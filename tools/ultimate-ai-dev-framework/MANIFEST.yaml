@@ -1,0 +1,5 @@
+version: "1.0"
+source: files-70400d55
+vendored_at: "2026-05-17"
+adf_compatibility: "3.0.0"
+description: Grok UAIDF pack — reference and prompt source for ADF v3; not a production orchestrator.

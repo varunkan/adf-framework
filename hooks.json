@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": ".cursor/hooks/orch-otel-ingest.sh sessionStart"
+      }
+    ],
+    "sessionEnd": [
+      {
+        "command": ".cursor/hooks/orch-otel-ingest.sh sessionEnd"
+      }
+    ],
+    "afterAgentThought": [
+      {
+        "command": ".cursor/hooks/orch-otel-ingest.sh afterAgentThought"
+      }
+    ],
+    "afterAgentResponse": [
+      {
+        "command": ".cursor/hooks/orch-otel-ingest.sh afterAgentResponse"
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": ".cursor/hooks/orch-otel-ingest.sh preToolUse"
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": ".cursor/hooks/orch-otel-ingest.sh postToolUse"
+      }
+    ],
+    "postToolUseFailure": [
+      {
+        "command": ".cursor/hooks/orch-otel-ingest.sh postToolUseFailure"
+      }
+    ],
+    "subagentStart": [
+      {
+        "command": ".cursor/hooks/orch-otel-ingest.sh subagentStart"
+      },
+      {
+        "command": ".cursor/hooks/orch-log-subagent.sh"
+      }
+    ],
+    "subagentStop": [
+      {
+        "command": ".cursor/hooks/orch-otel-ingest.sh subagentStop"
+      }
+    ],
+    "stop": [
+      {
+        "command": ".cursor/hooks/orch-on-stop.sh"
+      }
+    ]
+  }
+}

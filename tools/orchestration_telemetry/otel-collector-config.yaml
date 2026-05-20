@@ -1,0 +1,24 @@
+# Local OpenTelemetry Collector — receives OTLP from ingest_event.py
+# Start: docker run -p 4318:4318 -v $(pwd)/tools/orchestration_telemetry/otel-collector-config.yaml:/etc/otelcol/config.yaml otel/opentelemetry-collector:latest
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+
+exporters:
+  debug:
+    verbosity: detailed
+  file:
+    path: ./.cursor/orchestration/otel-collector-export.jsonl
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug, file]

@@ -1,0 +1,22 @@
+# Dart / Flutter
+.dart_tool/
+build/
+*.iml
+.packages
+.pub-cache/
+
+# ADF runtime (local)
+orchestration/otel-traces.jsonl
+orchestration/otel-session.json
+orchestration/features/**/commands.jsonl
+orchestration/features/**/run-log.jsonl
+orchestration/features/**/otel-traces.jsonl
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Release build output (optional local)
+dist/

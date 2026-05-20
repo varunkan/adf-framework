@@ -1,0 +1,4 @@
+{
+  "description": "Legacy lib files below 100% line coverage. Shrink this list each feature PR. Gate fails when any entry is past expires.",
+  "allowlist": []
+}

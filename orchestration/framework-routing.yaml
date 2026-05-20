@@ -1,0 +1,305 @@
+# Single dispatch table: Spec Kit builds, BMAD discipline reviews, Superpowers disciplines.
+# Orchestrator MUST read this file before every phase Task. Do not duplicate skills.
+version: "3.0.0"
+
+anti_duplication:
+  - "Exactly one primary builder per phase (optional secondary only if marked optional: true)."
+  - "Never run orch-spec-author, orch-architect, orch-task-decomposer, or orch-implementer as builders when Spec Kit equivalent is listed."
+  - "Never run bmad-create-* builders in-pipeline after Spec Kit specify/plan/tasks."
+  - "Record completed skills in state.json completed_builders / completed_reviewers per phase."
+  - "Use orch-review-coordinator for all BMAD reviews; never dispatch orch-judge directly."
+  - "Grok/UAIDF prompts (meta-orchestrator, tdd-executor) are overlays only — see prompt-registry.yaml."
+
+# Required artifacts under specs/<feature-id>/ before approve (validator enforces).
+adf_artifacts_required:
+  2: [spec.md]
+  3: [plan.md]
+  4: [tasks.md, task-graph.yaml, tasks/]
+  7: [tasks/]
+
+parallel_ready_tasks:
+  enabled: false
+  note: "v3.1 will batch-dispatch ready DAG nodes; v3.0 runs sequentially."
+
+# Canonical phase IDs (integers 1–9). Recovery phases heal=10, correct=11.
+phases:
+  1:
+    name: intake
+    gate: problem_statement_approved
+    builders:
+      - skill: orch-product-analyst
+        path: .cursor/skills/orch-product-analyst/SKILL.md
+      - skill: speckit-clarify
+        path: .cursor/skills/speckit-clarify/SKILL.md
+        optional: true
+    reviewers:
+      - skill: bmad-agent-analyst
+        path: .agents/skills/bmad-agent-analyst/SKILL.md
+        discipline: analyst
+        review_mode: readonly
+        parallel_group: 1
+      - skill: bmad-review-adversarial-general
+        path: .agents/skills/bmad-review-adversarial-general/SKILL.md
+        discipline: adversarial
+        review_mode: readonly
+        parallel_group: 1
+    superpowers: []
+    orch_outputs: [00-intake.md]
+    spec_outputs: []
+
+  2:
+    name: specify
+    gate: requirements_complete
+    builders:
+      - skill: speckit-constitution
+        path: .cursor/skills/speckit-constitution/SKILL.md
+        optional: true
+        run_once: true
+      - skill: speckit-specify
+        path: .cursor/skills/speckit-specify/SKILL.md
+    reviewers:
+      - skill: bmad-agent-pm
+        path: .agents/skills/bmad-agent-pm/SKILL.md
+        discipline: pm_po
+        review_mode: readonly
+        charter: .cursor/orchestration/agents/bmad-pm-review-charter.md
+        parallel_group: 1
+        required: true
+      - skill: bmad-validate-prd
+        path: .agents/skills/bmad-validate-prd/SKILL.md
+        discipline: prd_validation
+        review_mode: readonly
+        parallel_group: 1
+        required: true
+      - skill: bmad-editorial-review-structure
+        path: .agents/skills/bmad-editorial-review-structure/SKILL.md
+        discipline: editorial
+        review_mode: readonly
+        parallel_group: 1
+        required: false
+        skip_on_track: [S]
+    superpowers: []
+    orch_outputs: []
+    spec_outputs: [spec.md, checklists/requirements.md]
+    idempotency:
+      skip_build_if_exists: spec.md
+
+  3:
+    name: plan
+    gate: plan_covers_all_requirements
+    builders:
+      - skill: speckit-plan
+        path: .cursor/skills/speckit-plan/SKILL.md
+    reviewers:
+      - skill: bmad-agent-architect
+        path: .agents/skills/bmad-agent-architect/SKILL.md
+        discipline: architect
+        review_mode: readonly
+        parallel_group: 1
+        required: true
+      - skill: bmad-check-implementation-readiness
+        path: .agents/skills/bmad-check-implementation-readiness/SKILL.md
+        discipline: readiness
+        review_mode: readonly
+        parallel_group: 1
+        required: true
+    superpowers: []
+    orch_outputs: []
+    spec_outputs: [plan.md, research.md, data-model.md, contracts/, quickstart.md]
+    idempotency:
+      skip_build_if_exists: plan.md
+
+  4:
+    name: tasks
+    gate: tasks_atomic_and_traced
+    builders:
+      - skill: speckit-tasks
+        path: .cursor/skills/speckit-tasks/SKILL.md
+      - skill: speckit-analyze
+        path: .cursor/skills/speckit-analyze/SKILL.md
+        optional: true
+    reviewers:
+      - skill: bmad-agent-pm
+        path: .agents/skills/bmad-agent-pm/SKILL.md
+        discipline: pm_trace
+        review_mode: readonly
+        charter: .cursor/orchestration/agents/bmad-pm-review-charter.md
+        parallel_group: 1
+        required: true
+      - skill: bmad-review-adversarial-general
+        path: .agents/skills/bmad-review-adversarial-general/SKILL.md
+        discipline: adversarial
+        review_mode: readonly
+        parallel_group: 1
+        required: true
+    superpowers: []
+    orch_outputs: []
+    spec_outputs: [tasks.md, task-graph.yaml, tasks/]
+    adf_artifacts:
+      - task-graph.yaml
+      - tasks/
+    idempotency:
+      skip_build_if_exists: tasks.md
+
+  5:
+    name: test_plan
+    gate: test_strategy_approved
+    builders:
+      - skill: orch-test-architect
+        path: .cursor/skills/orch-test-architect/SKILL.md
+    reviewers:
+      - skill: bmad-review-edge-case-hunter
+        path: .agents/skills/bmad-review-edge-case-hunter/SKILL.md
+        discipline: qa_edge
+        review_mode: readonly
+        parallel_group: 1
+        required: true
+      - skill: bmad-qa-generate-e2e-tests
+        path: .agents/skills/bmad-qa-generate-e2e-tests/SKILL.md
+        discipline: qa_strategy
+        review_mode: readonly
+        review_only: true
+        parallel_group: 1
+        required: true
+    superpowers: []
+    orch_outputs: [04-test-plan.md]
+    spec_outputs: []
+
+  6:
+    name: test_cases
+    gate: tests_red
+    builders:
+      - skill: orch-test-author
+        path: .cursor/skills/orch-test-author/SKILL.md
+    reviewers:
+      - skill: bmad-review-edge-case-hunter
+        path: .agents/skills/bmad-review-edge-case-hunter/SKILL.md
+        discipline: qa_edge
+        review_mode: readonly
+        parallel_group: 1
+        required: true
+      - skill: bmad-agent-dev
+        path: .agents/skills/bmad-agent-dev/SKILL.md
+        discipline: dev_testability
+        review_mode: readonly
+        parallel_group: 1
+        required: true
+    superpowers: [test-driven-development]
+    orch_outputs: [05-test-cases.md, 06-traceability-matrix.md]
+    spec_outputs: []
+
+  7:
+    name: implement
+    gate: tests_green
+    execution_mode: micro_task_worktree
+    preconditions:
+      - gates.tests_red
+    builders:
+      - skill: speckit-implement
+        path: .cursor/skills/speckit-implement/SKILL.md
+      - skill: uaidf-tdd-executor
+        path: .cursor/skills/uaidf-tdd-executor/SKILL.md
+        optional: false
+        required_on_track: [M, L, XL]
+        overlay: true
+    reviewers:
+      - skill: bmad-code-review
+        path: .agents/skills/bmad-code-review/SKILL.md
+        discipline: code_review
+        review_mode: readonly
+        parallel_group: 1
+        required: true
+      - skill: bmad-checkpoint-preview
+        path: .agents/skills/bmad-checkpoint-preview/SKILL.md
+        discipline: security_performance
+        review_mode: readonly
+        parallel_group: 1
+        required: true
+    superpowers: [executing-plans, test-driven-development]
+    orch_outputs: []
+    spec_outputs: []
+    code_outputs: [lib/, testcases/]
+
+  8:
+    name: verify
+    gate: all_quality_gates_pass
+    builders:
+      - skill: orch-verifier
+        path: .cursor/skills/orch-verifier/SKILL.md
+    reviewers: []
+    superpowers: [verification-before-completion]
+    orch_outputs: [07-verification-report.md]
+    scripts:
+      - validate_traceability.sh
+      - coverage_gate.sh
+      - lint_gate.sh
+      - security_gate.sh
+      - performance_gate.sh
+    machine_gates:
+      - r100
+      - l100_repo
+      - l100_feature
+      - lint_clean
+      - security_clean
+      - performance_clean
+
+  9:
+    name: review
+    gate: review_approved
+    builders:
+      - skill: orch-code-reviewer
+        path: .cursor/skills/orch-code-reviewer/SKILL.md
+        role: aggregate_bmad_findings
+    reviewers:
+      - skill: bmad-code-review
+        path: .agents/skills/bmad-code-review/SKILL.md
+        discipline: code_review
+        review_mode: readonly
+        parallel_group: 1
+        required: true
+      - skill: bmad-agent-tech-writer
+        path: .agents/skills/bmad-agent-tech-writer/SKILL.md
+        discipline: tech_writer
+        review_mode: readonly
+        parallel_group: 1
+        required: true
+    superpowers: [requesting-code-review]
+    orch_outputs: [08-review.md]
+
+recovery:
+  10:
+    name: heal
+    agent: orch-self-healer
+    path: .cursor/skills/orch-self-healer/SKILL.md
+    superpowers: [systematic-debugging]
+    max_attempts: 3
+  11:
+    name: correct
+    agent: orch-self-corrector
+    path: .cursor/skills/orch-self-corrector/SKILL.md
+    max_attempts: 2
+
+phase_gate_map:
+  1: problem_statement_approved
+  2: requirements_complete
+  3: plan_covers_all_requirements
+  4: tasks_atomic_and_traced
+  5: test_strategy_approved
+  6: tests_red
+  7: tests_green
+  8: all_quality_gates_pass
+  9: review_approved
+
+track_skips:
+  S:
+    skip_phases: []
+    light_phases: [1, 2, 5]
+    bundle_phases: [1, 2]
+  M:
+    skip_phases: []
+  L:
+    skip_phases: []
+    require_bmad_review_on: [7, 9]
+  XL:
+    skip_phases: []
+    require_bmad_review_on: [7, 9]

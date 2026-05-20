@@ -1,0 +1,34 @@
+# ADF v3 IDE adapter map — paths relative to project root
+schema: 1
+ides:
+  cursor:
+    orchestration: .cursor/orchestration
+    skills: .cursor/skills
+    hooks: .cursor/hooks
+    hooks_manifest: .cursor/hooks.json
+    agents_entry: AGENTS.md
+  vscode:
+    orchestration: .adf/orchestration
+    skills: null
+    hooks: null
+    hooks_manifest: null
+    agents_entry: AGENTS.md
+    copilot_instructions: .github/copilot-instructions.md
+    vscode_settings: .vscode/adf.settings.json
+  windsurf:
+    orchestration: .adf/orchestration
+    skills: null
+    hooks: null
+    agents_entry: AGENTS.md
+    rules_file: .windsurf/rules/adf.md
+  claude:
+    orchestration: .adf/orchestration
+    skills: .claude/skills
+    hooks: null
+    agents_entry: AGENTS.md
+    claude_md: CLAUDE.md
+  generic:
+    orchestration: .adf/orchestration
+    skills: null
+    hooks: null
+    agents_entry: AGENTS.md

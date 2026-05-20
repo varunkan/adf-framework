@@ -1,0 +1,23 @@
+name: adf-framework
+version: 3.1.0
+description: Proof-Governed Agentic Development (ADF v3) — IDE-agnostic installable framework
+schema: 1
+components:
+  orchestration: orchestration/
+  skills: skills/
+  hooks: hooks/
+  scripts: scripts/
+  tools:
+    server: tools/orchestration_server/
+    dashboard: tools/orchestration_dashboard/
+    telemetry: tools/orchestration_telemetry/
+  docs: docs/
+supported_ides:
+  - cursor
+  - vscode
+  - windsurf
+  - claude
+  - generic
+ports:
+  api: 3847
+  dashboard: 3848

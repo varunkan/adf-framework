@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# ADF v3 CLI — install, doctor, start API/dashboard
+set -euo pipefail
+
+ADF_CLI="$(cd "$(dirname "$0")" && pwd)"
+FRAMEWORK_ROOT="$(cd "$ADF_CLI/.." && pwd)"
+export PATH="$ADF_CLI:$PATH"
+
+usage() {
+  cat << 'HELP'
+ADF v3 — Agentic Development Framework
+
+Usage:
+  adf install [-t TARGET] [-i IDE] [--global]   Install into project (IDE: cursor|vscode|windsurf|claude|generic)
+  adf doctor [-t TARGET]                      Verify prerequisites and paths
+  adf start [api|dashboard|all]               Start orchestration services
+  adf version                                 Show version
+
+Examples:
+  adf install -t ~/myapp -i cursor
+  adf install -t ~/myapp -i vscode
+  adf install --global && adf install -t ~/myapp -i cursor
+  adf start all
+HELP
+}
+
+cmd="${1:-help}"
+shift || true
+
+case "$cmd" in
+  install|init)
+    exec "$FRAMEWORK_ROOT/install/install.sh" --framework "$FRAMEWORK_ROOT" "$@"
+    ;;
+  doctor)
+    TARGET="."
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        -t|--target) TARGET="$2"; shift 2 ;;
+        *) TARGET="$1"; shift ;;
+      esac
+    done
+    TARGET="$(cd "$TARGET" && pwd)"
+    . "$FRAMEWORK_ROOT/lib/resolve_paths.sh"
+    echo "=== ADF doctor ==="
+    echo "Framework: $FRAMEWORK_ROOT ($(cat "$FRAMEWORK_ROOT/VERSION"))"
+    echo "Project:   $TARGET"
+    command -v dart >/dev/null && echo "OK dart: $(dart --version 2>&1 | head -1)" || echo "MISSING dart"
+    command -v flutter >/dev/null && echo "OK flutter" || echo "WARN flutter (needed for dashboard)"
+    command -v git >/dev/null && echo "OK git" || echo "MISSING git"
+    command -v cursor-agent >/dev/null && echo "OK cursor-agent (headless)" || echo "WARN cursor-agent (IDE path still works)"
+    cd "$TARGET"
+    if ROOT="$(adf_resolve_repo_root 2>/dev/null)"; then
+    ROOT="$(adf_resolve_repo_root)"
+    ORCH="$(adf_orchestration_dir "$ROOT")"
+    echo "OK orchestration: $ORCH"
+    [[ -f "$ROOT/.adf-install.json" ]] && echo "OK .adf-install.json"
+  else
+    echo "FAIL: no orchestration in $TARGET — run: adf install -t $TARGET -i cursor"
+    exit 1
+  fi
+    ;;
+  start)
+    . "$FRAMEWORK_ROOT/lib/resolve_paths.sh"
+    WHAT="${1:-all}"
+    TARGET="$(pwd)"
+    if [[ -f .adf-install.json ]]; then TARGET="$(pwd)"; fi
+    export ORCH_REPO_ROOT="$(cd "$TARGET" && pwd)"
+    FW="$(adf_framework_root "$ORCH_REPO_ROOT" 2>/dev/null || echo "$FRAMEWORK_ROOT")"
+    case "$WHAT" in
+      api) exec "$FW/scripts/start_orchestration_api.sh" ;;
+      dashboard) exec "$FW/scripts/start_orchestration_dashboard.sh" web ;;
+      all) exec "$FW/scripts/start_orchestration_dashboard.sh" web ;;
+      *) echo "Usage: adf start [api|dashboard|all]" >&2; exit 1 ;;
+    esac
+    ;;
+  version|-v)
+    echo "adf-framework $(cat "$FRAMEWORK_ROOT/VERSION")"
+    ;;
+  help|-h|--help)
+    usage
+    ;;
+  *)
+    usage
+    exit 1
+    ;;
+esac

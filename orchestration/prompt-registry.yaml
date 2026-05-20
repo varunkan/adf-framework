@@ -1,0 +1,42 @@
+# Single index for orchestration prompts — do not duplicate paths in skills.
+version: "3.0.0"
+
+conductor:
+  skill: orch-orchestrator
+  path: .cursor/skills/orch-orchestrator/SKILL.md
+  agent_doc: .cursor/orchestration/agents/orchestrator.md
+
+grok_overlays:
+  meta_orchestrator:
+    path: tools/ultimate-ai-dev-framework/prompts/meta-orchestrator.md
+    use: conductor discipline reference
+  tdd_executor:
+    skill: uaidf-tdd-executor
+    path: .cursor/skills/uaidf-tdd-executor/SKILL.md
+    source: tools/ultimate-ai-dev-framework/prompts/tdd-executor.md
+    phase: 7
+    required_tracks: [M, L, XL]
+
+spec_kit:
+  - speckit-clarify
+  - speckit-constitution
+  - speckit-specify
+  - speckit-plan
+  - speckit-tasks
+  - speckit-analyze
+  - speckit-implement
+
+bmad:
+  root: .agents/skills/
+  coordinator: .cursor/skills/orch-review-coordinator/SKILL.md
+
+policy:
+  adf: .cursor/orchestration/ADF.md
+  constitution: .cursor/orchestration/constitution.md
+  grok_determinism: .cursor/orchestration/grok-determinism.md
+  routing: .cursor/orchestration/framework-routing.yaml
+
+scripts:
+  seed: scripts/orch/seed_adf_artifacts.sh
+  validate: scripts/orch/validate_adf_artifacts.sh
+  worktree: scripts/orch/adf_worktree.sh

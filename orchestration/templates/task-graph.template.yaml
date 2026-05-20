@@ -1,0 +1,13 @@
+# Task execution DAG — {{FEATURE_ID}}
+version: "1"
+feature_id: "{{FEATURE_ID}}"
+
+nodes:
+  - id: task-001
+    title: ""
+    depends_on: []
+    parallel_group: null
+    max_duration_seconds: 90
+    task_file: tasks/task-001.md
+
+  # Add task-002, task-003, … with depends_on referencing prior ids
