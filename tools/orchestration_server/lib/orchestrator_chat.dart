@@ -1,16 +1,23 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'agent_chat_runner.dart';
+import 'conversation_builder.dart';
 import 'feature_store.dart';
 import 'pipeline_planner.dart';
 
 /// LLM interprets dashboard chat and produces orchestrator actions + agent prompts.
 class OrchestratorChatProcessor {
-  OrchestratorChatProcessor(this.store, {PipelinePlanner? planner})
-      : _planner = planner;
+  OrchestratorChatProcessor(
+    this.store, {
+    PipelinePlanner? planner,
+    AgentChatRunner? agentChat,
+  })  : _planner = planner,
+        _agentChat = agentChat ?? AgentChatRunner(repoRoot: store.repoRoot);
 
   final FeatureStore store;
   final PipelinePlanner? _planner;
+  final AgentChatRunner _agentChat;
 
   static const _defaultModel = 'gpt-4o-mini';
 
@@ -34,21 +41,91 @@ class OrchestratorChatProcessor {
     }
 
     final ctx = await _buildContext(featureId);
+    final contextBlock = _formatContextBlock(ctx);
+    final history = ConversationBuilder(store).build(featureId, limit: 12);
+
     final apiKey = _llmApiKey();
     if (apiKey != null) {
       try {
         return await _callHttpLlm(ctx, trimmed, apiKey);
-      } catch (e) {
-        final info = _tryContextualAnswer(ctx, trimmed);
-        if (info != null) return info;
-        return _fallback(ctx, trimmed, note: 'LLM error: $e');
+      } catch (_) {}
+    }
+
+    if (await _shouldTryCursorChat()) {
+      final agentReply = await _agentChat.converse(
+        featureId: featureId,
+        contextBlock: contextBlock,
+        userMessage: trimmed,
+        recentMessages: history,
+      );
+      if (agentReply != null && agentReply.reply.trim().isNotEmpty) {
+        return _fromAgentChat(ctx, trimmed, agentReply);
       }
     }
 
     final contextual = _tryContextualAnswer(ctx, trimmed);
     if (contextual != null) return contextual;
 
-    return _fallback(ctx, trimmed, note: null);
+    return _fallback(
+      ctx,
+      trimmed,
+      note:
+          'Could not reach a chat model. Run cursor-agent login or set ORCH_LLM_API_KEY / GROQ_API_KEY on the API server.',
+    );
+  }
+
+  Future<bool> _shouldTryCursorChat() async {
+    if (Platform.environment['ORCH_CHAT_USE_CURSOR'] == '0' ||
+        Platform.environment['ORCH_CHAT_USE_CURSOR'] == 'false') {
+      return false;
+    }
+    final health = await _agentChat.health.probe();
+    return health['ready'] == true;
+  }
+
+  String _formatContextBlock(OrchestratorChatContext ctx) {
+    final step = ctx.currentStepLabel != null
+        ? 'Pipeline step: ${ctx.currentStepLabel}\n'
+        : '';
+    return 'Phase: ${ctx.phase} | Status: ${ctx.status} | Awaiting: ${ctx.awaitingUser}\n'
+        'Spec: ${ctx.specDir}/\n'
+        'API: ${ctx.apiFeatureUrl}\n'
+        'Dashboard: ${ctx.dashboardUrl}\n'
+        'Orchestration: ${ctx.orchestrationRel}\n'
+        '$step\n'
+        'Requirement:\n'
+        '${ctx.requirementSnippet.isEmpty ? "(see requirement.md)" : ctx.requirementSnippet}';
+  }
+
+  OrchestratorChatResult _fromAgentChat(
+    OrchestratorChatContext ctx,
+    String userMessage,
+    AgentChatResponse agentReply,
+  ) {
+    final action = switch (agentReply.actionTag) {
+      'sync' => OrchestratorAction.sync,
+      'clarify' => OrchestratorAction.clarify,
+      'answer_only' => OrchestratorAction.answerOnly,
+      _ => OrchestratorAction.resume,
+    };
+    final cmd = action == OrchestratorAction.sync
+        ? '@orch-orchestrator sync ${ctx.featureId}'
+        : '@orch-orchestrator resume ${ctx.featureId}';
+    final agentPrompt = action == OrchestratorAction.answerOnly
+        ? ''
+        : _buildAgentPrompt(
+            ctx,
+            cmd,
+            'Execute per user chat request and ADF routing.',
+            userMessage,
+          );
+    return OrchestratorChatResult(
+      assistantReply: agentReply.reply,
+      orchestratorCommand: cmd,
+      agentPrompt: agentPrompt,
+      action: action,
+      source: 'cursor_agent',
+    );
   }
 
   String? _llmApiKey() {
