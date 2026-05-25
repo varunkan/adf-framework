@@ -103,6 +103,17 @@ class ConversationBuilder {
         'command_id': cmd['id'],
         'status': cmd['status'],
       });
+      final ar = cmd['assistant_reply'] as String?;
+      if (ar != null && ar.trim().isNotEmpty) {
+        messages.add({
+          'role': 'assistant',
+          'type': 'orchestrator',
+          'text': ar.trim(),
+          'timestamp': cmd['created_at'] as String?,
+          'command_id': cmd['id'],
+          'llm_source': cmd['llm_source'],
+        });
+      }
     }
 
     if (lastResponse != null && lastResponse.isNotEmpty) {

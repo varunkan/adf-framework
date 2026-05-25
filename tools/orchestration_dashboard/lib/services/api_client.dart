@@ -231,7 +231,7 @@ class ApiClient {
             'execute': execute,
           }),
         )
-        .timeout(const Duration(seconds: 15));
+        .timeout(const Duration(seconds: 180));
     if (r.statusCode == 409) {
       final data = jsonDecode(r.body) as Map<String, dynamic>;
       throw Exception(data['error'] as String? ?? 'Runner not ready');

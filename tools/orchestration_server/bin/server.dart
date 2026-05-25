@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:orchestration_server/artifact_validator.dart';
 import 'package:orchestration_server/conversation_builder.dart';
 import 'package:orchestration_server/feature_store.dart';
+import 'package:orchestration_server/orchestrator_chat.dart';
 import 'package:orchestration_server/phase_runner.dart';
 import 'package:orchestration_server/pipeline_planner.dart';
 import 'package:orchestration_server/run_post_sync.dart';
@@ -73,6 +74,7 @@ Future<void> main(List<String> args) async {
   final artifactValidator = ArtifactValidator(repoRoot);
   final planner = PipelinePlanner(store);
   final conversation = ConversationBuilder(store);
+  final chatProcessor = OrchestratorChatProcessor(store, planner: planner);
   final postSync = RunPostSync(store);
   final autoRunner = Platform.environment['ORCH_AUTO_RUNNER'] != 'false';
 
@@ -289,6 +291,16 @@ Future<void> main(List<String> args) async {
         execute: execute,
       );
 
+      final chat = await chatProcessor.process(id, prompt.trim());
+      store.updateCommandMeta(
+        id,
+        cmd['id'] as String,
+        assistantReply: chat.assistantReply,
+        orchestratorCommand: chat.orchestratorCommand,
+        agentPrompt: chat.agentPrompt,
+        llmSource: chat.source,
+      );
+
       if (execute) {
         final state = store.readState(id);
         if (state['status'] == 'completed') {
@@ -297,53 +309,65 @@ Future<void> main(List<String> args) async {
             'ok': true,
             'mode': 'feature_complete',
             'command': cmd,
+            'assistant_message': chat.assistantReply,
+            'orchestrator_command': chat.orchestratorCommand,
+            'llm_source': chat.source,
             'message':
                 'Feature is completed — notes saved to requirement.md only.',
             'feature': featureDetailPayload(id),
           });
         }
 
-        final healthNow = await runner.getHealth(refresh: true);
-        if (healthNow['ready'] != true) {
+        if (!chat.shouldRunAgent) {
           return _json({
-            'ok': false,
+            'ok': true,
+            'mode': 'llm_answer',
             'command': cmd,
-            'run_status': store.readRunStatus(id),
-            'runner_health': healthNow,
-            'error': healthNow['hint'],
-          }, status: 409);
+            'assistant_message': chat.assistantReply,
+            'orchestrator_command': chat.orchestratorCommand,
+            'llm_source': chat.source,
+            'feature': featureDetailPayload(id),
+          });
         }
-        if (healthNow['headless_ready'] != true) {
-          final result = await runner.enqueueCommand(
+
+        final healthNow = await runner.getHealth(refresh: true);
+        Map<String, dynamic> result;
+        if (healthNow['ready'] != true) {
+          store.appendClientClarification(id, prompt.trim());
+          result = {
+            'success': true,
+            'mode': 'llm_ide',
+            'message': chat.assistantReply,
+            'hint': healthNow['hint'],
+          };
+        } else {
+          result = await runner.enqueueCommand(
             id,
             prompt: prompt.trim(),
             stepId: stepId,
             commandId: cmd['id'] as String,
+            agentPrompt: chat.agentPrompt,
           );
-          return _json({
-            'ok': true,
-            'mode': result['mode'] ?? 'ide_only',
-            'command': cmd,
-            'result': result,
-            'feature': featureDetailPayload(id),
-          });
         }
-        final result = await runner.enqueueCommand(
-          id,
-          prompt: prompt.trim(),
-          stepId: stepId,
-          commandId: cmd['id'] as String,
-        );
-        final fd = featureDetailPayload(id);
         return _json({
-          'ok': result['success'] == true,
+          'ok': true,
+          'mode': result['mode'] ?? 'llm_agent',
           'command': cmd,
+          'assistant_message': chat.assistantReply,
+          'orchestrator_command': chat.orchestratorCommand,
+          'llm_source': chat.source,
           'result': result,
-          'feature': fd,
+          'feature': featureDetailPayload(id),
         });
       }
 
-      return _json({'ok': true, 'command': cmd});
+      return _json({
+        'ok': true,
+        'command': cmd,
+        'assistant_message': chat.assistantReply,
+        'orchestrator_command': chat.orchestratorCommand,
+        'llm_source': chat.source,
+      });
     } catch (e) {
       return _json({'error': e.toString()}, status: 400);
     }

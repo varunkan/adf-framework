@@ -363,12 +363,13 @@ $clarification
   }
 
   Future<void> _sendMessage(String prompt) async {
+    final ts = DateTime.now().toUtc().toIso8601String();
     setState(() {
       _optimisticMessages.add({
         'role': 'user',
         'type': 'command',
         'text': prompt,
-        'timestamp': DateTime.now().toUtc().toIso8601String(),
+        'timestamp': ts,
       });
     });
     try {
@@ -378,18 +379,44 @@ $clarification
         execute: true,
       );
       if (mounted) {
+        final assistant = res['assistant_message'] as String?;
+        if (assistant != null && assistant.trim().isNotEmpty) {
+          setState(() {
+            _optimisticMessages.add({
+              'role': 'assistant',
+              'type': 'orchestrator',
+              'text': assistant.trim(),
+              'timestamp': DateTime.now().toUtc().toIso8601String(),
+              'llm_source': res['llm_source'],
+            });
+          });
+        }
         final mode = res['mode'] as String?;
-        final msg = mode == 'ide_only' || mode == 'feature_complete'
-            ? (res['message'] as String? ??
-                'Saved to requirement.md — run `@orch-orchestrator sync ${widget.featureId}` in Cursor IDE (headless agent unavailable).')
-            : 'Message queued — previous run was replaced with your latest note';
+        final orch = res['orchestrator_command'] as String?;
+        String msg;
+        if (mode == 'llm_answer') {
+          msg = 'Orchestrator replied (no agent run needed).';
+        } else if (mode == 'llm_ide' || mode == 'ide_only') {
+          msg = orch != null
+              ? 'LLM processed your message. Run in Cursor: $orch'
+              : (res['message'] as String? ??
+                  'Saved — run `@orch-orchestrator sync ${widget.featureId}` in Cursor IDE.');
+        } else if (mode == 'feature_complete') {
+          msg = res['message'] as String? ?? 'Notes saved (feature completed).';
+        } else {
+          msg = 'Orchestrator is executing your request via the agent.';
+        }
         showMessage(context, msg);
         await _load(silent: true);
       }
     } catch (e) {
       if (mounted) {
-        _optimisticMessages.removeLast();
-        setState(() {});
+        setState(() {
+          if (_optimisticMessages.isNotEmpty &&
+              _optimisticMessages.last['role'] == 'user') {
+            _optimisticMessages.removeLast();
+          }
+        });
         showMessage(context, e.toString());
       }
     }
@@ -714,7 +741,7 @@ $clarification
             : null,
         composer: ChatComposer(
           runnerReady: _runnerReady,
-          enabled: _runnerReady,
+          enabled: true,
           hintText: _agentActive
               ? 'Send a message (cancels current run)…'
               : 'Message the orchestrator…',

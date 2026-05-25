@@ -505,6 +505,39 @@ $t
     }
   }
 
+
+  void updateCommandMeta(
+    String id,
+    String commandId, {
+    String? assistantReply,
+    String? orchestratorCommand,
+    String? agentPrompt,
+    String? llmSource,
+  }) {
+    final file = File('${featurePath(id)}/commands.jsonl');
+    if (!file.existsSync()) return;
+    final lines = file.readAsLinesSync();
+    final updated = <String>[];
+    for (final line in lines) {
+      if (line.trim().isEmpty) continue;
+      try {
+        final cmd = jsonDecode(line) as Map<String, dynamic>;
+        if (cmd['id'] == commandId) {
+          if (assistantReply != null) cmd['assistant_reply'] = assistantReply;
+          if (orchestratorCommand != null) {
+            cmd['orchestrator_command'] = orchestratorCommand;
+          }
+          if (agentPrompt != null) cmd['agent_prompt'] = agentPrompt;
+          if (llmSource != null) cmd['llm_source'] = llmSource;
+        }
+        updated.add(jsonEncode(cmd));
+      } catch (_) {
+        updated.add(line);
+      }
+    }
+    file.writeAsStringSync('${updated.join('\n')}\n');
+  }
+
   void markCommandExecuted(String id, String commandId, {String? status}) {
     final file = File('${featurePath(id)}/commands.jsonl');
     if (!file.existsSync()) return;

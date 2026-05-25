@@ -70,3 +70,21 @@ See `docs/CLONE_AND_SETUP.md` and `package.yaml`.
 @orch-orchestrator resume <feature-id>
 @orch-orchestrator sync <feature-id>
 ```
+
+## Dashboard chat + LLM
+
+Dashboard messages are processed by `OrchestratorChatProcessor` before invoking the agent:
+
+1. **LLM** interprets natural language (phase, gates, requirement context).
+2. Returns an **assistant reply** in chat plus an **orchestrator command**.
+3. Runs **cursor-agent** with the crafted prompt when the runner is ready.
+
+Set one of:
+
+```bash
+export ORCH_LLM_API_KEY=sk-...          # or OPENAI_API_KEY / GROQ_API_KEY
+export ORCH_LLM_MODEL=gpt-4o-mini       # optional
+export ORCH_LLM_API_URL=https://api.openai.com/v1/chat/completions  # optional
+```
+
+Without an API key, a rule-based fallback still routes messages to `@orch-orchestrator`.

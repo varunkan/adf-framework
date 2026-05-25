@@ -183,6 +183,7 @@ class PhaseRunner {
     String? stepId,
     String? commandId,
     bool cancelPrevious = true,
+    String? agentPrompt,
   }) async {
     _traces = TraceWriter(repoRoot);
     final health = await getHealth(refresh: true);
@@ -215,11 +216,11 @@ class PhaseRunner {
     }
 
     _active.add(featureId);
-    final agentPrompt = _wrapClientInputPrompt(featureId, prompt);
+    final resolvedPrompt = agentPrompt ?? _wrapClientInputPrompt(featureId, prompt);
 
     unawaited(_executeCommandWorker(
       featureId: featureId,
-      prompt: agentPrompt,
+      prompt: resolvedPrompt,
       stepId: stepId,
       commandId: commandId,
     ));
@@ -790,7 +791,7 @@ class PhaseRunner {
 $userText
 
 Instructions:
-1. Update `.cursor/orchestration/features/$featureId/requirement.md` with this clarification immediately.
+1. Update `${store.paths.featureRel(featureId, 'requirement.md')}` with this clarification immediately.
 2. If the client states this is a **standalone product** (not the POS app), document that explicitly in requirement and intake — do not assume POS scope.
 3. Re-run intake/spec for the current phase and stop when awaiting user approval.''';
   }
