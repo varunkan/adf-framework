@@ -39,9 +39,15 @@ class OrchestratorChatProcessor {
       try {
         return await _callHttpLlm(ctx, trimmed, apiKey);
       } catch (e) {
+        final info = _tryContextualAnswer(ctx, trimmed);
+        if (info != null) return info;
         return _fallback(ctx, trimmed, note: 'LLM error: $e');
       }
     }
+
+    final contextual = _tryContextualAnswer(ctx, trimmed);
+    if (contextual != null) return contextual;
+
     return _fallback(ctx, trimmed, note: null);
   }
 
@@ -65,11 +71,23 @@ class OrchestratorChatProcessor {
             : _defaultModel);
   }
 
+  int get _apiPort =>
+      int.tryParse(Platform.environment['ORCH_PORT'] ?? '3847') ?? 3847;
+
+  int get _webPort =>
+      int.tryParse(Platform.environment['ORCH_WEB_PORT'] ?? '3848') ?? 3848;
+
+  String get _apiBase => 'http://localhost:$_apiPort';
+
+  String get _dashboardBase => 'http://localhost:$_webPort';
+
   Future<OrchestratorChatContext> _buildContext(String featureId) async {
     final state = store.readState(featureId);
     final phase = store.effectivePhase(featureId, state);
     final gates = state['gates'] as Map<String, dynamic>? ?? {};
     final awaiting = state['awaiting_user'] == true;
+    final specDir =
+        state['spec_feature_dir'] as String? ?? 'specs/$featureId';
     final reqFile = File('${store.featurePath(featureId)}/requirement.md');
     var reqSnippet = '';
     if (reqFile.existsSync()) {
@@ -103,7 +121,145 @@ class OrchestratorChatProcessor {
       gates: gates,
       requirementSnippet: reqSnippet,
       currentStepLabel: currentStep,
+      specDir: specDir,
+      apiFeatureUrl: '$_apiBase/features/$featureId',
+      dashboardUrl: _dashboardBase,
+      orchestrationRel:
+          store.paths.featureRel(featureId, ''),
     );
+  }
+
+  /// Answers URL / status / phase questions without LLM or agent run.
+  OrchestratorChatResult? _tryContextualAnswer(
+    OrchestratorChatContext ctx,
+    String userMessage,
+  ) {
+    final lower = userMessage.toLowerCase();
+    if (!_isInformationalQuery(lower)) return null;
+
+    final resolvedId = _resolveFeatureIdFromMessage(ctx.featureId, lower);
+    final links = _formatFeatureLinks(resolvedId, ctx);
+
+    if (_asksForUrl(lower)) {
+      return OrchestratorChatResult(
+        assistantReply: links,
+        orchestratorCommand: '@orch-orchestrator resume ${ctx.featureId}',
+        agentPrompt: '',
+        action: OrchestratorAction.answerOnly,
+        source: 'context',
+      );
+    }
+
+    if (_asksPhaseOrStatus(lower)) {
+      final st = store.readState(resolvedId);
+      final phase = store.effectivePhase(resolvedId, st);
+      final status = st['status'] as String? ?? 'unknown';
+      final awaiting = st['awaiting_user'] == true;
+      return OrchestratorChatResult(
+        assistantReply:
+            '**$resolvedId** — phase **$phase**, status **$status**'
+            '${awaiting ? ', awaiting your approval' : ''}.\n\n$links',
+        orchestratorCommand: '@orch-orchestrator resume ${ctx.featureId}',
+        agentPrompt: '',
+        action: OrchestratorAction.answerOnly,
+        source: 'context',
+      );
+    }
+
+    if (_asksHelp(lower)) {
+      return OrchestratorChatResult(
+        assistantReply: '''**ADF orchestrator help**
+
+You are chatting about feature **${ctx.featureId}** (phase ${ctx.phase}).
+
+- Ask **URLs**: "what is the URL for this feature?"
+- Ask **status**: "what phase are we on?"
+- **Approve**: "sync" or "approve" → runs `@orch-orchestrator sync`
+- **Continue work**: describe changes → orchestrator updates requirement and runs agents
+- **IDE**: `@orch-orchestrator resume ${ctx.featureId}` in Cursor
+
+$links''',
+        orchestratorCommand: '@orch-orchestrator resume ${ctx.featureId}',
+        agentPrompt: '',
+        action: OrchestratorAction.answerOnly,
+        source: 'context',
+      );
+    }
+
+    return OrchestratorChatResult(
+      assistantReply:
+          'Here is the current context for **${ctx.featureId}**:\n\n$links',
+      orchestratorCommand: '@orch-orchestrator resume ${ctx.featureId}',
+      agentPrompt: '',
+      action: OrchestratorAction.answerOnly,
+      source: 'context',
+    );
+  }
+
+  bool _isInformationalQuery(String lower) {
+    if (_asksForUrl(lower) || _asksPhaseOrStatus(lower) || _asksHelp(lower)) {
+      return true;
+    }
+    final q = RegExp(
+      r'^(what|where|which|how|when|who|is|are|can|could|tell me|show me|list)\b',
+    );
+    return q.hasMatch(lower) &&
+        !lower.contains('add ') &&
+        !lower.contains('implement') &&
+        !lower.contains('build ') &&
+        !lower.contains('fix ');
+  }
+
+  bool _asksForUrl(String lower) {
+    return lower.contains('url') ||
+        lower.contains('link') ||
+        lower.contains('endpoint') ||
+        lower.contains('address');
+  }
+
+  bool _asksPhaseOrStatus(String lower) {
+    return lower.contains('phase') ||
+        lower.contains('status') ||
+        lower.contains('gate') ||
+        lower.contains('progress') ||
+        lower.contains('which step');
+  }
+
+  bool _asksHelp(String lower) {
+    return lower.contains('help') || lower.contains('how do i');
+  }
+
+  String _resolveFeatureIdFromMessage(String currentId, String lower) {
+    if (lower.contains('feature2') ||
+        lower.contains('feature 2') ||
+        lower.contains('feature-2')) {
+      return store.featureExists('feature2') ? 'feature2' : currentId;
+    }
+    if (lower.contains('feature1') || lower.contains('feature 1')) {
+      return store.featureExists('feature1') ? 'test1' : currentId;
+    }
+    final m = RegExp(r'feature\s*([a-z0-9][-a-z0-9]*)').firstMatch(lower);
+    if (m != null) {
+      final id = m.group(1)!;
+      if (store.featureExists(id)) return id;
+      if (id == '2' && store.featureExists('feature2')) return 'feature2';
+    }
+    return currentId;
+  }
+
+  String _formatFeatureLinks(String featureId, OrchestratorChatContext ctx) {
+    final specDir = store.readState(featureId)['spec_feature_dir'] as String? ??
+        'specs/$featureId';
+    final orch =
+        store.paths.featureRel(featureId, '').replaceAll(RegExp(r'/$'), '');
+    return '''**$featureId** links:
+- **API (JSON):** $_apiBase/features/$featureId
+- **API conversation:** $_apiBase/features/$featureId/conversation
+- **API pipeline:** $_apiBase/features/$featureId/pipeline
+- **Dashboard:** $_dashboardBase — open this feature from the list (no deep-link route yet)
+- **Spec folder:** `$specDir/`
+- **Orchestration:** `$orch/`
+- **Current chat context:** `${ctx.featureId}` phase ${ctx.phase}, status ${ctx.status}''';
   }
 
   Future<OrchestratorChatResult> _callHttpLlm(
@@ -143,7 +299,7 @@ class OrchestratorChatProcessor {
       if (content == null || content.trim().isEmpty) {
         throw StateError('LLM empty content');
       }
-      return _parseLlmJson(ctx, content.trim());
+      return _parseLlmJson(ctx, content.trim(), userMessage);
     } finally {
       client.close(force: true);
     }
@@ -155,29 +311,34 @@ Current phase: ${ctx.phase}. Status: ${ctx.status}. Awaiting user approval: ${ct
 Gates: ${jsonEncode(ctx.gates)}.
 ${ctx.currentStepLabel != null ? 'Active pipeline step: ${ctx.currentStepLabel}' : ''}
 
+Links for this feature:
+${ctx.apiFeatureUrl}
+Dashboard: ${ctx.dashboardUrl}
+Spec: ${ctx.specDir}/
+
 Requirement excerpt:
 ${ctx.requirementSnippet.isEmpty ? '(none yet)' : ctx.requirementSnippet}
 
 Respond with ONLY valid JSON:
 {
-  "assistant_reply": "friendly reply to the user in chat (2-4 sentences)",
+  "assistant_reply": "friendly reply to the user in chat (2-4 sentences). For URL/status questions, include the links above.",
   "action": "resume" | "sync" | "clarify" | "answer_only",
   "orchestrator_command": "@orch-orchestrator resume|sync ${ctx.featureId}",
-  "agent_instructions": "detailed instructions for the coding agent to execute now"
+  "agent_instructions": "detailed instructions for the coding agent (empty string if answer_only)"
 }
 
 Rules:
+- action "answer_only" for questions (URL, phase, status, what is X) — do NOT start agent work.
 - action "sync" when user approves or confirms moving forward after review.
 - action "resume" when user wants work continued on current phase builders.
-- action "clarify" when user adds requirements — update requirement.md and re-run intake/spec.
-- action "answer_only" for pure questions with no agent work.
-- orchestrator_command must start with @orch-orchestrator.
-- agent_instructions must tell the agent to follow ADF routing and update artifacts under specs/ and orchestration/features/.''';
+- action "clarify" when user adds requirements.
+- orchestrator_command must start with @orch-orchestrator.''';
   }
 
   OrchestratorChatResult _parseLlmJson(
     OrchestratorChatContext ctx,
     String content,
+    String userMessage,
   ) {
     Map<String, dynamic> obj;
     try {
@@ -201,7 +362,9 @@ Rules:
       cmd = '@orch-orchestrator resume ${ctx.featureId}';
     }
     final instructions = obj['agent_instructions'] as String? ?? '';
-    final agentPrompt = _buildAgentPrompt(ctx, cmd, instructions, '');
+    final agentPrompt = action == OrchestratorAction.answerOnly
+        ? ''
+        : _buildAgentPrompt(ctx, cmd, instructions, userMessage);
     return OrchestratorChatResult(
       assistantReply: obj['assistant_reply'] as String? ??
           'Understood — applying your request via the orchestrator.',
@@ -223,7 +386,7 @@ Rules:
     if (lower.contains('sync') ||
         lower.contains('approve') ||
         lower.contains('looks good') ||
-        lower.contains('proceed')) {
+        (lower.contains('proceed') && !lower.contains('?'))) {
       action = OrchestratorAction.sync;
       cmd = '@orch-orchestrator sync ${ctx.featureId}';
     } else if (ctx.awaitingUser) {
@@ -233,13 +396,18 @@ Rules:
       action = OrchestratorAction.resume;
       cmd = '@orch-orchestrator resume ${ctx.featureId}';
     }
+
     final reply = StringBuffer();
-    if (note != null) reply.writeln(note);
+    if (note != null) reply.writeln('$note\n');
     reply.writeln(
-      'I will route this to the orchestrator (phase ${ctx.phase}). '
-      'Set ORCH_LLM_API_KEY for richer interpretation.',
+      'Got it — I will route this to the orchestrator for phase ${ctx.phase}.',
     );
-    reply.writeln('\n**You said:** $userMessage');
+    if (_llmApiKey() == null) {
+      reply.writeln(
+        '\n_Tip: set `ORCH_LLM_API_KEY` on the API server for smarter replies. '
+        'You can also ask: "what is the URL for this feature?" or "what phase?"_',
+      );
+    }
     final agentPrompt = _buildAgentPrompt(
       ctx,
       cmd,
@@ -286,6 +454,10 @@ class OrchestratorChatContext {
     required this.awaitingUser,
     required this.gates,
     required this.requirementSnippet,
+    required this.specDir,
+    required this.apiFeatureUrl,
+    required this.dashboardUrl,
+    required this.orchestrationRel,
     this.currentStepLabel,
   });
 
@@ -295,6 +467,10 @@ class OrchestratorChatContext {
   final bool awaitingUser;
   final Map<String, dynamic> gates;
   final String requirementSnippet;
+  final String specDir;
+  final String apiFeatureUrl;
+  final String dashboardUrl;
+  final String orchestrationRel;
   final String? currentStepLabel;
 }
 

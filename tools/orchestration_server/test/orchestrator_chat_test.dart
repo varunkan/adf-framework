@@ -14,9 +14,9 @@ void main() {
     store = FeatureStore(tmp.path);
     processor = OrchestratorChatProcessor(store);
     store.createFeature(
-      id: 'chat-test',
-      requirement: 'Build a URL shortener API',
-      track: 'S',
+      id: 'feature2',
+      requirement: 'Auth login feature',
+      track: 'M',
     );
   });
 
@@ -26,17 +26,17 @@ void main() {
 
   test('passes through direct orchestrator commands', () async {
     final r = await processor.process(
-      'chat-test',
-      '@orch-orchestrator sync chat-test',
+      'feature2',
+      '@orch-orchestrator sync feature2',
     );
     expect(r.source, 'direct');
     expect(r.orchestratorCommand, contains('@orch-orchestrator sync'));
     expect(r.shouldRunAgent, isTrue);
   });
 
-  test('fallback LLM produces assistant reply and agent prompt', () async {
+  test('fallback produces agent prompt for work requests', () async {
     final r = await processor.process(
-      'chat-test',
+      'feature2',
       'Please add OAuth login and proceed to planning',
     );
     expect(r.assistantReply, isNotEmpty);
@@ -47,9 +47,21 @@ void main() {
 
   test('sync intent maps to sync command', () async {
     final r = await processor.process(
-      'chat-test',
+      'feature2',
       'looks good, please sync and approve',
     );
     expect(r.orchestratorCommand, contains('sync'));
+  });
+
+  test('answers URL questions without static routing boilerplate', () async {
+    final r = await processor.process(
+      'feature2',
+      'what is the url for feature 2?',
+    );
+    expect(r.source, 'context');
+    expect(r.action, OrchestratorAction.answerOnly);
+    expect(r.shouldRunAgent, isFalse);
+    expect(r.assistantReply, contains('http://localhost:3847/features/feature2'));
+    expect(r.assistantReply, isNot(contains('Set ORCH_LLM_API_KEY')));
   });
 }

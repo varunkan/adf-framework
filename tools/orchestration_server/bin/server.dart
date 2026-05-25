@@ -303,6 +303,19 @@ Future<void> main(List<String> args) async {
 
       if (execute) {
         final state = store.readState(id);
+
+        if (!chat.shouldRunAgent) {
+          return _json({
+            'ok': true,
+            'mode': 'llm_answer',
+            'command': cmd,
+            'assistant_message': chat.assistantReply,
+            'orchestrator_command': chat.orchestratorCommand,
+            'llm_source': chat.source,
+            'feature': featureDetailPayload(id),
+          });
+        }
+
         if (state['status'] == 'completed') {
           store.appendClientClarification(id, prompt.trim());
           return _json({
@@ -314,18 +327,6 @@ Future<void> main(List<String> args) async {
             'llm_source': chat.source,
             'message':
                 'Feature is completed — notes saved to requirement.md only.',
-            'feature': featureDetailPayload(id),
-          });
-        }
-
-        if (!chat.shouldRunAgent) {
-          return _json({
-            'ok': true,
-            'mode': 'llm_answer',
-            'command': cmd,
-            'assistant_message': chat.assistantReply,
-            'orchestrator_command': chat.orchestratorCommand,
-            'llm_source': chat.source,
             'feature': featureDetailPayload(id),
           });
         }
