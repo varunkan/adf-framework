@@ -38,8 +38,29 @@ Open http://localhost:3848 (dashboard) and http://localhost:3847 (API).
 | Cursor | `cursor` | `.cursor/orchestration`, skills, hooks |
 | VS Code | `vscode` | `.adf/orchestration`, `AGENTS.md`, Copilot instructions |
 | Windsurf | `windsurf` | `.adf/orchestration`, `.windsurf/rules/adf.md` |
-| Claude Code | `claude` | `.adf/orchestration`, `.claude/skills`, `CLAUDE.md` |
+| Claude Code | `claude` | `.adf/orchestration`, `.claude/skills`, `CLAUDE.md`, `.adf/runner.env` |
 | Any other | `generic` | `.adf/orchestration`, `AGENTS.md` |
+| **All of the above** | `all` | every adapter, one project |
+
+## Agent runners (IDE-independent)
+
+The pipeline is driven by a pluggable headless **runner**, chosen at start via
+`ADF_RUNNER` (written to `.adf/runner.env` by the installer):
+
+| `-r` flag | Drives | Auth |
+|-----------|--------|------|
+| `cursor` | `cursor-agent --print` | `cursor-agent login` / `CURSOR_API_KEY` |
+| `claude` | `claude -p` | `claude login` / `ANTHROPIC_API_KEY` |
+| `custom` | any CLI via `ADF_RUNNER_BIN` | `ADF_RUNNER_API_KEY_ENV` |
+| `auto` | custom→cursor→claude (first installed) | — |
+
+```bash
+adf install -t . -i claude  -r claude    # drive ADF with Claude Code
+adf install -t . -i cursor  -r claude    # Cursor docs, Claude runner
+adf install -t . -i generic -r custom    # any agent CLI
+```
+
+See [docs/RUNNERS.md](docs/RUNNERS.md) for the full matrix and env reference.
 
 ## Global install
 
@@ -50,14 +71,14 @@ adf-framework/bin/adf install --global
 
 ## CLI
 
-- `adf install -t DIR -i IDE` — copy framework + IDE adapter
-- `adf doctor -t DIR` — verify Dart, Git, orchestration paths
-- `adf start [api|dashboard|all]` — run services
+- `adf install -t DIR -i IDE [-r RUNNER]` — copy framework + IDE adapter + runner.env
+- `adf doctor -t DIR` — verify Dart, Git, runner, orchestration paths
+- `adf start [api|dashboard|all]` — run services (auto-loads `.adf/runner.env`)
 - `adf version`
 
 ## Prerequisites
 
-Git, Dart 3.5+, Flutter (dashboard). Optional: `cursor-agent` for headless. External: BMAD skills, Spec Kit (`speckit-*`).
+Git, Dart 3.5+, Flutter (dashboard). One headless runner: `cursor-agent` **or** `claude` (Claude Code) **or** any agent CLI via `ADF_RUNNER_BIN`. External: BMAD skills, Spec Kit (`speckit-*`).
 
 ## Docs
 

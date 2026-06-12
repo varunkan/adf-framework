@@ -1,21 +1,27 @@
 #!/usr/bin/env bash
-# Install ADF v3 into a project for a given IDE.
-# Usage: install.sh --target DIR --ide cursor|vscode|windsurf|claude|generic [--framework DIR] [--global]
+# Install ADF v3 into a project for a given IDE and agent runner.
+# Usage:
+#   install.sh --target DIR --ide cursor|vscode|windsurf|claude|generic|all
+#              [--runner auto|cursor|claude|custom] [--framework DIR] [--global]
 set -euo pipefail
 
 IDE="cursor"
+RUNNER=""        # empty → derive a sensible default from the IDE
 TARGET=""
 FRAMEWORK=""
 GLOBAL=false
+
+ALL_IDES=(cursor vscode windsurf claude generic)
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --target|-t) TARGET="$2"; shift 2 ;;
     --ide|-i) IDE="$2"; shift 2 ;;
+    --runner|-r) RUNNER="$2"; shift 2 ;;
     --framework|-f) FRAMEWORK="$2"; shift 2 ;;
     --global|-g) GLOBAL=true; shift ;;
     -h|--help)
-      echo "Usage: $0 --target DIR --ide cursor|vscode|windsurf|claude|generic [--framework DIR]"
+      echo "Usage: $0 --target DIR --ide cursor|vscode|windsurf|claude|generic|all [--runner auto|cursor|claude|custom] [--framework DIR]"
       exit 0 ;;
     *) echo "Unknown: $1" >&2; exit 1 ;;
   esac
@@ -25,6 +31,15 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DEFAULT_FW="$(cd "$SCRIPT_DIR/.." && pwd)"
 FRAMEWORK="${FRAMEWORK:-$DEFAULT_FW}"
 VERSION="$(cat "$FRAMEWORK/VERSION" 2>/dev/null || echo 3.1.0)"
+
+# Default runner per IDE when --runner not given (back-compat: cursor for cursor).
+default_runner_for() {
+  case "$1" in
+    claude) echo "claude" ;;
+    cursor) echo "cursor" ;;
+    *) echo "auto" ;;
+  esac
+}
 
 if $GLOBAL; then
   INSTALL_ROOT="${ADF_HOME:-$HOME/.adf}/$VERSION"
@@ -45,48 +60,75 @@ if [[ -z "$TARGET" ]]; then
 fi
 
 TARGET="$(cd "$TARGET" && pwd)"
-ADAPTER="$SCRIPT_DIR/adapters/$IDE.sh"
-if [[ ! -x "$ADAPTER" ]]; then
-  echo "ERROR: unknown IDE '$IDE'. Supported: cursor vscode windsurf claude generic" >&2
-  exit 1
-fi
 
-# Copy framework into project (or symlink if --link-only)
+# Copy framework into project once (shared by every adapter).
 FW_IN_PROJECT="$TARGET/adf-framework"
 if [[ ! -d "$FW_IN_PROJECT" ]]; then
   rsync -a --exclude='.git' "$FRAMEWORK/" "$FW_IN_PROJECT/"
   echo "Copied framework to $FW_IN_PROJECT"
 fi
 
-"$ADAPTER" "$FW_IN_PROJECT" "$TARGET"
+# Resolve the list of IDEs to install.
+if [[ "$IDE" == "all" || "$IDE" == "universal" ]]; then
+  IDES=("${ALL_IDES[@]}")
+else
+  IDES=("$IDE")
+fi
 
-# Manifest
+PRIMARY_IDE="${IDES[0]}"
+EFFECTIVE_RUNNER="${RUNNER:-$(default_runner_for "$PRIMARY_IDE")}"
+
+for ide in "${IDES[@]}"; do
+  ADAPTER="$SCRIPT_DIR/adapters/$ide.sh"
+  if [[ ! -x "$ADAPTER" ]]; then
+    echo "ERROR: unknown IDE '$ide'. Supported: ${ALL_IDES[*]} all" >&2
+    exit 1
+  fi
+  ide_runner="${RUNNER:-$(default_runner_for "$ide")}"
+  # claude.sh accepts a runner arg; others take (framework, target).
+  if [[ "$ide" == "claude" ]]; then
+    "$ADAPTER" "$FW_IN_PROJECT" "$TARGET" "$ide_runner"
+  else
+    "$ADAPTER" "$FW_IN_PROJECT" "$TARGET"
+  fi
+done
+
+# Always write a runner.env so `adf start` knows which CLI to drive.
+"$FRAMEWORK/install/write_runner_env.sh" "$TARGET" "$EFFECTIVE_RUNNER" >/dev/null
+echo "Runner: $EFFECTIVE_RUNNER (.adf/runner.env)"
+
+# Manifest reflects the primary IDE's paths.
 ORCH_DIR=".cursor/orchestration"
 SKILLS_DIR=".cursor/skills"
 HOOKS_FILE=".cursor/hooks.json"
-case "$IDE" in
+case "$PRIMARY_IDE" in
   vscode|windsurf|generic|claude) ORCH_DIR=".adf/orchestration"; SKILLS_DIR=""; HOOKS_FILE="" ;;
 esac
-[[ "$IDE" == claude ]] && SKILLS_DIR=".claude/skills"
+[[ "$PRIMARY_IDE" == claude ]] && SKILLS_DIR=".claude/skills"
+
+IDES_JSON="$(printf '"%s",' "${IDES[@]}")"; IDES_JSON="[${IDES_JSON%,}]"
 
 python3 - << PY
 import json, datetime
 m = {
   "schema": 1,
   "version": "$VERSION",
-  "ide": "$IDE",
+  "ide": "$PRIMARY_IDE",
+  "ides": $IDES_JSON,
+  "runner": "$EFFECTIVE_RUNNER",
   "installed_at": datetime.datetime.now(datetime.timezone.utc).isoformat() + "Z",
   "framework_root": "adf-framework",
   "orchestration_dir": "$ORCH_DIR",
   "skills_dir": "$SKILLS_DIR" or None,
   "hooks_file": "$HOOKS_FILE" or None,
+  "runner_env": ".adf/runner.env",
 }
 with open("$TARGET/.adf-install.json", "w") as f:
     json.dump(m, f, indent=2)
 print("Wrote $TARGET/.adf-install.json")
 PY
 
-chmod +x "$FW_IN_PROJECT/scripts/orch/"*.sh "$FW_IN_PROJECT/scripts/"*.sh 2>/dev/null || true
+chmod +x "$FW_IN_PROJECT/scripts/orch/"*.sh "$FW_IN_PROJECT/scripts/"*.sh "$FW_IN_PROJECT/install/"*.sh 2>/dev/null || true
 echo ""
-echo "ADF $VERSION installed for $IDE in $TARGET"
-echo "  Next: cd $TARGET && ./adf-framework/bin/adf doctor"
+echo "ADF $VERSION installed for ${IDES[*]} (runner: $EFFECTIVE_RUNNER) in $TARGET"
+echo "  Next: cd $TARGET && set -a && . .adf/runner.env && set +a && ./adf-framework/bin/adf doctor"

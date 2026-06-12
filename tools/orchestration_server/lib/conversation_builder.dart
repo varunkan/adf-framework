@@ -164,6 +164,44 @@ class ConversationBuilder {
     return deduped;
   }
 
+
+  /// Dashboard chat panel: commands + orchestrator replies (no run-log noise).
+  List<Map<String, dynamic>> buildChatView(String featureId, {int limit = 100}) {
+    final messages = <Map<String, dynamic>>[];
+    for (final cmd in store.listCommands(featureId, limit: 200)) {
+      final prompt = cmd['prompt'] as String? ?? '';
+      if (prompt.trim().isEmpty) continue;
+      messages.add({
+        'role': 'user',
+        'type': 'command',
+        'text': prompt.trim(),
+        'timestamp': cmd['created_at'] as String?,
+        'command_id': cmd['id'],
+        'status': cmd['status'],
+      });
+      final ar = cmd['assistant_reply'] as String?;
+      if (ar != null && ar.trim().isNotEmpty) {
+        messages.add({
+          'role': 'assistant',
+          'type': 'orchestrator',
+          'text': ar.trim(),
+          'timestamp': cmd['created_at'] as String?,
+          'command_id': cmd['id'],
+          'llm_source': cmd['llm_source'],
+        });
+      }
+    }
+    messages.sort((a, b) {
+      final ta = a['timestamp'] as String? ?? '';
+      final tb = b['timestamp'] as String? ?? '';
+      return ta.compareTo(tb);
+    });
+    if (messages.length > limit) {
+      return messages.sublist(messages.length - limit);
+    }
+    return messages;
+  }
+
   String? _extractAssistantText(Map<String, dynamic> obj) {
     if (obj['text'] is String) return obj['text'] as String;
     final msg = obj['message'];

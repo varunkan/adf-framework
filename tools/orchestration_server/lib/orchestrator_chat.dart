@@ -6,25 +6,58 @@ import 'conversation_builder.dart';
 import 'feature_store.dart';
 import 'pipeline_planner.dart';
 
+/// How much of the chat pipeline [process] runs.
+enum ChatProcessMode {
+  /// HTTP LLM → optional static context → fallback (no cursor-agent wait).
+  httpOnly,
+  /// Full pipeline including cursor-agent (can take minutes).
+  full,
+  /// Skip cursor/LLM — state-based answers only (fast fallback).
+  stateOnly,
+}
+
 /// LLM interprets dashboard chat and produces orchestrator actions + agent prompts.
 class OrchestratorChatProcessor {
   OrchestratorChatProcessor(
     this.store, {
     PipelinePlanner? planner,
     AgentChatRunner? agentChat,
+    bool forceStaticContext = false,
   })  : _planner = planner,
-        _agentChat = agentChat ?? AgentChatRunner(repoRoot: store.repoRoot);
+        _agentChat = agentChat ?? AgentChatRunner(repoRoot: store.repoRoot),
+        _forceStaticContext = forceStaticContext;
 
   final FeatureStore store;
   final PipelinePlanner? _planner;
   final AgentChatRunner _agentChat;
+  final bool _forceStaticContext;
 
   static const _defaultModel = 'gpt-4o-mini';
 
+  String? get llmApiKey => _llmApiKey();
+
+  /// When true, dashboard chat uses cursor-agent before HTTP LLM (Groq/OpenAI).
+  bool get preferCursorCli {
+    final v = Platform.environment['ORCH_CHAT_PREFER_CURSOR'];
+    if (v == '0' || v == 'false') return false;
+    if (v == '1' || v == 'true') return true;
+    // Default: prefer Cursor CLI when no cloud LLM key is configured.
+    return _llmApiKey() == null;
+  }
+
+  Future<bool> cursorChatReady() => _shouldTryCursorChat();
+
+  bool get staticContextEnabled =>
+      _forceStaticContext ||
+      Platform.environment['ORCH_CHAT_STATIC_CONTEXT'] == '1' ||
+      Platform.environment['ORCH_CHAT_STATIC_CONTEXT'] == 'true';
+
   Future<OrchestratorChatResult> process(
     String featureId,
-    String userMessage,
-  ) async {
+    String userMessage, {
+    ChatProcessMode mode = ChatProcessMode.full,
+    void Function(String partialText)? onPartial,
+  }) async {
     final trimmed = userMessage.trim();
     if (trimmed.isEmpty) {
       throw ArgumentError('empty message');
@@ -42,29 +75,57 @@ class OrchestratorChatProcessor {
 
     final ctx = await _buildContext(featureId);
     final contextBlock = _formatContextBlock(ctx);
-    final history = ConversationBuilder(store).build(featureId, limit: 12);
+    final history = _filterChatHistory(
+      ConversationBuilder(store).buildChatView(featureId, limit: 12),
+    );
 
-    final apiKey = _llmApiKey();
-    if (apiKey != null) {
-      try {
-        return await _callHttpLlm(ctx, trimmed, apiKey);
-      } catch (_) {}
+    if (mode == ChatProcessMode.stateOnly) {
+      final stateAnswer = _answerFromFeatureState(ctx, trimmed);
+      if (stateAnswer != null) return stateAnswer;
+      return _fallback(ctx, trimmed);
     }
 
-    if (await _shouldTryCursorChat()) {
+    final useCursor = mode == ChatProcessMode.full && await _shouldTryCursorChat();
+    if (preferCursorCli && useCursor) {
       final agentReply = await _agentChat.converse(
         featureId: featureId,
         contextBlock: contextBlock,
         userMessage: trimmed,
         recentMessages: history,
+        onPartial: onPartial,
       );
       if (agentReply != null && agentReply.reply.trim().isNotEmpty) {
         return _fromAgentChat(ctx, trimmed, agentReply);
       }
     }
 
-    final contextual = _tryContextualAnswer(ctx, trimmed);
-    if (contextual != null) return contextual;
+    final apiKey = _llmApiKey();
+    if (!preferCursorCli && apiKey != null) {
+      try {
+        return await _callHttpLlm(ctx, trimmed, apiKey, history);
+      } catch (_) {}
+    }
+
+    if (!preferCursorCli && useCursor) {
+      final agentReply = await _agentChat.converse(
+        featureId: featureId,
+        contextBlock: contextBlock,
+        userMessage: trimmed,
+        recentMessages: history,
+        onPartial: onPartial,
+      );
+      if (agentReply != null && agentReply.reply.trim().isNotEmpty) {
+        return _fromAgentChat(ctx, trimmed, agentReply);
+      }
+    }
+
+    if (staticContextEnabled) {
+      final contextual = _tryContextualAnswer(ctx, trimmed);
+      if (contextual != null) return contextual;
+    }
+
+    final stateAnswer = _answerFromFeatureState(ctx, trimmed);
+    if (stateAnswer != null) return stateAnswer;
 
     return _fallback(
       ctx,
@@ -131,8 +192,70 @@ class OrchestratorChatProcessor {
   String? _llmApiKey() {
     return Platform.environment['ORCH_LLM_API_KEY'] ??
         Platform.environment['OPENAI_API_KEY'] ??
-        Platform.environment['GROQ_API_KEY'];
+        Platform.environment['GROQ_API_KEY'] ??
+        _readDotEnvKey('ORCH_LLM_API_KEY') ??
+        _readDotEnvKey('OPENAI_API_KEY') ??
+        _readDotEnvKey('GROQ_API_KEY');
   }
+
+  String? _readDotEnvKey(String key) {
+    for (final path in [
+      '${store.repoRoot}/.env.groq.local',
+      '${store.repoRoot}/.env',
+      '${store.repoRoot}/adf-framework/.env',
+    ]) {
+      final f = File(path);
+      if (!f.existsSync()) continue;
+      for (final line in f.readAsLinesSync()) {
+        final trimmed = line.trim();
+        if (trimmed.isEmpty || trimmed.startsWith('#')) continue;
+        final eq = trimmed.indexOf('=');
+        if (eq <= 0) continue;
+        if (trimmed.substring(0, eq).trim() != key) continue;
+        var value = trimmed.substring(eq + 1).trim();
+        if ((value.startsWith('"') && value.endsWith('"')) ||
+            (value.startsWith("'") && value.endsWith("'"))) {
+          value = value.substring(1, value.length - 1);
+        }
+        if (value.isNotEmpty) return value;
+      }
+    }
+    return null;
+  }
+
+  /// Gate-by-gate progress with a concrete next action — instant, zero tokens.
+  OrchestratorChatResult _progressAnswer(
+    OrchestratorChatContext ctx,
+    String resolvedId,
+  ) {
+
+      final st = store.readState(resolvedId);
+      final gates = st['gates'] as Map<String, dynamic>? ?? {};
+      final work = store.inferWorkPhase(gates);
+      final done = <String>[];
+      final remaining = <String>[];
+      FeatureStore.phaseGateMap.forEach((p, g) {
+        final label = PipelinePlanner.phaseNames[p] ?? 'phase $p';
+        (gates[g] == true ? done : remaining).add('$p · $label');
+      });
+      final hint = work <= 6
+          ? 'Hit **Autopilot** (or `POST /features/$resolvedId/autopilot`) to '
+              'complete phases ${work}–6 instantly at zero token cost.'
+          : work == 7
+              ? 'Next: **phase 7 implement** — write code against the red '
+                  'tests, then phases 8–9 verify and review.'
+              : 'Next: finish verification/review gates.';
+      return OrchestratorChatResult(
+        assistantReply: '**$resolvedId** progress\n\n'
+            '- Done: ${done.isEmpty ? 'none yet' : done.join(', ')}\n'
+            '- Remaining: ${remaining.isEmpty ? 'all gates passed' : remaining.join(', ')}\n\n'
+            '$hint',
+        orchestratorCommand: '@orch-orchestrator resume ${ctx.featureId}',
+        agentPrompt: '',
+        action: OrchestratorAction.answerOnly,
+        source: 'state',
+      );
+      }
 
   String _llmApiUrl() {
     return Platform.environment['ORCH_LLM_API_URL'] ??
@@ -158,6 +281,104 @@ class OrchestratorChatProcessor {
 
   String get _dashboardBase => 'http://localhost:$_webPort';
 
+  List<Map<String, dynamic>> _filterChatHistory(
+    List<Map<String, dynamic>> messages,
+  ) {
+    return messages.where((m) {
+      final text = (m['text'] as String? ?? '').trim();
+      if (text.isEmpty) return false;
+      if (text.startsWith('Thinking')) return false;
+      if (m['llm_source'] == 'pending') return false;
+      return true;
+    }).toList();
+  }
+
+  OrchestratorChatResult? _answerFromFeatureState(
+    OrchestratorChatContext ctx,
+    String userMessage,
+  ) {
+    final lower = userMessage.toLowerCase();
+    if (_looksLikeWorkRequest(lower)) return null;
+    if (!_isInformationalQuery(lower)) return null;
+    final resolvedId = _resolveFeatureIdFromMessage(ctx.featureId, lower);
+
+    if (_asksNextSteps(lower) || _asksAutopilot(lower) || lower.contains('progress')) {
+      return _progressAnswer(ctx, resolvedId);
+    }
+
+    if (_asksPhaseOrStatus(lower)) {
+      final st = store.readState(resolvedId);
+      final phase = store.effectivePhase(resolvedId, st);
+      final status = st['status'] as String? ?? 'unknown';
+      final awaiting = st['awaiting_user'] == true;
+      final step = ctx.currentStepLabel;
+      return OrchestratorChatResult(
+        assistantReply:
+            '**$resolvedId** is on **phase $phase** (status: **$status**)'
+            '${awaiting ? ', waiting for your approval' : ''}.'
+            '${step != null ? ' Current step: $step.' : ''}',
+        orchestratorCommand: '@orch-orchestrator resume ${ctx.featureId}',
+        agentPrompt: '',
+        action: OrchestratorAction.answerOnly,
+        source: 'state',
+      );
+    }
+
+    if (_asksForUrl(lower)) {
+      return OrchestratorChatResult(
+        assistantReply:
+            'Open **$resolvedId** from the dashboard at ${ctx.dashboardUrl}. '
+            'API JSON: $_apiBase/features/$resolvedId',
+        orchestratorCommand: '@orch-orchestrator resume ${ctx.featureId}',
+        agentPrompt: '',
+        action: OrchestratorAction.answerOnly,
+        source: 'state',
+      );
+    }
+
+    if (_asksArtifacts(lower)) {
+      final specDir = '${store.repoRoot}/specs/$resolvedId';
+      final existing = <String>[];
+      for (final name in [
+        'problem-statement.md',
+        'spec.md',
+        'plan.md',
+        'tasks.md',
+        'task-graph.yaml',
+        'test-plan.md',
+        'test-cases.md',
+        'traceability-matrix.md',
+      ]) {
+        if (File('$specDir/$name').existsSync()) existing.add('`specs/$resolvedId/$name`');
+      }
+      return OrchestratorChatResult(
+        assistantReply: existing.isEmpty
+            ? 'No artifacts generated yet for **$resolvedId**. Hit **Autopilot** '
+                'to generate spec, plan, tasks, and test cases instantly.'
+            : 'Artifacts for **$resolvedId**:\n- ${existing.join('\n- ')}',
+        orchestratorCommand: '@orch-orchestrator resume ${ctx.featureId}',
+        agentPrompt: '',
+        action: OrchestratorAction.answerOnly,
+        source: 'state',
+      );
+    }
+
+    if (_asksHelp(lower)) {
+      return OrchestratorChatResult(
+        assistantReply:
+            'I answer instantly about **status**, **progress**, **next steps**, '
+            '**artifacts**, and **URLs** — zero tokens. Say **autopilot** to run '
+            'phases 1–6 automatically, **sync** to approve, or describe a change '
+            'to route it into the pipeline.',
+        orchestratorCommand: '@orch-orchestrator resume ${ctx.featureId}',
+        agentPrompt: '',
+        action: OrchestratorAction.answerOnly,
+        source: 'state',
+      );
+    }
+    return null;
+  }
+
   Future<OrchestratorChatContext> _buildContext(String featureId) async {
     final state = store.readState(featureId);
     final phase = store.effectivePhase(featureId, state);
@@ -176,7 +397,7 @@ class OrchestratorChatProcessor {
     String? currentStep;
     if (_planner != null) {
       try {
-        final plan = _planner!.buildPlan(featureId);
+        final plan = _planner.buildPlan(featureId);
         final stepId = plan['current_step_id'] as String?;
         final steps = (plan['phases'] as List<dynamic>?) ?? [];
         for (final ph in steps) {
@@ -227,6 +448,10 @@ class OrchestratorChatProcessor {
       );
     }
 
+    if (_asksNextSteps(lower) || _asksAutopilot(lower) || lower.contains('progress')) {
+      return _progressAnswer(ctx, resolvedId);
+    }
+
     if (_asksPhaseOrStatus(lower)) {
       final st = store.readState(resolvedId);
       final phase = store.effectivePhase(resolvedId, st);
@@ -263,28 +488,53 @@ $links''',
       );
     }
 
-    return OrchestratorChatResult(
-      assistantReply:
-          'Here is the current context for **${ctx.featureId}**:\n\n$links',
-      orchestratorCommand: '@orch-orchestrator resume ${ctx.featureId}',
-      agentPrompt: '',
-      action: OrchestratorAction.answerOnly,
-      source: 'context',
-    );
+    return null;
+  }
+
+  /// Work requests ("add OAuth login…") must reach the pipeline even when
+  /// they mention spec/plan/task keywords.
+  bool _looksLikeWorkRequest(String lower) {
+    if (lower.contains('?')) return false;
+    const verbs = [
+      'add ', 'implement', 'create ', 'build ', 'fix ', 'change ',
+      'update ', 'remove ', 'delete ', 'refactor', 'write ', 'make ',
+      'rename ', 'integrate ',
+    ];
+    return verbs.any(lower.contains);
   }
 
   bool _isInformationalQuery(String lower) {
-    if (_asksForUrl(lower) || _asksPhaseOrStatus(lower) || _asksHelp(lower)) {
-      return true;
-    }
-    final q = RegExp(
-      r'^(what|where|which|how|when|who|is|are|can|could|tell me|show me|list)\b',
-    );
-    return q.hasMatch(lower) &&
-        !lower.contains('add ') &&
-        !lower.contains('implement') &&
-        !lower.contains('build ') &&
-        !lower.contains('fix ');
+    return _asksForUrl(lower) ||
+        _asksPhaseOrStatus(lower) ||
+        _asksHelp(lower) ||
+        _asksNextSteps(lower) ||
+        _asksArtifacts(lower) ||
+        _asksAutopilot(lower);
+  }
+
+  bool _asksNextSteps(String lower) {
+    return lower.contains('next') ||
+        lower.contains("what's left") ||
+        lower.contains('what is left') ||
+        lower.contains('remaining') ||
+        lower.contains('to do') ||
+        lower.contains('todo');
+  }
+
+  bool _asksArtifacts(String lower) {
+    return lower.contains('artifact') ||
+        lower.contains('spec') ||
+        lower.contains('plan') ||
+        lower.contains('task') ||
+        lower.contains('test case') ||
+        lower.contains('files');
+  }
+
+  bool _asksAutopilot(String lower) {
+    return lower.contains('autopilot') ||
+        lower.contains('automatic') ||
+        lower.contains('run all') ||
+        lower.contains('do everything');
   }
 
   bool _asksForUrl(String lower) {
@@ -343,16 +593,26 @@ $links''',
     OrchestratorChatContext ctx,
     String userMessage,
     String apiKey,
+    List<Map<String, dynamic>> history,
   ) async {
     final system = _systemPrompt(ctx);
+    final messages = <Map<String, String>>[
+      {'role': 'system', 'content': system},
+    ];
+    for (final m in history) {
+      final role = m['role'] as String?;
+      final text = (m['text'] as String? ?? '').trim();
+      if (text.isEmpty || role == null) continue;
+      if (role != 'user' && role != 'assistant') continue;
+      messages.add({'role': role, 'content': text});
+    }
+    messages.add({'role': 'user', 'content': userMessage});
+
     final body = jsonEncode({
       'model': _llmModel(),
-      'temperature': 0.2,
+      'temperature': 0.55,
       'response_format': {'type': 'json_object'},
-      'messages': [
-        {'role': 'system', 'content': system},
-        {'role': 'user', 'content': userMessage},
-      ],
+      'messages': messages,
     });
 
     final client = HttpClient();
@@ -398,7 +658,7 @@ ${ctx.requirementSnippet.isEmpty ? '(none yet)' : ctx.requirementSnippet}
 
 Respond with ONLY valid JSON:
 {
-  "assistant_reply": "friendly reply to the user in chat (2-4 sentences). For URL/status questions, include the links above.",
+  "assistant_reply": "natural, varied reply like ChatGPT/Cursor chat (2-5 sentences). Answer the specific question; use links above only when relevant.",
   "action": "resume" | "sync" | "clarify" | "answer_only",
   "orchestrator_command": "@orch-orchestrator resume|sync ${ctx.featureId}",
   "agent_instructions": "detailed instructions for the coding agent (empty string if answer_only)"
@@ -458,9 +718,21 @@ Rules:
     String? note,
   }) {
     final lower = userMessage.toLowerCase();
+    final looksLikeQuestion = lower.contains('?') ||
+        lower.startsWith('what ') ||
+        lower.startsWith('where ') ||
+        lower.startsWith('how ') ||
+        lower.startsWith('why ') ||
+        lower.contains('what is') ||
+        lower.contains('what are');
     OrchestratorAction action;
     String cmd;
-    if (lower.contains('sync') ||
+    if (looksLikeQuestion &&
+        !lower.contains('sync') &&
+        !lower.contains('approve')) {
+      action = OrchestratorAction.answerOnly;
+      cmd = '@orch-orchestrator resume ${ctx.featureId}';
+    } else if (lower.contains('sync') ||
         lower.contains('approve') ||
         lower.contains('looks good') ||
         (lower.contains('proceed') && !lower.contains('?'))) {
@@ -476,21 +748,34 @@ Rules:
 
     final reply = StringBuffer();
     if (note != null) reply.writeln('$note\n');
-    reply.writeln(
-      'Got it — I will route this to the orchestrator for phase ${ctx.phase}.',
-    );
-    if (_llmApiKey() == null) {
+    if (action == OrchestratorAction.answerOnly) {
       reply.writeln(
-        '\n_Tip: set `ORCH_LLM_API_KEY` on the API server for smarter replies. '
-        'You can also ask: "what is the URL for this feature?" or "what phase?"_',
+        'Quick answer from feature state: **${ctx.featureId}** is on phase '
+        '${ctx.phase} (${ctx.status}). Ask about **progress**, **next steps**, '
+        'or **artifacts** for instant detail — or set `GROQ_API_KEY` for '
+        'free-form answers.',
       );
+      if (_asksForUrl(lower)) {
+        reply.writeln('\n${_formatFeatureLinks(ctx.featureId, ctx)}');
+      }
+    } else {
+      reply.writeln(
+        'Got it — I will route this to the orchestrator for phase ${ctx.phase}.',
+      );
+      if (_llmApiKey() == null) {
+        reply.writeln(
+          '\n_Tip: set `GROQ_API_KEY` on the API server for smarter replies._',
+        );
+      }
     }
-    final agentPrompt = _buildAgentPrompt(
-      ctx,
-      cmd,
-      'Apply the client input below to requirement.md and current phase artifacts.',
-      userMessage,
-    );
+    final agentPrompt = action == OrchestratorAction.answerOnly
+        ? ''
+        : _buildAgentPrompt(
+            ctx,
+            cmd,
+            'Apply the client input below to requirement.md and current phase artifacts.',
+            userMessage,
+          );
     return OrchestratorChatResult(
       assistantReply: reply.toString().trim(),
       orchestratorCommand: cmd,

@@ -437,6 +437,11 @@ class _MessageBubble extends StatelessWidget {
       fg = status.idle;
       icon = Icons.terminal;
       label = type == 'command' ? 'Command' : 'System';
+    } else if (type == 'orchestrator') {
+      bg = status.awaitingBg;
+      fg = status.awaiting;
+      icon = Icons.auto_awesome_outlined;
+      label = 'Orchestrator';
     } else {
       bg = status.successBg;
       fg = status.success;

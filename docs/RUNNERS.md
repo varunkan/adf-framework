@@ -1,0 +1,92 @@
+# ADF runners — drive the pipeline with any agent CLI
+
+ADF's orchestration server executes phases, self-heal attempts, and dashboard
+chat by shelling out to a headless **agent runner**. As of v3.2.0 the runner is
+pluggable: the same pipeline can be driven by Cursor, Claude Code, or any other
+agent CLI, on any IDE.
+
+## Selecting a runner
+
+The active runner is chosen at server start from the `ADF_RUNNER` environment
+variable (typically loaded from `.adf/runner.env`, which the installer writes):
+
+| `ADF_RUNNER` | Binary driven                  | Auth                                   |
+|--------------|--------------------------------|----------------------------------------|
+| `cursor`     | `cursor-agent --print`         | `cursor-agent login` or `CURSOR_API_KEY` |
+| `claude`     | `claude -p`                    | `claude login` or `ANTHROPIC_API_KEY`  |
+| `custom`     | `$ADF_RUNNER_BIN`              | `$ADF_RUNNER_API_KEY_ENV` (optional)   |
+| `auto` / unset | custom if configured, else cursor, else claude | — |
+
+`auto` keeps existing Cursor installs working unchanged: if `cursor-agent`
+resolves it is used; otherwise ADF falls back to `claude`.
+
+## Claude Code
+
+```bash
+npm install -g @anthropic-ai/claude-code
+claude login                      # or: export ANTHROPIC_API_KEY=...
+adf install -t . -i claude -r claude
+set -a && . .adf/runner.env && set +a
+adf doctor      # should report: OK claude / runner: claude
+adf start all
+```
+
+ADF invokes Claude headlessly as:
+
+```
+claude -p --output-format stream-json --verbose \
+  --dangerously-skip-permissions --add-dir <repo> "<prompt>"
+```
+
+Claude Code's `stream-json` events (`assistant` message blocks plus a terminal
+`{"type":"result","result":"…"}`) are parsed by the same code path that handles
+Cursor, so phase logs, partial streaming, and the `[ACTION:…]` chat protocol all
+work identically.
+
+## Any other agent CLI (custom)
+
+Point ADF at any binary. `{prompt}` is always passed as a single argument;
+`{workspace}` is replaced with the repo/worktree path.
+
+```bash
+adf install -t . -i generic -r custom
+# then edit .adf/runner.env:
+ADF_RUNNER=custom
+ADF_RUNNER_BIN=/usr/local/bin/my-agent
+ADF_RUNNER_ARGS=run --json --dir {workspace} {prompt}
+ADF_RUNNER_API_KEY_ENV=MY_AGENT_TOKEN     # optional
+ADF_RUNNER_KILL_PATTERN=my-agent          # optional, for stale-process cleanup
+```
+
+For a custom runner to stream nicely, emit JSON lines with a terminal
+`{"type":"result","result":"<final text>"}`; otherwise ADF falls back to
+treating raw stdout as the reply.
+
+## Install on any IDE
+
+```bash
+adf install -t . -i cursor      # .cursor/orchestration + skills + hooks
+adf install -t . -i vscode      # .adf/orchestration + Copilot instructions
+adf install -t . -i windsurf    # .adf/orchestration + .windsurf/rules
+adf install -t . -i claude      # CLAUDE.md + .claude/skills + runner.env
+adf install -t . -i generic     # .adf/orchestration + AGENTS.md
+adf install -t . -i all         # every adapter above, one project
+```
+
+The IDE adapter controls *where docs/skills land*; the runner controls *which
+agent executes the pipeline*. They are independent — e.g. you can install the
+Cursor adapter but drive it with Claude (`-i cursor -r claude`).
+
+## Environment reference
+
+| Variable | Purpose |
+|----------|---------|
+| `ADF_RUNNER` | `auto` \| `cursor` \| `claude` \| `custom` |
+| `CURSOR_API_KEY` | Cursor unattended auth |
+| `CURSOR_AGENT_PATH` | Override cursor-agent binary location |
+| `ANTHROPIC_API_KEY` | Claude unattended auth |
+| `ADF_CLAUDE_PATH` / `CLAUDE_PATH` | Override claude binary location |
+| `ADF_RUNNER_BIN` | Custom runner executable |
+| `ADF_RUNNER_ARGS` | Custom argv template (`{prompt}`, `{workspace}`) |
+| `ADF_RUNNER_API_KEY_ENV` | Name of the custom runner's API-key env var |
+| `ADF_RUNNER_KILL_PATTERN` | `pkill -f` pattern for stale custom runs |

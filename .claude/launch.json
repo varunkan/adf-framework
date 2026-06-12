@@ -1,0 +1,21 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "orchestration-api",
+      "runtimeExecutable": "dart",
+      "runtimeArgs": ["run", "tools/orchestration_server/bin/server.dart"],
+      "port": 3847
+    },
+    {
+      "name": "orchestration-dashboard",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd tools/orchestration_dashboard && flutter run -d web-server --web-port=${PORT:-3848} --dart-define=ORCH_API_URL=http://localhost:3847"
+      ],
+      "port": 3848,
+      "autoPort": true
+    }
+  ]
+}

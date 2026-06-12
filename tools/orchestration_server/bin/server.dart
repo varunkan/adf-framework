@@ -1,12 +1,21 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:orchestration_server/adf_brain.dart';
+import 'package:orchestration_server/agent_crew.dart';
 import 'package:orchestration_server/artifact_validator.dart';
+import 'package:orchestration_server/deterministic_artifacts.dart';
+import 'package:orchestration_server/learning_store.dart';
 import 'package:orchestration_server/conversation_builder.dart';
 import 'package:orchestration_server/feature_store.dart';
+import 'package:orchestration_server/figma_connector.dart';
+import 'package:orchestration_server/integrity_chain.dart';
+import 'package:orchestration_server/orch_env_loader.dart';
 import 'package:orchestration_server/orchestrator_chat.dart';
 import 'package:orchestration_server/phase_runner.dart';
 import 'package:orchestration_server/pipeline_planner.dart';
+import 'package:orchestration_server/preview_service.dart';
 import 'package:orchestration_server/run_post_sync.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as io;
@@ -68,6 +77,7 @@ Future<void> main(List<String> args) async {
       3847;
   final repoRoot = resolveRepoRoot();
   await _loadAgentEnv(repoRoot);
+  loadOrchLlmEnvFiles(repoRoot);
 
   final store = FeatureStore(repoRoot);
   final runner = PhaseRunner(store);
@@ -76,6 +86,60 @@ Future<void> main(List<String> args) async {
   final conversation = ConversationBuilder(store);
   final chatProcessor = OrchestratorChatProcessor(store, planner: planner);
   final postSync = RunPostSync(store);
+  final brainSelector = BrainSelector();
+  final learnings = LearningStore(repoRoot);
+  final figma = FigmaConnector();
+  final integrity = IntegrityChain(store);
+  final previewService = PreviewService(
+    store,
+    repoRoot,
+    integrity: integrity,
+    validator: artifactValidator,
+    apiPort: port,
+  );
+  final autoAutopilot = Platform.environment['ORCH_AUTO_AUTOPILOT'] != 'false';
+
+  Future<Map<String, dynamic>> runCrewForFeature(String id) async {
+    final brain = await brainSelector.select();
+    final engine = DeterministicArtifactEngine(store, brain: brain);
+    final crew = AgentCrew(store, engine, artifactValidator, learnings,
+        integrity: integrity);
+    return crew.run(id).timeout(const Duration(seconds: 120));
+  }
+
+  /// Pulls a Figma design and folds it into the feature requirement so the
+  /// crew generates design-aware specs. Zero model cost.
+  Future<Map<String, dynamic>> figmaIntake(String id, String url) async {
+    final key = FigmaConnector.fileKeyFromUrl(url);
+    if (key == null) {
+      throw ArgumentError('not a Figma file URL: $url');
+    }
+    final file = await figma.fetchFile(key);
+    final design = figma.parseFile(file);
+    final md = figma.designMarkdown(design, sourceUrl: url);
+    final designPath = File('$repoRoot/specs/$id/design.md');
+    designPath.parent.createSync(recursive: true);
+    designPath.writeAsStringSync(md);
+
+    final fragments = design.requirementFragments();
+    if (fragments.isNotEmpty) {
+      final reqFile = File('${store.featurePath(id)}/requirement.md');
+      final existing = reqFile.existsSync() ? reqFile.readAsStringSync() : '';
+      if (!existing.contains('## Design requirements (Figma)')) {
+        reqFile.writeAsStringSync(
+          '$existing\n\n## Design requirements (Figma)\n\n'
+          '${fragments.map((f) => 'The app must $f.').join(' ')}\n',
+        );
+      }
+    }
+    return {
+      'file': design.fileName,
+      'screens': design.screens.length,
+      'components': design.components.length,
+      'colors': design.colors,
+      'design_md': 'specs/$id/design.md',
+    };
+  }
   final autoRunner = Platform.environment['ORCH_AUTO_RUNNER'] != 'false';
 
   if (autoRunner) {
@@ -85,9 +149,120 @@ Future<void> main(List<String> args) async {
   final health = await runner.getHealth();
   print('Orchestration server repo root: $repoRoot');
   print('Auto phase runner: ${autoRunner ? 'on' : 'off'}');
+  print('Active runner: ${health['runner'] ?? 'cursor'} '
+      '(ADF_RUNNER=${Platform.environment['ADF_RUNNER'] ?? 'auto'})');
   print('Runner ready: ${health['ready']} (${health['agent_path'] ?? 'no agent'})');
+  final cursorChat = await chatProcessor.cursorChatReady();
+  print('Chat LLM: ${orchLlmConfigured() ? 'configured (Groq/OpenAI)' : 'not configured'}');
+  print('Chat mode: ${chatProcessor.preferCursorCli && cursorChat ? 'Agent CLI (${health['runner'] ?? 'cursor'})' : (orchLlmConfigured() ? 'HTTP LLM' : 'fallback/static')}');
 
-  Map<String, dynamic> featureDetailPayload(String id) {
+
+  Future<void> runChatInBackground(
+    String featureId,
+    String commandId,
+    String prompt,
+  ) async {
+    await runner.health.killStalePrintAgents();
+    try {
+      OrchestratorChatResult chat;
+      var lastFlush = DateTime.now();
+      var finalized = false;
+      void streamPartial(String partial) {
+        if (finalized) return;
+        final now = DateTime.now();
+        if (now.difference(lastFlush).inMilliseconds < 700) return;
+        lastFlush = now;
+        store.updateCommandMeta(
+          featureId,
+          commandId,
+          assistantReply: partial,
+          llmSource: 'streaming',
+        );
+      }
+
+      try {
+        chat = await chatProcessor
+            .process(
+              featureId,
+              prompt,
+              mode: ChatProcessMode.full,
+              onPartial: streamPartial,
+            )
+            .timeout(const Duration(seconds: 95));
+      } on TimeoutException {
+        await runner.health.killStalePrintAgents();
+        chat = await chatProcessor.process(
+          featureId,
+          prompt,
+          mode: ChatProcessMode.stateOnly,
+        );
+      }
+      finalized = true;
+      store.updateCommandMeta(
+        featureId,
+        commandId,
+        assistantReply: chat.assistantReply,
+        orchestratorCommand: chat.orchestratorCommand,
+        agentPrompt: chat.agentPrompt,
+        llmSource: chat.source,
+      );
+      if (chat.shouldRunAgent) {
+        final state = store.readState(featureId);
+        if (state['status'] != 'completed') {
+          final healthNow = await runner.getHealth(refresh: false);
+          if (healthNow['ready'] == true) {
+            await runner.enqueueCommand(
+              featureId,
+              prompt: prompt,
+              commandId: commandId,
+              agentPrompt: chat.agentPrompt,
+            );
+          }
+        }
+      }
+    } catch (e) {
+      store.updateCommandMeta(
+        featureId,
+        commandId,
+        assistantReply: 'Chat failed: $e',
+        llmSource: 'error',
+      );
+    }
+  }
+
+  // ---- Efficiency layer: fingerprint cache + request metrics ----
+  final detailCache = <String, MapEntry<String, Map<String, dynamic>>>{};
+  var cacheHits = 0;
+  var cacheMisses = 0;
+  var notModifiedCount = 0;
+  final serverStarted = DateTime.now();
+  final routeCounts = <String, int>{};
+  final routeMicros = <String, int>{};
+
+  /// Cheap change detector: mtime+size of the files driving the payload.
+  String featureFingerprint(String id) {
+    final buf = StringBuffer();
+    for (final rel in [
+      'state.json',
+      'commands.jsonl',
+      'run-status.json',
+      'run-log.jsonl',
+      'requirement.md',
+    ]) {
+      final fl = File('${store.featurePath(id)}/$rel');
+      if (fl.existsSync()) {
+        final st = fl.statSync();
+        buf.write('$rel:${st.modified.microsecondsSinceEpoch}:${st.size};');
+      }
+    }
+    final verdicts = Directory('${store.featurePath(id)}/judge-verdicts');
+    if (verdicts.existsSync()) {
+      buf.write('jv:${verdicts.statSync().modified.microsecondsSinceEpoch};');
+    }
+    return buf.toString();
+  }
+
+  Map<String, dynamic> buildDetailPayload(String id) {
     store.reconcileFeatureState(id);
     store.repairRunStatus(id);
     runner.reconcileStaleRunStatus(id);
@@ -98,13 +273,61 @@ Future<void> main(List<String> args) async {
       pipeline = {'error': e.toString(), 'phases': []};
     }
     final detail = store.featureDetail(id, pipeline: pipeline);
-    detail['conversation'] = conversation.build(id);
+    detail['conversation'] = conversation.buildChatView(id);
     return detail;
+  }
+
+  /// Cached payload: when nothing on disk changed, skip reconcile, planner,
+  /// and conversation rebuild entirely.
+  Map<String, dynamic> featureDetailPayload(String id) {
+    final fp = featureFingerprint(id);
+    final cached = detailCache[id];
+    if (cached != null && cached.key == fp) {
+      cacheHits++;
+      return cached.value;
+    }
+    cacheMisses++;
+    final detail = buildDetailPayload(id);
+    // Reconcile may have rewritten files; fingerprint after build so the
+    // cache is keyed to the settled on-disk state.
+    detailCache[id] = MapEntry(featureFingerprint(id), detail);
+    return detail;
+  }
+
+  void kickAutopilotBackground(String id) {
+    unawaited(() async {
+      try {
+        detailCache.remove(id);
+        await runCrewForFeature(id);
+        detailCache.remove(id);
+      } catch (e) {
+        stderr.writeln('autopilot background failed for $id: $e');
+      }
+    }());
   }
 
   final router = Router();
 
-  router.get('/health', (Request _) => _json({'status': 'ok', 'repo': repoRoot}));
+  // /health is polled constantly; cache the expensive cursor probe for 60s.
+  Map<String, dynamic>? healthCache;
+  DateTime healthCachedAt = DateTime.fromMillisecondsSinceEpoch(0);
+  router.get('/health', (Request _) async {
+    if (healthCache == null ||
+        DateTime.now().difference(healthCachedAt) >
+            const Duration(seconds: 60)) {
+      healthCache = {
+        'status': 'ok',
+        'repo': repoRoot,
+        'chat_llm_configured': orchLlmConfigured(),
+        'chat_cursor_ready': await chatProcessor.cursorChatReady(),
+        'chat_prefer_cursor': chatProcessor.preferCursorCli,
+        'chat_static_context':
+            Platform.environment['ORCH_CHAT_STATIC_CONTEXT'] == '1',
+      };
+      healthCachedAt = DateTime.now();
+    }
+    return _json(healthCache!);
+  });
 
   router.get('/runner/health', (Request request) async {
     try {
@@ -135,11 +358,22 @@ Future<void> main(List<String> args) async {
   router.get('/features', (Request _) {
     try {
       final ids = store.listFeatures();
-      final list = ids.map(store.featureSummary).toList();
+      // Quarantine corrupt features (e.g. missing state.json) instead of
+      // letting one bad directory take down the whole listing.
+      final list = <Map<String, dynamic>>[];
+      final quarantined = <String>[];
+      for (final fid in ids) {
+        try {
+          list.add(store.featureSummary(fid));
+        } catch (_) {
+          quarantined.add(fid);
+        }
+      }
       return _json({
         'features': list,
         'count': list.length,
         'api': 'http://localhost:$port',
+        if (quarantined.isNotEmpty) 'quarantined': quarantined,
       });
     } catch (e) {
       return _json({'error': e.toString()}, status: 500);
@@ -152,7 +386,13 @@ Future<void> main(List<String> args) async {
         return _json({'error': 'not found'}, status: 404);
       }
       final detail = featureDetailPayload(id);
-      return _json(detail);
+      final etag = '"${featureFingerprint(id).hashCode.toRadixString(16)}"';
+      if (request.headers['if-none-match'] == etag) {
+        notModifiedCount++;
+        return Response(304, headers: {'ETag': etag, ..._corsHeaders});
+      }
+      final res = _json(detail);
+      return res.change(headers: {'ETag': etag});
     } catch (e) {
       return _json({'error': e.toString()}, status: 500);
     }
@@ -165,7 +405,7 @@ Future<void> main(List<String> args) async {
       }
       final limit =
           int.tryParse(request.url.queryParameters['limit'] ?? '50') ?? 50;
-      final messages = conversation.build(id, limit: limit);
+      final messages = conversation.buildChatView(id, limit: limit);
       return _json({
         'feature_id': id,
         'messages': messages,
@@ -291,7 +531,27 @@ Future<void> main(List<String> args) async {
         execute: execute,
       );
 
-      final chat = await chatProcessor.process(id, prompt.trim());
+      // Instant-first chat: reply in milliseconds at zero token cost.
+      // A cloud LLM (if configured) answers in ~1s. cursor-agent refinement
+      // is opt-in via ORCH_CHAT_REFINE=1 and upgrades the reply in place.
+      OrchestratorChatResult chat;
+      final refineEnabled =
+          Platform.environment['ORCH_CHAT_REFINE'] == '1' ||
+              Platform.environment['ORCH_CHAT_REFINE'] == 'true';
+
+      if (chatProcessor.llmApiKey != null && !chatProcessor.preferCursorCli) {
+        chat = await chatProcessor.process(
+          id,
+          prompt.trim(),
+          mode: ChatProcessMode.httpOnly,
+        );
+      } else {
+        chat = await chatProcessor.process(
+          id,
+          prompt.trim(),
+          mode: ChatProcessMode.stateOnly,
+        );
+      }
       store.updateCommandMeta(
         id,
         cmd['id'] as String,
@@ -300,8 +560,23 @@ Future<void> main(List<String> args) async {
         agentPrompt: chat.agentPrompt,
         llmSource: chat.source,
       );
+      if (refineEnabled && await chatProcessor.cursorChatReady()) {
+        unawaited(runChatInBackground(id, cmd['id'] as String, prompt.trim()));
+      }
 
       if (execute) {
+        if (chat.source == 'pending') {
+          return _json({
+            'ok': true,
+            'mode': 'chat_pending',
+            'command': cmd,
+            'assistant_message': chat.assistantReply,
+            'orchestrator_command': chat.orchestratorCommand,
+            'llm_source': chat.source,
+            'feature': featureDetailPayload(id),
+          });
+        }
+
         final state = store.readState(id);
 
         if (!chat.shouldRunAgent) {
@@ -378,15 +653,40 @@ Future<void> main(List<String> args) async {
     try {
       final body =
           jsonDecode(await request.readAsString()) as Map<String, dynamic>;
-      final id = body['id'] as String?;
-      final requirement = body['requirement'] as String? ?? '';
+      var id = body['id'] as String?;
+      final prompt = body['prompt'] as String? ?? '';
+      final requirement = (body['requirement'] as String? ?? '').isNotEmpty
+          ? body['requirement'] as String
+          : prompt;
       final track = body['track'] as String? ?? 'M';
+      if ((id == null || id.isEmpty) && requirement.trim().isEmpty) {
+        return _json({'error': 'id or prompt required'}, status: 400);
+      }
       if (id == null || id.isEmpty) {
-        return _json({'error': 'id required'}, status: 400);
+        final existing = store.listFeatures().toSet();
+        id = FeatureStore.generateFeatureId(requirement, existing: existing);
       }
       store.createFeature(id: id, requirement: requirement, track: track);
+      if (FigmaConnector.looksLikeFigmaUrl(requirement) && figma.configured) {
+        try {
+          final url = RegExp(r'https?://\S*figma\.com/\S+')
+              .firstMatch(requirement)!
+              .group(0)!;
+          await figmaIntake(id, url);
+        } catch (_) {/* design intake is best-effort at create time */}
+      }
       final payload = featureDetailPayload(id);
-      if (autoRunner) {
+      payload['id'] = id;
+      final fromPrompt = prompt.trim().isNotEmpty;
+      final autopilotOnCreate =
+          body['autopilot'] == true || (fromPrompt && autoAutopilot);
+      if (autopilotOnCreate) {
+        payload['mode'] = 'building';
+        payload['message'] =
+            'ADF crew is building spec, plan, and tests (zero tokens)…';
+        payload['autopilot_started'] = true;
+        kickAutopilotBackground(id);
+      } else if (autoRunner) {
         // Cached health only — avoid 20s `--print` probe on every new feature.
         final h = await runner.getHealth(refresh: false);
         if (h['ready'] == true) {
@@ -411,6 +711,140 @@ Future<void> main(List<String> args) async {
       return _json(payload, status: 201);
     } catch (e) {
       return _json({'error': e.toString()}, status: 400);
+    }
+  });
+
+  router.get('/metrics', (Request _) {
+    final polls = cacheHits + cacheMisses;
+    final byRoute = <String, dynamic>{};
+    routeCounts.forEach((route, count) {
+      byRoute[route] = {
+        'count': count,
+        'avg_ms': count == 0
+            ? 0
+            : ((routeMicros[route] ?? 0) / count / 1000).toStringAsFixed(2),
+      };
+    });
+    return _json({
+      'uptime_s': DateTime.now().difference(serverStarted).inSeconds,
+      'token_spend': 'zero',
+      'detail_cache': {
+        'hits': cacheHits,
+        'misses': cacheMisses,
+        'hit_rate': polls == 0
+            ? 1.0
+            : double.parse((cacheHits / polls).toStringAsFixed(3)),
+        'not_modified_304': notModifiedCount,
+      },
+      'routes': byRoute,
+      'learnings': learnings.stats(),
+    });
+  });
+
+  router.get('/brain', (Request _) async {
+    final desc = await brainSelector.describe();
+    desc['learnings'] = learnings.stats();
+    desc['figma_configured'] = figma.configured;
+    return _json(desc);
+  });
+
+  router.get('/features/<id>/preview', (Request request, String id) async {
+    try {
+      if (!store.featureExists(id)) {
+        return _json({'error': 'not found'}, status: 404);
+      }
+      final phaseStr = request.url.queryParameters['phase'];
+      final phase = phaseStr != null ? int.tryParse(phaseStr) : null;
+      final payload = await previewService.studioPreview(id, phase: phase);
+      final etag =
+          '"preview-${featureFingerprint(id).hashCode.toRadixString(16)}"';
+      if (request.headers['if-none-match'] == etag) {
+        return Response(304, headers: {'ETag': etag, ..._corsHeaders});
+      }
+      final res = _json(payload);
+      return res.change(headers: {'ETag': etag});
+    } catch (e) {
+      return _json({'error': e.toString()}, status: 500);
+    }
+  });
+
+  router.get('/features/<id>/studio-preview', (Request request, String id) async {
+    try {
+      if (!store.featureExists(id)) {
+        return _json({'error': 'not found'}, status: 404);
+      }
+      final phaseStr = request.url.queryParameters['phase'];
+      final phase = phaseStr != null ? int.tryParse(phaseStr) : null;
+      final data = await previewService.studioPreview(id, phase: phase);
+      return _json(data);
+    } catch (e) {
+      return _json({'error': e.toString()}, status: 500);
+    }
+  });
+
+  router.post('/features/<id>/preview/build', (Request request, String id) async {
+    try {
+      if (!store.featureExists(id)) {
+        return _json({'error': 'not found'}, status: 404);
+      }
+      final result = await previewService.kickoffBuild(id);
+      return _json(result);
+    } catch (e) {
+      return _json({'error': e.toString()}, status: 500);
+    }
+  });
+
+  router.get('/features/<id>/integrity', (Request request, String id) {
+    if (!store.featureExists(id)) {
+      return _json({'error': 'unknown feature: $id'}, status: 404);
+    }
+    // Routine polling uses the reliable fast path; ?strict=true forces a full
+    // raw-byte re-hash for adversarial audits.
+    final strict = request.url.queryParameters['strict'] == 'true';
+    return _json(integrity.verify(id, strict: strict));
+  });
+
+  router.post('/features/<id>/figma', (Request request, String id) async {
+    if (!store.featureExists(id)) {
+      return _json({'error': 'unknown feature: $id'}, status: 404);
+    }
+    try {
+      final body =
+          jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+      final url = body['url'] as String? ?? '';
+      final result = await figmaIntake(id, url);
+      return _json({'ok': true, ...result});
+    } on StateError catch (e) {
+      return _json({'error': e.message, 'figma_configured': false},
+          status: 422);
+    } catch (e) {
+      return _json({'error': e.toString()}, status: 400);
+    }
+  });
+
+
+  router.get('/features/<id>/crew-log', (Request request, String id) {
+    final file = File('${store.featurePath(id)}/crew-log.jsonl');
+    if (!file.existsSync()) return _json({'agents': []});
+    final agents = file
+        .readAsLinesSync()
+        .where((l) => l.trim().isNotEmpty)
+        .map((l) => jsonDecode(l))
+        .toList();
+    return _json({'agents': agents});
+  });
+
+  router.post('/features/<id>/autopilot', (Request request, String id) async {
+    if (!store.featureExists(id)) {
+      return _json({'error': 'unknown feature: $id'}, status: 404);
+    }
+    try {
+      final summary = await runCrewForFeature(id);
+      detailCache.remove(id);
+      summary['detail'] = featureDetailPayload(id);
+      return _json(summary);
+    } catch (e) {
+      return _json({'error': e.toString()}, status: 500);
     }
   });
 
@@ -480,6 +914,7 @@ Future<void> main(List<String> args) async {
         );
       }
 
+      var sealApproval = false;
       store.appendApproval(id, {
         'phase': phase,
         'decision': decision,
@@ -497,6 +932,7 @@ Future<void> main(List<String> args) async {
         store.setGateForPhase(state, phase, true);
         state['awaiting_user'] = false;
         state['pending_approval_phase'] = null;
+        sealApproval = true;
         if (phase >= FeatureStore.lastPipelinePhase) {
           state['current_phase'] = FeatureStore.lastPipelinePhase;
           state['status'] = 'completed';
@@ -518,6 +954,14 @@ Future<void> main(List<String> args) async {
       }
 
       store.writeState(id, state);
+      if (sealApproval) {
+        integrity.seal(
+          id,
+          phase: phase,
+          actor: 'human:$source',
+          note: 'phase $phase approved',
+        );
+      }
 
       if (decision == 'approved' &&
           autoRunner &&
@@ -719,10 +1163,45 @@ Future<void> main(List<String> args) async {
     }
   });
 
+  Middleware timingMiddleware() => (Handler inner) => (Request req) async {
+        final sw = Stopwatch()..start();
+        final res = await inner(req);
+        sw.stop();
+        // Normalize ids out of the path so metrics group by route shape.
+        final route = req.method +
+            ' /' +
+            req.url.pathSegments
+                .map((s) => s == 'features' ||
+                        s == 'runner' ||
+                        s == 'commands' ||
+                        s == 'autopilot' ||
+                        s == 'health' ||
+                        s == 'brain' ||
+                        s == 'metrics' ||
+                        s == 'approve' ||
+                        s == 'sync-state' ||
+                        s == 'conversation' ||
+                        s == 'pipeline' ||
+                        s == 'run-status' ||
+                        s == 'studio-preview' ||
+                        s == 'preview'
+                    ? s
+                    : '{id}')
+                .join('/');
+        routeCounts[route] = (routeCounts[route] ?? 0) + 1;
+        routeMicros[route] =
+            (routeMicros[route] ?? 0) + sw.elapsedMicroseconds;
+        return res;
+      };
+
   final handler = Pipeline()
       .addMiddleware(_corsMiddleware())
-      .addMiddleware(logRequests())
-      .addHandler(router.call);
+      .addMiddleware(timingMiddleware())
+      .addHandler((Request request) {
+        final staticRes = previewService.serveStatic(request);
+        if (staticRes != null) return staticRes;
+        return router.call(request);
+      });
 
   final server = await io.serve(handler, InternetAddress.loopbackIPv4, port);
   print('Orchestration API listening on:');

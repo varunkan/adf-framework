@@ -4,6 +4,46 @@ import 'package:flutter/services.dart';
 import '../main.dart';
 import '../services/api_client.dart';
 
+/// Identity of the active runner backend, derived from `/runner/health`.
+/// Falls back to Cursor wording when the server predates the `runner` field.
+class _RunnerIdentity {
+  _RunnerIdentity(Map<String, dynamic> health)
+      : id = health['runner'] as String? ?? 'cursor',
+        _label = health['runner_label'] as String?,
+        _login = health['login_command'] as String?;
+
+  final String id;
+  final String? _label;
+  final String? _login;
+
+  String get label =>
+      _label ??
+      switch (id) {
+        'claude' => 'Claude Code CLI (claude)',
+        'custom' => 'Custom agent CLI',
+        _ => 'Cursor CLI (cursor-agent)',
+      };
+
+  String? get loginCommand =>
+      _login ??
+      switch (id) {
+        'claude' => 'claude login',
+        'custom' => null,
+        _ => 'cursor-agent login',
+      };
+
+  List<String> get fallbackSteps => [
+        if (loginCommand != null)
+          'In Terminal: $loginCommand (complete sign-in if prompted)',
+        if (id == 'cursor') 'Or add CURSOR_API_KEY to ~/.cursor/agent.env',
+        if (id == 'claude') 'Or export ANTHROPIC_API_KEY in your environment',
+        if (id == 'custom')
+          'Set ADF_RUNNER_BIN / ADF_RUNNER_ARGS in .adf/runner.env',
+        'Restart API: dart run tools/orchestration_server/bin/server.dart',
+        'Tap Verify below, then Start pipeline',
+      ];
+}
+
 class RunnerSetupCard extends StatelessWidget {
   const RunnerSetupCard({
     super.key,
@@ -22,6 +62,8 @@ class RunnerSetupCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final runner = _RunnerIdentity(health);
+
     if (ready && headlessReady) {
       return Card(
         color: Colors.green.shade50,
@@ -33,7 +75,7 @@ class RunnerSetupCard extends StatelessWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  'Cursor agent ready (${health['agent_path'] ?? 'authenticated'})',
+                  '${runner.label} ready (${health['agent_path'] ?? 'authenticated'})',
                   style: TextStyle(color: Colors.green.shade900),
                 ),
               ),
@@ -45,7 +87,7 @@ class RunnerSetupCard extends StatelessWidget {
 
     if (ready && !headlessReady) {
       final hint = health['headless_hint'] as String? ??
-          'Headless probe failed — use Cursor IDE (@orch-orchestrator resume/sync), then Sync here.';
+          'Headless probe failed — run the phase in your IDE, then Sync here.';
       return Card(
         color: Colors.amber.shade50,
         child: Padding(
@@ -70,12 +112,7 @@ class RunnerSetupCard extends StatelessWidget {
     final steps = (health['recovery_steps'] as List<dynamic>?)
             ?.map((e) => e.toString())
             .toList() ??
-        [
-          'In Terminal: cursor-agent login (complete sign-in in browser)',
-          'Or add CURSOR_API_KEY to ~/.cursor/agent.env',
-          'Restart API: dart run tools/orchestration_server/bin/server.dart',
-          'Tap Verify below, then Start pipeline',
-        ];
+        runner.fallbackSteps;
 
     return Card(
       color: Colors.red.shade50,
@@ -89,7 +126,7 @@ class RunnerSetupCard extends StatelessWidget {
                 Icon(Icons.warning_amber, color: Colors.red.shade800),
                 const SizedBox(width: 8),
                 Text(
-                  'Cursor agent setup required',
+                  '${runner.label} setup required',
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
                     color: Colors.red.shade900,
@@ -108,35 +145,38 @@ class RunnerSetupCard extends StatelessWidget {
                 child: Text('${e.key + 1}. ${e.value}'),
               ),
             ),
-            const SizedBox(height: 8),
-            const Text(
-              'Quick setup (Terminal):',
-              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-            ),
-            const SizedBox(height: 4),
-            const SelectableText(
-              './scripts/orch/setup_cursor_runner.sh',
-              style: TextStyle(fontFamily: 'monospace', fontSize: 12),
-            ),
+            if (runner.id == 'cursor') ...[
+              const SizedBox(height: 8),
+              const Text(
+                'Quick setup (Terminal):',
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+              ),
+              const SizedBox(height: 4),
+              const SelectableText(
+                './scripts/orch/setup_cursor_runner.sh',
+                style: TextStyle(fontFamily: 'monospace', fontSize: 12),
+              ),
+            ],
             const SizedBox(height: 12),
             Wrap(
               spacing: 8,
               children: [
-                OutlinedButton.icon(
-                  onPressed: () async {
-                    await Clipboard.setData(
-                      const ClipboardData(text: 'cursor-agent login'),
-                    );
-                    if (context.mounted) {
-                      showMessage(
-                        context,
-                        'Copied. Paste in Terminal — browser will open to sign in.',
+                if (runner.loginCommand != null)
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      await Clipboard.setData(
+                        ClipboardData(text: runner.loginCommand!),
                       );
-                    }
-                  },
-                  icon: const Icon(Icons.copy, size: 18),
-                  label: const Text('Copy login command'),
-                ),
+                      if (context.mounted) {
+                        showMessage(
+                          context,
+                          'Copied. Paste in Terminal to sign in.',
+                        );
+                      }
+                    },
+                    icon: const Icon(Icons.copy, size: 18),
+                    label: const Text('Copy login command'),
+                  ),
                 FilledButton.icon(
                   onPressed: onVerify,
                   icon: const Icon(Icons.verified_user, size: 18),
@@ -188,7 +228,7 @@ class _RunnerHealthLoaderState extends State<RunnerHealthLoader> {
     final ready = _health!['ready'] == true;
     return Tooltip(
       message: ready
-          ? 'Cursor agent ready'
+          ? '${_RunnerIdentity(_health!).label} ready'
           : _health!['hint'] as String? ?? 'Setup required',
       child: Icon(
         ready ? Icons.smart_toy : Icons.smart_toy_outlined,

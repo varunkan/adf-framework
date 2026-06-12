@@ -476,6 +476,7 @@ $t
       writeState(id, state, skipRepair: true);
     }
     repairRunStatus(id);
+    repairStaleChatReplies(id);
   }
 
   /// Mark orphaned `running` commands as cancelled (hook/agent crash).
@@ -505,6 +506,65 @@ $t
     }
   }
 
+
+
+  /// Lovable-style: derive a kebab-case feature id from a free-text prompt.
+  static String generateFeatureId(String prompt, {Set<String> existing = const {}}) {
+    final words = prompt
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9\s-]'), ' ')
+        .split(RegExp(r'\s+'))
+        .where((w) => w.isNotEmpty && !_stopWords.contains(w))
+        .take(4)
+        .toList();
+    var base = words.isEmpty ? 'feature' : words.join('-');
+    if (base.length > 40) base = base.substring(0, 40);
+    base = base.replaceAll(RegExp(r'-+$'), '');
+    if (!existing.contains(base)) return base;
+    for (var i = 2; i < 100; i++) {
+      final candidate = '$base-$i';
+      if (!existing.contains(candidate)) return candidate;
+    }
+    return '$base-${DateTime.now().millisecondsSinceEpoch % 100000}';
+  }
+
+  static const _stopWords = {
+    'a', 'an', 'the', 'i', 'we', 'to', 'of', 'for', 'and', 'or', 'in', 'on',
+    'with', 'that', 'this', 'want', 'need', 'please', 'build', 'create',
+    'make', 'add', 'me', 'my', 'our', 'app', 'feature',
+  };
+
+  /// Chat replies stuck at pending/streaming after server restart get closed out.
+  void repairStaleChatReplies(String id, {Duration maxAge = const Duration(minutes: 10)}) {
+    final file = File('${featurePath(id)}/commands.jsonl');
+    if (!file.existsSync()) return;
+    final now = DateTime.now().toUtc();
+    final lines = file.readAsLinesSync();
+    final updated = <String>[];
+    var changed = false;
+    for (final line in lines) {
+      if (line.trim().isEmpty) continue;
+      try {
+        final cmd = jsonDecode(line) as Map<String, dynamic>;
+        final src = cmd['llm_source'] as String?;
+        if (src == 'pending' || src == 'streaming') {
+          final created = DateTime.tryParse(cmd['created_at'] as String? ?? '');
+          if (created != null && now.difference(created) > maxAge) {
+            cmd['llm_source'] = 'timeout';
+            cmd['assistant_reply'] =
+                'The assistant did not finish replying (server restarted or '
+                'cursor-agent timed out). Ask again, or set GROQ_API_KEY for '
+                'instant replies.';
+            changed = true;
+          }
+        }
+        updated.add(jsonEncode(cmd));
+      } catch (_) {
+        updated.add(line);
+      }
+    }
+    if (changed) file.writeAsStringSync('${updated.join('\n')}\n');
+  }
 
   void updateCommandMeta(
     String id,

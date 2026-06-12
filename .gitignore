@@ -1,6 +1,7 @@
 # Dart / Flutter
 .dart_tool/
 build/
+coverage/
 *.iml
 .packages
 .pub-cache/

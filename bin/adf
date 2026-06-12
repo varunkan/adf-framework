@@ -11,16 +11,24 @@ usage() {
 ADF v3 — Agentic Development Framework
 
 Usage:
-  adf install [-t TARGET] [-i IDE] [--global]   Install into project (IDE: cursor|vscode|windsurf|claude|generic)
-  adf doctor [-t TARGET]                      Verify prerequisites and paths
+  adf install [-t TARGET] [-i IDE] [-r RUNNER] [--global]   Install into project
+                IDE:    cursor|vscode|windsurf|claude|generic|all
+                RUNNER: auto|cursor|claude|custom   (which agent CLI drives the pipeline)
+  adf doctor [-t TARGET]                      Verify prerequisites, runner, and paths
   adf start [api|dashboard|all]               Start orchestration services
+  adf studio                                  One-command studio: kill stale, start API + dashboard, health-check
+  adf test                                    Run comprehensive server + dashboard test suite
   adf version                                 Show version
 
 Examples:
   adf install -t ~/myapp -i cursor
-  adf install -t ~/myapp -i vscode
+  adf install -t ~/myapp -i claude -r claude        # drive the pipeline with Claude Code
+  adf install -t ~/myapp -i all -r auto             # install every IDE adapter
+  adf install -t ~/myapp -i generic -r custom       # any agent CLI via ADF_RUNNER_BIN
   adf install --global && adf install -t ~/myapp -i cursor
-  adf start all
+  adf studio
+
+Runner selection is read from ADF_RUNNER (or .adf/runner.env) at server start.
 HELP
 }
 
@@ -48,6 +56,13 @@ case "$cmd" in
     command -v flutter >/dev/null && echo "OK flutter" || echo "WARN flutter (needed for dashboard)"
     command -v git >/dev/null && echo "OK git" || echo "MISSING git"
     command -v cursor-agent >/dev/null && echo "OK cursor-agent (headless)" || echo "WARN cursor-agent (IDE path still works)"
+    command -v claude >/dev/null && echo "OK claude (Claude Code headless)" || echo "WARN claude (install: npm i -g @anthropic-ai/claude-code)"
+    if [[ -f "$TARGET/.adf/runner.env" ]]; then
+      RUNNER_SEL="$(grep -E '^ADF_RUNNER=' "$TARGET/.adf/runner.env" | head -1 | cut -d= -f2)"
+      echo "OK runner: ${RUNNER_SEL:-auto} (.adf/runner.env)"
+    else
+      echo "WARN runner: no .adf/runner.env (defaults to ADF_RUNNER=auto)"
+    fi
     cd "$TARGET"
     if ROOT="$(adf_resolve_repo_root 2>/dev/null)"; then
     ROOT="$(adf_resolve_repo_root)"
@@ -64,6 +79,11 @@ case "$cmd" in
     WHAT="${1:-all}"
     TARGET="$(pwd)"
     if [[ -f .adf-install.json ]]; then TARGET="$(pwd)"; fi
+    # Load the selected agent runner (ADF_RUNNER, API keys, custom bin) if present.
+    if [[ -f "$TARGET/.adf/runner.env" ]]; then
+      set -a; . "$TARGET/.adf/runner.env"; set +a
+      echo "Runner: ${ADF_RUNNER:-auto} (from .adf/runner.env)"
+    fi
     export ORCH_REPO_ROOT="$(cd "$TARGET" && pwd)"
     FW="$(adf_framework_root "$ORCH_REPO_ROOT" 2>/dev/null || echo "$FRAMEWORK_ROOT")"
     case "$WHAT" in
@@ -72,6 +92,15 @@ case "$cmd" in
       all) exec "$FW/scripts/start_orchestration_dashboard.sh" web ;;
       *) echo "Usage: adf start [api|dashboard|all]" >&2; exit 1 ;;
     esac
+    ;;
+  studio)
+    if [[ -z "${ORCH_REPO_ROOT:-}" && -d "$(pwd)/.cursor/orchestration" ]]; then
+      export ORCH_REPO_ROOT="$(pwd)"
+    fi
+    exec "$FRAMEWORK_ROOT/scripts/orch/respin_dashboard.sh" "$@"
+    ;;
+  test)
+    exec "$FRAMEWORK_ROOT/scripts/orch/run_comprehensive_tests.sh" "$@"
     ;;
   version|-v)
     echo "adf-framework $(cat "$FRAMEWORK_ROOT/VERSION")"

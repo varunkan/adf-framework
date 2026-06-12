@@ -8,8 +8,9 @@ import '../theme/orchestration_colors.dart';
 import '../widgets/agent_conversation_view.dart';
 import '../widgets/approval_action_bar.dart';
 import '../widgets/chat_composer.dart';
-import '../widgets/feature_inspector.dart';
-import '../widgets/orchestration_shell.dart';
+import '../widgets/live_preview_panel.dart';
+import '../widgets/studio_shell.dart';
+import '../theme/studio_theme.dart';
 import '../widgets/pipeline_rail.dart';
 
 class FeatureDetailScreen extends StatefulWidget {
@@ -17,10 +18,12 @@ class FeatureDetailScreen extends StatefulWidget {
     super.key,
     required this.api,
     required this.featureId,
+    this.justCreated = false,
   });
 
   final ApiClient api;
   final String featureId;
+  final bool justCreated;
 
   @override
   State<FeatureDetailScreen> createState() => _FeatureDetailScreenState();
@@ -37,18 +40,49 @@ class _FeatureDetailScreenState extends State<FeatureDetailScreen> {
   int _pollTick = 0;
   bool _autoSynced = false;
   bool _autoUnstuck = false;
+  bool _autoAutopilotOnEnter = false;
+  final Set<String> _shownMilestones = {};
+  int _lastMilestonePhase = 0;
   final ScrollController _chatScroll = ScrollController();
   final List<Map<String, dynamic>> _optimisticMessages = [];
   Map<String, dynamic>? _artifactChecklist;
+  bool? _chatLlmConfigured;
+  bool? _chatPreferCursor;
 
   @override
   void initState() {
     super.initState();
     _load();
-    _poll = Timer.periodic(const Duration(seconds: 2), (_) {
+    _loadChatHealth();
+    _schedulePoll();
+    _maybeAutoAutopilot();
+    if (widget.justCreated) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          showMessage(context, 'Feature created — crew is building artifacts…');
+        }
+      });
+    }
+  }
+
+  // Adaptive polling: 2s while things change, backing off to 10s when idle.
+  int _pollMs = 2000;
+
+  void _schedulePoll() {
+    _poll?.cancel();
+    _poll = Timer(Duration(milliseconds: _pollMs), () async {
       _pollTick++;
-      _load(silent: true, refreshRunner: _pollTick % 15 == 0);
+      await _load(silent: true, refreshRunner: _pollTick % 15 == 0);
+      final unchanged = widget.api.wasNotModified(widget.featureId);
+      _pollMs = unchanged ? (_pollMs * 2).clamp(2000, 10000) : 2000;
+      if (mounted) _schedulePoll();
     });
+  }
+
+  /// Snap back to fast polling after any user action.
+  void _wakePolling() {
+    _pollMs = 2000;
+    if (mounted) _schedulePoll();
   }
 
   @override
@@ -56,6 +90,36 @@ class _FeatureDetailScreenState extends State<FeatureDetailScreen> {
     _poll?.cancel();
     _chatScroll.dispose();
     super.dispose();
+  }
+
+
+
+  Future<void> _maybeAutoAutopilot() async {
+    if (_autoAutopilotOnEnter) return;
+    try {
+      final d = await widget.api.getFeature(widget.featureId);
+      final state = d['state'] as Map<String, dynamic>? ?? {};
+      final phase = (state['current_phase'] as num?)?.toInt() ?? 0;
+      final crew = await widget.api.getCrewLog(widget.featureId);
+      if (phase <= 1 && crew.isEmpty && state['status'] == 'active') {
+        _autoAutopilotOnEnter = true;
+        _wakePolling();
+        await widget.api.runAutopilot(widget.featureId);
+        if (mounted) await _load(silent: true);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _loadChatHealth() async {
+    try {
+      final health = await widget.api.fetchHealth();
+      if (mounted) {
+        setState(() {
+          _chatLlmConfigured = health['chat_llm_configured'] as bool?;
+          _chatPreferCursor = health['chat_prefer_cursor'] as bool?;
+        });
+      }
+    } catch (_) {}
   }
 
   Future<void> _load({bool silent = false, bool refreshRunner = true}) async {
@@ -124,6 +188,32 @@ class _FeatureDetailScreenState extends State<FeatureDetailScreen> {
     }
   }
 
+
+  void _checkMilestones(Map<String, dynamic> d) {
+    final state = d['state'] as Map<String, dynamic>? ?? {};
+    final gates = state['gates'] as Map<String, dynamic>? ?? {};
+    final phase = (state['current_phase'] as num?)?.toInt() ?? 0;
+    if (phase > _lastMilestonePhase) {
+      _lastMilestonePhase = phase;
+      if (phase >= 2 && !_shownMilestones.contains('spec')) {
+        _shownMilestones.add('spec');
+        showMessage(context, 'Spec ready — review in the preview panel');
+      }
+      if (phase >= 6 && !_shownMilestones.contains('tests')) {
+        _shownMilestones.add('tests');
+        showMessage(context, 'Tests written — red phase locked in');
+      }
+    }
+    if (gates['tests_red'] == true && !_shownMilestones.contains('tests_red')) {
+      _shownMilestones.add('tests_red');
+      showMessage(context, 'Tests written — ready for implementation');
+    }
+    if (gates['spec_ready'] == true && !_shownMilestones.contains('spec_gate')) {
+      _shownMilestones.add('spec_gate');
+      showMessage(context, 'Spec ready');
+    }
+  }
+
   void _applyDetail(Map<String, dynamic> d, Map<String, dynamic>? h) {
     final phase = ((d['state'] as Map<String, dynamic>?)?['current_phase']
             as num?)
@@ -133,10 +223,22 @@ class _FeatureDetailScreenState extends State<FeatureDetailScreen> {
         (d['conversation'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ??
             [];
     if (_optimisticMessages.isNotEmpty && serverConv.isNotEmpty) {
-      final lastServer = serverConv.last['text'] as String?;
-      _optimisticMessages.removeWhere(
-        (m) => m['text'] == lastServer || serverConv.any((s) => s['text'] == m['text']),
-      );
+      for (final om in List<Map<String, dynamic>>.from(_optimisticMessages)) {
+        final cid = om['command_id'] as String?;
+        if (cid == null) continue;
+        final serverReply = serverConv.where(
+          (s) =>
+              s['role'] == 'assistant' &&
+              s['command_id'] == cid &&
+              s['llm_source'] != 'pending' &&
+              s['llm_source'] != null,
+        );
+        if (serverReply.isNotEmpty) {
+          _optimisticMessages.removeWhere(
+            (m) => m['command_id'] == cid,
+          );
+        }
+      }
     }
     setState(() {
       _detail = d;
@@ -144,6 +246,7 @@ class _FeatureDetailScreenState extends State<FeatureDetailScreen> {
       _loading = false;
       if (_viewPhase == 0 && phase > 0) _viewPhase = phase;
     });
+    _checkMilestones(d);
   }
 
   int get _phase {
@@ -298,7 +401,19 @@ $clarification
         (_detail?['conversation'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ??
             [];
     if (_optimisticMessages.isEmpty) return server;
-    return [...server, ..._optimisticMessages];
+    final serverIds = server
+        .map((m) => m['command_id'])
+        .whereType<String>()
+        .toSet();
+    final extra = _optimisticMessages.where((m) {
+      final cid = m['command_id'] as String?;
+      if (cid != null && serverIds.contains(cid)) {
+        final src = m['llm_source'] as String?;
+        if (src == 'pending') return false;
+      }
+      return true;
+    });
+    return [...server, ...extra];
   }
 
   Future<void> _startPhase() async {
@@ -362,6 +477,74 @@ $clarification
     }
   }
 
+
+
+  Widget? _chatSetupBanner() {
+    if (_chatLlmConfigured != false && _chatPreferCursor != true) return null;
+    return MaterialBanner(
+      backgroundColor: Theme.of(context).colorScheme.tertiaryContainer,
+      content: Text(
+        _chatPreferCursor == true
+            ? 'Chat is using your Cursor CLI (cursor-agent). Replies may take 30–120 seconds; the panel refreshes automatically.'
+            : 'Chat uses static fallbacks until you set GROQ_API_KEY on the API server, '
+                'or start the API with scripts/orch/run_server_cursor_cli.sh for Cursor CLI chat.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => setState(() {
+            _chatLlmConfigured = null;
+            _chatPreferCursor = null;
+          }),
+          child: const Text('Dismiss'),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _pollForChatReply() async {
+    final pendingCmd = _optimisticMessages.lastWhere(
+      (m) => m['role'] == 'user',
+      orElse: () => <String, dynamic>{},
+    );
+    final commandId = pendingCmd['command_id'] as String?;
+    for (var i = 0; i < 120; i++) {
+      await Future.delayed(const Duration(seconds: 1));
+      if (!mounted) return;
+      await _load(silent: true);
+      final conv =
+          (_detail?['conversation'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ??
+              [];
+      Map<String, dynamic>? reply;
+      for (final m in conv.reversed) {
+        if (m['role'] != 'assistant') continue;
+        final src = m['llm_source'] as String?;
+        if (src == null || src == 'pending' || src == 'streaming') continue;
+        if (commandId != null && m['command_id'] != commandId) continue;
+        final text = (m['text'] as String? ?? '').trim();
+        if (text.isEmpty || text.startsWith('Thinking')) continue;
+        reply = m;
+        break;
+      }
+      if (reply != null) {
+        if (!mounted) return;
+        setState(() => _optimisticMessages.clear());
+        showMessage(
+          context,
+          reply['llm_source'] == 'cursor_agent'
+              ? 'Cursor CLI reply ready.'
+              : 'Reply ready.',
+        );
+        return;
+      }
+    }
+    if (mounted) {
+      showMessage(
+        context,
+        'Cursor CLI is still working — wait a bit longer or check API logs.',
+      );
+    }
+  }
+
   Future<void> _sendMessage(String prompt) async {
     final ts = DateTime.now().toUtc().toIso8601String();
     setState(() {
@@ -372,6 +555,7 @@ $clarification
         'timestamp': ts,
       });
     });
+    _wakePolling();
     try {
       final res = await widget.api.sendCommand(
         widget.featureId,
@@ -379,15 +563,25 @@ $clarification
         execute: true,
       );
       if (mounted) {
+        final cmd = res['command'] as Map<String, dynamic>?;
+        final commandId = cmd?['id'] as String?;
         final assistant = res['assistant_message'] as String?;
         if (assistant != null && assistant.trim().isNotEmpty) {
           setState(() {
+            if (commandId != null) {
+              final lastUser =
+                  _optimisticMessages.lastIndexWhere((m) => m['role'] == 'user');
+              if (lastUser >= 0) {
+                _optimisticMessages[lastUser]['command_id'] = commandId;
+              }
+            }
             _optimisticMessages.add({
               'role': 'assistant',
               'type': 'orchestrator',
               'text': assistant.trim(),
               'timestamp': DateTime.now().toUtc().toIso8601String(),
               'llm_source': res['llm_source'],
+              'command_id': commandId,
             });
           });
         }
@@ -403,11 +597,17 @@ $clarification
                   'Saved — run `@orch-orchestrator sync ${widget.featureId}` in Cursor IDE.');
         } else if (mode == 'feature_complete') {
           msg = res['message'] as String? ?? 'Notes saved (feature completed).';
+        } else if (mode == 'chat_pending') {
+          msg = 'Cursor CLI is thinking — chat will update automatically.';
         } else {
           msg = 'Orchestrator is executing your request via the agent.';
         }
         showMessage(context, msg);
-        await _load(silent: true);
+        if (mode == 'chat_pending') {
+          await _pollForChatReply();
+        } else {
+          await _load(silent: true);
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -511,16 +711,31 @@ $clarification
     }
   }
 
-  Future<void> _syncState() async {
+  bool _autopilotRunning = false;
+
+  Future<void> _runAutopilot() async {
+    if (_autopilotRunning) return;
+    setState(() => _autopilotRunning = true);
+    _wakePolling();
     try {
-      final r = await widget.api.syncState(widget.featureId);
-      final f = r['feature'] as Map<String, dynamic>?;
-      if (mounted && f != null) {
-        setState(() => _detail = f);
-        showMessage(context, 'State synced');
-      }
+      final summary = await widget.api.runAutopilot(widget.featureId);
+      if (!mounted) return;
+      final phases = (summary['phases_completed'] as List?)?.join(', ') ?? '';
+      final reason = summary['stop_reason'] as String? ?? '';
+      final agents = (summary['agents'] as List?)?.length ?? 0;
+      final ms = summary['duration_ms'] ?? '?';
+      showMessage(
+        context,
+        phases.isEmpty
+            ? 'Autopilot: nothing to do ($reason)'
+            : 'Crew of $agents subagents completed phases $phases in ${ms}ms '
+                '(zero tokens) — $reason',
+      );
+      await _load(silent: true);
     } catch (e) {
-      if (mounted) showMessage(context, e.toString());
+      if (mounted) showMessage(context, 'Autopilot failed: $e');
+    } finally {
+      if (mounted) setState(() => _autopilotRunning = false);
     }
   }
 
@@ -656,8 +871,6 @@ $clarification
     final state = _detail!['state'] as Map<String, dynamic>;
     final gates = state['gates'] as Map<String, dynamic>? ?? {};
     final requirement = _detail!['requirement'] as String? ?? '';
-    final verdict = _detail!['judge_verdict'] as String?;
-    final traceCount = (_detail!['trace_count'] as num?)?.toInt() ?? 0;
     final awaiting = _showApprovalGate;
     final status = state['status'] as String? ?? 'active';
     final pipelineComplete = _pipeline?['pipeline_complete'] == true ||
@@ -680,40 +893,64 @@ $clarification
 
     return Scaffold(
       appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(widget.featureId),
-            Text(
-              phaseLabel,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-            ),
-          ],
-        ),
-        actions: [
-          if (summary != null)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: Chip(
+        leading: BackButton(onPressed: () => Navigator.of(context).pop()),
+        title: Text(phaseLabel),
+      ),
+      body: StudioShell(
+        featureId: widget.featureId,
+        header: Container(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+          decoration: const BoxDecoration(
+            border: Border(bottom: BorderSide(color: StudioTheme.panelBorder)),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.auto_awesome, color: StudioTheme.accent, size: 22),
+              const SizedBox(width: 10),
+              Text(
+                'ADF Studio',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                widget.featureId,
+                style: TextStyle(color: Colors.white.withValues(alpha: 0.6)),
+              ),
+              const Spacer(),
+              if (summary != null)
+                Chip(
                   label: Text(
-                    '${(summary['phases_complete'] as num?)?.toInt().clamp(0, 9) ?? 0}/9',
+                    '${(summary['phases_complete'] as num?)?.toInt().clamp(0, 9) ?? 0}/9 phases',
                   ),
                   visualDensity: VisualDensity.compact,
                 ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                child: FilledButton.tonalIcon(
+                  onPressed: _autopilotRunning ? null : _runAutopilot,
+                  icon: _autopilotRunning
+                      ? const SizedBox(
+                          height: 14,
+                          width: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.rocket_launch, size: 16),
+                  label: Text(_autopilotRunning ? 'Autopilot…' : 'Autopilot'),
+                ),
               ),
-            ),
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
-        ],
-      ),
-      body: OrchestrationShellBody(
-        featureId: widget.featureId,
-        isRunning: _showAgentActivityUi,
-        onRefresh: _load,
-        phaseSummary: phaseLabel,
-        statusBar: _statusBar(context),
+              IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
+            ],
+          ),
+        ),
+        statusBar: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (_chatSetupBanner() case final banner?) banner,
+            _statusBar(context),
+          ],
+        ),
         chatContent: AgentConversationView(
           api: widget.api,
           featureId: widget.featureId,
@@ -744,7 +981,7 @@ $clarification
           enabled: true,
           hintText: _agentActive
               ? 'Send a message (cancels current run)…'
-              : 'Message the orchestrator…',
+              : 'Ask ADF to build, review, or sync this feature…',
           initialPrompt: _promptForCurrentStep(),
           quickActions: _quickActions(),
           onSend: _sendMessage,
@@ -758,27 +995,18 @@ $clarification
                 onPhaseTap: (p) => setState(() => _viewPhase = p),
               )
             : null,
-        inspector: FeatureInspector(
+        preview: LivePreviewPanel(
           api: widget.api,
           featureId: widget.featureId,
+          phase: phase,
+          status: status,
           requirement: requirement,
+          currentStep: _currentStepId,
           gates: gates,
-          verdict: verdict,
           combinedRecommendation:
               _detail!['combined_recommendation'] as String?,
-          runnerHealth: _runnerHealth,
-          phases: _phases,
-          expandedPhase: _viewPhase > 0 ? _viewPhase : (phase > 0 ? phase : 1),
-          currentStepId: _currentStepId,
-          traceCount: traceCount,
-          isRunning: _showAgentActivityUi,
-          onVerifyRunner: () => _load(refreshRunner: true),
-          onRetryRunner: (_runStatus == 'needs_login' || _runStatus == 'error')
-              ? _retry
-              : null,
-          onStepCommand: (stepId, cmd) async => _sendMessage(cmd),
-          onSyncState: _syncState,
-          artifactChecklist: _artifactChecklist,
+          awaitingApproval: awaiting,
+          building: _autopilotRunning || _isRunning,
         ),
       ),
     );

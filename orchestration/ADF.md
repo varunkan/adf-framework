@@ -49,4 +49,12 @@ Phases 1–3 and 9 require **human** dashboard approval. Phases 4–8 auto-unblo
 
 ## Version
 
+- **ADF v3.2.0** — 2026-06-12 — Pluggable runners: Claude Code + any agent CLI; `-r/--runner` install flag; `-i all`
 - **ADF v3.0.0** — 2026-05-17 — Full Grok fidelity (PGAD)
+
+## Runners (IDE-independent)
+
+The orchestration server drives a pluggable headless agent runner, selected via
+`ADF_RUNNER` (`auto` | `cursor` | `claude` | `custom`; loaded from
+`.adf/runner.env`). Cursor and Claude Code are first-class; any other agent CLI
+works via `ADF_RUNNER_BIN`. See [../docs/RUNNERS.md](../docs/RUNNERS.md).

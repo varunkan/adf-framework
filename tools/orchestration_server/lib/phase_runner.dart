@@ -627,28 +627,14 @@ class PhaseRunner {
       };
     }
 
-    final agent = _health.resolveCursorAgent();
+    final agent = _health.backend.resolveExecutable();
     if (agent == null) {
       final health = await getHealth(refresh: true);
       _writeNeedsLogin(featureId, phase, health);
       return {'success': false, 'exit_code': -1};
     }
 
-    final args = <String>[
-      '--print',
-      '--trust',
-      '--workspace',
-      repoRoot,
-      '--output-format',
-      'stream-json',
-      '--stream-partial-output',
-      prompt,
-    ];
-
-    if (Platform.environment['CURSOR_API_KEY']?.isNotEmpty == true) {
-      args.insert(0, '--api-key');
-      args.insert(1, Platform.environment['CURSOR_API_KEY']!);
-    }
+    final args = _health.backend.streamArgs(prompt, repoRoot, partial: true);
 
     store.appendRunLog(featureId, {
       'timestamp': DateTime.now().toUtc().toIso8601String(),
@@ -799,17 +785,27 @@ Instructions:
   Future<void> _pollSelfHeal() async {
     for (final id in store.listFeatures()) {
       if (_active.contains(id) || _healing.contains(id)) continue;
-      final run = store.readRunStatus(id);
-      final status = run?['status'] as String?;
-      if (status == 'error') {
-        final phase = (run?['phase'] as num?)?.toInt() ?? _resolveRunPhase(id);
-        final err = run?['error'] as String? ?? 'unknown error';
-        await _scheduleSelfHeal(id, phase, err);
-      } else if (status == 'needs_login') {
-        final h = await getHealth(refresh: true);
-        if (h['ready'] == true) {
-          unawaited(enqueue(id, phase: (run?['phase'] as num?)?.toInt()));
+      // A feature can be deleted or become corrupt (missing state.json) while
+      // this background poll runs. Isolate each feature so one bad/vanished
+      // directory can never throw out of the timer and crash the server.
+      try {
+        if (!store.featureExists(id)) continue;
+        final run = store.readRunStatus(id);
+        final status = run?['status'] as String?;
+        if (status == 'error') {
+          final phase =
+              (run?['phase'] as num?)?.toInt() ?? _resolveRunPhase(id);
+          final err = run?['error'] as String? ?? 'unknown error';
+          await _scheduleSelfHeal(id, phase, err);
+        } else if (status == 'needs_login') {
+          final h = await getHealth(refresh: true);
+          if (h['ready'] == true) {
+            unawaited(enqueue(id, phase: (run?['phase'] as num?)?.toInt()));
+          }
         }
+      } catch (e) {
+        stderr.writeln('self-heal: skipping feature $id — $e');
+        continue;
       }
     }
   }

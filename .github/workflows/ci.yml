@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  server:
+    name: Orchestration server (dart analyze + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/orchestration_server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - run: dart pub get
+      - run: dart analyze --fatal-infos
+      - run: dart test --reporter expanded
+
+  dashboard:
+    name: Dashboard (flutter analyze + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/orchestration_dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
+  shell:
+    name: Installer smoke (write_runner_env.sh)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: runner.env round-trip for every backend
+        run: |
+          set -euo pipefail
+          for runner in cursor claude custom; do
+            dir="$(mktemp -d)"
+            bash install/write_runner_env.sh "$dir" "$runner"
+            test -f "$dir/.adf/runner.env"
+            # Every generated env file must survive `set -a` sourcing.
+            ( set -a; . "$dir/.adf/runner.env"; set +a )
+            grep -q "ADF_RUNNER=" "$dir/.adf/runner.env"
+          done

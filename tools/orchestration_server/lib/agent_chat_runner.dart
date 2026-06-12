@@ -14,68 +14,78 @@ class AgentChatRunner {
   final String repoRoot;
   final RunnerHealth health;
 
-  static const Duration chatTimeout = Duration(seconds: 120);
+  static Duration get chatTimeout {
+    final sec =
+        int.tryParse(Platform.environment['ORCH_CHAT_TIMEOUT_SEC'] ?? '120') ??
+            120;
+    return Duration(seconds: sec.clamp(30, 300));
+  }
 
   Future<AgentChatResponse?> converse({
     required String featureId,
     required String contextBlock,
     required String userMessage,
     List<Map<String, dynamic>> recentMessages = const [],
+    void Function(String partialText)? onPartial,
   }) async {
-    final agent = health.resolveCursorAgent();
+    final agent = health.backend.resolveExecutable();
     if (agent == null) return null;
 
+    await health.killStalePrintAgents();
+
     final history = StringBuffer();
-    for (final m in recentMessages.takeLast(8)) {
+    for (final m in recentMessages.takeLast(6)) {
       final role = m['role'] as String? ?? 'user';
-      final text = (m['text'] as String? ?? '').trim();
+      if (role != 'user' && role != 'assistant') continue;
+      var text = (m['text'] as String? ?? '').trim();
       if (text.isEmpty) continue;
+      if (text.startsWith('Thinking')) continue;
+      if (m['llm_source'] == 'pending') continue;
+      if (text.length > 400) text = '${text.substring(0, 400)}…';
       history.writeln('${role.toUpperCase()}: $text');
     }
 
-    final prompt = '''You are the ADF v3 orchestration assistant in the POS development dashboard.
-Feature id: $featureId
+    final prompt = "You are the ADF orchestration assistant (like Cursor chat).\n"
+        "Feature: $featureId\n\n"
+        "$contextBlock\n\n"
+        "${history.isEmpty ? '' : 'Recent chat:\n$history\n'}"
+        "Answer the user naturally in 2-5 sentences. Use markdown if helpful.\n"
+        "End with exactly one line: [ACTION:answer_only] or [ACTION:resume] or "
+        "[ACTION:sync] or [ACTION:clarify]\n\n"
+        "User: $userMessage";
 
-$contextBlock
-
-${history.isEmpty ? '' : 'Recent chat:\n$history\n'}
-Respond naturally to the user — like Cursor IDE chat. Be specific, helpful, and concise.
-Use the feature context above; do not invent URLs or paths not listed.
-
-End your reply with exactly one line (required):
-[ACTION:answer_only] — questions only, no code/agent work
-[ACTION:resume] — continue orchestration / implement / clarify requirements
-[ACTION:sync] — user approved; sync phase gates
-[ACTION:clarify] — user added requirements to capture
-
-User message:
-$userMessage''';
-
-    final args = <String>[
-      '--print',
-      '--trust',
-      '--workspace',
-      repoRoot,
-      '--output-format',
-      'text',
-      prompt,
-    ];
-    final apiKey = Platform.environment['CURSOR_API_KEY'];
-    if (apiKey != null && apiKey.isNotEmpty) {
-      args.insertAll(0, ['--api-key', apiKey]);
-    }
+    final args = health.backend.streamArgs(prompt, repoRoot, partial: true);
 
     Process? proc;
-    final out = StringBuffer();
-    final err = StringBuffer();
+    String? fullResult;
+    final streamed = StringBuffer();
     try {
-      proc = await Process.start(
-        agent,
-        args,
-        workingDirectory: repoRoot,
-      );
-      final subOut = proc.stdout.transform(utf8.decoder).listen(out.write);
-      final subErr = proc.stderr.transform(utf8.decoder).listen(err.write);
+      proc = await Process.start(agent, args, workingDirectory: repoRoot);
+      final stdoutDone = proc.stdout
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .listen((line) {
+        if (line.trim().isEmpty) return;
+        try {
+          final obj = jsonDecode(line) as Map<String, dynamic>;
+          final type = obj['type'] as String?;
+          if (type == 'result') {
+            final t = obj['result'] as String?;
+            if (t != null && t.trim().isNotEmpty) fullResult = t.trim();
+          } else if (type == 'assistant' ||
+              type == 'text' ||
+              type == 'message') {
+            final t = _extractText(obj);
+            if (t != null && t.isNotEmpty) {
+              streamed.write(t);
+              onPartial?.call(streamed.toString());
+            }
+          }
+        } catch (_) {
+          streamed.write(line);
+        }
+      });
+
       final code = await proc.exitCode.timeout(
         chatTimeout,
         onTimeout: () {
@@ -85,18 +95,42 @@ $userMessage''';
           return -1;
         },
       );
-      await subOut.cancel();
-      await subErr.cancel();
-      if (code != 0) return null;
-      final text = out.toString().trim();
+      await stdoutDone.cancel();
+
+      final text = (fullResult ?? streamed.toString()).trim();
       if (text.isEmpty) return null;
+      if (code != 0 && fullResult == null && streamed.length < 20) return null;
       return _parseReply(text);
     } catch (_) {
       try {
         proc?.kill(ProcessSignal.sigkill);
       } catch (_) {}
+      final partial = (fullResult ?? streamed.toString()).trim();
+      if (partial.length >= 20) return _parseReply(partial);
       return null;
     }
+  }
+
+  String? _extractText(Map<String, dynamic> obj) {
+    if (obj['text'] is String) return obj['text'] as String;
+    final msg = obj['message'];
+    if (msg is Map) {
+      final content = msg['content'];
+      if (content is List) {
+        final buf = StringBuffer();
+        for (final block in content) {
+          if (block is Map &&
+              block['type'] == 'text' &&
+              block['text'] is String) {
+            buf.write(block['text']);
+          }
+        }
+        if (buf.isNotEmpty) return buf.toString();
+      }
+    }
+    final delta = obj['delta'];
+    if (delta is Map && delta['text'] is String) return delta['text'] as String;
+    return null;
   }
 
   AgentChatResponse _parseReply(String raw) {
@@ -114,7 +148,6 @@ $userMessage''';
 
 class AgentChatResponse {
   AgentChatResponse({required this.reply, required this.actionTag});
-
   final String reply;
   final String actionTag;
 }

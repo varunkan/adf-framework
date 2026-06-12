@@ -2,16 +2,31 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-/// Probes cursor-agent availability and authentication.
+import 'runner_backend.dart';
+
+/// Probes the active agent runner (Cursor, Claude, or a custom CLI) for
+/// availability and authentication.
+///
+/// Historically this class only knew about `cursor-agent`; it now delegates
+/// executable resolution and argv construction to the [RunnerBackend] selected
+/// via the `ADF_RUNNER` environment variable. The original method names
+/// (`resolveCursorAgent`, `probe`, `livenessProbe`, `killStalePrintAgents`) are
+/// preserved so existing callers and tests keep working regardless of backend.
 class RunnerHealth {
-  RunnerHealth({this.repoRoot});
+  RunnerHealth({this.repoRoot, RunnerBackend? backend})
+      : backend = backend ?? RunnerBackend.active();
 
   final String? repoRoot;
+
+  /// The active runner backend (cursor / claude / custom).
+  final RunnerBackend backend;
 
   DateTime? _headlessProbeAt;
   bool? _headlessOk;
   static const Duration _headlessProbeTtl = Duration(minutes: 5);
 
+  /// Retained for back-compat (cursor-flavoured defaults). Prefer
+  /// [activeRecoverySteps] which reflects the selected backend.
   static const recoverySteps = [
     'Kill stuck headless agents: pkill -f "cursor-agent.*--print" (macOS/Linux)',
     'Restart Cursor app, run: cursor-agent login',
@@ -21,97 +36,107 @@ class RunnerHealth {
     'Tap Verify in the dashboard for a fresh headless probe',
   ];
 
-  String? resolveCursorAgent() {
-    final env = Platform.environment['CURSOR_AGENT_PATH'];
-    if (env != null && env.isNotEmpty && File(env).existsSync()) return env;
+  List<String> get activeRecoverySteps => backend.recoverySteps;
 
-    final home = Platform.environment['HOME'] ?? '';
-    final candidates = [
-      '$home/.local/bin/cursor-agent',
-      '$home/.local/bin/agent',
-      '/Applications/Cursor.app/Contents/Resources/app/bin/cursor',
-    ];
-    for (final path in candidates) {
-      if (File(path).existsSync()) return path;
-    }
-    try {
-      final which = Process.runSync('which', ['cursor-agent']);
-      if (which.exitCode == 0) {
-        final p = (which.stdout as String).trim();
-        if (p.isNotEmpty && File(p).existsSync()) return p;
-      }
-    } catch (_) {}
-    return null;
-  }
+  RunnerKind get runnerKind => backend.kind;
+
+  /// Resolve the active runner binary (any backend).
+  String? resolveRunner() => backend.resolveExecutable();
+
+  /// Back-compat alias — resolves the active runner, not necessarily Cursor.
+  String? resolveCursorAgent() => backend.resolveExecutable();
 
   Future<Map<String, dynamic>> probe({bool useCache = true}) async {
-    final apiKeySet =
-        Platform.environment['CURSOR_API_KEY']?.isNotEmpty == true;
-    final agentPath = resolveCursorAgent();
+    final apiKeySet = backend.apiKeyConfigured;
+    final agentPath = backend.resolveExecutable();
+    final runnerInfo = <String, dynamic>{
+      'runner': backend.kind.id,
+      'runner_label': backend.kind.label,
+      'login_command': backend.loginCommand,
+    };
+    final steps = [
+      if (agentPath == null) backend.installHint,
+      ...backend.recoverySteps,
+    ];
 
     if (agentPath == null) {
       return {
+        ...runnerInfo,
         'agent_path': null,
         'authenticated': false,
         'api_key_set': apiKeySet,
         'ready': apiKeySet,
-        'hint': apiKeySet
-            ? null
-            : 'cursor-agent not found. Install via: curl -fsSL https://cursor.com/install | bash',
+        'hint': apiKeySet ? null : backend.installHint,
         'error_code': 'agent_not_found',
-        'recovery_steps': [
-          'Install cursor-agent: curl -fsSL https://cursor.com/install | bash',
-          ...recoverySteps,
-        ],
+        'recovery_steps': steps,
       };
     }
 
     if (apiKeySet) {
       return {
+        ...runnerInfo,
         'agent_path': agentPath,
         'authenticated': true,
         'api_key_set': true,
         'ready': true,
         'hint': null,
         'error_code': null,
-        'recovery_steps': recoverySteps,
+        'recovery_steps': backend.recoverySteps,
+      };
+    }
+
+    // Backends without a cheap `status` verb (Claude, custom) are treated as
+    // ready when the binary resolves; a missing login surfaces on first run and
+    // routes through the needs-login / self-heal path.
+    final statusArgs = backend.statusArgs();
+    if (statusArgs == null) {
+      return {
+        ...runnerInfo,
+        'agent_path': agentPath,
+        'authenticated': true,
+        'api_key_set': false,
+        'ready': true,
+        'hint': backend.kind == RunnerKind.claude
+            ? 'Using existing Claude login. Set ANTHROPIC_API_KEY for unattended auth.'
+            : null,
+        'error_code': null,
+        'recovery_steps': backend.recoverySteps,
       };
     }
 
     try {
       final result = await Process.run(
         agentPath,
-        ['status'],
+        statusArgs,
         workingDirectory: repoRoot,
       );
-      final out =
-          '${result.stdout}${result.stderr}'.toLowerCase();
+      final out = '${result.stdout}${result.stderr}'.toLowerCase();
       final notLoggedIn = out.contains('not logged in') ||
           out.contains('not authenticated') ||
           result.exitCode != 0 && out.contains('login');
       final authenticated = !notLoggedIn && result.exitCode == 0;
 
       return {
+        ...runnerInfo,
         'agent_path': agentPath,
         'authenticated': authenticated,
         'api_key_set': false,
         'ready': authenticated,
-        'hint': authenticated
-            ? null
-            : 'Run cursor-agent login or set CURSOR_API_KEY',
+        'hint': authenticated ? null : 'Run login or set ${backend.apiKeyEnvVar ?? 'an API key'}',
         'error_code': authenticated ? null : 'needs_login',
-        'recovery_steps': recoverySteps,
+        'recovery_steps': backend.recoverySteps,
         'status_output': '${result.stdout}'.trim(),
       };
     } catch (e) {
       return {
+        ...runnerInfo,
         'agent_path': agentPath,
         'authenticated': false,
         'api_key_set': apiKeySet,
         'ready': false,
-        'hint': 'Failed to probe cursor-agent: $e',
+        'hint': 'Failed to probe ${backend.kind.id} runner: $e',
         'error_code': 'probe_failed',
-        'recovery_steps': recoverySteps,
+        'recovery_steps': backend.recoverySteps,
       };
     }
   }
@@ -119,17 +144,14 @@ class RunnerHealth {
   Future<void> killStalePrintAgents() async {
     if (!Platform.isMacOS && !Platform.isLinux) return;
     try {
-      await Process.run(
-        'pkill',
-        ['-f', r'cursor-agent.*--print'],
-      );
+      await Process.run('pkill', ['-f', backend.killPattern]);
     } catch (_) {}
     await Future<void>.delayed(const Duration(milliseconds: 300));
   }
 
   /// Quick check: agent binary responds to `--version` (no network).
   Future<bool> versionProbe() async {
-    final agentPath = resolveCursorAgent();
+    final agentPath = backend.resolveExecutable();
     if (agentPath == null) return false;
     try {
       final result = await Process.run(
@@ -144,8 +166,9 @@ class RunnerHealth {
     }
   }
 
-  /// True if `--print` returns any stdout/stderr within [timeout] (cached [ttl]).
-  /// Set `ORCH_HEADLESS_ASSUME_READY=1` when agent is installed but `--print` is slow.
+  /// True if a streaming run returns any stdout/stderr within [timeout]
+  /// (cached [ttl]). Set `ORCH_HEADLESS_ASSUME_READY=1` when the agent is
+  /// installed but the print/stream probe is slow.
   Future<bool> livenessProbe({
     Duration timeout = const Duration(seconds: 25),
     Duration ttl = _headlessProbeTtl,
@@ -167,7 +190,7 @@ class RunnerHealth {
       return _headlessOk!;
     }
 
-    final agentPath = resolveCursorAgent();
+    final agentPath = backend.resolveExecutable();
     if (agentPath == null) {
       _headlessOk = false;
       _headlessProbeAt = DateTime.now();
@@ -177,21 +200,7 @@ class RunnerHealth {
     await killStalePrintAgents();
 
     final cwd = repoRoot ?? Directory.current.path;
-    final args = <String>[
-      '--print',
-      '--trust',
-      '--force',
-      '--approve-mcps',
-      '--workspace',
-      cwd,
-      '--output-format',
-      'text',
-      'Reply with exactly: OK',
-    ];
-    final apiKey = Platform.environment['CURSOR_API_KEY'];
-    if (apiKey != null && apiKey.isNotEmpty) {
-      args.insertAll(0, ['--api-key', apiKey]);
-    }
+    final args = backend.textArgs('Reply with exactly: OK', cwd);
 
     Process? proc;
     try {
