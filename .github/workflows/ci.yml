@@ -21,6 +21,21 @@ jobs:
       - run: dart analyze --fatal-infos
       - run: dart test --reporter expanded
 
+  mcp:
+    name: MCP server (dart analyze + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/adf_mcp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - run: dart pub get
+      - run: dart analyze --fatal-infos
+      - run: dart test --reporter expanded
+
   dashboard:
     name: Dashboard (flutter analyze + test)
     runs-on: ubuntu-latest
