@@ -219,6 +219,18 @@ class ApiClient {
     return jsonDecode(r.body) as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> getFeatureCost(String id) async {
+    final r = await _get('/features/$id/cost');
+    if (r.statusCode != 200) throw Exception(r.body);
+    return jsonDecode(r.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getCostSummary() async {
+    final r = await _get('/cost/summary');
+    if (r.statusCode != 200) throw Exception(r.body);
+    return jsonDecode(r.body) as Map<String, dynamic>;
+  }
+
   Future<List<Map<String, dynamic>>> getCrewLog(String id) async {
     final r = await _get('/features/$id/crew-log');
     if (r.statusCode != 200) throw Exception(r.body);

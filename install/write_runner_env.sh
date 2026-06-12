@@ -28,6 +28,21 @@ ADF_RUNNER=claude
 # ADF_CLAUDE_PATH=/usr/local/bin/claude
 ENV
     ;;
+  ollama)
+    # The Ollama wrapper ships with the framework; point ADF_RUNNER_BIN at it.
+    FRAMEWORK_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+    cat > "$ENV_FILE" << ENV
+# ADF runner: local Ollama model (zero marginal cost, fully offline)
+# Driven through the custom-runner contract via the bundled wrapper.
+ADF_RUNNER=custom
+ADF_RUNNER_BIN="$FRAMEWORK_ROOT/scripts/orch/ollama_runner.sh"
+ADF_RUNNER_ARGS="{prompt} --workspace {workspace}"
+ADF_RUNNER_KILL_PATTERN="ollama_runner.sh"
+# Model and host (defaults shown). Pull the model once: ollama pull llama3.2
+# ORCH_OLLAMA_MODEL=llama3.2
+# OLLAMA_HOST=http://127.0.0.1:11434
+ENV
+    ;;
   custom)
     cat > "$ENV_FILE" << 'ENV'
 # ADF runner: any agent CLI. Placeholders {prompt} and {workspace} are

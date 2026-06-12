@@ -62,6 +62,42 @@ adf install -t . -i generic -r custom    # any agent CLI
 
 See [docs/RUNNERS.md](docs/RUNNERS.md) for the full matrix and env reference.
 
+## Zero-cost mode
+
+ADF runs at three cost tiers — pick per project, switch any time:
+
+| Tier | Marginal cost | Notes |
+|------|---------------|-------|
+| Deterministic artifact engine | 0 tokens | Phases 1–6 structure generated without an LLM, guaranteed to pass machine gates |
+| Local Ollama runner | $0 | Fully offline: `adf install -t . -i generic -r ollama` |
+| Flat-rate subscription runners | Monthly plan only | `claude` / `cursor` under existing subscriptions, no per-message credits |
+
+Compared with credit-billed app builders:
+
+| | ADF | Credit-billed builders |
+|---|-----|------------------------|
+| Marginal cost per feature | $0 or flat-rate | Credits per message |
+| Offline capable | Yes (Ollama runner) | No |
+| Code ownership | Plain Git repo in your project | Platform-hosted |
+| Audit trail | Phase artifacts + machine gates in-repo | Chat history |
+
+Cost meter: every feature exposes `/features/<id>/cost`, and the dashboard shows a live LLM-cost chip per feature.
+
+## Machine interface (agents operating ADF)
+
+The pipeline is operable end-to-end by other agents and automation — the dashboard is a window, not a requirement. Every operation is a CLI call with machine-readable output, so an orchestrating agent (or a cron job) can create a feature, run all nine phases unattended, and check gate state without a human in the loop. The same surface is exposed over MCP, so any MCP-capable agent can drive ADF as a set of tools.
+
+```bash
+adf feature new "Add CSV export" --autopilot   # create + run all phases unattended
+adf feature status <feature-id>                # machine-readable phase + gate state
+adf feature audit <feature-id>                 # export the audit bundle
+```
+
+See [docs/MACHINE.md](docs/MACHINE.md) for the full machine-operation contract.
+See [tools/adf_mcp/README.md](tools/adf_mcp/README.md) to register ADF as an MCP server.
+
+Audit bundles are self-contained and verifiable offline with `scripts/orch/verify_audit_bundle.py` — no network, no LLM, no running services required.
+
 ## Global install
 
 ```bash

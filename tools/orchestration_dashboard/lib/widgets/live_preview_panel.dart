@@ -6,6 +6,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 
 import '../services/api_client.dart';
 import '../theme/studio_theme.dart';
+import 'cost_badge.dart';
 import 'integrity_badge.dart';
 
 /// Right-rail live preview (Lovable-style): phase, artifacts, spec, integrity, crew.
@@ -42,6 +43,7 @@ class LivePreviewPanel extends StatefulWidget {
 class _LivePreviewPanelState extends State<LivePreviewPanel>
     with SingleTickerProviderStateMixin {
   Map<String, dynamic>? _preview;
+  Map<String, dynamic>? _cost;
   bool _loading = true;
   Timer? _poll;
   int _pollMs = 2000;
@@ -78,6 +80,7 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
     if (oldWidget.phase != widget.phase ||
         oldWidget.building != widget.building ||
         oldWidget.featureId != widget.featureId) {
+      if (oldWidget.featureId != widget.featureId) _cost = null;
       _wakePoll();
       _load(silent: true);
     }
@@ -105,6 +108,18 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
     } catch (_) {
       if (!mounted) return;
       setState(() => _loading = false);
+    }
+    await _loadCost();
+  }
+
+  /// Cost endpoint is optional (older servers 404) — degrade silently.
+  Future<void> _loadCost() async {
+    try {
+      final cost = await widget.api.getFeatureCost(widget.featureId);
+      if (!mounted) return;
+      setState(() => _cost = cost);
+    } catch (_) {
+      // Keep the last known value; badge stays hidden if it never loaded.
     }
   }
 
@@ -156,6 +171,8 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
                       ),
                 ),
               ),
+              CostBadge(compact: true, cost: _cost),
+              const SizedBox(width: 8),
               IntegrityBadge(
                 compact: true,
                 valid: _integrity?['valid'] as bool?,

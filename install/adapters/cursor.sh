@@ -7,7 +7,18 @@ link_dir() {
   local src="$1" dest="$2"
   mkdir -p "$(dirname "$dest")"
   if [[ -e "$dest" && ! -L "$dest" ]]; then
-    echo "SKIP (exists): $dest — remove manually to reinstall" >&2
+    # A real directory already exists (e.g. the server created runtime state
+    # before install ran). Merge: link each framework entry that is missing,
+    # leave everything already there untouched.
+    local merged=0 entry name
+    for entry in "$src"/*; do
+      name="$(basename "$entry")"
+      if [[ ! -e "$dest/$name" ]]; then
+        ln -sfn "$entry" "$dest/$name"
+        merged=$((merged + 1))
+      fi
+    done
+    echo "merged $merged framework entries into existing $dest"
     return 0
   fi
   ln -sfn "$src" "$dest"

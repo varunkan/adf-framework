@@ -20,6 +20,9 @@ variable (typically loaded from `.adf/runner.env`, which the installer writes):
 `auto` keeps existing Cursor installs working unchanged: if `cursor-agent`
 resolves it is used; otherwise ADF falls back to `claude`.
 
+`adf install -r ollama` is a special case: it writes a pre-filled `custom`
+config that drives a local Ollama model — see [Ollama](#ollama-local-model-0).
+
 ## Claude Code
 
 ```bash
@@ -42,6 +45,42 @@ Claude Code's `stream-json` events (`assistant` message blocks plus a terminal
 `{"type":"result","result":"…"}`) are parsed by the same code path that handles
 Cursor, so phase logs, partial streaming, and the `[ACTION:…]` chat protocol all
 work identically.
+
+## Ollama (local model, $0)
+
+Run the whole pipeline against a model served by [Ollama](https://ollama.com)
+on your own machine: zero marginal cost per run, no API key, fully offline.
+ADF ships a wrapper (`scripts/orch/ollama_runner.sh`) that adapts Ollama's
+HTTP API to the custom-runner contract — `adf install -r ollama` wires it up
+out of the box.
+
+Prerequisites:
+
+```bash
+ollama serve                      # local API on http://127.0.0.1:11434
+ollama pull llama3.2              # or any model you prefer
+```
+
+Install and start:
+
+```bash
+adf install -t . -i generic -r ollama
+set -a && . .adf/runner.env && set +a
+adf start all
+```
+
+The wrapper POSTs each prompt to `$OLLAMA_HOST/api/generate` (`stream:false`)
+and emits the terminal `{"type":"result","result":"…"}` event the server
+parses. Pick a different model or host in `.adf/runner.env`:
+
+```bash
+ORCH_OLLAMA_MODEL=llama3.2                # any pulled model, e.g. qwen2.5-coder
+OLLAMA_HOST=http://127.0.0.1:11434        # remote Ollama works too
+```
+
+Note: Ollama models are plain text generators with no filesystem or tool
+access, so quality depends heavily on the model you pull — but every run is
+free and never leaves your machine.
 
 ## Any other agent CLI (custom)
 
@@ -90,3 +129,5 @@ Cursor adapter but drive it with Claude (`-i cursor -r claude`).
 | `ADF_RUNNER_ARGS` | Custom argv template (`{prompt}`, `{workspace}`) |
 | `ADF_RUNNER_API_KEY_ENV` | Name of the custom runner's API-key env var |
 | `ADF_RUNNER_KILL_PATTERN` | `pkill -f` pattern for stale custom runs |
+| `ORCH_OLLAMA_MODEL` | Model for the Ollama runner (default `llama3.2`) |
+| `OLLAMA_HOST` | Ollama base URL (default `http://127.0.0.1:11434`) |

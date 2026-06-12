@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'cost_meter.dart';
+import 'feature_store.dart';
 import 'runner_health.dart';
 
 /// Headless cursor-agent for conversational dashboard chat (Cursor-like replies).
@@ -13,6 +15,7 @@ class AgentChatRunner {
 
   final String repoRoot;
   final RunnerHealth health;
+  late final CostMeter _costs = CostMeter(FeatureStore(repoRoot));
 
   static Duration get chatTimeout {
     final sec =
@@ -70,6 +73,7 @@ class AgentChatRunner {
           final obj = jsonDecode(line) as Map<String, dynamic>;
           final type = obj['type'] as String?;
           if (type == 'result') {
+            _costs.recordFromResultEvent(featureId, obj);
             final t = obj['result'] as String?;
             if (t != null && t.trim().isNotEmpty) fullResult = t.trim();
           } else if (type == 'assistant' ||

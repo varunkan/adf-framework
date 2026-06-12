@@ -5,9 +5,11 @@ import 'dart:io';
 import 'package:orchestration_server/adf_brain.dart';
 import 'package:orchestration_server/agent_crew.dart';
 import 'package:orchestration_server/artifact_validator.dart';
+import 'package:orchestration_server/audit_bundle.dart';
 import 'package:orchestration_server/deterministic_artifacts.dart';
 import 'package:orchestration_server/learning_store.dart';
 import 'package:orchestration_server/conversation_builder.dart';
+import 'package:orchestration_server/cost_meter.dart';
 import 'package:orchestration_server/feature_store.dart';
 import 'package:orchestration_server/figma_connector.dart';
 import 'package:orchestration_server/integrity_chain.dart';
@@ -90,6 +92,9 @@ Future<void> main(List<String> args) async {
   final learnings = LearningStore(repoRoot);
   final figma = FigmaConnector();
   final integrity = IntegrityChain(store);
+  final costs = CostMeter(store);
+  final auditBundles =
+      AuditBundleBuilder(store, integrity: integrity, costs: costs);
   final previewService = PreviewService(
     store,
     repoRoot,
@@ -804,6 +809,15 @@ Future<void> main(List<String> args) async {
     return _json(integrity.verify(id, strict: strict));
   });
 
+  router.get('/features/<id>/audit-bundle', (Request request, String id) {
+    if (!store.featureExists(id)) {
+      return _json({'error': 'unknown feature: $id'}, status: 404);
+    }
+    // Self-verifying proof document — check it offline (no server, no Dart)
+    // with scripts/orch/verify_audit_bundle.py.
+    return _json(auditBundles.build(id));
+  });
+
   router.post('/features/<id>/figma', (Request request, String id) async {
     if (!store.featureExists(id)) {
       return _json({'error': 'unknown feature: $id'}, status: 404);
@@ -1163,6 +1177,25 @@ Future<void> main(List<String> args) async {
     }
   });
 
+  router.get('/features/<id>/cost', (Request request, String id) {
+    try {
+      if (!store.featureExists(id)) {
+        return _json({'error': 'not found'}, status: 404);
+      }
+      return _json(costs.featureCost(id));
+    } catch (e) {
+      return _json({'error': e.toString()}, status: 500);
+    }
+  });
+
+  router.get('/cost/summary', (Request _) {
+    try {
+      return _json(costs.summary());
+    } catch (e) {
+      return _json({'error': e.toString()}, status: 500);
+    }
+  });
+
   Middleware timingMiddleware() => (Handler inner) => (Request req) async {
         final sw = Stopwatch()..start();
         final res = await inner(req);
@@ -1184,7 +1217,10 @@ Future<void> main(List<String> args) async {
                         s == 'pipeline' ||
                         s == 'run-status' ||
                         s == 'studio-preview' ||
-                        s == 'preview'
+                        s == 'preview' ||
+                        s == 'cost' ||
+                        s == 'summary' ||
+                        s == 'audit-bundle'
                     ? s
                     : '{id}')
                 .join('/');

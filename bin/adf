@@ -18,6 +18,13 @@ Usage:
   adf start [api|dashboard|all]               Start orchestration services
   adf studio                                  One-command studio: kill stale, start API + dashboard, health-check
   adf test                                    Run comprehensive server + dashboard test suite
+  adf feature new "<requirement>" [--autopilot]   Create a feature via the API (prints its id)
+  adf feature status <id>                     Feature detail merged with the pipeline plan
+  adf feature autopilot <id>                  Run the zero-token ADF crew for a feature
+  adf feature approve <id> [--phase N]        Approve the pending phase gate
+  adf feature cost <id>                       Token/cost meter for one feature
+  adf feature audit <id> [-o FILE]            Export the feature's audit bundle
+  adf health                                  Orchestration API + runner health
   adf version                                 Show version
 
 Examples:
@@ -27,9 +34,61 @@ Examples:
   adf install -t ~/myapp -i generic -r custom       # any agent CLI via ADF_RUNNER_BIN
   adf install --global && adf install -t ~/myapp -i cursor
   adf studio
+  adf feature new "Add CSV export to the orders screen" --autopilot
 
 Runner selection is read from ADF_RUNNER (or .adf/runner.env) at server start.
+
+Machine use: every `adf feature …` / `adf health` verb prints raw JSON when
+--json is passed or when stdout is not a TTY, and exits 1 (with a hint on
+stderr) when the API is unreachable or returns non-2xx. The API endpoint is
+${ORCH_API_URL:-http://127.0.0.1:3847}. See docs/MACHINE.md.
 HELP
+}
+
+# ---- Robot-grade API verbs --------------------------------------------------
+# Shared plumbing for `adf feature …` and `adf health`. All verbs talk HTTP to
+# the orchestration API (override with ORCH_API_URL) and never touch disk state
+# directly, so they work from any shell, script, or robot.
+
+ADF_JSON=0
+
+api_base() { printf '%s' "${ORCH_API_URL:-http://127.0.0.1:3847}"; }
+
+# Machines get raw JSON; humans at a terminal get a brief summary.
+want_json() { [[ "$ADF_JSON" == "1" || ! -t 1 ]]; }
+
+# api_call METHOD PATH [extra curl args…] — body on stdout; exit 1 with a
+# stderr hint when the API is unreachable or replies non-2xx.
+api_call() {
+  local method="$1" path="$2"
+  shift 2
+  local url body
+  url="$(api_base)$path"
+  if body="$(curl -sS --fail-with-body --connect-timeout 5 \
+      --max-time "${ADF_API_TIMEOUT:-60}" -X "$method" \
+      -H 'Content-Type: application/json' "$@" "$url" 2>/dev/null)"; then
+    printf '%s\n' "$body"
+    return 0
+  fi
+  if [[ -n "$body" ]]; then printf '%s\n' "$body" >&2; fi
+  echo "error: ADF API request failed ($method $url) — if the server is down, run: adf start api" >&2
+  return 1
+}
+
+# emit JSON_BODY PYTHON_SUMMARY — raw JSON for machines, summary for humans.
+emit() {
+  if want_json; then
+    printf '%s\n' "$1"
+  else
+    printf '%s' "$1" | python3 -c "$2"
+  fi
+}
+
+require_feature_id() {
+  if [[ -z "$1" ]]; then
+    echo "Usage: $2" >&2
+    exit 1
+  fi
 }
 
 cmd="${1:-help}"
@@ -101,6 +160,191 @@ case "$cmd" in
     ;;
   test)
     exec "$FRAMEWORK_ROOT/scripts/orch/run_comprehensive_tests.sh" "$@"
+    ;;
+  feature)
+    SUB="${1:-}"
+    shift || true
+    case "$SUB" in
+      new)
+        REQUIREMENT=""
+        AUTOPILOT="false"
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --autopilot) AUTOPILOT="true"; shift ;;
+            --json) ADF_JSON=1; shift ;;
+            *) REQUIREMENT="$1"; shift ;;
+          esac
+        done
+        if [[ -z "$REQUIREMENT" ]]; then
+          echo 'Usage: adf feature new "<requirement>" [--autopilot] [--json]' >&2
+          exit 1
+        fi
+        PAYLOAD="$(python3 -c 'import json,sys; print(json.dumps({"requirement": sys.argv[1], "autopilot": sys.argv[2] == "true"}))' "$REQUIREMENT" "$AUTOPILOT")"
+        BODY="$(api_call POST /features --data "$PAYLOAD")"
+        emit "$BODY" 'import sys,json
+d = json.load(sys.stdin)
+print(d.get("id", "?"))
+if d.get("message"):
+    print(d["message"])'
+        ;;
+      status)
+        ID=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --json) ADF_JSON=1; shift ;;
+            *) ID="$1"; shift ;;
+          esac
+        done
+        require_feature_id "$ID" 'adf feature status <id> [--json]'
+        DETAIL="$(api_call GET "/features/$ID")"
+        PIPELINE="$(api_call GET "/features/$ID/pipeline")"
+        BODY="$(printf '%s\n%s\n' "$DETAIL" "$PIPELINE" | python3 -c 'import json,sys
+dec = json.JSONDecoder()
+raw = sys.stdin.read().lstrip()
+detail, end = dec.raw_decode(raw)
+pipeline, _ = dec.raw_decode(raw[end:].lstrip())
+detail["pipeline"] = pipeline
+print(json.dumps(detail))')"
+        emit "$BODY" 'import sys,json
+d = json.load(sys.stdin)
+s = d.get("summary") or {}
+print("feature:", s.get("id", "?"))
+print("status: ", s.get("status", "?"), "| phase", s.get("current_phase", "?"))
+if s.get("awaiting_user"):
+    print("awaiting approval: phase", s.get("pending_approval_phase"))
+if s.get("last_judge_verdict"):
+    print("judge verdict:", s.get("last_judge_verdict"))
+if s.get("run_status"):
+    print("run status:", s.get("run_status"))
+for p in (d.get("pipeline") or {}).get("phases") or []:
+    print("  phase", p.get("phase"), str(p.get("name", "")) + ":", p.get("status"))'
+        ;;
+      autopilot)
+        ID=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --json) ADF_JSON=1; shift ;;
+            *) ID="$1"; shift ;;
+          esac
+        done
+        require_feature_id "$ID" 'adf feature autopilot <id> [--json]'
+        # The crew runs synchronously server-side; allow a long window.
+        BODY="$(api_call POST "/features/$ID/autopilot" --max-time "${ADF_API_TIMEOUT:-900}")"
+        emit "$BODY" 'import sys,json
+d = json.load(sys.stdin)
+s = (d.get("detail") or {}).get("summary") or {}
+print("autopilot finished:", s.get("id", "?"))
+print("status: ", s.get("status", "?"), "| phase", s.get("current_phase", "?"))
+if s.get("awaiting_user"):
+    print("awaiting approval: phase", s.get("pending_approval_phase"))'
+        ;;
+      approve)
+        ID=""
+        PHASE=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --phase) PHASE="${2:-}"; shift 2 ;;
+            --json) ADF_JSON=1; shift ;;
+            *) ID="$1"; shift ;;
+          esac
+        done
+        require_feature_id "$ID" 'adf feature approve <id> [--phase N] [--json]'
+        if [[ -z "$PHASE" ]]; then
+          DETAIL="$(api_call GET "/features/$ID")"
+          PHASE="$(printf '%s' "$DETAIL" | python3 -c 'import sys,json
+s = (json.load(sys.stdin).get("summary") or {})
+p = s.get("pending_approval_phase")
+if p is None:
+    p = s.get("current_phase")
+print("" if p is None else int(p))')"
+        fi
+        if [[ -z "$PHASE" ]]; then
+          echo "error: could not determine the phase to approve for $ID — pass --phase N" >&2
+          exit 1
+        fi
+        BODY="$(api_call POST "/features/$ID/approve" \
+          --data "{\"phase\": $PHASE, \"decision\": \"approved\", \"source\": \"cli\"}")"
+        emit "$BODY" 'import sys,json
+s = json.load(sys.stdin).get("summary") or {}
+print("approved:", s.get("id", "?"))
+print("status: ", s.get("status", "?"), "| phase", s.get("current_phase", "?"))'
+        ;;
+      cost)
+        ID=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --json) ADF_JSON=1; shift ;;
+            *) ID="$1"; shift ;;
+          esac
+        done
+        require_feature_id "$ID" 'adf feature cost <id> [--json]'
+        BODY="$(api_call GET "/features/$ID/cost")"
+        emit "$BODY" 'import sys,json
+d = json.load(sys.stdin)
+print("feature:", d.get("feature_id", "?"))
+print("total:   $" + str(d.get("total_usd", 0)))
+print("tokens: ", d.get("total_input_tokens", 0), "in /", d.get("total_output_tokens", 0), "out")'
+        ;;
+      audit)
+        ID=""
+        OUT=""
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            -o|--output) OUT="${2:-}"; shift 2 ;;
+            --json) ADF_JSON=1; shift ;;
+            *) ID="$1"; shift ;;
+          esac
+        done
+        require_feature_id "$ID" 'adf feature audit <id> [-o FILE] [--json]'
+        BODY="$(api_call GET "/features/$ID/audit-bundle")"
+        if [[ -n "$OUT" ]]; then
+          printf '%s\n' "$BODY" > "$OUT"
+          DIGEST="$(printf '%s' "$BODY" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("bundle_digest", ""))')"
+          if want_json; then
+            python3 -c 'import json,sys; print(json.dumps({"ok": True, "path": sys.argv[1], "bundle_digest": sys.argv[2]}))' "$OUT" "$DIGEST"
+          else
+            echo "audit bundle written: $OUT (bundle_digest $DIGEST)"
+          fi
+        else
+          emit "$BODY" 'import sys,json
+d = json.load(sys.stdin)
+print("feature:      ", d.get("feature_id", "?"))
+print("created_at:   ", d.get("created_at", "?"))
+print("runner:       ", (d.get("runner") or {}).get("runner_label", "?"))
+print("artifacts:    ", len(d.get("artifacts") or []))
+print("sealed chain: ", "yes" if d.get("chain") else "no")
+print("bundle_digest:", d.get("bundle_digest", "?"))'
+        fi
+        ;;
+      *)
+        usage
+        exit 1
+        ;;
+    esac
+    ;;
+  health)
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --json) ADF_JSON=1 ;;
+      esac
+      shift
+    done
+    API_BODY="$(api_call GET /health)"
+    RUNNER_BODY="$(api_call GET /runner/health)"
+    BODY="$(printf '%s\n%s\n' "$API_BODY" "$RUNNER_BODY" | python3 -c 'import json,sys
+dec = json.JSONDecoder()
+raw = sys.stdin.read().lstrip()
+api, end = dec.raw_decode(raw)
+runner, _ = dec.raw_decode(raw[end:].lstrip())
+print(json.dumps({"api": api, "runner": runner}))')"
+    emit "$BODY" 'import sys,json
+d = json.load(sys.stdin)
+api = d.get("api") or {}
+runner = d.get("runner") or {}
+print("api:    ", api.get("status", "?"), "(" + str(api.get("repo", "?")) + ")")
+print("runner: ", runner.get("runner_label") or runner.get("runner") or "?", "| ready:", runner.get("ready"))
+if runner.get("hint"):
+    print("hint:   ", runner["hint"])'
     ;;
   version|-v)
     echo "adf-framework $(cat "$FRAMEWORK_ROOT/VERSION")"

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'cost_meter.dart';
 import 'feature_store.dart';
 import 'runner_health.dart';
 import 'run_post_sync.dart';
@@ -12,13 +13,15 @@ enum CancelReason { user, replaced }
 /// Runs orchestration phases via headless `cursor-agent` (or CURSOR_API_KEY).
 class PhaseRunner {
   PhaseRunner(this.store, {this.pollInterval = const Duration(seconds: 2)})
-      : _health = RunnerHealth(repoRoot: store.repoRoot);
+      : _health = RunnerHealth(repoRoot: store.repoRoot),
+        _costs = CostMeter(store);
 
   static const int maxHealAttempts = 3;
 
   final FeatureStore store;
   final Duration pollInterval;
   final RunnerHealth _health;
+  final CostMeter _costs;
 
   RunnerHealth get health => _health;
 
@@ -675,6 +678,7 @@ class PhaseRunner {
         try {
           final obj = jsonDecode(line) as Map<String, dynamic>;
           if (obj['type'] == 'result') {
+            _costs.recordFromResultEvent(featureId, obj, phase: phase);
             final t = obj['result'] as String?;
             if (t != null && t.trim().isNotEmpty) fullResultText = t.trim();
           }
