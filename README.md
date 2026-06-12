@@ -72,6 +72,14 @@ ADF runs at three cost tiers — pick per project, switch any time:
 | Local Ollama runner | $0 | Fully offline: `adf install -t . -i generic -r ollama` |
 | Flat-rate subscription runners | Monthly plan only | `claude` / `cursor` under existing subscriptions, no per-message credits |
 
+Within a run, a complexity router sends every LLM task to the cheapest tier
+that can handle it — instant state answers and the local model cover simple
+work for $0, and cloud models only engage when the task demands them. Routing
+is cheap-first by design, so simple work never pays cloud prices. Every agent
+task also runs under a hard 30-second ceiling, which keeps parallel waves
+moving instead of stalling on one slow call — see
+[docs/RUNNERS.md](docs/RUNNERS.md#model-routing-complexity-based).
+
 Compared with credit-billed app builders:
 
 | | ADF | Credit-billed builders |

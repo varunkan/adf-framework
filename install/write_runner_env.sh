@@ -38,9 +38,13 @@ ADF_RUNNER=custom
 ADF_RUNNER_BIN="$FRAMEWORK_ROOT/scripts/orch/ollama_runner.sh"
 ADF_RUNNER_ARGS="{prompt} --workspace {workspace}"
 ADF_RUNNER_KILL_PATTERN="ollama_runner.sh"
-# Model and host (defaults shown). Pull the model once: ollama pull llama3.2
-# ORCH_OLLAMA_MODEL=llama3.2
+# Model and host (defaults shown). Pull the model once:
+#   ollama pull hf.co/nvidia/NVIDIA-Nemotron-3-Nano-4B-GGUF:Q4_K_M
+# Alternatives: nemotron-mini (smallest), hf.co/MaziyarPanahi/NVIDIA-Nemotron-Nano-12B-v2-GGUF (higher quality)
+# ORCH_OLLAMA_MODEL=hf.co/nvidia/NVIDIA-Nemotron-3-Nano-4B-GGUF:Q4_K_M
 # OLLAMA_HOST=http://127.0.0.1:11434
+# Dashboard chat backend: auto = instant state answers, then local Ollama, then cursor-agent
+# ORCH_CHAT_LLM=auto
 ENV
     ;;
   custom)

@@ -23,6 +23,48 @@ resolves it is used; otherwise ADF falls back to `claude`.
 `adf install -r ollama` is a special case: it writes a pre-filled `custom`
 config that drives a local Ollama model — see [Ollama](#ollama-local-model-0).
 
+## Model routing (complexity-based)
+
+On top of the runner, the orchestration server routes every LLM task to the
+cheapest tier that can handle it. Each task is scored for complexity (task
+length, kind — chat/artifact lean local or fast, review/plan lean balanced,
+implement/architecture lean deep — presence of code blocks, explicit user
+escalation words) and the router returns a logged decision:
+`{tier, model, reason}`.
+
+| Tier | Model | $/MTok in | $/MTok out |
+|------|-------|-----------|------------|
+| `instant` | none — answered from server state | $0 | $0 |
+| `local` | Ollama, `ORCH_OLLAMA_MODEL` (default Nemotron GGUF) | $0 | $0 |
+| `fast` | `ORCH_MODEL_FAST` (default `claude-haiku-4-5`) | $1.00 | $5.00 |
+| `balanced` | `ORCH_MODEL_BALANCED` (default `claude-sonnet-4-6`) | $3.00 | $15.00 |
+| `deep` | `ORCH_MODEL_DEEP` (default `claude-opus-4-8`) | $5.00 | $25.00 |
+
+Decision flow: instant state answer → router picks `local` \| `fast` \|
+`balanced` \| `deep` → on failure, fallback chain to the next tier up.
+
+Simple work **never** pays cloud prices: short chat and artifact tasks resolve
+at the `instant` or `local` tier ($0), and the cloud tiers only engage when the
+complexity score demands them. Every cloud call's token usage and cost lands in
+the per-feature cost meter (`/features/<id>/cost` and the dashboard cost chip).
+
+| Variable | Purpose |
+|----------|---------|
+| `ORCH_ROUTER` | `auto` \| `local-only` \| `cloud-only` (default `auto`) |
+| `ORCH_MODEL_FAST` | Fast-tier model (default `claude-haiku-4-5`) |
+| `ORCH_MODEL_BALANCED` | Balanced-tier model (default `claude-sonnet-4-6`) |
+| `ORCH_MODEL_DEEP` | Deep-tier model (default `claude-opus-4-8`) |
+| `ANTHROPIC_API_KEY` | Required for the cloud tiers; when unset the router degrades to local-only (never an error) |
+| `ORCH_AGENT_TIMEOUT_SEC` | Cap per brain/crew LLM task in seconds (default `30`) |
+| `ORCH_RUNNER_TIMEOUT_SEC` | Cap per spawned runner-CLI agent in seconds (default `30`) |
+
+**Timeouts and escalation.** Every LLM task is capped at
+`ORCH_AGENT_TIMEOUT_SEC` (default 30 s); spawned runner-CLI agents at
+`ORCH_RUNNER_TIMEOUT_SEC` (default 30 s). On timeout the task is killed and
+recorded as `timed_out` with its elapsed ms, then escalated **once** to the
+next-higher tier (`local → fast → balanced → deep`) with the same task; if that
+attempt also times out, the task is marked blocked.
+
 ## Claude Code
 
 ```bash
@@ -58,7 +100,7 @@ Prerequisites:
 
 ```bash
 ollama serve                      # local API on http://127.0.0.1:11434
-ollama pull llama3.2              # or any model you prefer
+ollama pull hf.co/nvidia/NVIDIA-Nemotron-3-Nano-4B-GGUF:Q4_K_M   # default model
 ```
 
 Install and start:
@@ -81,6 +123,37 @@ OLLAMA_HOST=http://127.0.0.1:11434        # remote Ollama works too
 Note: Ollama models are plain text generators with no filesystem or tool
 access, so quality depends heavily on the model you pull — but every run is
 free and never leaves your machine.
+
+### Local Nemotron (NVIDIA)
+
+ADF's default local model is NVIDIA's Nemotron 3 Nano (4B) — small enough for
+a laptop, capable enough for dashboard chat. Pull the official NVIDIA GGUF
+once:
+
+```bash
+ollama pull hf.co/nvidia/NVIDIA-Nemotron-3-Nano-4B-GGUF:Q4_K_M
+```
+
+Then set (or uncomment) in `.adf/runner.env`:
+
+```bash
+ORCH_CHAT_LLM=auto                          # auto | ollama | cursor
+ORCH_OLLAMA_MODEL=hf.co/nvidia/NVIDIA-Nemotron-3-Nano-4B-GGUF:Q4_K_M
+ORCH_OLLAMA_HOST=http://127.0.0.1:11434
+```
+
+Alternatives: `nemotron-mini` (smallest) or
+`hf.co/MaziyarPanahi/NVIDIA-Nemotron-Nano-12B-v2-GGUF` (higher quality).
+
+**Latency expectations.** Questions the server can answer from its own state
+(status, URLs, phase progress) are answered instantly — milliseconds,
+regardless of which model is configured (`llm_source: state`). Free-form chat
+goes through the local model, so latency is bounded by local inference speed —
+typically a few seconds per reply for the 4B model on recent hardware.
+
+**Chat fallback order.** With `ORCH_CHAT_LLM=auto` each dashboard chat message
+resolves as: instant state answer first, then the local Ollama model when
+`ORCH_OLLAMA_HOST` is reachable, then the existing `cursor-agent` path.
 
 ## Any other agent CLI (custom)
 
@@ -129,5 +202,7 @@ Cursor adapter but drive it with Claude (`-i cursor -r claude`).
 | `ADF_RUNNER_ARGS` | Custom argv template (`{prompt}`, `{workspace}`) |
 | `ADF_RUNNER_API_KEY_ENV` | Name of the custom runner's API-key env var |
 | `ADF_RUNNER_KILL_PATTERN` | `pkill -f` pattern for stale custom runs |
-| `ORCH_OLLAMA_MODEL` | Model for the Ollama runner (default `llama3.2`) |
-| `OLLAMA_HOST` | Ollama base URL (default `http://127.0.0.1:11434`) |
+| `ORCH_OLLAMA_MODEL` | Model for the Ollama runner and chat (default `hf.co/nvidia/NVIDIA-Nemotron-3-Nano-4B-GGUF:Q4_K_M`) |
+| `OLLAMA_HOST` | Ollama base URL for the runner wrapper (default `http://127.0.0.1:11434`) |
+| `ORCH_OLLAMA_HOST` | Ollama base URL for dashboard chat (default `http://127.0.0.1:11434`) |
+| `ORCH_CHAT_LLM` | Dashboard chat backend: `auto` \| `ollama` \| `cursor` (default `auto`) |

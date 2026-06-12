@@ -9,10 +9,14 @@ void main() {
   late FeatureStore store;
   late OrchestratorChatProcessor processor;
 
+  // Hermetic: no API keys and an unreachable Ollama port so no tier can
+  // accidentally pick up a model running on the dev machine.
+  const hermeticEnv = {'ORCH_OLLAMA_HOST': 'http://127.0.0.1:9'};
+
   setUp(() {
     tmp = Directory.systemTemp.createTempSync('orch_chat_test_');
     store = FeatureStore(tmp.path);
-    processor = OrchestratorChatProcessor(store);
+    processor = OrchestratorChatProcessor(store, env: hermeticEnv);
     store.createFeature(
       id: 'feature2',
       requirement: 'Auth login feature',
@@ -67,7 +71,11 @@ void main() {
   });
 
   test('static context answers URLs when forced', () async {
-    final staticProc = OrchestratorChatProcessor(store, forceStaticContext: true);
+    final staticProc = OrchestratorChatProcessor(
+      store,
+      forceStaticContext: true,
+      env: hermeticEnv,
+    );
     final r = await staticProc.process(
       'feature2',
       'what is the url for feature 2?',

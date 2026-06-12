@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'adf_brain.dart';
 import 'agent_chat_runner.dart';
 import 'conversation_builder.dart';
 import 'feature_store.dart';
@@ -22,23 +23,84 @@ class OrchestratorChatProcessor {
     this.store, {
     PipelinePlanner? planner,
     AgentChatRunner? agentChat,
+    OllamaBrain? ollama,
+    Object? router,
+    void Function(String featureId, Map<String, dynamic> event)? onUsage,
+    Map<String, String>? env,
     bool forceStaticContext = false,
   })  : _planner = planner,
         _agentChat = agentChat ?? AgentChatRunner(repoRoot: store.repoRoot),
+        _ollama = ollama ?? OllamaBrain(env: env),
+        _router = router,
+        _onUsage = onUsage,
+        _env = env ?? Platform.environment,
         _forceStaticContext = forceStaticContext;
 
   final FeatureStore store;
   final PipelinePlanner? _planner;
   final AgentChatRunner _agentChat;
+  final OllamaBrain _ollama;
+
+  /// Loose-coupled model router (concrete type lives in model_router.dart and
+  /// is injected to avoid a hard dependency). Consulted in auto mode after
+  /// the instant tier misses. Expected shape:
+  /// `route(String task, {String kind, int? phase})` returning a
+  /// `{tier, model, reason}` decision (map or RouteDecision-shaped object),
+  /// and `brainFor(decision, {void Function(Map<String, dynamic>)? onUsage})`
+  /// returning a Claude brain exposing `complete({system, user})`.
+  final Object? _router;
+
+  /// Receives CostMeter-compatible `{"type":"result",...}` usage events from
+  /// router-selected Claude calls, keyed by feature id; the server wires this
+  /// to its CostMeter instance.
+  final void Function(String featureId, Map<String, dynamic> event)? _onUsage;
+  final Map<String, String> _env;
   final bool _forceStaticContext;
 
   static const _defaultModel = 'gpt-4o-mini';
 
   String? get llmApiKey => _llmApiKey();
 
+  /// `ORCH_CHAT_LLM`: `auto` (default — Ollama when reachable, else the
+  /// cursor-agent path) | `ollama` | `cursor` (never touch Ollama).
+  String get chatLlmMode {
+    final v = (_env['ORCH_CHAT_LLM'] ?? 'auto').trim().toLowerCase();
+    return (v == 'ollama' || v == 'cursor') ? v : 'auto';
+  }
+
+  /// Cached <=500ms reachability probe — safe to call once per message.
+  Future<bool> ollamaChatReady() async {
+    if (chatLlmMode == 'cursor') return false;
+    return _ollama.availableCached();
+  }
+
+  /// Loads the local model into memory so the first user question doesn't
+  /// pay the ~3s cold start. Fire-and-forget at server boot.
+  Future<void> warmOllama() async {
+    if (!await ollamaChatReady()) return;
+    await _ollama.chat(
+      [
+        {'role': 'user', 'content': 'ok'},
+      ],
+      maxTokens: 1,
+      timeout: const Duration(seconds: 90),
+    );
+  }
+
+  /// Which LLM free-form chat will use right now: `llm` (cloud API),
+  /// `ollama:<model>`, `cursor_agent`, or `none`.
+  Future<String> describeChatLlm() async {
+    final apiKey = _llmApiKey();
+    if (apiKey != null && !preferCursorCli) return 'llm';
+    if (await ollamaChatReady()) return _ollama.name;
+    if (await cursorChatReady()) return 'cursor_agent';
+    if (apiKey != null) return 'llm';
+    return 'none';
+  }
+
   /// When true, dashboard chat uses cursor-agent before HTTP LLM (Groq/OpenAI).
   bool get preferCursorCli {
-    final v = Platform.environment['ORCH_CHAT_PREFER_CURSOR'];
+    final v = _env['ORCH_CHAT_PREFER_CURSOR'];
     if (v == '0' || v == 'false') return false;
     if (v == '1' || v == 'true') return true;
     // Default: prefer Cursor CLI when no cloud LLM key is configured.
@@ -49,8 +111,8 @@ class OrchestratorChatProcessor {
 
   bool get staticContextEnabled =>
       _forceStaticContext ||
-      Platform.environment['ORCH_CHAT_STATIC_CONTEXT'] == '1' ||
-      Platform.environment['ORCH_CHAT_STATIC_CONTEXT'] == 'true';
+      _env['ORCH_CHAT_STATIC_CONTEXT'] == '1' ||
+      _env['ORCH_CHAT_STATIC_CONTEXT'] == 'true';
 
   Future<OrchestratorChatResult> process(
     String featureId,
@@ -58,35 +120,58 @@ class OrchestratorChatProcessor {
     ChatProcessMode mode = ChatProcessMode.full,
     void Function(String partialText)? onPartial,
   }) async {
+    final sw = Stopwatch()..start();
     final trimmed = userMessage.trim();
     if (trimmed.isEmpty) {
       throw ArgumentError('empty message');
     }
     if (trimmed.startsWith('@orch-orchestrator')) {
-      return OrchestratorChatResult(
-        assistantReply:
-            'Running orchestrator command: ${trimmed.split('\n').first}',
-        orchestratorCommand: trimmed.split('\n').first,
-        agentPrompt: trimmed,
-        action: OrchestratorAction.execute,
-        source: 'direct',
+      return _stamped(
+        OrchestratorChatResult(
+          assistantReply:
+              'Running orchestrator command: ${trimmed.split('\n').first}',
+          orchestratorCommand: trimmed.split('\n').first,
+          agentPrompt: trimmed,
+          action: OrchestratorAction.execute,
+          source: 'direct',
+        ),
+        sw,
       );
     }
 
     final ctx = await _buildContext(featureId);
+
+    // Forced static context keeps its richer link answers ahead of the
+    // instant tier; both are zero-model millisecond paths.
+    if (mode != ChatProcessMode.stateOnly && staticContextEnabled) {
+      final contextual = _tryContextualAnswer(ctx, trimmed);
+      if (contextual != null) return _stamped(contextual, sw);
+    }
+
+    // Instant zero-model tier runs first in every mode: state and
+    // describe-intent questions answer in milliseconds from disk and never
+    // hit the 'Thinking…' placeholder path.
+    final instant = _answerFromFeatureState(ctx, trimmed);
+    if (instant != null) return _stamped(instant, sw);
+
+    if (mode == ChatProcessMode.stateOnly) {
+      return _stamped(_fallback(ctx, trimmed), sw);
+    }
+
     final contextBlock = _formatContextBlock(ctx);
     final history = _filterChatHistory(
       ConversationBuilder(store).buildChatView(featureId, limit: 12),
     );
 
-    if (mode == ChatProcessMode.stateOnly) {
-      final stateAnswer = _answerFromFeatureState(ctx, trimmed);
-      if (stateAnswer != null) return stateAnswer;
-      return _fallback(ctx, trimmed);
-    }
+    final useCursor =
+        mode == ChatProcessMode.full && await _shouldTryCursorChat();
+    final cursorFirst = chatLlmMode == 'cursor' ||
+        _env['ORCH_CHAT_PREFER_CURSOR'] == '1' ||
+        _env['ORCH_CHAT_PREFER_CURSOR'] == 'true';
 
-    final useCursor = mode == ChatProcessMode.full && await _shouldTryCursorChat();
-    if (preferCursorCli && useCursor) {
+    // ORCH_CHAT_LLM=cursor (or explicit prefer-cursor) keeps the legacy
+    // cursor-first ordering; auto order is API LLM -> Ollama -> cursor.
+    if (cursorFirst && useCursor) {
       final agentReply = await _agentChat.converse(
         featureId: featureId,
         contextBlock: contextBlock,
@@ -95,18 +180,35 @@ class OrchestratorChatProcessor {
         onPartial: onPartial,
       );
       if (agentReply != null && agentReply.reply.trim().isNotEmpty) {
-        return _fromAgentChat(ctx, trimmed, agentReply);
+        return _stamped(_fromAgentChat(ctx, trimmed, agentReply), sw);
       }
+    }
+
+    // Model router (auto mode only): after the instant tier misses, the
+    // router scores complexity — simple stays on the free local tier, hard
+    // goes to the right Claude tier. ORCH_CHAT_LLM=ollama|cursor bypasses the
+    // router entirely, and any router/brain failure returns null so the
+    // existing ollama -> cursor-agent -> fallback chain below takes over.
+    if (chatLlmMode == 'auto' && _router != null) {
+      final routed = await _callRoutedModel(ctx, trimmed, history);
+      if (routed != null) return _stamped(routed, sw);
     }
 
     final apiKey = _llmApiKey();
-    if (!preferCursorCli && apiKey != null) {
+    if (apiKey != null && (!preferCursorCli || cursorFirst)) {
       try {
-        return await _callHttpLlm(ctx, trimmed, apiKey, history);
+        return _stamped(await _callHttpLlm(ctx, trimmed, apiKey, history), sw);
       } catch (_) {}
     }
 
-    if (!preferCursorCli && useCursor) {
+    // Local Ollama answers free-form chat at $0 before any cursor-agent
+    // fallback. ollamaChatReady() is false when ORCH_CHAT_LLM=cursor.
+    if (await ollamaChatReady()) {
+      final viaOllama = await _callOllama(ctx, trimmed, history);
+      if (viaOllama != null) return _stamped(viaOllama, sw);
+    }
+
+    if (!cursorFirst && useCursor) {
       final agentReply = await _agentChat.converse(
         featureId: featureId,
         contextBlock: contextBlock,
@@ -115,33 +217,253 @@ class OrchestratorChatProcessor {
         onPartial: onPartial,
       );
       if (agentReply != null && agentReply.reply.trim().isNotEmpty) {
-        return _fromAgentChat(ctx, trimmed, agentReply);
+        return _stamped(_fromAgentChat(ctx, trimmed, agentReply), sw);
       }
     }
 
-    if (staticContextEnabled) {
-      final contextual = _tryContextualAnswer(ctx, trimmed);
-      if (contextual != null) return contextual;
-    }
-
-    final stateAnswer = _answerFromFeatureState(ctx, trimmed);
-    if (stateAnswer != null) return stateAnswer;
-
-    return _fallback(
-      ctx,
-      trimmed,
-      note:
-          'Could not reach a chat model. Run cursor-agent login or set ORCH_LLM_API_KEY / GROQ_API_KEY on the API server.',
+    return _stamped(
+      _fallback(
+        ctx,
+        trimmed,
+        note:
+            'Could not reach a chat model. Start Ollama (ORCH_OLLAMA_HOST), run cursor-agent login, or set ORCH_LLM_API_KEY / GROQ_API_KEY on the API server.',
+      ),
+      sw,
     );
   }
 
+  /// Records wall-clock time from question received to answer ready.
+  OrchestratorChatResult _stamped(OrchestratorChatResult r, Stopwatch sw) {
+    sw.stop();
+    r.latencyMs ??= sw.elapsedMilliseconds;
+    return r;
+  }
+
   Future<bool> _shouldTryCursorChat() async {
-    if (Platform.environment['ORCH_CHAT_USE_CURSOR'] == '0' ||
-        Platform.environment['ORCH_CHAT_USE_CURSOR'] == 'false') {
+    if (_env['ORCH_CHAT_USE_CURSOR'] == '0' ||
+        _env['ORCH_CHAT_USE_CURSOR'] == 'false') {
       return false;
     }
     final health = await _agentChat.health.probe();
     return health['ready'] == true;
+  }
+
+  /// Free-form chat through the local Ollama model. The reply carries an
+  /// `[ACTION:...]` tag (small models follow it more reliably than JSON);
+  /// missing tags degrade to answer-only / resume heuristics.
+  Future<OrchestratorChatResult?> _callOllama(
+    OrchestratorChatContext ctx,
+    String userMessage,
+    List<Map<String, dynamic>> history,
+  ) async {
+    // Prefill time on a local 4B model is linear in prompt size: keep the
+    // last 6 turns, each capped, so answers start in well under a second.
+    final messages = <Map<String, String>>[
+      {'role': 'system', 'content': _chatSystemPrompt(ctx)},
+    ];
+    final recent = history.length > 6
+        ? history.sublist(history.length - 6)
+        : history;
+    for (final m in recent) {
+      final role = m['role'] as String?;
+      var text = (m['text'] as String? ?? '').trim();
+      if (text.isEmpty || (role != 'user' && role != 'assistant')) continue;
+      if (text.length > 700) text = '${text.substring(0, 700)}…';
+      messages.add({'role': role!, 'content': text});
+    }
+    messages.add({'role': 'user', 'content': userMessage});
+
+    final raw = await _ollama.chat(messages, maxTokens: 256, think: false);
+    if (raw == null || raw.trim().isEmpty) return null;
+    return _resultFromActionTaggedReply(ctx, userMessage, raw, _ollama.name);
+  }
+
+  /// Parses a model reply carrying the trailing `[ACTION:...]` tag — shared
+  /// by the local Ollama path and the router-selected Claude path. Models
+  /// drift on tag formatting ("[ ACTION:resume ]"), so whitespace anywhere
+  /// inside the brackets is tolerated; missing tags degrade to answer-only /
+  /// resume heuristics.
+  OrchestratorChatResult? _resultFromActionTaggedReply(
+    OrchestratorChatContext ctx,
+    String userMessage,
+    String raw,
+    String source,
+  ) {
+    var text = raw.trim();
+    var action = _looksLikeWorkRequest(userMessage.toLowerCase())
+        ? OrchestratorAction.resume
+        : OrchestratorAction.answerOnly;
+    final tag = RegExp(r'\[\s*ACTION:\s*(\w+)\s*\]', caseSensitive: false)
+        .firstMatch(text);
+    if (tag != null) {
+      action = switch (tag.group(1)!.toLowerCase()) {
+        'sync' => OrchestratorAction.sync,
+        'resume' => OrchestratorAction.resume,
+        'clarify' => OrchestratorAction.clarify,
+        _ => OrchestratorAction.answerOnly,
+      };
+      text = text.replaceRange(tag.start, tag.end, '').trim();
+    }
+    if (text.isEmpty) return null;
+    final cmd = action == OrchestratorAction.sync
+        ? '@orch-orchestrator sync ${ctx.featureId}'
+        : '@orch-orchestrator resume ${ctx.featureId}';
+    final agentPrompt = action == OrchestratorAction.answerOnly
+        ? ''
+        : _buildAgentPrompt(
+            ctx,
+            cmd,
+            'Execute per user chat request and ADF routing.',
+            userMessage,
+          );
+    return OrchestratorChatResult(
+      assistantReply: text,
+      orchestratorCommand: cmd,
+      agentPrompt: agentPrompt,
+      action: action,
+      source: source,
+    );
+  }
+
+  /// Whether router cloud tiers may be attempted at all. Without
+  /// ANTHROPIC_API_KEY the router degrades to local-only — never an error.
+  bool get _anthropicConfigured =>
+      (_env['ANTHROPIC_API_KEY'] ?? '').trim().isNotEmpty;
+
+  /// ORCH_AGENT_TIMEOUT_SEC caps every brain LLM task (default 30s). On
+  /// timeout the routed path returns null and the local chain takes over.
+  Duration get _agentTimeout => Duration(
+      seconds: int.tryParse(_env['ORCH_AGENT_TIMEOUT_SEC'] ?? '') ?? 30);
+
+  /// Consults the injected model router and answers through the tier it
+  /// picks: 'local' reuses the existing $0 [_callOllama] path unchanged;
+  /// 'fast'/'balanced'/'deep' call the Claude brain the router supplies
+  /// (only when ANTHROPIC_API_KEY is set). Returns null whenever the routed
+  /// path cannot answer so the caller falls through to the legacy chain.
+  Future<OrchestratorChatResult?> _callRoutedModel(
+    OrchestratorChatContext ctx,
+    String userMessage,
+    List<Map<String, dynamic>> history,
+  ) async {
+    Object? decision;
+    try {
+      final raw = (_router as dynamic)
+          .route(userMessage, kind: 'chat', phase: ctx.phase);
+      decision = (raw is Future ? await raw : raw) as Object?;
+    } catch (_) {
+      return null;
+    }
+    final tier = _decisionField(decision, 'tier');
+    if (tier == 'local') {
+      if (!await ollamaChatReady()) return null;
+      return _callOllama(ctx, userMessage, history);
+    }
+    if (tier != 'fast' && tier != 'balanced' && tier != 'deep') return null;
+    if (!_anthropicConfigured) return null;
+    final model = _decisionField(decision, 'model');
+    if (model == null || model.isEmpty) return null;
+    return _callClaude(ctx, userMessage, history, decision, model);
+  }
+
+  /// Reads `tier` / `model` / `reason` off a router decision regardless of
+  /// whether it arrives as a map or a RouteDecision-shaped object.
+  String? _decisionField(Object? decision, String key) {
+    if (decision is Map) return decision[key]?.toString();
+    try {
+      final d = decision as dynamic;
+      final Object? v = switch (key) {
+        'tier' => d.tier,
+        'model' => d.model,
+        'reason' => d.reason,
+        _ => null,
+      };
+      return v?.toString();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Free-form chat through the Claude brain the router supplies. Reuses the
+  /// `[ACTION:...]` reply protocol so action parsing matches the local path,
+  /// stamps the source as `claude:<model>`, and threads [_onUsage] into the
+  /// brain so the server meters spend per feature.
+  Future<OrchestratorChatResult?> _callClaude(
+    OrchestratorChatContext ctx,
+    String userMessage,
+    List<Map<String, dynamic>> history,
+    Object? decision,
+    String model,
+  ) async {
+    final onUsage = _onUsage;
+    final usageCb = onUsage == null
+        ? null
+        : (Map<String, dynamic> event) => onUsage(ctx.featureId, event);
+    dynamic brain;
+    try {
+      brain = (_router as dynamic).brainFor(decision, onUsage: usageCb);
+    } catch (_) {
+      // Routers that attach usage reporting on the brain instead of the
+      // factory call still work — set it best-effort after construction.
+      try {
+        brain = (_router as dynamic).brainFor(decision);
+        if (usageCb != null) {
+          try {
+            (brain as dynamic).onUsage = usageCb;
+          } catch (_) {}
+        }
+      } catch (_) {
+        return null;
+      }
+    }
+    if (brain == null) return null;
+    String? raw;
+    try {
+      final out = (brain as dynamic).complete(
+        system: _chatSystemPrompt(ctx),
+        user: _foldHistory(history, userMessage),
+      );
+      raw = (out is Future ? await out.timeout(_agentTimeout) : out) as String?;
+    } catch (_) {
+      return null;
+    }
+    if (raw == null || raw.trim().isEmpty) return null;
+    return _resultFromActionTaggedReply(ctx, userMessage, raw, 'claude:$model');
+  }
+
+  /// Folds recent turns into one user block for single-shot
+  /// `complete({system, user})` brains (the Claude brain takes a system
+  /// prompt plus one user message, not a message list). Mirrors the Ollama
+  /// path's caps: last 6 turns, each trimmed to 700 chars.
+  String _foldHistory(
+    List<Map<String, dynamic>> history,
+    String userMessage,
+  ) {
+    final recent =
+        history.length > 6 ? history.sublist(history.length - 6) : history;
+    final buf = StringBuffer();
+    for (final m in recent) {
+      final role = m['role'] as String?;
+      var text = (m['text'] as String? ?? '').trim();
+      if (text.isEmpty || (role != 'user' && role != 'assistant')) continue;
+      if (text.length > 700) text = '${text.substring(0, 700)}…';
+      buf.writeln('${role == 'user' ? 'User' : 'Assistant'}: $text');
+    }
+    if (buf.isEmpty) return userMessage;
+    return 'Recent conversation:\n$buf\nUser: $userMessage';
+  }
+
+  /// System prompt for the `[ACTION:...]` tagged-reply protocol, shared by
+  /// the local Ollama path and the router-selected Claude path.
+  String _chatSystemPrompt(OrchestratorChatContext ctx) {
+    return 'You are the ADF v3 orchestrator assistant for feature '
+        '"${ctx.featureId}".\n'
+        '${_formatContextBlock(ctx)}\n\n'
+        'Answer the user naturally in 2-5 sentences using the context above. '
+        'Use markdown if helpful.\n'
+        'End with exactly one line: [ACTION:answer_only] for questions, '
+        '[ACTION:sync] when the user approves moving forward, '
+        '[ACTION:resume] when they want work continued, or '
+        '[ACTION:clarify] when they add requirements.';
   }
 
   String _formatContextBlock(OrchestratorChatContext ctx) {
@@ -190,9 +512,9 @@ class OrchestratorChatProcessor {
   }
 
   String? _llmApiKey() {
-    return Platform.environment['ORCH_LLM_API_KEY'] ??
-        Platform.environment['OPENAI_API_KEY'] ??
-        Platform.environment['GROQ_API_KEY'] ??
+    return _env['ORCH_LLM_API_KEY'] ??
+        _env['OPENAI_API_KEY'] ??
+        _env['GROQ_API_KEY'] ??
         _readDotEnvKey('ORCH_LLM_API_KEY') ??
         _readDotEnvKey('OPENAI_API_KEY') ??
         _readDotEnvKey('GROQ_API_KEY');
@@ -257,25 +579,80 @@ class OrchestratorChatProcessor {
       );
       }
 
+  /// "What does this feature do?" answered purely from disk state —
+  /// requirement text, spec.md EARS excerpt, phase/status, gates passed.
+  /// No model call, no process spawn: milliseconds, zero tokens.
+  OrchestratorChatResult _describeAnswer(
+    OrchestratorChatContext ctx,
+    String resolvedId,
+  ) {
+    final reqFile = File('${store.featurePath(resolvedId)}/requirement.md');
+    var requirement =
+        reqFile.existsSync() ? reqFile.readAsStringSync().trim() : '';
+    if (requirement.length > 600) {
+      requirement = '${requirement.substring(0, 600)}…';
+    }
+
+    final st = store.readState(resolvedId);
+    final phase = store.effectivePhase(resolvedId, st);
+    final status = st['status'] as String? ?? 'unknown';
+    final gates = st['gates'] as Map<String, dynamic>? ?? {};
+    final passed = gates.values.where((v) => v == true).length;
+    final ears = _specEarsLines(resolvedId);
+
+    final buf = StringBuffer('**$resolvedId** — what it does\n\n');
+    buf.writeln(requirement.isEmpty
+        ? '_No requirement recorded yet — describe the feature in chat or '
+            'edit `requirement.md` to fill it in._'
+        : requirement);
+    if (ears.isNotEmpty) {
+      buf
+        ..writeln('\nSpec requirements (EARS, `specs/$resolvedId/spec.md`):')
+        ..writeln(ears.map((l) => '- $l').join('\n'));
+    }
+    buf.writeln('\nCurrently on **phase $phase** (status: **$status**), '
+        '$passed/${FeatureStore.phaseGateMap.length} gates passed.');
+    return OrchestratorChatResult(
+      assistantReply: buf.toString().trim(),
+      orchestratorCommand: '@orch-orchestrator resume ${ctx.featureId}',
+      agentPrompt: '',
+      action: OrchestratorAction.answerOnly,
+      source: 'state',
+    );
+  }
+
+  /// First EARS `The system SHALL …` lines from spec.md, if generated.
+  List<String> _specEarsLines(String id, {int max = 3}) {
+    final spec = File('${store.repoRoot}/specs/$id/spec.md');
+    if (!spec.existsSync()) return const [];
+    final lines = <String>[];
+    for (final line in spec.readAsLinesSync()) {
+      final t = line.trim();
+      if (t.toLowerCase().startsWith('the system shall')) {
+        lines.add(t);
+        if (lines.length >= max) break;
+      }
+    }
+    return lines;
+  }
+
   String _llmApiUrl() {
-    return Platform.environment['ORCH_LLM_API_URL'] ??
-        (Platform.environment['GROQ_API_KEY'] != null
+    return _env['ORCH_LLM_API_URL'] ??
+        (_env['GROQ_API_KEY'] != null
             ? 'https://api.groq.com/openai/v1/chat/completions'
             : 'https://api.openai.com/v1/chat/completions');
   }
 
   String _llmModel() {
-    return Platform.environment['ORCH_LLM_MODEL'] ??
-        (Platform.environment['GROQ_API_KEY'] != null
+    return _env['ORCH_LLM_MODEL'] ??
+        (_env['GROQ_API_KEY'] != null
             ? 'llama-3.3-70b-versatile'
             : _defaultModel);
   }
 
-  int get _apiPort =>
-      int.tryParse(Platform.environment['ORCH_PORT'] ?? '3847') ?? 3847;
+  int get _apiPort => int.tryParse(_env['ORCH_PORT'] ?? '3847') ?? 3847;
 
-  int get _webPort =>
-      int.tryParse(Platform.environment['ORCH_WEB_PORT'] ?? '3848') ?? 3848;
+  int get _webPort => int.tryParse(_env['ORCH_WEB_PORT'] ?? '3848') ?? 3848;
 
   String get _apiBase => 'http://localhost:$_apiPort';
 
@@ -301,6 +678,12 @@ class OrchestratorChatProcessor {
     if (_looksLikeWorkRequest(lower)) return null;
     if (!_isInformationalQuery(lower)) return null;
     final resolvedId = _resolveFeatureIdFromMessage(ctx.featureId, lower);
+
+    // Describe-intent first: "what does this feature do" must answer from
+    // disk before next-steps/status keywords get a chance to misroute it.
+    if (_asksDescribe(lower)) {
+      return _describeAnswer(ctx, resolvedId);
+    }
 
     if (_asksNextSteps(lower) || _asksAutopilot(lower) || lower.contains('progress')) {
       return _progressAnswer(ctx, resolvedId);
@@ -504,12 +887,27 @@ $links''',
   }
 
   bool _isInformationalQuery(String lower) {
-    return _asksForUrl(lower) ||
+    return _asksDescribe(lower) ||
+        _asksForUrl(lower) ||
         _asksPhaseOrStatus(lower) ||
         _asksHelp(lower) ||
         _asksNextSteps(lower) ||
         _asksArtifacts(lower) ||
         _asksAutopilot(lower);
+  }
+
+  /// Describe-intent: "what does this feature do", "what is this feature",
+  /// "describe/explain/summarize this/the feature", "what am I building".
+  bool _asksDescribe(String lower) {
+    if (lower.contains('what does this feature do') ||
+        lower.contains('what does the feature do') ||
+        lower.contains('what does it do') ||
+        lower.contains('what am i building')) {
+      return true;
+    }
+    return RegExp(r"\bwhat('s| is)\s+(this|the)\s+feature\b").hasMatch(lower) ||
+        RegExp(r'\b(describe|explain|summari[sz]e)\b.{0,40}\b(this|the)\s+feature\b')
+            .hasMatch(lower);
   }
 
   bool _asksNextSteps(String lower) {
@@ -845,6 +1243,7 @@ class OrchestratorChatResult {
     required this.agentPrompt,
     required this.action,
     required this.source,
+    this.latencyMs,
   });
 
   final String assistantReply;
@@ -852,6 +1251,10 @@ class OrchestratorChatResult {
   final String agentPrompt;
   final OrchestratorAction action;
   final String source;
+
+  /// Wall-clock ms from question received to answer ready (stamped by
+  /// [OrchestratorChatProcessor.process]).
+  int? latencyMs;
 
   bool get shouldRunAgent => action != OrchestratorAction.answerOnly;
 }

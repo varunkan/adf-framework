@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:io';
 
+import 'agent_crew.dart' show AgentEscalation, agentBudgetFromEnv;
 import 'artifact_validator.dart';
 import 'deterministic_artifacts.dart';
 import 'feature_store.dart';
@@ -18,13 +20,26 @@ class Autopilot {
     this.validator,
     this.learnings, {
     this.maxHealAttempts = 2,
-  });
+    this.escalation,
+    Duration? agentBudget,
+    Map<String, String>? env,
+  }) : agentBudget =
+            agentBudget ?? agentBudgetFromEnv(env ?? Platform.environment);
 
   final FeatureStore store;
   final DeterministicArtifactEngine engine;
   final ArtifactValidator validator;
   final LearningStore learnings;
   final int maxHealAttempts;
+
+  /// Optional router-backed escalation hook for budget breaches; without it
+  /// a timed-out phase blocks immediately.
+  final AgentEscalation? escalation;
+
+  /// Per-task wall-clock budget (`ORCH_AGENT_TIMEOUT_SEC`, default 30s).
+  /// Deterministic-brain generation finishes in milliseconds and never
+  /// comes close to the budget.
+  final Duration agentBudget;
 
   /// Phases whose artifacts are machine-validated by the shell validator.
   static const validatedPhases = {2, 3, 4};
@@ -91,8 +106,36 @@ class Autopilot {
 
   Future<Map<String, dynamic>> _runPhase(String id, int phase) async {
     var attempt = 0;
+    String? escalatedTo;
     while (true) {
-      final written = await engine.generatePhase(id, phase);
+      List<String> written;
+      final sw = Stopwatch()..start();
+      try {
+        written = await engine.generatePhase(id, phase).timeout(agentBudget);
+      } on TimeoutException {
+        // Budget breached: escalate ONCE to the next-higher tier, then
+        // block if the retry also breaches (or no hook is wired).
+        final hook = escalation;
+        if (hook == null || escalatedTo != null) {
+          return _timedOutOutcome(
+            phase,
+            elapsedMs: sw.elapsedMilliseconds,
+            escalatedTo: escalatedTo,
+            attempts: attempt + 1,
+          );
+        }
+        escalatedTo = hook.tier;
+        try {
+          written = await hook.run(id, phase).timeout(agentBudget);
+        } on TimeoutException {
+          return _timedOutOutcome(
+            phase,
+            elapsedMs: sw.elapsedMilliseconds,
+            escalatedTo: escalatedTo,
+            attempts: attempt + 1,
+          );
+        }
+      }
       Map<String, dynamic> validation = {'pass': true, 'blockers': []};
       if (validatedPhases.contains(phase)) {
         validation = await validator.check(id, phase: phase);
@@ -103,6 +146,8 @@ class Autopilot {
           'pass': true,
           'artifacts': written,
           'attempts': attempt + 1,
+          if (escalatedTo != null) 'status': 'escalated',
+          if (escalatedTo != null) 'escalated_to': escalatedTo,
         };
       }
       if (attempt >= maxHealAttempts) {
@@ -111,6 +156,8 @@ class Autopilot {
           'pass': false,
           'blockers': validation['blockers'],
           'attempts': attempt + 1,
+          if (escalatedTo != null) 'status': 'escalated',
+          if (escalatedTo != null) 'escalated_to': escalatedTo,
         };
       }
       attempt++;
@@ -124,6 +171,31 @@ class Autopilot {
         fix: 'regenerated artifacts (attempt ${attempt + 1})',
       );
     }
+  }
+
+  /// Terminal outcome for a phase whose generation breached [agentBudget]
+  /// twice (or once with no escalation hook). Carries `status`,
+  /// `elapsed_ms`, and `escalated_to` so run() log entries surface it.
+  Map<String, dynamic> _timedOutOutcome(
+    int phase, {
+    required int elapsedMs,
+    required String? escalatedTo,
+    required int attempts,
+  }) {
+    return {
+      'phase': phase,
+      'pass': false,
+      'status': 'blocked',
+      'elapsed_ms': elapsedMs,
+      'budget_ms': agentBudget.inMilliseconds,
+      'escalated_to': escalatedTo,
+      'attempts': attempts,
+      'blockers': [
+        'phase $phase generation timed out after '
+            '${agentBudget.inMilliseconds}ms budget (ORCH_AGENT_TIMEOUT_SEC; '
+            'escalated_to: ${escalatedTo ?? 'none'})',
+      ],
+    };
   }
 
   /// Deterministic self-heal: recreate any missing directories the

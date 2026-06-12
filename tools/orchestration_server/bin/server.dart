@@ -51,6 +51,29 @@ Middleware _corsMiddleware() {
   };
 }
 
+/// Model-router tier map from env — mirrors the router contract so /health
+/// and the boot log report routing without a hard router dependency. Cloud
+/// tiers require ANTHROPIC_API_KEY; without it the router degrades to
+/// local-only (never an error), so the effective mode is reported.
+Map<String, dynamic> _modelRouterInfo() {
+  final env = Platform.environment;
+  final cloudReady = (env['ANTHROPIC_API_KEY'] ?? '').trim().isNotEmpty;
+  final configured = (env['ORCH_ROUTER'] ?? 'auto').trim().toLowerCase();
+  final mode = const {'auto', 'local-only', 'cloud-only'}.contains(configured)
+      ? configured
+      : 'auto';
+  return {
+    'mode': cloudReady ? mode : 'local-only',
+    'tiers': {
+      'local': env['ORCH_OLLAMA_MODEL'] ?? OllamaBrain.defaultModel,
+      'fast': env['ORCH_MODEL_FAST'] ?? 'claude-haiku-4-5',
+      'balanced': env['ORCH_MODEL_BALANCED'] ?? 'claude-sonnet-4-6',
+      'deep': env['ORCH_MODEL_DEEP'] ?? 'claude-opus-4-8',
+    },
+    'cloud_ready': cloudReady,
+  };
+}
+
 Future<void> _loadAgentEnv(String repoRoot) async {
   final home = Platform.environment['HOME'] ?? '';
   final envFile = File('$home/.cursor/agent.env');
@@ -86,13 +109,21 @@ Future<void> main(List<String> args) async {
   final artifactValidator = ArtifactValidator(repoRoot);
   final planner = PipelinePlanner(store);
   final conversation = ConversationBuilder(store);
-  final chatProcessor = OrchestratorChatProcessor(store, planner: planner);
+  final costs = CostMeter(store);
+  // Router-selected Claude chat calls meter spend through the same CostMeter
+  // the cost routes serve; chat is not a pipeline phase, so entries record
+  // phase null.
+  final chatProcessor = OrchestratorChatProcessor(
+    store,
+    planner: planner,
+    onUsage: (featureId, event) =>
+        costs.recordFromResultEvent(featureId, event),
+  );
   final postSync = RunPostSync(store);
   final brainSelector = BrainSelector();
   final learnings = LearningStore(repoRoot);
   final figma = FigmaConnector();
   final integrity = IntegrityChain(store);
-  final costs = CostMeter(store);
   final auditBundles =
       AuditBundleBuilder(store, integrity: integrity, costs: costs);
   final previewService = PreviewService(
@@ -157,9 +188,19 @@ Future<void> main(List<String> args) async {
   print('Active runner: ${health['runner'] ?? 'cursor'} '
       '(ADF_RUNNER=${Platform.environment['ADF_RUNNER'] ?? 'auto'})');
   print('Runner ready: ${health['ready']} (${health['agent_path'] ?? 'no agent'})');
-  final cursorChat = await chatProcessor.cursorChatReady();
-  print('Chat LLM: ${orchLlmConfigured() ? 'configured (Groq/OpenAI)' : 'not configured'}');
-  print('Chat mode: ${chatProcessor.preferCursorCli && cursorChat ? 'Agent CLI (${health['runner'] ?? 'cursor'})' : (orchLlmConfigured() ? 'HTTP LLM' : 'fallback/static')}');
+  final chatLlm = await chatProcessor.describeChatLlm();
+  print('Chat LLM: $chatLlm (ORCH_CHAT_LLM=${chatProcessor.chatLlmMode}, '
+      'key ${orchLlmConfigured() ? 'set' : 'unset'})');
+  final modelRouter = _modelRouterInfo();
+  final routerTiers = modelRouter['tiers'] as Map<String, dynamic>;
+  print('Model router: mode=${modelRouter['mode']} '
+      '(cloud ${modelRouter['cloud_ready'] == true ? 'ready' : 'off — no ANTHROPIC_API_KEY'}) '
+      'tiers fast=${routerTiers['fast']} balanced=${routerTiers['balanced']} '
+      'deep=${routerTiers['deep']} local=${routerTiers['local']}');
+  if (chatLlm.startsWith('ollama:')) {
+    unawaited(chatProcessor.warmOllama().then((_) =>
+        print('Local chat model warmed and resident ($chatLlm)')));
+  }
 
 
   Future<void> runChatInBackground(
@@ -323,11 +364,14 @@ Future<void> main(List<String> args) async {
       healthCache = {
         'status': 'ok',
         'repo': repoRoot,
-        'chat_llm_configured': orchLlmConfigured(),
+        'chat_llm': await chatProcessor.describeChatLlm(),
+        'chat_llm_configured':
+            orchLlmConfigured() || await chatProcessor.ollamaChatReady(),
         'chat_cursor_ready': await chatProcessor.cursorChatReady(),
         'chat_prefer_cursor': chatProcessor.preferCursorCli,
         'chat_static_context':
             Platform.environment['ORCH_CHAT_STATIC_CONTEXT'] == '1',
+        'model_router': modelRouter,
       };
       healthCachedAt = DateTime.now();
     }
@@ -537,26 +581,22 @@ Future<void> main(List<String> args) async {
       );
 
       // Instant-first chat: reply in milliseconds at zero token cost.
-      // A cloud LLM (if configured) answers in ~1s. cursor-agent refinement
-      // is opt-in via ORCH_CHAT_REFINE=1 and upgrades the reply in place.
+      // Free-form questions go to a cloud LLM (if configured) or local
+      // Ollama (~seconds, $0). cursor-agent refinement is opt-in via
+      // ORCH_CHAT_REFINE=1 and upgrades the reply in place.
       OrchestratorChatResult chat;
       final refineEnabled =
           Platform.environment['ORCH_CHAT_REFINE'] == '1' ||
               Platform.environment['ORCH_CHAT_REFINE'] == 'true';
 
-      if (chatProcessor.llmApiKey != null && !chatProcessor.preferCursorCli) {
-        chat = await chatProcessor.process(
-          id,
-          prompt.trim(),
-          mode: ChatProcessMode.httpOnly,
-        );
-      } else {
-        chat = await chatProcessor.process(
-          id,
-          prompt.trim(),
-          mode: ChatProcessMode.stateOnly,
-        );
-      }
+      final hasHttpLlm =
+          (chatProcessor.llmApiKey != null && !chatProcessor.preferCursorCli) ||
+              await chatProcessor.ollamaChatReady();
+      chat = await chatProcessor.process(
+        id,
+        prompt.trim(),
+        mode: hasHttpLlm ? ChatProcessMode.httpOnly : ChatProcessMode.stateOnly,
+      );
       store.updateCommandMeta(
         id,
         cmd['id'] as String,
@@ -564,8 +604,14 @@ Future<void> main(List<String> args) async {
         orchestratorCommand: chat.orchestratorCommand,
         agentPrompt: chat.agentPrompt,
         llmSource: chat.source,
+        latencyMs: chat.latencyMs,
       );
-      if (refineEnabled && await chatProcessor.cursorChatReady()) {
+      // The instant tier already produced a final answer — never replace it
+      // with a 'Thinking…'/streaming placeholder pass.
+      final instantAnswered = chat.source == 'state' || chat.source == 'direct';
+      if (refineEnabled &&
+          !instantAnswered &&
+          await chatProcessor.cursorChatReady()) {
         unawaited(runChatInBackground(id, cmd['id'] as String, prompt.trim()));
       }
 
@@ -578,6 +624,7 @@ Future<void> main(List<String> args) async {
             'assistant_message': chat.assistantReply,
             'orchestrator_command': chat.orchestratorCommand,
             'llm_source': chat.source,
+            'latency_ms': chat.latencyMs,
             'feature': featureDetailPayload(id),
           });
         }
@@ -592,6 +639,7 @@ Future<void> main(List<String> args) async {
             'assistant_message': chat.assistantReply,
             'orchestrator_command': chat.orchestratorCommand,
             'llm_source': chat.source,
+            'latency_ms': chat.latencyMs,
             'feature': featureDetailPayload(id),
           });
         }
@@ -605,6 +653,7 @@ Future<void> main(List<String> args) async {
             'assistant_message': chat.assistantReply,
             'orchestrator_command': chat.orchestratorCommand,
             'llm_source': chat.source,
+            'latency_ms': chat.latencyMs,
             'message':
                 'Feature is completed — notes saved to requirement.md only.',
             'feature': featureDetailPayload(id),
@@ -637,6 +686,7 @@ Future<void> main(List<String> args) async {
           'assistant_message': chat.assistantReply,
           'orchestrator_command': chat.orchestratorCommand,
           'llm_source': chat.source,
+          'latency_ms': chat.latencyMs,
           'result': result,
           'feature': featureDetailPayload(id),
         });
@@ -648,6 +698,7 @@ Future<void> main(List<String> args) async {
         'assistant_message': chat.assistantReply,
         'orchestrator_command': chat.orchestratorCommand,
         'llm_source': chat.source,
+        'latency_ms': chat.latencyMs,
       });
     } catch (e) {
       return _json({'error': e.toString()}, status: 400);

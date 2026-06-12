@@ -573,6 +573,7 @@ $t
     String? orchestratorCommand,
     String? agentPrompt,
     String? llmSource,
+    int? latencyMs,
   }) {
     final file = File('${featurePath(id)}/commands.jsonl');
     if (!file.existsSync()) return;
@@ -589,6 +590,7 @@ $t
           }
           if (agentPrompt != null) cmd['agent_prompt'] = agentPrompt;
           if (llmSource != null) cmd['llm_source'] = llmSource;
+          if (latencyMs != null) cmd['latency_ms'] = latencyMs;
         }
         updated.add(jsonEncode(cmd));
       } catch (_) {

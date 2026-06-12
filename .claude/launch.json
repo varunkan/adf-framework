@@ -3,8 +3,11 @@
   "configurations": [
     {
       "name": "orchestration-api",
-      "runtimeExecutable": "dart",
-      "runtimeArgs": ["run", "tools/orchestration_server/bin/server.dart"],
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "ORCH_CHAT_LLM=auto ORCH_OLLAMA_MODEL='hf.co/nvidia/NVIDIA-Nemotron-3-Nano-4B-GGUF:Q4_K_M' dart run tools/orchestration_server/bin/server.dart"
+      ],
       "port": 3847
     },
     {

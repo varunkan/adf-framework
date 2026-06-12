@@ -411,6 +411,9 @@ class _MessageBubble extends StatelessWidget {
     final time = ts != null && ts.length >= 19 ? ts.substring(11, 19) : '';
 
     final isUser = role == 'user';
+    final latencyMs = (message['latency_ms'] as num?)?.toInt();
+    final llmSource = message['llm_source'] as String?;
+    final caption = isUser ? null : _replyCaption(latencyMs, llmSource);
     final isError = type == 'error';
     final isSystem = role == 'system' || (type == 'command' && !isUser);
 
@@ -495,6 +498,16 @@ class _MessageBubble extends StatelessWidget {
               p: TextStyle(fontSize: 14, height: 1.45, color: fg),
             ),
           ),
+          if (caption != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              caption,
+              style: TextStyle(
+                fontSize: 10,
+                color: fg.withValues(alpha: 0.7),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -527,4 +540,36 @@ class _MessageBubble extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Caption like "12 ms · instant" for assistant replies; null when the
+/// message carries no latency/source metadata.
+String? _replyCaption(int? latencyMs, String? llmSource) {
+  final parts = <String>[
+    if (latencyMs != null) _formatLatency(latencyMs),
+    if (llmSource != null && llmSource.isNotEmpty) _formatLlmSource(llmSource),
+  ];
+  return parts.isEmpty ? null : parts.join(' · ');
+}
+
+/// Sub-second latencies as "N ms", longer ones as "X.Y s".
+String _formatLatency(int ms) =>
+    ms < 1000 ? '$ms ms' : '${(ms / 1000).toStringAsFixed(1)} s';
+
+/// Human label for a reply source: 'state' → "instant",
+/// `ollama:<model>` → "model short-name (local)" (hf.co/... paths are
+/// trimmed to the last segment, quant tags dropped),
+/// 'cursor_agent' → "cursor agent"; anything else renders as-is.
+String _formatLlmSource(String source) {
+  if (source == 'state') return 'instant';
+  if (source == 'cursor_agent') return 'cursor agent';
+  if (source.startsWith('ollama:')) {
+    var model = source.substring('ollama:'.length);
+    final slash = model.lastIndexOf('/');
+    if (slash != -1) model = model.substring(slash + 1);
+    final tag = model.indexOf(':');
+    if (tag != -1) model = model.substring(0, tag);
+    return '$model (local)';
+  }
+  return source;
 }

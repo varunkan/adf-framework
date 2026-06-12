@@ -112,6 +112,7 @@ class ConversationBuilder {
           'timestamp': cmd['created_at'] as String?,
           'command_id': cmd['id'],
           'llm_source': cmd['llm_source'],
+          'latency_ms': cmd['latency_ms'],
         });
       }
     }
@@ -188,6 +189,7 @@ class ConversationBuilder {
           'timestamp': cmd['created_at'] as String?,
           'command_id': cmd['id'],
           'llm_source': cmd['llm_source'],
+          'latency_ms': cmd['latency_ms'],
         });
       }
     }

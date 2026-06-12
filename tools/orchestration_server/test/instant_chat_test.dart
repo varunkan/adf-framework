@@ -70,4 +70,25 @@ void main() {
     expect(r.source, 'fallback');
     expect(r.agentPrompt, contains('OAuth'));
   });
+
+  test('describe questions bypass model tiers even in httpOnly mode',
+      () async {
+    // Unreachable Ollama port: if the instant tier did not answer first,
+    // this would fall through to the (dead) model tiers instead of 'state'.
+    final hermetic = OrchestratorChatProcessor(
+      store,
+      env: {'ORCH_OLLAMA_HOST': 'http://127.0.0.1:9'},
+    );
+    final sw = Stopwatch()..start();
+    final r = await hermetic.process(
+      id,
+      'what does this feature do?',
+      mode: ChatProcessMode.httpOnly,
+    );
+    sw.stop();
+    expect(r.source, 'state');
+    expect(r.assistantReply, contains('instant chat'));
+    expect(r.latencyMs, isNotNull);
+    expect(sw.elapsedMilliseconds, lessThan(1000));
+  });
 }

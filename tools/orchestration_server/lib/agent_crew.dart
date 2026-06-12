@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -6,6 +7,34 @@ import 'deterministic_artifacts.dart';
 import 'feature_store.dart';
 import 'integrity_chain.dart';
 import 'learning_store.dart';
+
+/// Re-runs a timed-out task at a higher router tier, returning artifact paths.
+typedef AgentEscalationRun = Future<List<String>> Function(
+    String featureId, int phase);
+
+/// Minimal local contract for the model router (model_router.dart is owned
+/// elsewhere): when a task breaches its wall-clock budget it escalates ONCE
+/// to the next-higher tier (local -> fast -> balanced -> deep). Callers wire
+/// a router-backed hook in; the crew never imports the router directly, so
+/// the dependency stays loose.
+class AgentEscalation {
+  AgentEscalation({required this.tier, required this.run});
+
+  /// Tier name the retry executes on (e.g. 'fast') — recorded as
+  /// `escalated_to` in logs.
+  final String tier;
+
+  /// Re-runs the same task on [tier].
+  final AgentEscalationRun run;
+}
+
+/// Resolves the per-task wall-clock budget from `ORCH_AGENT_TIMEOUT_SEC`
+/// (seconds, default 30). Invalid or non-positive values fall back to the
+/// default so a bad env var can never disable the budget.
+Duration agentBudgetFromEnv(Map<String, String> env) {
+  final raw = int.tryParse(env['ORCH_AGENT_TIMEOUT_SEC']?.trim() ?? '');
+  return Duration(seconds: raw == null || raw <= 0 ? 30 : raw);
+}
 
 /// A specialized subagent in the crew. Agents declare dependencies; the
 /// crew runs every agent whose needs are met concurrently (wave execution).
@@ -35,13 +64,26 @@ class AgentCrew {
     this.validator,
     this.learnings, {
     IntegrityChain? integrity,
-  }) : integrity = integrity ?? IntegrityChain(store);
+    this.escalation,
+    Duration? agentBudget,
+    Map<String, String>? env,
+  })  : integrity = integrity ?? IntegrityChain(store),
+        agentBudget =
+            agentBudget ?? agentBudgetFromEnv(env ?? Platform.environment);
 
   final FeatureStore store;
   final DeterministicArtifactEngine engine;
   final ArtifactValidator validator;
   final LearningStore learnings;
   final IntegrityChain integrity;
+
+  /// Optional router-backed escalation hook; without it a budget breach
+  /// blocks the agent immediately (there is no higher tier to try).
+  final AgentEscalation? escalation;
+
+  /// Per-subagent wall-clock budget (`ORCH_AGENT_TIMEOUT_SEC`, default 30s).
+  /// Deterministic-brain tasks finish in milliseconds and never come close.
+  final Duration agentBudget;
 
   List<CrewAgent> buildCrew(String id) => [
         CrewAgent(
@@ -95,7 +137,8 @@ class AgentCrew {
     final waves = <List<String>>[];
 
     final remaining = [...crew];
-    while (remaining.isNotEmpty) {
+    final crewBlockers = <String>[];
+    while (remaining.isNotEmpty && crewBlockers.isEmpty) {
       final wave = remaining
           .where((a) => a.needs.every(doneAgents.contains))
           .toList();
@@ -104,31 +147,36 @@ class AgentCrew {
             '${remaining.map((a) => a.name).join(', ')}');
       }
       waves.add(wave.map((a) => a.name).toList());
-      // All agents in a wave run concurrently.
-      final results = await Future.wait(wave.map((agent) async {
-        final sw = Stopwatch()..start();
-        final artifacts = await agent.run();
-        sw.stop();
-        return {
-          'agent': agent.name,
-          'role': agent.role,
-          'phase': agent.phase,
-          'artifacts': artifacts,
-          'duration_ms': sw.elapsedMilliseconds,
-        };
-      }));
+      // All agents in a wave run concurrently, each under the budget.
+      final results =
+          await Future.wait(wave.map((agent) => _runWithBudget(id, agent)));
       for (final r in results) {
         agentResults.add(r);
-        doneAgents.add(r['agent'] as String);
         _logAgent(id, r);
+        if (r['status'] == 'blocked') {
+          final blocker = '${r['agent']} (phase ${r['phase']}): timed out '
+              'after ${agentBudget.inMilliseconds}ms budget '
+              '(escalated_to: ${r['escalated_to'] ?? 'none'})';
+          crewBlockers.add(blocker);
+          learnings.record(
+            featureId: id,
+            phase: r['phase'] as int,
+            kind: 'failure',
+            blockers: [blocker],
+          );
+        } else {
+          doneAgents.add(r['agent'] as String);
+        }
       }
       remaining.removeWhere((a) => doneAgents.contains(a.name));
     }
 
     // Machine-validate, then advance gates exactly like a human-led run.
+    // A timed-out crew never advances gates — its artifacts are incomplete.
     final completed = <int>[];
-    var blockers = <String>[];
+    var blockers = List<String>.from(crewBlockers);
     for (final phase in [1, 2, 3, 4, 5, 6]) {
+      if (blockers.isNotEmpty) break;
       if ({2, 3, 4}.contains(phase)) {
         final v = await validator.check(id, phase: phase);
         if (v['pass'] != true) {
@@ -168,6 +216,56 @@ class AgentCrew {
     };
     _announce(id, summary);
     return summary;
+  }
+
+  /// Runs one subagent under [agentBudget]. On breach: log a `timed_out`
+  /// entry with elapsed_ms, escalate ONCE to the next-higher tier via
+  /// [escalation], then return a `blocked` entry if the retry also breaches
+  /// (or no escalation hook is wired).
+  Future<Map<String, dynamic>> _runWithBudget(String id, CrewAgent agent) async {
+    final sw = Stopwatch()..start();
+    Map<String, dynamic> entry(String status, {String? escalatedTo}) => {
+          'agent': agent.name,
+          'role': agent.role,
+          'phase': agent.phase,
+          'status': status,
+          'elapsed_ms': sw.elapsedMilliseconds,
+          'budget_ms': agentBudget.inMilliseconds,
+          if (escalatedTo != null) 'escalated_to': escalatedTo,
+        };
+
+    try {
+      final artifacts = await agent.run().timeout(agentBudget);
+      sw.stop();
+      return {
+        ...entry('ok'),
+        'artifacts': artifacts,
+        'duration_ms': sw.elapsedMilliseconds,
+      };
+    } on TimeoutException {
+      final escalatedTo = escalation?.tier;
+      _logAgent(id, {
+        ...entry('timed_out'),
+        'escalated_to': escalatedTo,
+      });
+      if (escalation == null) {
+        sw.stop();
+        return {...entry('blocked'), 'escalated_to': null};
+      }
+      try {
+        final artifacts =
+            await escalation!.run(id, agent.phase).timeout(agentBudget);
+        sw.stop();
+        return {
+          ...entry('escalated', escalatedTo: escalatedTo),
+          'artifacts': artifacts,
+          'duration_ms': sw.elapsedMilliseconds,
+        };
+      } on TimeoutException {
+        sw.stop();
+        return entry('blocked', escalatedTo: escalatedTo);
+      }
+    }
   }
 
   void _advance(String id, int phase) {

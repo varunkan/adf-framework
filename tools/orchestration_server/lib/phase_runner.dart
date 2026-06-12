@@ -12,9 +12,13 @@ enum CancelReason { user, replaced }
 
 /// Runs orchestration phases via headless `cursor-agent` (or CURSOR_API_KEY).
 class PhaseRunner {
-  PhaseRunner(this.store, {this.pollInterval = const Duration(seconds: 2)})
-      : _health = RunnerHealth(repoRoot: store.repoRoot),
-        _costs = CostMeter(store);
+  PhaseRunner(
+    this.store, {
+    this.pollInterval = const Duration(seconds: 2),
+    Map<String, String>? env,
+  })  : _health = RunnerHealth(repoRoot: store.repoRoot),
+        _costs = CostMeter(store),
+        _env = env ?? Platform.environment;
 
   static const int maxHealAttempts = 3;
 
@@ -22,6 +26,16 @@ class PhaseRunner {
   final Duration pollInterval;
   final RunnerHealth _health;
   final CostMeter _costs;
+  final Map<String, String> _env;
+
+  /// Wall-clock budget for one spawned runner-CLI agent
+  /// (`ORCH_RUNNER_TIMEOUT_SEC`, default 30s). Breach kills the process
+  /// group and fails the run instead of letting it hang. Invalid or
+  /// non-positive values fall back to the default.
+  Duration get runnerTimeout {
+    final raw = int.tryParse(_env['ORCH_RUNNER_TIMEOUT_SEC']?.trim() ?? '');
+    return Duration(seconds: raw == null || raw <= 0 ? 30 : raw);
+  }
 
   RunnerHealth get health => _health;
 
@@ -665,6 +679,23 @@ class PhaseRunner {
         } catch (_) {}
       }
     });
+    // Hard per-run budget: a runner that produces nothing within the budget
+    // is killed (whole process group) and the run fails with a clear reason.
+    final budget = runnerTimeout;
+    var timedOut = false;
+    final timeoutTimer = Timer(budget, () {
+      if (_processes[featureId] != proc) return;
+      timedOut = true;
+      store.appendRunLog(featureId, {
+        'timestamp': DateTime.now().toUtc().toIso8601String(),
+        'level': 'error',
+        'stream': 'runner',
+        'phase': phase,
+        'message': 'timed_out after ${budget.inSeconds}s '
+            '(ORCH_RUNNER_TIMEOUT_SEC)',
+      });
+      _killProcessGroup(proc);
+    });
     final stdoutLines = <String>[];
     final stderrLines = <String>[];
 
@@ -695,6 +726,34 @@ class PhaseRunner {
       final needsLogin = errText.toLowerCase().contains('authentication') ||
           errText.toLowerCase().contains('not logged in') ||
           errText.toLowerCase().contains('login');
+
+      if (timedOut) {
+        final reason =
+            'timed_out after ${budget.inSeconds}s (ORCH_RUNNER_TIMEOUT_SEC)';
+        store.writeRunStatus(featureId, {
+          'status': 'error',
+          'agent_active': false,
+          'phase': phase,
+          'finished_at': DateTime.now().toUtc().toIso8601String(),
+          'exit_code': code,
+          'error': reason,
+          'error_code': 'timed_out',
+          'recovery_steps': RunnerHealth.recoverySteps,
+        });
+        _traces.append(
+          featureId: featureId,
+          name: 'runner.phase_timeout',
+          event: 'runner',
+          phase: phase,
+          message: reason,
+        );
+        return {
+          'success': false,
+          'exit_code': code,
+          'error': reason,
+          'timed_out': true,
+        };
+      }
 
       if (code != 0) {
         final wasCancelled = _userCancelled.remove(featureId) ||
@@ -767,8 +826,21 @@ class PhaseRunner {
       };
     } finally {
       killTimer.cancel();
+      timeoutTimer.cancel();
       _processes.remove(featureId);
     }
+  }
+
+  /// Kills a spawned runner and everything it forked. The negative-pid form
+  /// signals the whole process group when the runner is a group leader
+  /// (runner scripts that setsid); the direct kill is the fallback.
+  void _killProcessGroup(Process proc) {
+    try {
+      Process.killPid(-proc.pid, ProcessSignal.sigkill);
+    } catch (_) {}
+    try {
+      proc.kill(ProcessSignal.sigkill);
+    } catch (_) {}
   }
 
   String _wrapClientInputPrompt(String featureId, String userText) {
