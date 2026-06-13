@@ -17,6 +17,11 @@ orchestration/otel-session.json
 orchestration/features/**/commands.jsonl
 orchestration/features/**/run-log.jsonl
 orchestration/features/**/otel-traces.jsonl
+# Generated when the server/studio/tests run against the framework repo itself:
+# orchestration runtime state, spec-kit state, and per-feature spec output.
+.cursor/orchestration/
+.specify/
+specs/
 
 # OS / IDE
 .DS_Store
