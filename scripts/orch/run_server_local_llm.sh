@@ -14,7 +14,7 @@
 #
 # All settings are read from $FRAMEWORK_ROOT/.env (git-ignored).
 set -euo pipefail
-FRAMEWORK_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+FRAMEWORK_ROOT="${ORCH_REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 ROOT="${ORCH_REPO_ROOT:-$(cd "$FRAMEWORK_ROOT/.." && pwd)}"
 export ORCH_REPO_ROOT="$ROOT"
 
@@ -46,10 +46,23 @@ export ORCH_CHAT_LLM="${ORCH_CHAT_LLM:-ollama}"
 export ORCH_CHAT_USE_CURSOR=0
 unset ORCH_CHAT_PREFER_CURSOR 2>/dev/null || true
 
-# --- Runner: default local Ollama adapter ---------------------------------
+# --- Runner: file-writing agent that actually implements code --------------
+# agent_runner.py loads the crew's spec, asks a capable model (free NVIDIA NIM
+# by default, Claude/Ollama fallback) for a complete app, writes the files, and
+# self-heals: it runs the generated tests and feeds failures back until they
+# pass. ollama_runner.sh (text-only, no file writes) remains for chat-style use.
 export ADF_RUNNER="${ADF_RUNNER:-custom}"
-export ADF_RUNNER_BIN="${ADF_RUNNER_BIN:-$FRAMEWORK_ROOT/scripts/orch/ollama_runner.sh}"
-export ADF_RUNNER_ARGS="${ADF_RUNNER_ARGS:-{prompt} --workspace {workspace}}"
+export ADF_RUNNER_BIN="${ADF_RUNNER_BIN:-$FRAMEWORK_ROOT/scripts/orch/agent_runner.py}"
+# NOTE: do not write `${ADF_RUNNER_ARGS:-{prompt} ...}` — the `}` in `{prompt}`
+# closes the `${...}` early, yielding the broken `{prompt --workspace ...`.
+# Set the default in a separate, single-quoted assignment instead.
+if [[ -z "${ADF_RUNNER_ARGS:-}" ]]; then
+  ADF_RUNNER_ARGS='{prompt} --workspace {workspace}'
+fi
+export ADF_RUNNER_ARGS
+# The self-heal loop runs several model calls + test runs; give it room (the
+# server's per-run budget defaults to 30s, which would kill it mid-build).
+export ORCH_RUNNER_TIMEOUT_SEC="${ORCH_RUNNER_TIMEOUT_SEC:-600}"
 
 # --- Shared Ollama endpoint + model ---------------------------------------
 DEFAULT_MODEL='hf.co/nvidia/NVIDIA-Nemotron-3-Nano-4B-GGUF:Q4_K_M'
