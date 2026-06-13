@@ -46,14 +46,29 @@ export ORCH_CHAT_LLM="${ORCH_CHAT_LLM:-ollama}"
 export ORCH_CHAT_USE_CURSOR=0
 unset ORCH_CHAT_PREFER_CURSOR 2>/dev/null || true
 
-# --- Optional: route billed Claude chat through the headroom proxy ----------
-# Start the proxy first (scripts/orch/headroom_proxy.sh), then launch with
-# ADF_HEADROOM=1 to compress conversation history before the paid Claude tier.
-if [[ "${ADF_HEADROOM:-0}" == "1" || "${ADF_HEADROOM:-}" == "true" ]]; then
-  # Force the proxy even if ANTHROPIC_BASE_URL is already set in the environment
-  # (e.g. by the Claude desktop app). Override the target with HEADROOM_PROXY_URL.
-  export ANTHROPIC_BASE_URL="${HEADROOM_PROXY_URL:-http://127.0.0.1:${HEADROOM_PORT:-8787}}"
-  echo "Headroom: routing Claude calls via $ANTHROPIC_BASE_URL"
+# --- Headroom-first by default: compress context before every LLM call ------
+# Default ON when the venv is present. The build runner (agent_runner.py)
+# applies headroom in-process before EVERY backend (NVIDIA/Claude/Ollama). For
+# chat, the billed Claude tier is routed through the local headroom proxy —
+# auto-started here if not already up, and only used when reachable so Claude
+# never breaks if it's down. Disable everything with ADF_HEADROOM=0.
+_HB="$FRAMEWORK_ROOT/.venv-headroom/bin/headroom"
+_HEADROOM_DEFAULT=0; [[ -x "$_HB" ]] && _HEADROOM_DEFAULT=1
+export ADF_HEADROOM="${ADF_HEADROOM:-$_HEADROOM_DEFAULT}"
+if [[ "$ADF_HEADROOM" == "1" || "$ADF_HEADROOM" == "true" ]]; then
+  _HR_PORT="${HEADROOM_PORT:-8787}"
+  _HR_URL="${HEADROOM_PROXY_URL:-http://127.0.0.1:$_HR_PORT}"
+  if ! curl -sf --max-time 2 "$_HR_URL/livez" >/dev/null 2>&1 && [[ -x "$_HB" ]]; then
+    echo "Headroom: starting compression proxy on :$_HR_PORT"
+    ( "$_HB" proxy --host 127.0.0.1 --port "$_HR_PORT" >/tmp/headroom-proxy.log 2>&1 & )
+    for _i in $(seq 1 12); do curl -sf --max-time 1 "$_HR_URL/livez" >/dev/null 2>&1 && break; sleep 1; done
+  fi
+  if curl -sf --max-time 2 "$_HR_URL/livez" >/dev/null 2>&1; then
+    export ANTHROPIC_BASE_URL="$_HR_URL"
+    echo "Headroom: ON — runner in-process + Claude chat via $_HR_URL"
+  else
+    echo "Headroom: ON for runner (in-process); Claude proxy unavailable — Claude chat direct"
+  fi
 fi
 
 # --- Runner: file-writing agent that actually implements code --------------

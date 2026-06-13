@@ -280,9 +280,35 @@ def call_ollama(messages, timeout):
         return None
 
 
+def apply_headroom(messages):
+    """Headroom-first: compress context before EVERY model call, whatever the
+    backend. Safe by design — headroom protects system/user messages (the
+    instructions + code we must keep verbatim) and only crushes tool/history
+    payloads, so code fidelity is never at risk. No-op (returns input) if
+    headroom isn't importable (e.g. running on system Python without the venv)
+    or disabled via ADF_HEADROOM=0."""
+    if os.environ.get("ADF_HEADROOM", "1") in ("0", "false", "off"):
+        return messages
+    try:
+        import headroom
+    except Exception:
+        return messages
+    try:
+        res = headroom.compress(messages, model="claude-3-5-sonnet")
+        if getattr(res, "tokens_saved", 0):
+            log(f"headroom: {res.tokens_before}->{res.tokens_after} tokens "
+                f"({res.compression_ratio:.0%} smaller) before LLM call")
+        return res.messages
+    except Exception as e:
+        log(f"headroom skipped: {e}")
+        return messages
+
+
 def generate(messages, timeout):
     """Try each configured backend in order; return (text, usage) or None.
-    Pins to one backend per run via ADF_RUNNER_BACKEND=nvidia|anthropic|ollama."""
+    Pins to one backend per run via ADF_RUNNER_BACKEND=nvidia|anthropic|ollama.
+    Headroom runs FIRST, before any backend dispatch."""
+    messages = apply_headroom(messages)
     pin = os.environ.get("ADF_RUNNER_BACKEND", "").strip().lower()
     order = {"nvidia": [call_nvidia], "anthropic": [call_anthropic],
              "ollama": [call_ollama]}.get(pin, [call_nvidia, call_anthropic, call_ollama])
