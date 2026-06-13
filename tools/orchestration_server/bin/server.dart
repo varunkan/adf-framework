@@ -13,6 +13,7 @@ import 'package:orchestration_server/cost_meter.dart';
 import 'package:orchestration_server/feature_store.dart';
 import 'package:orchestration_server/figma_connector.dart';
 import 'package:orchestration_server/integrity_chain.dart';
+import 'package:orchestration_server/model_router.dart';
 import 'package:orchestration_server/orch_env_loader.dart';
 import 'package:orchestration_server/orchestrator_chat.dart';
 import 'package:orchestration_server/phase_runner.dart';
@@ -55,9 +56,9 @@ Middleware _corsMiddleware() {
 /// and the boot log report routing without a hard router dependency. Cloud
 /// tiers require ANTHROPIC_API_KEY; without it the router degrades to
 /// local-only (never an error), so the effective mode is reported.
-Map<String, dynamic> _modelRouterInfo() {
-  final env = Platform.environment;
-  final cloudReady = (env['ANTHROPIC_API_KEY'] ?? '').trim().isNotEmpty;
+Map<String, dynamic> _modelRouterInfo(Map<String, String> env) {
+  final router = ModelRouter(env: env);
+  final cloudReady = router.hasApiKey;
   final configured = (env['ORCH_ROUTER'] ?? 'auto').trim().toLowerCase();
   final mode = const {'auto', 'local-only', 'cloud-only'}.contains(configured)
       ? configured
@@ -66,11 +67,18 @@ Map<String, dynamic> _modelRouterInfo() {
     'mode': cloudReady ? mode : 'local-only',
     'tiers': {
       'local': env['ORCH_OLLAMA_MODEL'] ?? OllamaBrain.defaultModel,
-      'fast': env['ORCH_MODEL_FAST'] ?? 'claude-haiku-4-5',
-      'balanced': env['ORCH_MODEL_BALANCED'] ?? 'claude-sonnet-4-6',
-      'deep': env['ORCH_MODEL_DEEP'] ?? 'claude-opus-4-8',
+      'fast': router.modelForTier('fast'),
+      'balanced': router.modelForTier('balanced'),
+      'deep': router.modelForTier('deep'),
+    },
+    'providers': {
+      'fast': router.providerForTier('fast'),
+      'balanced': router.providerForTier('balanced'),
+      'deep': router.providerForTier('deep'),
     },
     'cloud_ready': cloudReady,
+    'nvidia_ready': router.hasNvidiaKey,
+    'anthropic_ready': router.hasAnthropicKey,
   };
 }
 
@@ -102,7 +110,12 @@ Future<void> main(List<String> args) async {
       3847;
   final repoRoot = resolveRepoRoot();
   await _loadAgentEnv(repoRoot);
-  loadOrchLlmEnvFiles(repoRoot);
+  // Platform.environment is unmodifiable, so merge repo-local .env values over
+  // it into a plain map the router/chat read from. Exported keys still win.
+  final env = <String, String>{
+    ...Platform.environment,
+    ...readOrchEnv(repoRoot),
+  };
 
   final store = FeatureStore(repoRoot);
   final runner = PhaseRunner(store);
@@ -110,12 +123,20 @@ Future<void> main(List<String> args) async {
   final planner = PipelinePlanner(store);
   final conversation = ConversationBuilder(store);
   final costs = CostMeter(store);
-  // Router-selected Claude chat calls meter spend through the same CostMeter
+  // Complexity router for dashboard chat: simple turns stay on the free local
+  // Ollama tier, harder ones lift to free NVIDIA NIM (fast/balanced) or paid
+  // Claude (deep), per available keys. Injected so `ORCH_CHAT_LLM=auto`
+  // actually routes — without it the chat path falls straight through to
+  // local Ollama.
+  final chatRouter = ModelRouter(env: env);
+  // Router-selected cloud chat calls meter spend through the same CostMeter
   // the cost routes serve; chat is not a pipeline phase, so entries record
-  // phase null.
+  // phase null. NVIDIA's free tier reports tokens with $0 cost.
   final chatProcessor = OrchestratorChatProcessor(
     store,
     planner: planner,
+    router: chatRouter,
+    env: env,
     onUsage: (featureId, event) =>
         costs.recordFromResultEvent(featureId, event),
   );
@@ -190,13 +211,18 @@ Future<void> main(List<String> args) async {
   print('Runner ready: ${health['ready']} (${health['agent_path'] ?? 'no agent'})');
   final chatLlm = await chatProcessor.describeChatLlm();
   print('Chat LLM: $chatLlm (ORCH_CHAT_LLM=${chatProcessor.chatLlmMode}, '
-      'key ${orchLlmConfigured() ? 'set' : 'unset'})');
-  final modelRouter = _modelRouterInfo();
+      'key ${orchLlmConfigured(env) ? 'set' : 'unset'})');
+  final modelRouter = _modelRouterInfo(env);
   final routerTiers = modelRouter['tiers'] as Map<String, dynamic>;
-  print('Model router: mode=${modelRouter['mode']} '
-      '(cloud ${modelRouter['cloud_ready'] == true ? 'ready' : 'off — no ANTHROPIC_API_KEY'}) '
-      'tiers fast=${routerTiers['fast']} balanced=${routerTiers['balanced']} '
-      'deep=${routerTiers['deep']} local=${routerTiers['local']}');
+  final routerProviders = modelRouter['providers'] as Map<String, dynamic>;
+  final cloudLabel = modelRouter['cloud_ready'] == true
+      ? 'ready — nvidia=${modelRouter['nvidia_ready']} anthropic=${modelRouter['anthropic_ready']}'
+      : 'off — set NVIDIA_API_KEY (free) or ANTHROPIC_API_KEY';
+  print('Model router: mode=${modelRouter['mode']} (cloud $cloudLabel) '
+      'tiers local=${routerTiers['local']} '
+      'fast=${routerProviders['fast']}:${routerTiers['fast']} '
+      'balanced=${routerProviders['balanced']}:${routerTiers['balanced']} '
+      'deep=${routerProviders['deep']}:${routerTiers['deep']}');
   if (chatLlm.startsWith('ollama:')) {
     unawaited(chatProcessor.warmOllama().then((_) =>
         print('Local chat model warmed and resident ($chatLlm)')));
@@ -366,7 +392,7 @@ Future<void> main(List<String> args) async {
         'repo': repoRoot,
         'chat_llm': await chatProcessor.describeChatLlm(),
         'chat_llm_configured':
-            orchLlmConfigured() || await chatProcessor.ollamaChatReady(),
+            orchLlmConfigured(env) || await chatProcessor.ollamaChatReady(),
         'chat_cursor_ready': await chatProcessor.cursorChatReady(),
         'chat_prefer_cursor': chatProcessor.cursorIsPreferred,
         'chat_static_context':

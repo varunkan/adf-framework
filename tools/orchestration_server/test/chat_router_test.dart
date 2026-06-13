@@ -191,7 +191,8 @@ class FakeRouter {
   String? lastTask;
   String? lastKind;
 
-  Map<String, String> route(String task, {String kind = 'chat', int? phase}) {
+  Map<String, String> route(
+      {required String task, String kind = 'chat', int? phase}) {
     routeCalls++;
     lastTask = task;
     lastKind = kind;

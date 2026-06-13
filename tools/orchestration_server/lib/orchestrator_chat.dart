@@ -44,7 +44,7 @@ class OrchestratorChatProcessor {
   /// Loose-coupled model router (concrete type lives in model_router.dart and
   /// is injected to avoid a hard dependency). Consulted in auto mode after
   /// the instant tier misses. Expected shape:
-  /// `route(String task, {String kind, int? phase})` returning a
+  /// `route({required String task, String kind, int? phase})` returning a
   /// `{tier, model, reason}` decision (map or RouteDecision-shaped object),
   /// and `brainFor(decision, {void Function(Map<String, dynamic>)? onUsage})`
   /// returning a Claude brain exposing `complete({system, user})`.
@@ -336,10 +336,19 @@ class OrchestratorChatProcessor {
     );
   }
 
-  /// Whether router cloud tiers may be attempted at all. Without
-  /// ANTHROPIC_API_KEY the router degrades to local-only — never an error.
+  /// Whether router cloud tiers may be attempted at all. Without any cloud
+  /// key the router degrades to local-only — never an error.
   bool get _anthropicConfigured =>
       (_env['ANTHROPIC_API_KEY'] ?? '').trim().isNotEmpty;
+
+  /// Free NVIDIA NIM tier availability (build.nvidia.com).
+  bool get _nvidiaConfigured =>
+      (_env['NVIDIA_API_KEY'] ?? _env['ORCH_NVIDIA_API_KEY'] ?? '')
+          .trim()
+          .isNotEmpty;
+
+  /// Any cloud chat backend is reachable (Claude or free NVIDIA).
+  bool get _cloudChatConfigured => _anthropicConfigured || _nvidiaConfigured;
 
   /// ORCH_AGENT_TIMEOUT_SEC caps every brain LLM task (default 30s). On
   /// timeout the routed path returns null and the local chain takes over.
@@ -359,7 +368,7 @@ class OrchestratorChatProcessor {
     Object? decision;
     try {
       final raw = (_router as dynamic)
-          .route(userMessage, kind: 'chat', phase: ctx.phase);
+          .route(task: userMessage, kind: 'chat', phase: ctx.phase);
       decision = (raw is Future ? await raw : raw) as Object?;
     } catch (_) {
       return null;
@@ -370,7 +379,7 @@ class OrchestratorChatProcessor {
       return _callOllama(ctx, userMessage, history);
     }
     if (tier != 'fast' && tier != 'balanced' && tier != 'deep') return null;
-    if (!_anthropicConfigured) return null;
+    if (!_cloudChatConfigured) return null;
     final model = _decisionField(decision, 'model');
     if (model == null || model.isEmpty) return null;
     return _callClaude(ctx, userMessage, history, decision, model);
@@ -386,6 +395,7 @@ class OrchestratorChatProcessor {
         'tier' => d.tier,
         'model' => d.model,
         'reason' => d.reason,
+        'provider' => d.provider,
         _ => null,
       };
       return v?.toString();
@@ -438,7 +448,12 @@ class OrchestratorChatProcessor {
       return null;
     }
     if (raw == null || raw.trim().isEmpty) return null;
-    return _resultFromActionTaggedReply(ctx, userMessage, raw, 'claude:$model');
+    // Stamp the source with the real provider so the dashboard/cost view can
+    // tell free NVIDIA answers from paid Claude ones. Decisions without a
+    // provider field (legacy/test routers) keep the historical claude: label.
+    final provider = _decisionField(decision, 'provider');
+    final source = provider == 'nvidia' ? 'nvidia:$model' : 'claude:$model';
+    return _resultFromActionTaggedReply(ctx, userMessage, raw, source);
   }
 
   /// Folds recent turns into one user block for single-shot

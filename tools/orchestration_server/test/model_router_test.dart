@@ -1,10 +1,13 @@
 import 'package:orchestration_server/adf_brain.dart';
 import 'package:orchestration_server/claude_api_brain.dart';
 import 'package:orchestration_server/model_router.dart';
+import 'package:orchestration_server/openai_compat_brain.dart';
 import 'package:test/test.dart';
 
 void main() {
   const withKey = {'ANTHROPIC_API_KEY': 'sk-test'};
+  const withNvidia = {'NVIDIA_API_KEY': 'nvapi-test'};
+  const withBoth = {'ANTHROPIC_API_KEY': 'sk-test', 'NVIDIA_API_KEY': 'nvapi-test'};
 
   ModelRouter routerWith([Map<String, String> env = withKey]) =>
       ModelRouter(env: env);
@@ -242,6 +245,88 @@ void main() {
         'ORCH_OLLAMA_MODEL': 'nemo-x',
       });
       expect((await ollama.select()).name, 'ollama:nemo-x');
+    });
+  });
+
+  group('NVIDIA free tier', () {
+    test('with only an NVIDIA key, fast/balanced route to NVIDIA models', () {
+      final router = ModelRouter(env: withNvidia);
+      final fast = router.route(task: 'q' * 700, kind: 'chat');
+      expect(fast.tier, 'fast');
+      expect(fast.provider, 'nvidia');
+      expect(fast.model, 'meta/llama-3.3-70b-instruct');
+
+      final balanced = router.route(task: 'review the diff', kind: 'review');
+      expect(balanced.provider, 'nvidia');
+      expect(balanced.model, 'nvidia/llama-3.3-nemotron-super-49b-v1.5');
+    });
+
+    test('deep prefers Claude when both keys exist, NVIDIA elsewhere', () {
+      final both = ModelRouter(env: withBoth);
+      final deep = both.route(task: 'implement the cart', kind: 'implement');
+      expect(deep.tier, 'deep');
+      expect(deep.provider, 'anthropic');
+      expect(deep.model, 'claude-opus-4-8');
+      // fast/balanced still take the free NVIDIA path even with a Claude key.
+      expect(both.route(task: 'q' * 700, kind: 'chat').provider, 'nvidia');
+    });
+
+    test('deep falls back to NVIDIA when no Claude key', () {
+      final d = ModelRouter(env: withNvidia)
+          .route(task: 'implement the cart', kind: 'implement');
+      expect(d.tier, 'deep');
+      expect(d.provider, 'nvidia');
+      expect(d.model, 'qwen/qwen3.5-397b-a17b');
+    });
+
+    test('an NVIDIA key alone makes cloud tiers reachable', () {
+      final router = ModelRouter(env: withNvidia);
+      expect(router.hasApiKey, isTrue);
+      expect(router.hasNvidiaKey, isTrue);
+      expect(router.hasAnthropicKey, isFalse);
+      // auto no longer degrades a medium task to local — NVIDIA serves it.
+      expect(router.route(task: 'q' * 700, kind: 'chat').tier, 'fast');
+    });
+
+    test('brainForTier builds an OpenAiCompatBrain for NVIDIA tiers', () {
+      final router = ModelRouter(env: withNvidia);
+      final brain = router.brainForTier('fast');
+      expect(brain, isA<OpenAiCompatBrain>());
+      expect(brain.name, 'nvidia:meta/llama-3.3-70b-instruct');
+      expect(brain.billsTokens, isFalse); // free tier
+      // Claude deep brain when both keys present.
+      expect(ModelRouter(env: withBoth).brainForTier('deep'),
+          isA<ClaudeApiBrain>());
+    });
+
+    test('ORCH_PROVIDER_<TIER> forces a provider when its key exists', () {
+      final pinClaude = ModelRouter(
+          env: const {...withBoth, 'ORCH_PROVIDER_FAST': 'anthropic'});
+      expect(pinClaude.route(task: 'q' * 700, kind: 'chat').provider,
+          'anthropic');
+      final pinNvidia = ModelRouter(
+          env: const {...withBoth, 'ORCH_PROVIDER_DEEP': 'nvidia'});
+      expect(pinNvidia.route(task: 'implement it', kind: 'implement').provider,
+          'nvidia');
+    });
+
+    test('ORCH_NVIDIA_MODEL_<TIER> overrides the NVIDIA model', () {
+      final router = ModelRouter(
+          env: const {...withNvidia, 'ORCH_NVIDIA_MODEL_FAST': 'meta/llama-x'});
+      expect(router.route(task: 'q' * 700, kind: 'chat').model, 'meta/llama-x');
+    });
+
+    test('generic ORCH_MODEL_<TIER> still wins over the NVIDIA default', () {
+      final router =
+          ModelRouter(env: const {...withNvidia, 'ORCH_MODEL_FAST': 'pinned'});
+      expect(router.route(task: 'q' * 700, kind: 'chat').model, 'pinned');
+    });
+
+    test('no keys at all still degrades cloud picks to local', () {
+      final d = ModelRouter(env: const {})
+          .route(task: 'q' * 700, kind: 'chat');
+      expect(d.tier, 'local');
+      expect(d.provider, 'local');
     });
   });
 }
