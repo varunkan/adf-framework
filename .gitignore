@@ -31,3 +31,6 @@ specs/
 
 # Release build output (optional local)
 dist/
+
+# headroom integration (local venv — Python 3.13, litellm needs <3.14)
+.venv-headroom/

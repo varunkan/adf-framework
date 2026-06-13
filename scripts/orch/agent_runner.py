@@ -389,11 +389,44 @@ def run_verification(app_root, timeout=60):
     return True, f"{out}\n\nboot check: {boot_msg}"
 
 
+def headroom_compress_log(text):
+    """Compress bulky test-failure output (logs/tracebacks — headroom's sweet
+    spot) before re-sending it in a self-heal turn. Returns the original text
+    if headroom isn't importable or yields no win, so code fidelity and
+    behavior are never at risk. Only the *log* is touched, never the code."""
+    if not text or len(text) < 400:
+        return text
+    try:
+        import headroom
+    except Exception:
+        return text
+    try:
+        # Frame the log as a tool result so headroom compresses it (it protects
+        # user/system/code messages by design).
+        res = headroom.compress(
+            [{"role": "tool", "content": text},
+             {"role": "user", "content": "Fix the failures."}],
+            model="claude-3-5-sonnet",
+        )
+        for m in res.messages:
+            if m.get("role") == "tool":
+                comp = m.get("content") or text
+                if len(comp) < len(text):
+                    log(f"headroom: failure log {len(text)}->{len(comp)} chars "
+                        f"({res.compression_ratio:.0%} smaller)")
+                    return comp
+        return text
+    except Exception as e:
+        log(f"headroom compress skipped: {e}")
+        return text
+
+
 def fix_messages(system, user, files, failure):
     """Build the follow-up turn asking the model to fix the failing files."""
     current = "\n".join(
         f"<<<FILE: {p}>>>\n{c}\n<<<END>>>" for p, c in files
     )
+    failure = headroom_compress_log(failure)
     fixer = (
         "Your previous implementation FAILED its tests. Here is the current "
         "code and the exact failure output. Fix the root cause in whichever "

@@ -46,13 +46,26 @@ export ORCH_CHAT_LLM="${ORCH_CHAT_LLM:-ollama}"
 export ORCH_CHAT_USE_CURSOR=0
 unset ORCH_CHAT_PREFER_CURSOR 2>/dev/null || true
 
+# --- Optional: route billed Claude chat through the headroom proxy ----------
+# Start the proxy first (scripts/orch/headroom_proxy.sh), then launch with
+# ADF_HEADROOM=1 to compress conversation history before the paid Claude tier.
+if [[ "${ADF_HEADROOM:-0}" == "1" || "${ADF_HEADROOM:-}" == "true" ]]; then
+  # Force the proxy even if ANTHROPIC_BASE_URL is already set in the environment
+  # (e.g. by the Claude desktop app). Override the target with HEADROOM_PROXY_URL.
+  export ANTHROPIC_BASE_URL="${HEADROOM_PROXY_URL:-http://127.0.0.1:${HEADROOM_PORT:-8787}}"
+  echo "Headroom: routing Claude calls via $ANTHROPIC_BASE_URL"
+fi
+
 # --- Runner: file-writing agent that actually implements code --------------
 # agent_runner.py loads the crew's spec, asks a capable model (free NVIDIA NIM
 # by default, Claude/Ollama fallback) for a complete app, writes the files, and
 # self-heals: it runs the generated tests and feeds failures back until they
 # pass. ollama_runner.sh (text-only, no file writes) remains for chat-style use.
 export ADF_RUNNER="${ADF_RUNNER:-custom}"
-export ADF_RUNNER_BIN="${ADF_RUNNER_BIN:-$FRAMEWORK_ROOT/scripts/orch/agent_runner.py}"
+# Use the headroom wrapper (runs the runner under the .venv-headroom Python 3.13
+# so it can compress self-heal failure logs); it falls back to system python3
+# when the venv is absent. Set ADF_RUNNER_BIN to agent_runner.py to bypass.
+export ADF_RUNNER_BIN="${ADF_RUNNER_BIN:-$FRAMEWORK_ROOT/scripts/orch/agent_runner_headroom.sh}"
 # NOTE: do not write `${ADF_RUNNER_ARGS:-{prompt} ...}` — the `}` in `{prompt}`
 # closes the `${...}` early, yielding the broken `{prompt --workspace ...`.
 # Set the default in a separate, single-quoted assignment instead.

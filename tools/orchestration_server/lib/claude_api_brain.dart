@@ -21,10 +21,18 @@ class ClaudeApiBrain implements AdfBrain {
     String? baseUrl,
     Map<String, String>? env,
     this.onUsage,
-  })  : baseUrl = baseUrl ?? defaultBaseUrl,
+  })  : baseUrl = baseUrl ?? _envBaseUrl(env ?? Platform.environment),
         _env = env ?? Platform.environment;
 
   static const defaultBaseUrl = 'https://api.anthropic.com';
+
+  /// Honors `ANTHROPIC_BASE_URL` (Anthropic SDK convention) so calls can be
+  /// routed through a local proxy (e.g. the headroom context-compression
+  /// proxy) without code changes. Falls back to the public API.
+  static String _envBaseUrl(Map<String, String> env) {
+    final v = env['ANTHROPIC_BASE_URL']?.trim();
+    return (v == null || v.isEmpty) ? defaultBaseUrl : v;
+  }
   static const apiVersion = '2023-06-01';
 
   /// Chat-sized default; callers raise it for artifact-sized completions.
