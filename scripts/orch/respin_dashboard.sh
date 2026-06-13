@@ -6,6 +6,22 @@ export ORCH_REPO_ROOT="$ROOT"
 API_PORT="${ORCH_PORT:-3847}"
 WEB_PORT="${ORCH_WEB_PORT:-3848}"
 
+# Backend selection. Default: local Ollama (chat + runner), no cursor-agent.
+# Override with `adf studio --cursor` or ADF_STUDIO_BACKEND=cursor.
+BACKEND="${ADF_STUDIO_BACKEND:-local}"
+DEV=0
+for arg in "$@"; do
+  case "$arg" in
+    --cursor) BACKEND=cursor ;;
+    --local)  BACKEND=local ;;
+    --dev)    DEV=1 ;;
+  esac
+done
+case "$BACKEND" in
+  cursor) API_LAUNCHER="run_server_cursor_cli.sh"; BACKEND_LABEL="Cursor CLI chat + zero-token crew" ;;
+  *)      API_LAUNCHER="run_server_local_llm.sh";  BACKEND_LABEL="local Ollama chat + runner (no cursor)" ;;
+esac
+
 echo "╔══════════════════════════════════════════════════════════╗"
 echo "║  ADF Studio — proof-governed agentic development         ║"
 echo "╚══════════════════════════════════════════════════════════╝"
@@ -20,8 +36,8 @@ pkill -f "orchestration_server/bin/server" 2>/dev/null || true
 pkill -f "orchestration_dashboard" 2>/dev/null || true
 sleep 2
 
-echo "Starting API (Cursor CLI chat + zero-token crew)..."
-"$FRAMEWORK_ROOT/scripts/orch/run_server_cursor_cli.sh" > /tmp/orch-api.log 2>&1 &
+echo "Starting API ($BACKEND_LABEL)..."
+"$FRAMEWORK_ROOT/scripts/orch/$API_LAUNCHER" > /tmp/orch-api.log 2>&1 &
 for i in $(seq 1 45); do
   if curl -sf "http://127.0.0.1:$API_PORT/health" >/dev/null; then break; fi
   sleep 1
@@ -34,7 +50,7 @@ echo "✓ API healthy at http://127.0.0.1:$API_PORT"
 echo ""
 
 DASH="$FRAMEWORK_ROOT/tools/orchestration_dashboard"
-if [[ "${1:-}" == "--dev" ]]; then
+if [[ "$DEV" == "1" ]]; then
   echo "Starting dashboard (dev/hot-reload)..."
   cd "$DASH"
   flutter run -d chrome --web-port="$WEB_PORT" > /tmp/orch-dashboard.log 2>&1 &
@@ -66,5 +82,6 @@ echo "  Try: \"Add a loyalty points screen to checkout\""
 echo "       Crew runs instantly (zero tokens) · integrity chain seals artifacts"
 echo ""
 echo "  Logs: /tmp/orch-api.log · /tmp/orch-dashboard.log"
-echo "  Dev mode (hot reload): adf studio --dev"
+echo "  Backend: $BACKEND_LABEL"
+echo "  Dev mode (hot reload): adf studio --dev   ·   Cursor backend: adf studio --cursor"
 echo ""

@@ -109,6 +109,17 @@ class OrchestratorChatProcessor {
 
   Future<bool> cursorChatReady() => _shouldTryCursorChat();
 
+  /// True only when chat genuinely routes to cursor-agent BEFORE the local /
+  /// HTTP models — mirrors the `cursorFirst` decision in [process]. Unlike
+  /// [preferCursorCli] (which defaults true whenever no cloud key is set, for
+  /// the API-key fallback ordering), this reflects what actually happens, so
+  /// `/health` does not report a cursor preference when chat is pinned to
+  /// Ollama or cursor chat is disabled.
+  bool get cursorIsPreferred =>
+      chatLlmMode == 'cursor' ||
+      _env['ORCH_CHAT_PREFER_CURSOR'] == '1' ||
+      _env['ORCH_CHAT_PREFER_CURSOR'] == 'true';
+
   bool get staticContextEnabled =>
       _forceStaticContext ||
       _env['ORCH_CHAT_STATIC_CONTEXT'] == '1' ||

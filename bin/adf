@@ -16,7 +16,8 @@ Usage:
                 RUNNER: auto|cursor|claude|custom   (which agent CLI drives the pipeline)
   adf doctor [-t TARGET]                      Verify prerequisites, runner, and paths
   adf start [api|dashboard|all]               Start orchestration services
-  adf studio                                  One-command studio: kill stale, start API + dashboard, health-check
+  adf studio [--local|--cursor] [--dev]       One-command studio: kill stale, start API + dashboard, health-check
+                                              (default --local: Ollama chat + runner, no cursor)
   adf test                                    Run comprehensive server + dashboard test suite
   adf feature new "<requirement>" [--autopilot]   Create a feature via the API (prints its id)
   adf feature status <id>                     Feature detail merged with the pipeline plan

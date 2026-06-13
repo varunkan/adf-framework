@@ -368,7 +368,7 @@ Future<void> main(List<String> args) async {
         'chat_llm_configured':
             orchLlmConfigured() || await chatProcessor.ollamaChatReady(),
         'chat_cursor_ready': await chatProcessor.cursorChatReady(),
-        'chat_prefer_cursor': chatProcessor.preferCursorCli,
+        'chat_prefer_cursor': chatProcessor.cursorIsPreferred,
         'chat_static_context':
             Platform.environment['ORCH_CHAT_STATIC_CONTEXT'] == '1',
         'model_router': modelRouter,

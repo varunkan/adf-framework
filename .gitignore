@@ -6,6 +6,11 @@ coverage/
 .packages
 .pub-cache/
 
+# Local machine config / secrets (never commit)
+.env
+.env.*.local
+.env.groq.local
+
 # ADF runtime (local)
 orchestration/otel-traces.jsonl
 orchestration/otel-session.json
