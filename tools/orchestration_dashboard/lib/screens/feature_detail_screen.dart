@@ -777,8 +777,9 @@ $clarification
       body = error ?? 'Check runner setup';
     } else if (runSt == 'blocked') {
       bg = status.errorBg;
-      title = 'Blocked';
-      body = error ?? 'Max heal attempts reached';
+      title = 'Build stopped';
+      body = 'The builder could not finish after several tries. '
+          'Tap "Reset & retry" to start the build over.';
     } else if (run?['resume_mode'] == 'cursor_ide' ||
         run?['headless_unavailable'] == true) {
       bg = status.awaitingBg;
@@ -837,8 +838,11 @@ $clarification
                     : const Icon(Icons.play_arrow, size: 18),
                 label: Text(_phase == 0 ? 'Start' : 'Run phase'),
               ),
-            if (runSt == 'needs_login' || runSt == 'error')
-              TextButton(onPressed: _retry, child: const Text('Retry')),
+            if (runSt == 'needs_login' || runSt == 'error' || runSt == 'blocked')
+              TextButton(
+                onPressed: _retry,
+                child: Text(runSt == 'blocked' ? 'Reset & retry' : 'Retry'),
+              ),
           ],
         ),
       ),
