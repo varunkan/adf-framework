@@ -32,6 +32,10 @@ class TraceSpan {
   String? get toolOutput => attributes['tool.output'] as String?;
   String? get runnerMessage => attributes['runner.message'] as String?;
 
+  /// Canonical human-readable message attribute written by `TraceWriter`
+  /// (`message:` → `orch.message`), e.g. the crew's "Wave 1: …" narration.
+  String? get orchMessage => attributes['orch.message'] as String?;
+
   bool get isRunnerControlEvent => name.startsWith('runner.');
 
   String get displayKind {
@@ -60,6 +64,9 @@ class TraceSpan {
     }
     if (runnerMessage != null && runnerMessage!.trim().isNotEmpty) {
       return runnerMessage!.trim();
+    }
+    if (orchMessage != null && orchMessage!.trim().isNotEmpty) {
+      return orchMessage!.trim();
     }
     return name;
   }

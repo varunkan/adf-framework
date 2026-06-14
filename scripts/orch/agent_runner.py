@@ -509,7 +509,8 @@ def read_pending_edit(app_dir):
     if not os.path.isfile(p):
         return None
     try:
-        t = open(p, encoding="utf-8").read().strip()
+        with open(p, encoding="utf-8") as f:
+            t = f.read().strip()
         return t or None
     except OSError:
         return None
@@ -528,7 +529,8 @@ def current_app_files(app_dir):
         fp = os.path.join(app_dir, name)
         if os.path.isfile(fp):
             try:
-                out.append((name, open(fp, encoding="utf-8").read()))
+                with open(fp, encoding="utf-8") as f:
+                    out.append((name, f.read()))
             except OSError:
                 pass
     return out

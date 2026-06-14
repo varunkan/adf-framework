@@ -11,6 +11,7 @@ import '../widgets/chat_composer.dart';
 import '../widgets/live_preview_panel.dart';
 import '../widgets/studio_shell.dart';
 import '../theme/studio_theme.dart';
+import '../utils/message_classifier.dart';
 import '../widgets/pipeline_rail.dart';
 
 class FeatureDetailScreen extends StatefulWidget {
@@ -103,6 +104,7 @@ class _FeatureDetailScreenState extends State<FeatureDetailScreen> {
       final crew = await widget.api.getCrewLog(widget.featureId);
       if (phase <= 1 && crew.isEmpty && state['status'] == 'active') {
         _autoAutopilotOnEnter = true;
+        _autopilotStartedAt = DateTime.now().toUtc();
         _wakePolling();
         await widget.api.runAutopilot(widget.featureId);
         if (mounted) await _load(silent: true);
@@ -561,20 +563,6 @@ $clarification
     }
   }
 
-  /// Heuristic: is this message a question (→ chat) vs. a change request (→ edit)?
-  bool _isQuestion(String s) {
-    final t = s.trim().toLowerCase();
-    if (t.isEmpty) return true;
-    if (t.endsWith('?')) return true;
-    final first = t.split(RegExp(r'\s+')).first;
-    const q = {
-      'what', "what's", 'whats', 'why', 'how', 'can', 'could', 'does', 'do',
-      'is', 'are', 'was', 'were', 'where', 'when', 'who', 'which', 'should',
-      'will', 'would', 'explain', 'tell', 'show', 'help',
-    };
-    return q.contains(first);
-  }
-
   Future<void> _sendMessage(String prompt) async {
     final ts = DateTime.now().toUtc().toIso8601String();
     setState(() {
@@ -590,7 +578,7 @@ $clarification
     // One-box iteration: once the app is built, a plain (non-question, non-@command)
     // message edits the app and re-renders the live preview — the Lovable loop.
     final p = prompt.trim();
-    if (_phase >= 7 && !p.startsWith('@') && !_isQuestion(p)) {
+    if (_phase >= 7 && !p.startsWith('@') && !looksLikeQuestion(p)) {
       try {
         await widget.api.editApp(widget.featureId, prompt);
         if (mounted) {
@@ -880,10 +868,14 @@ $clarification
   }
 
   bool _autopilotRunning = false;
+  DateTime? _autopilotStartedAt;
 
   Future<void> _runAutopilot() async {
     if (_autopilotRunning) return;
-    setState(() => _autopilotRunning = true);
+    setState(() {
+      _autopilotRunning = true;
+      _autopilotStartedAt = DateTime.now().toUtc();
+    });
     _wakePolling();
     try {
       final summary = await widget.api.runAutopilot(widget.featureId);
@@ -1168,8 +1160,11 @@ $clarification
           featureId: widget.featureId,
           messages: conversation,
           scrollController: _chatScroll,
-          isRunning: _showAgentActivityUi,
-          liveTraceSince: runStatus?['started_at'] as String?,
+          // Autopilot (the zero-token crew) also streams live trace spans now,
+          // so treat it as a running session for the live-trace panel.
+          isRunning: _showAgentActivityUi || _autopilotRunning,
+          liveTraceSince: runStatus?['started_at'] as String? ??
+              _autopilotStartedAt?.toIso8601String(),
           sessionEnded: sessionEnded,
           awaitingApproval: awaiting,
           needsRevision: awaiting && !_verdictPassed,

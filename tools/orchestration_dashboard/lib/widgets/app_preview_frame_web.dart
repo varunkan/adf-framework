@@ -1,6 +1,6 @@
 // Web-only: embed the live app at [url] as an <iframe> via HtmlElementView.
 // This file is only compiled on web (conditional import in app_preview_frame.dart).
-// ignore: avoid_web_libraries_in_flutter
+// ignore: avoid_web_libraries_in_flutter, deprecated_member_use
 import 'dart:html' as html;
 import 'dart:ui_web' as ui_web;
 

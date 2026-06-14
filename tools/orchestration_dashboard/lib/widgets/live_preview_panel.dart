@@ -194,6 +194,7 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
     final specExcerpt = _preview?['spec_excerpt'] as String?;
     final codeExcerpt = _product?['code_excerpt'] as String?;
     final previewUrl = _product?['preview_url'] as String?;
+    final appLive = _appPreview != null && _appPreview!['available'] == true;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -263,36 +264,39 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
               borderRadius: BorderRadius.circular(3),
             ),
           ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-          child: Row(
-            children: [
-              _actionBtn(
-                context,
-                icon: Icons.rocket_launch_outlined,
-                label: _buildInFlight ? 'Building…' : 'Run preview',
-                enabled: !_buildInFlight,
-                onTap: _runPreviewBuild,
-              ),
-              const SizedBox(width: 8),
-              _actionBtn(
-                context,
-                icon: Icons.open_in_new,
-                label: 'Open',
-                enabled: previewUrl != null,
-                onTap: () => _copyUrl(previewUrl!),
-              ),
-              const SizedBox(width: 8),
-              _actionBtn(
-                context,
-                icon: Icons.description_outlined,
-                label: 'Spec',
-                enabled: specExcerpt != null,
-                onTap: () => _tabs.animateTo(1),
-              ),
-            ],
+        // Legacy Flutter-product build controls. Hidden once the real app is
+        // rendering live in the App tab (these only apply to a products/ target).
+        if (!appLive)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+            child: Row(
+              children: [
+                _actionBtn(
+                  context,
+                  icon: Icons.rocket_launch_outlined,
+                  label: _buildInFlight ? 'Building…' : 'Run preview',
+                  enabled: !_buildInFlight,
+                  onTap: _runPreviewBuild,
+                ),
+                const SizedBox(width: 8),
+                _actionBtn(
+                  context,
+                  icon: Icons.open_in_new,
+                  label: 'Open',
+                  enabled: previewUrl != null,
+                  onTap: () => _copyUrl(previewUrl!),
+                ),
+                const SizedBox(width: 8),
+                _actionBtn(
+                  context,
+                  icon: Icons.description_outlined,
+                  label: 'Spec',
+                  enabled: specExcerpt != null,
+                  onTap: () => _tabs.animateTo(2),
+                ),
+              ],
+            ),
           ),
-        ),
         TabBar(
           controller: _tabs,
           labelColor: StudioTheme.accent,

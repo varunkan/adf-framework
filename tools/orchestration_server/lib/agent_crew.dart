@@ -7,6 +7,7 @@ import 'deterministic_artifacts.dart';
 import 'feature_store.dart';
 import 'integrity_chain.dart';
 import 'learning_store.dart';
+import 'trace_writer.dart';
 
 /// Re-runs a timed-out task at a higher router tier, returning artifact paths.
 typedef AgentEscalationRun = Future<List<String>> Function(
@@ -67,9 +68,15 @@ class AgentCrew {
     this.escalation,
     Duration? agentBudget,
     Map<String, String>? env,
+    this.traces,
   })  : integrity = integrity ?? IntegrityChain(store),
         agentBudget =
             agentBudget ?? agentBudgetFromEnv(env ?? Platform.environment);
+
+  /// Optional live-trace sink. When wired, the crew narrates itself span-by-span
+  /// (wave start + each subagent done) so the dashboard's live-trace stream has
+  /// something to show during the run instead of ~14s of dead-air.
+  final TraceWriter? traces;
 
   final FeatureStore store;
   final DeterministicArtifactEngine engine;
@@ -147,12 +154,25 @@ class AgentCrew {
             '${remaining.map((a) => a.name).join(', ')}');
       }
       waves.add(wave.map((a) => a.name).toList());
+      traces?.append(
+        featureId: id,
+        name: 'crew.wave_start',
+        event: 'crew',
+        message: 'Wave ${waves.length}: ${wave.map((a) => a.name).join(', ')}',
+      );
       // All agents in a wave run concurrently, each under the budget.
       final results =
           await Future.wait(wave.map((agent) => _runWithBudget(id, agent)));
       for (final r in results) {
         agentResults.add(r);
         _logAgent(id, r);
+        traces?.append(
+          featureId: id,
+          name: 'crew.agent_done',
+          event: 'crew',
+          phase: r['phase'] as int?,
+          message: '✓ ${r['agent']} — ${r['role']}',
+        );
         if (r['status'] == 'blocked') {
           final blocker = '${r['agent']} (phase ${r['phase']}): timed out '
               'after ${agentBudget.inMilliseconds}ms budget '
@@ -214,6 +234,14 @@ class AgentCrew {
       'brain': engine.brain.name,
       'duration_ms': DateTime.now().difference(started).inMilliseconds,
     };
+    traces?.append(
+      featureId: id,
+      name: 'crew.finished',
+      event: 'crew',
+      message: blockers.isNotEmpty
+          ? 'Crew blocked: ${blockers.first}'
+          : 'Crew complete — phases ${completed.join(', ')} ready; handing off to implementation.',
+    );
     _announce(id, summary);
     return summary;
   }

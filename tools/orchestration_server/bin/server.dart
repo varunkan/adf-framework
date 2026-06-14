@@ -21,6 +21,7 @@ import 'package:orchestration_server/phase_runner.dart';
 import 'package:orchestration_server/pipeline_planner.dart';
 import 'package:orchestration_server/preview_service.dart';
 import 'package:orchestration_server/run_post_sync.dart';
+import 'package:orchestration_server/trace_writer.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as io;
 import 'package:shelf_router/shelf_router.dart';
@@ -160,11 +161,12 @@ Future<void> main(List<String> args) async {
   final appRunner = AppRunner(repoRoot);
   final autoAutopilot = Platform.environment['ORCH_AUTO_AUTOPILOT'] != 'false';
 
+  final crewTraces = TraceWriter(repoRoot);
   Future<Map<String, dynamic>> runCrewForFeature(String id) async {
     final brain = await brainSelector.select();
     final engine = DeterministicArtifactEngine(store, brain: brain);
     final crew = AgentCrew(store, engine, artifactValidator, learnings,
-        integrity: integrity);
+        integrity: integrity, traces: crewTraces);
     return crew.run(id).timeout(const Duration(seconds: 120));
   }
 

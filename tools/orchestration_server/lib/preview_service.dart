@@ -177,15 +177,11 @@ class PreviewService {
   /// Kick off a background `flutter build web` when [previewBuildEnabled].
   Future<Map<String, dynamic>> kickoffBuild(String featureId) async {
     final target = resolvePreviewTarget(featureId);
-    if (target['kind'] == 'none') {
-      return {
-        'ok': false,
-        'enabled': previewBuildEnabled,
-        'error': 'No Flutter preview target for this feature',
-        'target': target,
-      };
-    }
+    // The global feature flag is the dominant signal: when preview builds are
+    // off, report 'disabled' consistently — even when there is no Flutter
+    // target (the common case now that apps render live via the App tab).
     if (!previewBuildEnabled) {
+      final slug = target['slug'] as String?;
       return {
         'ok': false,
         'enabled': false,
@@ -193,7 +189,15 @@ class PreviewService {
         'message':
             'Set ORCH_PREVIEW_BUILD=1 on the API server to enable preview builds.',
         'target': target,
-        'preview_url': previewUrlForSlug(target['slug'] as String),
+        'preview_url': slug != null ? previewUrlForSlug(slug) : null,
+      };
+    }
+    if (target['kind'] == 'none') {
+      return {
+        'ok': false,
+        'enabled': true,
+        'error': 'No Flutter preview target for this feature',
+        'target': target,
       };
     }
     final key = _buildJobKey(target);
