@@ -561,6 +561,20 @@ $clarification
     }
   }
 
+  /// Heuristic: is this message a question (→ chat) vs. a change request (→ edit)?
+  bool _isQuestion(String s) {
+    final t = s.trim().toLowerCase();
+    if (t.isEmpty) return true;
+    if (t.endsWith('?')) return true;
+    final first = t.split(RegExp(r'\s+')).first;
+    const q = {
+      'what', "what's", 'whats', 'why', 'how', 'can', 'could', 'does', 'do',
+      'is', 'are', 'was', 'were', 'where', 'when', 'who', 'which', 'should',
+      'will', 'would', 'explain', 'tell', 'show', 'help',
+    };
+    return q.contains(first);
+  }
+
   Future<void> _sendMessage(String prompt) async {
     final ts = DateTime.now().toUtc().toIso8601String();
     setState(() {
@@ -572,6 +586,25 @@ $clarification
       });
     });
     _wakePolling();
+
+    // One-box iteration: once the app is built, a plain (non-question, non-@command)
+    // message edits the app and re-renders the live preview — the Lovable loop.
+    final p = prompt.trim();
+    if (_phase >= 7 && !p.startsWith('@') && !_isQuestion(p)) {
+      try {
+        await widget.api.editApp(widget.featureId, prompt);
+        if (mounted) {
+          showMessage(
+            context,
+            'Applying your change — the preview refreshes when it\'s ready.',
+          );
+          await _load(silent: true);
+        }
+        return;
+      } catch (_) {
+        // No built app yet (409) or transient error — fall through to chat.
+      }
+    }
     try {
       final res = await widget.api.sendCommand(
         widget.featureId,

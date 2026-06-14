@@ -80,10 +80,20 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
   @override
   void didUpdateWidget(covariant LivePreviewPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.featureId != widget.featureId) {
+      // New feature: drop the previous app's live preview so we never show it.
+      _cost = null;
+      _appPreview = null;
+    }
+    // A build just finished — relaunch the app from fresh code so the iframe
+    // hot-refreshes to the new version with zero manual steps.
+    final buildJustFinished = oldWidget.building && !widget.building;
+    if (buildJustFinished && widget.phase >= 7) {
+      _loadAppPreview(restart: true);
+    }
     if (oldWidget.phase != widget.phase ||
         oldWidget.building != widget.building ||
         oldWidget.featureId != widget.featureId) {
-      if (oldWidget.featureId != widget.featureId) _cost = null;
       _wakePoll();
       _load(silent: true);
     }

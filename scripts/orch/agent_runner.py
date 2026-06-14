@@ -498,6 +498,69 @@ def fix_messages(system, user, files, failure):
     ]
 
 
+# --- one-box iteration: edit an existing app ------------------------------
+EDIT_REQUEST_FILE = ".adf-edit-request.txt"
+
+
+def read_pending_edit(app_dir):
+    """A free-text change request the server dropped next to the app, e.g.
+    'make the header blue'. Present => run in EDIT mode instead of rebuilding."""
+    p = os.path.join(app_dir, EDIT_REQUEST_FILE)
+    if not os.path.isfile(p):
+        return None
+    try:
+        t = open(p, encoding="utf-8").read().strip()
+        return t or None
+    except OSError:
+        return None
+
+
+def clear_pending_edit(app_dir):
+    try:
+        os.remove(os.path.join(app_dir, EDIT_REQUEST_FILE))
+    except OSError:
+        pass
+
+
+def current_app_files(app_dir):
+    out = []
+    for name in ("index.html", "server.py", "test_app.py"):
+        fp = os.path.join(app_dir, name)
+        if os.path.isfile(fp):
+            try:
+                out.append((name, open(fp, encoding="utf-8").read()))
+            except OSError:
+                pass
+    return out
+
+
+def build_edit_messages(fid, files, instruction):
+    """Apply a scoped change to an existing app — the Lovable 'type a change,
+    watch it update' loop. We hand the model the current files + the request and
+    ask for the SMALLEST edit, re-emitting only the changed files."""
+    system = (
+        "You are editing an EXISTING, working web app (Python stdlib http.server "
+        "+ a single static index.html). Apply the user's requested change with "
+        "the SMALLEST edit that fully satisfies it — preserve all other behavior "
+        "and styling exactly. Keep the same architecture and the PORT-from-env "
+        "contract (`port = int(os.environ.get('PORT','8000'))`). Re-emit the "
+        "COMPLETE content of every file you change (and ONLY those), as:\n"
+        "<<<FILE: relative/path>>>\n<full file content>\n<<<END>>>\n"
+        "No commentary, no markdown fences."
+    )
+    blocks = "\n\n".join(
+        f"<<<FILE: {name}>>>\n{content}\n<<<END>>>" for name, content in files
+    )
+    user = (
+        f"App: `{fid}` — the files below are the current, working version.\n\n"
+        f"=== CURRENT FILES ===\n{blocks}\n\n"
+        f"=== CHANGE REQUESTED ===\n{instruction}\n\n"
+        "Apply the change and re-emit the complete updated file(s) now. Keep "
+        "test_app.py passing; update it only if the change requires it."
+    )
+    return system, user
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("prompt")
@@ -515,11 +578,21 @@ def main():
     log(f"feature: {fid} | workspace: {workspace}")
 
     ctx = load_feature_context(repo_root, fid)
-    if not any(ctx.values()):
+    app_dir = os.path.join(workspace, "apps", fid)
+    edit_instruction = read_pending_edit(app_dir)
+    is_edit = bool(edit_instruction) and os.path.isfile(
+        os.path.join(app_dir, "index.html"))
+
+    if not is_edit and not any(ctx.values()):
         log(f"no spec/requirement found for {fid} under {repo_root}")
         sys.exit(3)
 
-    system, user = build_messages(fid, ctx)
+    if is_edit:
+        log(f"EDIT mode: applying change -> {edit_instruction[:100]}")
+        system, user = build_edit_messages(
+            fid, current_app_files(app_dir), edit_instruction)
+    else:
+        system, user = build_messages(fid, ctx)
     timeout = int(os.environ.get("ADF_RUNNER_TIMEOUT_SEC", "180"))
     max_iters = int(os.environ.get("ADF_RUNNER_FIX_ITERS", "3"))
 
@@ -559,10 +632,15 @@ def main():
         log("implementation produced no files")
         sys.exit(5)
 
+    # Consume the one-box edit request so the next plain run rebuilds normally.
+    if is_edit:
+        clear_pending_edit(app_dir)
+
     rel_root = os.path.relpath(app_root, workspace)
     status = "✅ tests PASS" if verified else "⚠️ tests still failing after retries"
+    verb = "Updated" if is_edit else "Implemented"
     summary = (
-        f"Implemented `{fid}` — {status} ({len(written)} files in {rel_root}/)\n"
+        f"{verb} `{fid}` — {status} ({len(written)} files in {rel_root}/)\n"
         + "\n".join(f"- {w}" for w in written)
         + f"\n\nRun:  cd {rel_root} && python3 server.py\n"
         + f"Test: cd {rel_root} && python3 test_app.py"

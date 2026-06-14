@@ -387,6 +387,14 @@ class ApiClient {
     return jsonDecode(r.body) as Map<String, dynamic>;
   }
 
+  /// One-box iteration: apply a free-text change to the built app and rebuild.
+  /// Throws on 409 when there is no built app yet (caller falls back to chat).
+  Future<Map<String, dynamic>> editApp(String id, String instruction) async {
+    final r = await _post('/features/$id/edit', {'instruction': instruction});
+    if (r.statusCode != 200) throw Exception(_formatError(r));
+    return jsonDecode(r.body) as Map<String, dynamic>;
+  }
+
   Future<Map<String, dynamic>> sendCommand(
     String id, {
     required String prompt,

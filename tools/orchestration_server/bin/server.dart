@@ -1280,6 +1280,47 @@ Future<void> main(List<String> args) async {
     }
   });
 
+  // One-box iteration (Lovable-style): apply a free-text change to the built app
+  // and rebuild. Drops a change request next to the app; the runner picks it up
+  // as an EDIT (load current files + change -> minimal diff) instead of a fresh
+  // build. The live preview auto-refreshes when the run completes.
+  router.post('/features/<id>/edit', (Request request, String id) async {
+    try {
+      if (!store.featureExists(id)) {
+        return _json({'error': 'not found'}, status: 404);
+      }
+      final bodyStr = await request.readAsString();
+      final body = bodyStr.isNotEmpty
+          ? jsonDecode(bodyStr) as Map<String, dynamic>
+          : <String, dynamic>{};
+      final instruction = (body['instruction'] as String? ?? '').trim();
+      if (instruction.isEmpty) {
+        return _json({'error': 'instruction is required'}, status: 400);
+      }
+      final appDir = '$repoRoot/apps/$id';
+      if (!File('$appDir/index.html').existsSync()) {
+        return _json(
+          {'error': 'No built app to edit yet — build the feature first.'},
+          status: 409,
+        );
+      }
+      File('$appDir/.adf-edit-request.txt').writeAsStringSync(instruction);
+      // Record the edit as a durable user message so the conversation reads as
+      // a natural back-and-forth (and de-dupes the dashboard's optimistic bubble).
+      store.appendCommand(id, prompt: instruction);
+      final status = await runner.enqueue(id, phase: 7);
+      return _json({
+        'ok': true,
+        'mode': 'edit',
+        'instruction': instruction,
+        'run_status': status,
+        'feature': featureDetailPayload(id),
+      });
+    } catch (e) {
+      return _json({'error': e.toString()}, status: 400);
+    }
+  });
+
   router.post('/features/<id>/heal', (Request request, String id) async {
     try {
       if (!store.featureExists(id)) {
