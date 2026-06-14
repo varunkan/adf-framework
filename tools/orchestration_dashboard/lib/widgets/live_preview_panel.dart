@@ -6,6 +6,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 
 import '../services/api_client.dart';
 import '../theme/studio_theme.dart';
+import 'app_preview_frame.dart';
 import 'cost_badge.dart';
 import 'integrity_badge.dart';
 
@@ -44,6 +45,8 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
     with SingleTickerProviderStateMixin {
   Map<String, dynamic>? _preview;
   Map<String, dynamic>? _cost;
+  Map<String, dynamic>? _appPreview;
+  bool _appPreviewLoading = false;
   bool _loading = true;
   Timer? _poll;
   int _pollMs = 2000;
@@ -53,7 +56,7 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
   @override
   void initState() {
     super.initState();
-    _tabs = TabController(length: 4, vsync: this);
+    _tabs = TabController(length: 5, vsync: this);
     _load();
     _schedulePoll();
   }
@@ -110,6 +113,7 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
       setState(() => _loading = false);
     }
     await _loadCost();
+    _loadAppPreview();
   }
 
   /// Cost endpoint is optional (older servers 404) — degrade silently.
@@ -120,6 +124,33 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
       setState(() => _cost = cost);
     } catch (_) {
       // Keep the last known value; badge stays hidden if it never loaded.
+    }
+  }
+
+  /// Launches (lazily) and polls the live app. The server only spawns a process
+  /// once an app exists, and `ensureRunning` is idempotent, so polling is cheap.
+  /// `restart=true` kills + relaunches on a fresh port after a rebuild.
+  Future<void> _loadAppPreview({bool restart = false}) async {
+    // The app only exists after the implement phase; don't poke earlier.
+    if (widget.phase < 6 && !restart && _appPreview == null) return;
+    if (restart && mounted) {
+      setState(() {
+        _appPreviewLoading = true;
+        _appPreview = null;
+      });
+    }
+    try {
+      final res = restart
+          ? await widget.api.restartAppPreview(widget.featureId)
+          : await widget.api.getAppPreview(widget.featureId);
+      if (!mounted) return;
+      setState(() {
+        _appPreview = res;
+        _appPreviewLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _appPreviewLoading = false);
     }
   }
 
@@ -258,6 +289,7 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
           unselectedLabelColor: Colors.white54,
           indicatorColor: StudioTheme.accent,
           tabs: const [
+            Tab(text: 'App'),
             Tab(text: 'Overview'),
             Tab(text: 'Spec'),
             Tab(text: 'Crew'),
@@ -270,6 +302,7 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
               : TabBarView(
                   controller: _tabs,
                   children: [
+                    _appTab(context),
                     _overviewTab(context, scheme, codeExcerpt, previewUrl),
                     _specTab(context, scheme, specExcerpt),
                     _crewTab(context),
@@ -278,6 +311,111 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
                 ),
         ),
       ],
+    );
+  }
+
+  /// The hero tab: the REAL running app, rendered inline in an iframe.
+  Widget _appTab(BuildContext context) {
+    final ap = _appPreview;
+    final available = ap != null && ap['available'] == true;
+    final url = ap?['url'] as String?;
+    if (available && url != null) {
+      return Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
+            child: Row(
+              children: [
+                _chip(context, 'Live app', Colors.greenAccent),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    url,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 11, color: Colors.white60),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.refresh, size: 18),
+                  tooltip: 'Restart app preview',
+                  onPressed: () => _loadAppPreview(restart: true),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: Container(
+              margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: StudioTheme.panelBorder),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: buildAppPreviewFrame(url),
+            ),
+          ),
+        ],
+      );
+    }
+    final status = ap?['status'] as String?;
+    final reason = ap?['reason'] as String?;
+    final building = widget.building || _isBuilding;
+    final failed = status == 'failed_to_start' || status == 'spawn_failed';
+    IconData icon;
+    String headline;
+    if (_appPreviewLoading) {
+      icon = Icons.hourglass_top;
+      headline = 'Starting your app…';
+    } else if (failed) {
+      icon = Icons.error_outline;
+      headline = 'Could not start the app preview';
+    } else if (widget.phase < 7 || building) {
+      icon = Icons.auto_awesome;
+      headline = 'Your app appears here — live — the moment the build finishes.';
+    } else {
+      icon = Icons.web_asset;
+      headline = 'No running app yet — build the feature to see it live.';
+    }
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (_appPreviewLoading)
+              const SizedBox(
+                width: 28,
+                height: 28,
+                child: CircularProgressIndicator(strokeWidth: 2.5),
+              )
+            else
+              Icon(icon, size: 44, color: StudioTheme.accentSoft),
+            const SizedBox(height: 14),
+            Text(
+              headline,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            if (reason != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                reason,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 12, color: Colors.white54),
+              ),
+            ],
+            if (failed) ...[
+              const SizedBox(height: 16),
+              FilledButton.tonalIcon(
+                onPressed: () => _loadAppPreview(restart: true),
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('Retry'),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 

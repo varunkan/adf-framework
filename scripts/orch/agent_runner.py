@@ -116,7 +116,8 @@ def build_messages(fid, ctx):
         "- Frontend: a single static HTML file with inline CSS + vanilla JS "
         "(fetch). No build step, no frameworks, no CDNs.\n"
         "- The server must serve the frontend AND expose a JSON API, and run "
-        "with a single command: `python3 server.py` (default port 8000).\n"
+        "with a single command: `python3 server.py`, binding to the PORT "
+        "environment variable (default 8000) so it can be previewed live.\n"
         "- Include a README.md with exact run + test instructions.\n\n"
         "OUTPUT FORMAT — emit each file EXACTLY like this, nothing else between "
         "files:\n"
@@ -142,30 +143,37 @@ def build_messages(fid, ctx):
         "- `server.py`  — Python stdlib HTTP server. It MUST:\n"
         "    * serve the full index.html (read from disk next to server.py) at "
         "GET `/` with Content-Type text/html;\n"
-        "    * expose the JSON API the frontend calls;\n"
-        "    * implement all spec behavior. For a URL shortener: "
-        "POST /api/shorten with JSON {\"url\": ...} -> 200 JSON "
-        "{\"short_url\":..., \"code\":...}; GET /<code> -> 302 redirect (Location "
-        "header) to the original; unknown code -> 404; invalid/empty url -> 400; "
-        "in-memory dict store; accept http:// and https:// URLs.\n"
+        "    * expose the JSON API needed to satisfy EVERY behavior in the spec "
+        "above — derive the exact routes, methods, request/response shapes, "
+        "validation and error codes from the spec. Use clear `/api/...` paths and "
+        "return JSON with correct HTTP status codes (200/201 success, 400 invalid "
+        "input, 404 not found);\n"
+        "    * persist data when the spec implies durability (e.g. a JSON file "
+        "next to server.py); otherwise an in-memory store is fine;\n"
         "    * expose a module-level `RequestHandler` class and a "
         "`make_server(port=0)` helper returning the server object, so tests can "
         "import and start it;\n"
-        "    * END with `if __name__ == '__main__':` that calls "
-        "`make_server(8000).serve_forever()` and prints a ready line — running "
-        "`python3 server.py` MUST actually start the server on port 8000.\n"
-        "- `index.html` — frontend: input, Shorten button, result area showing "
-        "the short URL with a copy link; calls POST /api/shorten via fetch.\n"
+        "    * read the port from the environment "
+        "(`port = int(os.environ.get('PORT', '8000'))`) and END with "
+        "`if __name__ == '__main__':` calling `make_server(port).serve_forever()` "
+        "and printing a ready line — running `python3 server.py` MUST actually "
+        "start the server (default 8000, overridable via PORT).\n"
+        "- `index.html` — a single self-contained frontend (inline CSS + vanilla "
+        "JS) implementing the full UI the spec describes, calling the server's "
+        "JSON API via fetch with relative, same-origin paths. Make it clean, "
+        "modern, and genuinely usable.\n"
         "- `test_app.py` — Python stdlib unittest that:\n"
         "    * imports `make_server` / `RequestHandler` from server, starts it on "
         "port 0 in a background thread, reads the real port from "
         "`server.server_address[1]`;\n"
-        "    * asserts POST /api/shorten returns 200 with a code;\n"
-        "    * asserts GET /<code> returns 302 — use http.client (NOT "
-        "urllib.urlopen, which auto-follows redirects) and assert status 302 and "
-        "the Location header equals the original url;\n"
-        "    * asserts an invalid url returns 400; shuts the server down in "
-        "tearDown.\n"
+        "    * exercises the MAIN success path of the spec's API (e.g. create then "
+        "read it back, or compute then check the result) asserting the right "
+        "status and JSON;\n"
+        "    * asserts at least one validation/error case returns the correct code "
+        "(400 invalid input or 404 missing resource). For any redirect/status "
+        "assertion use `http.client` (NOT urllib.urlopen, which auto-follows "
+        "redirects);\n"
+        "    * shuts the server down in tearDown.\n"
         "- `README.md` — exact run + test instructions.\n\n"
         "CRITICAL: code must be final and correct — `python3 test_app.py` must "
         "pass with zero failures. No placeholders. Emit all files now."
@@ -370,18 +378,24 @@ def write_files(workspace, fid, files):
     return app_root, written
 
 
-def smoke_boot(app_root, port=8000, secs=8):
+def smoke_boot(app_root, port=None, secs=8):
     """Authoritative end-to-end check: `python3 server.py` must actually start
     a server that answers GET / — catches a missing __main__ block that unit
-    tests (which call make_server() directly) silently pass over."""
+    tests (which call make_server() directly) silently pass over. We pass a free
+    PORT via the environment and require the server to honor it, so concurrent
+    builds/previews never collide on 8000 (and the PORT contract is enforced)."""
     import socket
     import time
     server = os.path.join(app_root, "server.py")
     if not os.path.isfile(server):
         return False, "server.py was not generated"
-    # Clear a stale listener on the port from a previous attempt.
+    if port is None:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as _s:
+            _s.bind(("127.0.0.1", 0))
+            port = _s.getsockname()[1]
     proc = subprocess.Popen(
         [sys.executable, "server.py"], cwd=app_root,
+        env=dict(os.environ, PORT=str(port)),
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
     )
     try:

@@ -95,6 +95,10 @@ export ADF_RUNNER_ARGS
 # The self-heal loop runs several model calls + test runs; give it room (the
 # server's per-run budget defaults to 30s, which would kill it mid-build).
 export ORCH_RUNNER_TIMEOUT_SEC="${ORCH_RUNNER_TIMEOUT_SEC:-600}"
+# The file-writing runner self-heals INTERNALLY (ADF_RUNNER_FIX_ITERS, default 3).
+# Without this, the Dart layer would re-spawn it up to 3 MORE times — ~9 cold
+# rebuilds per phase. One extra outer attempt after a hard failure is plenty.
+export ORCH_MAX_HEAL_ATTEMPTS="${ORCH_MAX_HEAL_ATTEMPTS:-1}"
 
 # --- Shared Ollama endpoint + model ---------------------------------------
 DEFAULT_MODEL='hf.co/nvidia/NVIDIA-Nemotron-3-Nano-4B-GGUF:Q4_K_M'

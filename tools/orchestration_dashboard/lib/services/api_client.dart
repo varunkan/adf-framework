@@ -371,6 +371,22 @@ class ApiClient {
     return jsonDecode(r.body) as Map<String, dynamic>;
   }
 
+  /// Launch (lazily) the built app's own server and return its live localhost
+  /// URL so the dashboard can iframe the REAL running app.
+  Future<Map<String, dynamic>> getAppPreview(String id) async {
+    final r = await _get('/features/$id/app-preview');
+    if (r.statusCode == 404) throw Exception('Feature not found: $id');
+    if (r.statusCode != 200) throw Exception(_formatError(r));
+    return jsonDecode(r.body) as Map<String, dynamic>;
+  }
+
+  /// Restart the live app after a rebuild so the preview reflects fresh code.
+  Future<Map<String, dynamic>> restartAppPreview(String id) async {
+    final r = await _post('/features/$id/app-preview/restart', {});
+    if (r.statusCode != 200) throw Exception(_formatError(r));
+    return jsonDecode(r.body) as Map<String, dynamic>;
+  }
+
   Future<Map<String, dynamic>> sendCommand(
     String id, {
     required String prompt,

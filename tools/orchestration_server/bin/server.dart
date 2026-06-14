@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:orchestration_server/adf_brain.dart';
 import 'package:orchestration_server/agent_crew.dart';
+import 'package:orchestration_server/app_runner.dart';
 import 'package:orchestration_server/artifact_validator.dart';
 import 'package:orchestration_server/audit_bundle.dart';
 import 'package:orchestration_server/deterministic_artifacts.dart';
@@ -154,6 +155,9 @@ Future<void> main(List<String> args) async {
     validator: artifactValidator,
     apiPort: port,
   );
+  // Runs built apps (apps/<id>/server.py) on a live port so the dashboard can
+  // render the REAL running app inline.
+  final appRunner = AppRunner(repoRoot);
   final autoAutopilot = Platform.environment['ORCH_AUTO_AUTOPILOT'] != 'false';
 
   Future<Map<String, dynamic>> runCrewForFeature(String id) async {
@@ -939,6 +943,34 @@ Future<void> main(List<String> args) async {
     }
   });
 
+  // Live app preview: launch apps/<id>/server.py and return its localhost URL so
+  // the dashboard can iframe the REAL running app. Lazy-starts on first call.
+  router.get('/features/<id>/app-preview', (Request request, String id) async {
+    try {
+      if (!store.featureExists(id)) {
+        return _json({'error': 'not found'}, status: 404);
+      }
+      final res = await appRunner.ensureRunning(id);
+      return _json(res);
+    } catch (e) {
+      return _json({'error': e.toString()}, status: 500);
+    }
+  });
+
+  // Restart the live app (after a rebuild) so the preview reflects fresh code.
+  router.post('/features/<id>/app-preview/restart',
+      (Request request, String id) async {
+    try {
+      if (!store.featureExists(id)) {
+        return _json({'error': 'not found'}, status: 404);
+      }
+      final res = await appRunner.restart(id);
+      return _json(res);
+    } catch (e) {
+      return _json({'error': e.toString()}, status: 500);
+    }
+  });
+
   router.get('/features/<id>/studio-preview', (Request request, String id) async {
     try {
       if (!store.featureExists(id)) {
@@ -1417,4 +1449,12 @@ Future<void> main(List<String> args) async {
   print('Orchestration API listening on:');
   print('  http://127.0.0.1:${server.port}');
   print('  http://localhost:${server.port}  (use this for web dashboard)');
+
+  // Reap any live app-preview processes when the API is told to stop.
+  for (final sig in [ProcessSignal.sigint, ProcessSignal.sigterm]) {
+    sig.watch().listen((_) {
+      appRunner.stopAll();
+      exit(0);
+    });
+  }
 }

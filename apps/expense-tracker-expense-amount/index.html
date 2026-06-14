@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Expense Tracker</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: linear-gradient(135deg, #f0f4ff 0%, #f9fafb 100%);
+    color: #1f2937;
+    min-height: 100vh;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 32px 18px 60px; }
+  h1 { font-size: 28px; margin: 0 0 4px; }
+  .sub { color: #6b7280; margin: 0 0 24px; }
+  .card {
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.06);
+    padding: 22px;
+    margin-bottom: 22px;
+  }
+  .card h2 { margin: 0 0 16px; font-size: 18px; }
+  form .row { display: flex; flex-wrap: wrap; gap: 12px; }
+  .field { display: flex; flex-direction: column; flex: 1 1 140px; }
+  .field label { font-size: 12px; font-weight: 600; color: #6b7280; margin-bottom: 5px; }
+  input, select {
+    padding: 10px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 10px;
+    font-size: 14px;
+    background: #fff;
+    outline: none;
+  }
+  input:focus, select:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.15); }
+  .btn {
+    cursor: pointer;
+    border: none;
+    border-radius: 10px;
+    padding: 10px 18px;
+    font-size: 14px;
+    font-weight: 600;
+    background: #6366f1;
+    color: #fff;
+    transition: background .15s;
+  }
+  .btn:hover { background: #4f46e5; }
+  .btn-add { align-self: flex-end; margin-top: 22px; flex: 0 0 auto; }
+  .total-box { display: flex; align-items: baseline; gap: 10px; }
+  .total-amt { font-size: 32px; font-weight: 700; color: #111827; }
+  .bars { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .bar-row { display: flex; align-items: center; gap: 10px; }
+  .bar-label { width: 84px; font-size: 13px; font-weight: 600; }
+  .bar-track { flex: 1; background: #eef0f5; border-radius: 8px; height: 20px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 8px; transition: width .3s; }
+  .bar-val { width: 86px; text-align: right; font-size: 13px; color: #374151; }
+  .filter-row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .filter-row label { font-size: 13px; font-weight: 600; color: #6b7280; }
+  ul.list { list-style: none; margin: 0; padding: 0; }
+  li.exp {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 4px;
+    border-bottom: 1px solid #f0f1f4;
+  }
+  li.exp:last-child { border-bottom: none; }
+  .cat-pill {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 999px;
+    color: #fff;
+    white-space: nowrap;
+  }
+  .exp-main { flex: 1; min-width: 0; }
+  .exp-note { font-size: 14px; font-weight: 600; }
+  .exp-meta { font-size: 12px; color: #9ca3af; }
+  .exp-amt { font-size: 16px; font-weight: 700; white-space: nowrap; }
+  .del {
+    cursor: pointer;
+    border: none;
+    background: #fee2e2;
+    color: #dc2626;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .del:hover { background: #fecaca; }
+  .empty { color: #9ca3af; text-align: center; padding: 24px 0; }
+  .err { color: #dc2626; font-size: 13px; margin-top: 8px; min-height: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>💸 Expense Tracker</h1>
+  <p class="sub">Track your spending across categories.</p>
+
+  <div class="card">
+    <h2>Add Expense</h2>
+    <form id="addForm">
+      <div class="row">
+        <div class="field">
+          <label for="amount">Amount</label>
+          <input type="number" id="amount" step="0.01" min="0.01" placeholder="0.00" required>
+        </div>
+        <div class="field">
+          <label for="category">Category</label>
+          <select id="category">
+            <option>Food</option>
+            <option>Transport</option>
+            <option>Bills</option>
+            <option>Fun</option>
+            <option>Other</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="date">Date</label>
+          <input type="date" id="date" required>
+        </div>
+        <div class="field" style="flex: 2 1 200px;">
+          <label for="note">Note (optional)</label>
+          <input type="text" id="note" placeholder="e.g. Lunch with friends">
+        </div>
+        <button type="submit" class="btn btn-add">Add</button>
+      </div>
+      <div class="err" id="formErr"></div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Summary</h2>
+    <div class="total-box">
+      <span>Total spent:</span>
+      <span class="total-amt" id="total">$0.00</span>
+    </div>
+    <div class="bars" id="bars"></div>
+  </div>
+
+  <div class="card">
+    <h2>Expenses</h2>
+    <div class="filter-row">
+      <label for="filter">Filter by category:</label>
+      <select id="filter">
+        <option value="All">All</option>
+        <option>Food</option>
+        <option>Transport</option>
+        <option>Bills</option>
+        <option>Fun</option>
+        <option>Other</option>
+      </select>
+    </div>
+    <ul class="list" id="list"></ul>
+  </div>
+</div>
+
+<script>
+const CAT_COLORS = {
+  Food: '#f59e0b',
+  Transport: '#3b82f6',
+  Bills: '#ef4444',
+  Fun: '#8b5cf6',
+  Other: '#10b981'
+};
+const CATS = ['Food', 'Transport', 'Bills', 'Fun', 'Other'];
+
+let state = { expenses: [], total: 0, breakdown: {} };
+
+function money(n) { return '$' + Number(n).toFixed(2); }
+
+async function load() {
+  const res = await fetch('/api/expenses');
+  state = await res.json();
+  render();
+}
+
+function render() {
+  document.getElementById('total').textContent = money(state.total);
+
+  const max = Math.max(1, ...CATS.map(c => state.breakdown[c] || 0));
+  const bars = document.getElementById('bars');
+  bars.innerHTML = '';
+  CATS.forEach(c => {
+    const val = state.breakdown[c] || 0;
+    const pct = (val / max) * 100;
+    const row = document.createElement('div');
+    row.className = 'bar-row';
+    row.innerHTML =
+      '<div class="bar-label">' + c + '</div>' +
+      '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%;background:' + CAT_COLORS[c] + '"></div></div>' +
+      '<div class="bar-val">' + money(val) + '</div>';
+    bars.appendChild(row);
+  });
+
+  const filter = document.getElementById('filter').value;
+  const list = document.getElementById('list');
+  list.innerHTML = '';
+  let items = state.expenses.slice();
+  if (filter !== 'All') items = items.filter(e => e.category === filter);
+  items.sort((a, b) => (a.date < b.date ? 1 : -1));
+
+  if (items.length === 0) {
+    list.innerHTML = '<div class="empty">No expenses to show.</div>';
+    return;
+  }
+
+  items.forEach(e => {
+    const li = document.createElement('li');
+    li.className = 'exp';
+    const pill = document.createElement('span');
+    pill.className = 'cat-pill';
+    pill.style.background = CAT_COLORS[e.category] || '#6b7280';
+    pill.textContent = e.category;
+
+    const main = document.createElement('div');
+    main.className = 'exp-main';
+    const note = document.createElement('div');
+    note.className = 'exp-note';
+    note.textContent = e.note || e.category;
+    const meta = document.createElement('div');
+    meta.className = 'exp-meta';
+    meta.textContent = e.date;
+    main.appendChild(note);
+    main.appendChild(meta);
+
+    const amt = document.createElement('div');
+    amt.className = 'exp-amt';
+    amt.textContent = money(e.amount);
+
+    const del = document.createElement('button');
+    del.className = 'del';
+    del.textContent = 'Delete';
+    del.onclick = () => removeExpense(e.id);
+
+    li.appendChild(pill);
+    li.appendChild(main);
+    li.appendChild(amt);
+    li.appendChild(del);
+    list.appendChild(li);
+  });
+}
+
+async function removeExpense(id) {
+  await fetch('/api/expenses/' + id, { method: 'DELETE' });
+  await load();
+}
+
+document.getElementById('addForm').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const errEl = document.getElementById('formErr');
+  errEl.textContent = '';
+  const payload = {
+    amount: parseFloat(document.getElementById('amount').value),
+    category: document.getElementById('category').value,
+    date: document.getElementById('date').value,
+    note: document.getElementById('note').value
+  };
+  const res = await fetch('/api/expenses', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    errEl.textContent = data.error || 'Failed to add expense.';
+    return;
+  }
+  document.getElementById('amount').value = '';
+  document.getElementById('note').value = '';
+  await load();
+});
+
+document.getElementById('filter').addEventListener('change', render);
+
+// default date = today
+(function () {
+  const d = new Date();
+  const iso = d.getFullYear() + '-' +
+    String(d.getMonth() + 1).padStart(2, '0') + '-' +
+    String(d.getDate()).padStart(2, '0');
+  document.getElementById('date').value = iso;
+})();
+
+load();
+</script>
+</body>
+</html>

@@ -20,7 +20,15 @@ class PhaseRunner {
         _costs = CostMeter(store),
         _env = env ?? Platform.environment;
 
-  static const int maxHealAttempts = 3;
+  /// Outer self-heal attempts the Dart layer makes after a runner failure. The
+  /// file-writing runner ALREADY self-heals internally (ADF_RUNNER_FIX_ITERS,
+  /// default 3), so a hardcoded 3 here meant up to ~9 cold rebuilds per phase.
+  /// Configurable via ORCH_MAX_HEAL_ATTEMPTS; the local-LLM launcher sets it to 1
+  /// (cursor/claude backends keep the default 3 since they re-diagnose).
+  int get maxHealAttempts {
+    final raw = int.tryParse(_env['ORCH_MAX_HEAL_ATTEMPTS']?.trim() ?? '');
+    return raw != null && raw >= 0 ? raw : 3;
+  }
 
   final FeatureStore store;
   final Duration pollInterval;
