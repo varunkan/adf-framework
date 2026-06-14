@@ -373,12 +373,33 @@ Future<void> main(List<String> args) async {
   // This connects the baton: on a clean handoff, queue phase 7 automatically so
   // one prompt goes all the way to working code. Gated on the handoff reason so
   // a 'blocked' crew (validator/timeout) never auto-pushes code generation.
+  // True when the user opted to skip the review gate ("proceed without
+  // approval"): per-feature state.auto_approve, or global ORCH_AUTO_APPROVE.
+  bool autoApproveFor(Map<String, dynamic> state) {
+    if (state['auto_approve'] == true) return true;
+    final g = (Platform.environment['ORCH_AUTO_APPROVE'] ?? '').toLowerCase();
+    return g == 'true' || g == '1';
+  }
+
   Future<void> autoEnqueueImplement(String id, Map<String, dynamic> summary) async {
-    if (!autoRunner || summary['stop_reason'] != 'implementation_handoff') return;
-    try {
-      await runner.enqueue(id, phase: 7);
-    } catch (e) {
-      stderr.writeln('auto-enqueue phase 7 failed for $id: $e');
+    if (summary['stop_reason'] != 'implementation_handoff') return;
+    final state = store.readState(id);
+    if (autoApproveFor(state)) {
+      // Proceed straight to writing code.
+      if (!autoRunner) return;
+      try {
+        await runner.enqueue(id, phase: 7);
+      } catch (e) {
+        stderr.writeln('auto-enqueue phase 7 failed for $id: $e');
+      }
+    } else {
+      // PAUSE for human review of the spec/plan/tests before any code is
+      // written. The dashboard shows the approval gate; approving phase 6
+      // advances to and runs phase 7 (implement) via the existing /approve path.
+      state['awaiting_user'] = true;
+      state['pending_approval_phase'] = 6;
+      store.writeState(id, state);
+      detailCache.remove(id);
     }
   }
 
@@ -586,6 +607,50 @@ Future<void> main(List<String> args) async {
     }
   });
 
+  // Lists the reviewable artifacts: the crew's spec/plan/tests (specs/<id>/)
+  // and the built application code (apps/<id>/), grouped, with sizes.
+  router.get('/features/<id>/artifacts', (Request request, String id) {
+    if (!store.featureExists(id)) {
+      return _json({'error': 'not found'}, status: 404);
+    }
+    final groups = <String, dynamic>{};
+    for (final entry in {'spec': 'specs/$id', 'code': 'apps/$id'}.entries) {
+      final dir = Directory('$repoRoot/${entry.value}');
+      if (!dir.existsSync()) continue;
+      final files = <Map<String, dynamic>>[];
+      for (final f in dir.listSync(recursive: true).whereType<File>()) {
+        if (f.path.contains('__pycache__')) continue;
+        final rel = f.path.substring('$repoRoot/'.length);
+        files.add({'path': rel, 'name': rel.split('/').last, 'bytes': f.lengthSync()});
+      }
+      files.sort((a, b) => (a['path'] as String).compareTo(b['path'] as String));
+      if (files.isNotEmpty) groups[entry.key] = files;
+    }
+    return _json({'feature_id': id, 'artifacts': groups});
+  });
+
+  // Returns the text content of one artifact, confined to specs/<id>/ or
+  // apps/<id>/ (no path traversal), so the dashboard can show it for review.
+  router.get('/features/<id>/artifact', (Request request, String id) {
+    if (!store.featureExists(id)) {
+      return _json({'error': 'not found'}, status: 404);
+    }
+    final rel = request.url.queryParameters['path'] ?? '';
+    final allowed = (rel.startsWith('specs/$id/') || rel.startsWith('apps/$id/')) &&
+        !rel.contains('..');
+    if (!allowed) {
+      return _json({'error': 'path not allowed'}, status: 400);
+    }
+    final f = File('$repoRoot/$rel');
+    if (!f.existsSync()) {
+      return _json({'error': 'not found'}, status: 404);
+    }
+    if (f.lengthSync() > 256 * 1024) {
+      return _json({'error': 'file too large to preview', 'path': rel}, status: 413);
+    }
+    return _json({'path': rel, 'content': f.readAsStringSync()});
+  });
+
   router.get('/features/<id>/commands', (Request request, String id) {
     try {
       if (!store.featureExists(id)) {
@@ -766,6 +831,13 @@ Future<void> main(List<String> args) async {
         id = FeatureStore.generateFeatureId(requirement, existing: existing);
       }
       store.createFeature(id: id, requirement: requirement, track: track);
+      // Persist the per-feature "proceed without approval" choice so the crew
+      // handoff knows whether to pause for review or build straight through.
+      if (body['auto_approve'] == true) {
+        final st = store.readState(id);
+        st['auto_approve'] = true;
+        store.writeState(id, st);
+      }
       if (FigmaConnector.looksLikeFigmaUrl(requirement) && figma.configured) {
         try {
           final url = RegExp(r'https?://\S*figma\.com/\S+')
