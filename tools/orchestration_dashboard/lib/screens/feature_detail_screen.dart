@@ -786,6 +786,15 @@ $clarification
       title = 'IDE mode';
       body = (run?['hint'] as String?) ??
           'Run `@orch-orchestrator resume ${widget.featureId}` in Cursor IDE, then Sync.';
+    } else if (runSt == 'running' || runSt == 'queued') {
+      // A build is in progress. Without this branch the status bar rendered
+      // nothing during phase 7 — the user stared at a blank "running" with no
+      // feedback. Show what's actually happening.
+      bg = status.runningBg;
+      title = _phase >= 7 ? 'Building your app…' : 'Working… (step $_phase of 9)';
+      body = _phase >= 7
+          ? 'Writing the code and running the tests. This usually takes about a minute.'
+          : 'Generating the spec, plan, and tests (a few seconds).';
     } else if (_phase == 0) {
       bg = status.runningBg;
       title = 'Ready';
