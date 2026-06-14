@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-FRAMEWORK_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+FRAMEWORK_ROOT="${ORCH_REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 ROOT="${ORCH_REPO_ROOT:-$(cd "$FRAMEWORK_ROOT/.." && pwd)}"
 export ORCH_REPO_ROOT="$ROOT"
 API_PORT="${ORCH_PORT:-3847}"
@@ -59,7 +59,12 @@ else
   STAMP="$DASH/build/web/.adf-build-hash"
   if [[ ! -f "$STAMP" || "$(cat "$STAMP" 2>/dev/null)" != "$DHASH" ]]; then
     echo "Building dashboard web bundle (one-time for this source version)..."
-    (cd "$DASH" && flutter build web --release > /tmp/orch-dashboard-build.log 2>&1)
+    # --pwa-strategy=none: do NOT ship a service worker. Flutter's SW caches the
+    # whole app and serves a STALE build after every rebuild — users then see the
+    # "same old (broken) dashboard" no matter what changed. No SW = every refresh
+    # is the live build. Also drop any SW left over from an older build.
+    (cd "$DASH" && flutter build web --release --pwa-strategy=none > /tmp/orch-dashboard-build.log 2>&1)
+    rm -f "$DASH/build/web/flutter_service_worker.js"
     echo "$DHASH" > "$STAMP"
   fi
   echo "Serving static dashboard..."
