@@ -366,12 +366,29 @@ Future<void> main(List<String> args) async {
     return detail;
   }
 
+  // After the deterministic crew (phases 1-6) hands off at phase 7, the feature
+  // is at current_phase=7 but NOTHING queues the implement run — the background
+  // poller is purely reactive to a phase_request/queued marker, and the crew
+  // writes neither. So phase 7 sat idle until a manual POST /run {phase:7}.
+  // This connects the baton: on a clean handoff, queue phase 7 automatically so
+  // one prompt goes all the way to working code. Gated on the handoff reason so
+  // a 'blocked' crew (validator/timeout) never auto-pushes code generation.
+  Future<void> autoEnqueueImplement(String id, Map<String, dynamic> summary) async {
+    if (!autoRunner || summary['stop_reason'] != 'implementation_handoff') return;
+    try {
+      await runner.enqueue(id, phase: 7);
+    } catch (e) {
+      stderr.writeln('auto-enqueue phase 7 failed for $id: $e');
+    }
+  }
+
   void kickAutopilotBackground(String id) {
     unawaited(() async {
       try {
         detailCache.remove(id);
-        await runCrewForFeature(id);
+        final summary = await runCrewForFeature(id);
         detailCache.remove(id);
+        await autoEnqueueImplement(id, summary);
       } catch (e) {
         stderr.writeln('autopilot background failed for $id: $e');
       }
@@ -932,6 +949,7 @@ Future<void> main(List<String> args) async {
     try {
       final summary = await runCrewForFeature(id);
       detailCache.remove(id);
+      await autoEnqueueImplement(id, summary);
       summary['detail'] = featureDetailPayload(id);
       return _json(summary);
     } catch (e) {
@@ -1220,6 +1238,13 @@ Future<void> main(List<String> args) async {
       }
       final run = store.readRunStatus(id);
       final phase = (run?['phase'] as num?)?.toInt();
+      // Genuinely un-block: clear the heal-exhaustion counter and lift a
+      // 'blocked' status, otherwise the re-enqueued run hits the heal cap again
+      // immediately and Retry looks like it did nothing.
+      final state = store.readState(id);
+      state['heal_attempts'] = 0;
+      if (state['status'] == 'blocked') state['status'] = 'active';
+      store.writeState(id, state);
       store.writeRunStatus(id, {
         'status': 'queued',
         'phase': phase,
