@@ -59,7 +59,7 @@ jobs:
       - name: runner.env round-trip for every backend
         run: |
           set -euo pipefail
-          for runner in cursor claude custom; do
+          for runner in cursor claude ollama custom auto; do
             dir="$(mktemp -d)"
             bash install/write_runner_env.sh "$dir" "$runner"
             test -f "$dir/.adf/runner.env"

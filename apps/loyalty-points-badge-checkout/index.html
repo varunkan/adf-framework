@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Checkout — Loyalty Points</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    background: #f4f6fb;
+    margin: 0;
+    color: #1a1a2e;
+  }
+  .wrap { max-width: 480px; margin: 40px auto; padding: 0 16px; }
+  .card {
+    background: #fff;
+    border-radius: 14px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.08);
+    padding: 24px;
+    margin-bottom: 20px;
+  }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: #777; font-size: 14px; margin-bottom: 20px; }
+  label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: #444; }
+  select, input {
+    width: 100%; padding: 11px 12px; font-size: 15px;
+    border: 1px solid #d4d9e6; border-radius: 9px; margin-bottom: 16px;
+    background: #fff;
+  }
+  button {
+    width: 100%; padding: 13px; font-size: 16px; font-weight: 600;
+    color: #fff; background: #2d6cdf; border: none; border-radius: 9px;
+    cursor: pointer; transition: background .15s;
+  }
+  button:hover { background: #2459bd; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 8px 14px; border-radius: 999px; color: #fff;
+    font-weight: 700; font-size: 14px; margin-top: 4px;
+  }
+  .badge .dot { width: 9px; height: 9px; border-radius: 50%; background: rgba(255,255,255,.85); }
+  .loyalty-row {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .loyalty-meta { font-size: 13px; color: #666; }
+  .result {
+    margin-top: 16px; padding: 14px; border-radius: 10px;
+    background: #eef5ee; border: 1px solid #cde6cd; font-size: 14px;
+    display: none;
+  }
+  .result.show { display: block; }
+  .result.error { background: #fdeeee; border-color: #f0c9c9; color: #a33; }
+  .big { font-size: 26px; font-weight: 800; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>Checkout</h1>
+    <div class="sub">Review your order and earn loyalty points.</div>
+
+    <label for="customer">Customer</label>
+    <select id="customer"></select>
+
+    <div class="loyalty-row">
+      <div id="badgeBox"><span class="loyalty-meta">Loading loyalty…</span></div>
+      <div class="loyalty-meta" id="redeemInfo"></div>
+    </div>
+
+    <label for="amount">Order total (USD)</label>
+    <input id="amount" type="number" min="0" step="0.01" value="49.99">
+
+    <button id="payBtn">Pay &amp; Earn Points</button>
+
+    <div class="result" id="result"></div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+async function loadCustomers() {
+  const res = await fetch('/api/customers');
+  const data = await res.json();
+  const sel = $('customer');
+  sel.innerHTML = '';
+  data.customers.forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c;
+    opt.textContent = c;
+    sel.appendChild(opt);
+  });
+  if (data.customers.includes('alice')) sel.value = 'alice';
+  await loadLoyalty();
+}
+
+function renderBadge(d) {
+  $('badgeBox').innerHTML =
+    '<span class="badge" style="background:' + d.color + '">' +
+    '<span class="dot"></span>' + d.badge_label + '</span>';
+  const dollars = (d.redeem_value_cents / 100).toFixed(2);
+  $('redeemInfo').textContent = 'Redeemable: $' + dollars;
+}
+
+async function loadLoyalty() {
+  const cid = $('customer').value;
+  try {
+    const res = await fetch('/api/loyalty/' + encodeURIComponent(cid));
+    if (!res.ok) {
+      $('badgeBox').innerHTML = '<span class="loyalty-meta">No loyalty data</span>';
+      $('redeemInfo').textContent = '';
+      return;
+    }
+    const d = await res.json();
+    renderBadge(d);
+  } catch (e) {
+    $('badgeBox').innerHTML = '<span class="loyalty-meta">Error</span>';
+  }
+}
+
+async function pay() {
+  const cid = $('customer').value;
+  const amountDollars = parseFloat($('amount').value);
+  const result = $('result');
+  result.className = 'result';
+
+  if (isNaN(amountDollars) || amountDollars < 0) {
+    result.classList.add('show', 'error');
+    result.textContent = 'Please enter a valid order total.';
+    return;
+  }
+  const amount_cents = Math.round(amountDollars * 100);
+
+  try {
+    const res = await fetch('/api/checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customer_id: cid, amount_cents })
+    });
+    const d = await res.json();
+    if (!res.ok) {
+      result.classList.add('show', 'error');
+      result.textContent = d.error || 'Checkout failed.';
+      return;
+    }
+    result.classList.add('show');
+    result.innerHTML =
+      'Payment successful! <br>' +
+      'You earned <span class="big">' + d.points_earned + '</span> points.<br>' +
+      'New balance: <strong>' + d.points_total + '</strong> (' + d.tier + ')';
+    // Refresh badge with new total
+    renderBadge({
+      color: d.color,
+      badge_label: d.badge_label,
+      redeem_value_cents: d.points_total
+    });
+  } catch (e) {
+    result.classList.add('show', 'error');
+    result.textContent = 'Network error.';
+  }
+}
+
+$('customer').addEventListener('change', loadLoyalty);
+$('payBtn').addEventListener('click', pay);
+loadCustomers();
+</script>
+</body>
+</html>

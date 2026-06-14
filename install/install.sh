@@ -2,7 +2,7 @@
 # Install ADF v3 into a project for a given IDE and agent runner.
 # Usage:
 #   install.sh --target DIR --ide cursor|vscode|windsurf|claude|generic|all
-#              [--runner auto|cursor|claude|custom] [--framework DIR] [--global]
+#              [--runner auto|cursor|claude|ollama|custom] [--framework DIR] [--global]
 set -euo pipefail
 
 IDE="cursor"
@@ -21,7 +21,7 @@ while [[ $# -gt 0 ]]; do
     --framework|-f) FRAMEWORK="$2"; shift 2 ;;
     --global|-g) GLOBAL=true; shift ;;
     -h|--help)
-      echo "Usage: $0 --target DIR --ide cursor|vscode|windsurf|claude|generic|all [--runner auto|cursor|claude|custom] [--framework DIR]"
+      echo "Usage: $0 --target DIR --ide cursor|vscode|windsurf|claude|generic|all [--runner auto|cursor|claude|ollama|custom] [--framework DIR]"
       exit 0 ;;
     *) echo "Unknown: $1" >&2; exit 1 ;;
   esac
@@ -30,7 +30,7 @@ done
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DEFAULT_FW="$(cd "$SCRIPT_DIR/.." && pwd)"
 FRAMEWORK="${FRAMEWORK:-$DEFAULT_FW}"
-VERSION="$(cat "$FRAMEWORK/VERSION" 2>/dev/null || echo 3.1.0)"
+VERSION="$(cat "$FRAMEWORK/VERSION" 2>/dev/null || echo 3.2.0)"
 
 # Default runner per IDE when --runner not given (back-compat: cursor for cursor).
 default_runner_for() {

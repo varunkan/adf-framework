@@ -3,32 +3,47 @@
 set -euo pipefail
 
 FEATURE_ID="${1:-_repo}"
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ROOT="${ORCH_REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 LIB="$ROOT/lib"
 FAIL=0
 
-echo "=== security_gate ==="
+# Auto-scope: on a micro change, scan only the changed files + their dependents
+# instead of all of lib/. Default (non-micro) behaviour is unchanged.
+# shellcheck source=/dev/null
+. "$(dirname "$0")/change_scope.sh" 2>/dev/null || true
+SCAN=("$LIB")
+if declare -f adf_is_micro >/dev/null 2>&1 && adf_is_micro; then
+  mapfile -t _aff < <(adf_affected_files)
+  if (( ${#_aff[@]} )); then
+    SCAN=(); for _f in "${_aff[@]}"; do SCAN+=("$ROOT/$_f"); done
+    echo "=== security_gate (micro-scoped: ${#SCAN[@]} file(s)) ==="
+  else
+    echo "=== security_gate ==="
+  fi
+else
+  echo "=== security_gate ==="
+fi
 
 # Hardcoded secrets (common patterns)
-if grep -rEn '(api[_-]?key|secret|password)\s*=\s*['\''"][^'\''"]{8,}' "$LIB" --include='*.dart' 2>/dev/null | grep -v '// ignore' | grep -v 'example'; then
+if grep -rEn '(api[_-]?key|secret|password)\s*=\s*['\''"][^'\''"]{8,}' "${SCAN[@]}" --include='*.dart' 2>/dev/null | grep -v '// ignore' | grep -v 'example'; then
   echo "FAIL: possible hardcoded secret in lib/"
   FAIL=1
 fi
 
 # Insecure HTTP (allow localhost in comments only via exclusion)
-if grep -rEn 'http://' "$LIB" --include='*.dart' 2>/dev/null | grep -v 'localhost' | grep -v '127.0.0.1' | grep -v '//'; then
+if grep -rEn 'http://' "${SCAN[@]}" --include='*.dart' 2>/dev/null | grep -v 'localhost' | grep -v '127.0.0.1' | grep -v '//'; then
   echo "FAIL: http:// in lib/ (use https)"
   FAIL=1
 fi
 
 # eval / dart:mirrors abuse
-if grep -rEn 'dart:mirrors' "$LIB" --include='*.dart' 2>/dev/null; then
+if grep -rEn 'dart:mirrors' "${SCAN[@]}" --include='*.dart' 2>/dev/null; then
   echo "FAIL: dart:mirrors in lib/"
   FAIL=1
 fi
 
 # Order soft-delete: new deletes should use is_deleted pattern (advisory grep for .delete( without is_deleted nearby is noisy — check deleteOrder paths)
-if grep -rEn 'hardDelete|DELETE FROM orders' "$LIB" --include='*.dart' 2>/dev/null; then
+if grep -rEn 'hardDelete|DELETE FROM orders' "${SCAN[@]}" --include='*.dart' 2>/dev/null; then
   echo "WARN: possible hard delete pattern — verify is_deleted soft-delete policy"
 fi
 

@@ -61,7 +61,7 @@ Phase 8 requires **all** machine gates PASS.
 
 | Track | When | Notes |
 |-------|------|-------|
-| **S** | Bug fix, ≤1 file | Light phases 1,2,5; bundle approval 1–2 optional |
+| **S** | Bug fix, ≤1 file (auto-detected) | Light phases 1,2,5; bundle approval 1–2 optional. Gates auto-scope to the changed file + its blast radius — repo-wide L100 is waived (you still owe 100% on what you touched). See [MICRO_CHANGES.md](MICRO_CHANGES.md). |
 | **M** | Normal feature | Full pipeline |
 | **L/XL** | Cross-cutting | Full; never skip BMAD review on phases 7, 9 |
 

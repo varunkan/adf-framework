@@ -13,7 +13,8 @@ ADF v3 — Agentic Development Framework
 Usage:
   adf install [-t TARGET] [-i IDE] [-r RUNNER] [--global]   Install into project
                 IDE:    cursor|vscode|windsurf|claude|generic|all
-                RUNNER: auto|cursor|claude|custom   (which agent CLI drives the pipeline)
+                RUNNER: auto|cursor|claude|ollama|custom   (which agent CLI drives the pipeline)
+                        ollama = local model wrapper, zero marginal cost / offline
   adf doctor [-t TARGET]                      Verify prerequisites, runner, and paths
   adf start [api|dashboard|all]               Start orchestration services
   adf studio [--local|--cursor] [--dev]       One-command studio: kill stale, start API + dashboard, health-check
@@ -125,14 +126,13 @@ case "$cmd" in
     fi
     cd "$TARGET"
     if ROOT="$(adf_resolve_repo_root 2>/dev/null)"; then
-    ROOT="$(adf_resolve_repo_root)"
-    ORCH="$(adf_orchestration_dir "$ROOT")"
-    echo "OK orchestration: $ORCH"
-    [[ -f "$ROOT/.adf-install.json" ]] && echo "OK .adf-install.json"
-  else
-    echo "FAIL: no orchestration in $TARGET — run: adf install -t $TARGET -i cursor"
-    exit 1
-  fi
+      ORCH="$(adf_orchestration_dir "$ROOT")"
+      echo "OK orchestration: $ORCH"
+      [[ -f "$ROOT/.adf-install.json" ]] && echo "OK .adf-install.json"
+    else
+      echo "FAIL: no orchestration in $TARGET — run: adf install -t $TARGET -i cursor"
+      exit 1
+    fi
     ;;
   start)
     . "$FRAMEWORK_ROOT/lib/resolve_paths.sh"

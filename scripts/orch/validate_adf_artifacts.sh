@@ -13,7 +13,7 @@ if [[ -z "$FEATURE_ID" ]]; then
   exit 1
 fi
 
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ROOT="${ORCH_REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 SPECS="$ROOT/specs/$FEATURE_ID"
 ERRORS=0
 

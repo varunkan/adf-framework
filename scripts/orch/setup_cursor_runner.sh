@@ -2,7 +2,7 @@
 # One-time setup for orchestration dashboard headless runner.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ROOT="${ORCH_REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 AGENT="${CURSOR_AGENT_PATH:-$HOME/.local/bin/cursor-agent}"
 ENV_FILE="$HOME/.cursor/agent.env"
 PORT="${ORCH_PORT:-3847}"

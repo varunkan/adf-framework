@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notes</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    background: #f4f6fb;
+    color: #1c2333;
+    margin: 0;
+    padding: 0;
+  }
+  .wrap {
+    max-width: 640px;
+    margin: 40px auto;
+    padding: 0 16px;
+  }
+  h1 { font-size: 28px; margin-bottom: 4px; }
+  p.sub { color: #6b7280; margin-top: 0; }
+  .card {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    padding: 20px;
+    margin-bottom: 24px;
+  }
+  textarea {
+    width: 100%;
+    min-height: 80px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    padding: 10px;
+    font-size: 15px;
+    resize: vertical;
+    font-family: inherit;
+  }
+  button {
+    margin-top: 12px;
+    background: #4f46e5;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-size: 15px;
+    cursor: pointer;
+  }
+  button:hover { background: #4338ca; }
+  button:disabled { background: #a5a5c9; cursor: not-allowed; }
+  .err { color: #dc2626; margin-top: 8px; min-height: 18px; font-size: 14px; }
+  ul.notes { list-style: none; padding: 0; margin: 0; }
+  ul.notes li {
+    background: #fff;
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .empty { color: #9ca3af; font-style: italic; }
+  h2 { font-size: 18px; margin: 0 0 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Notes</h1>
+  <p class="sub">Add a note and see your list below.</p>
+
+  <div class="card">
+    <textarea id="noteInput" placeholder="Write a note..."></textarea>
+    <div>
+      <button id="addBtn">Add Note</button>
+    </div>
+    <div class="err" id="errMsg"></div>
+  </div>
+
+  <h2>Your notes (<span id="count">0</span>)</h2>
+  <ul class="notes" id="noteList"></ul>
+</div>
+
+<script>
+  const input = document.getElementById('noteInput');
+  const addBtn = document.getElementById('addBtn');
+  const errMsg = document.getElementById('errMsg');
+  const noteList = document.getElementById('noteList');
+  const countEl = document.getElementById('count');
+
+  function render(notes) {
+    noteList.innerHTML = '';
+    countEl.textContent = notes.length;
+    if (notes.length === 0) {
+      const li = document.createElement('li');
+      li.className = 'empty';
+      li.textContent = 'No notes yet.';
+      noteList.appendChild(li);
+      return;
+    }
+    notes.forEach(function (n) {
+      const li = document.createElement('li');
+      li.textContent = n.text;
+      noteList.appendChild(li);
+    });
+  }
+
+  async function loadNotes() {
+    try {
+      const res = await fetch('/api/notes');
+      const data = await res.json();
+      render(data.notes || []);
+    } catch (e) {
+      errMsg.textContent = 'Failed to load notes.';
+    }
+  }
+
+  async function addNote() {
+    const text = input.value.trim();
+    errMsg.textContent = '';
+    if (text === '') {
+      errMsg.textContent = 'Note cannot be empty.';
+      return;
+    }
+    addBtn.disabled = true;
+    try {
+      const res = await fetch('/api/notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: text })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(function () { return {}; });
+        errMsg.textContent = err.error || 'Failed to add note.';
+        return;
+      }
+      input.value = '';
+      await loadNotes();
+    } catch (e) {
+      errMsg.textContent = 'Network error.';
+    } finally {
+      addBtn.disabled = false;
+    }
+  }
+
+  addBtn.addEventListener('click', addNote);
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      addNote();
+    }
+  });
+
+  loadNotes();
+</script>
+</body>
+</html>

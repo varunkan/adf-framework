@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Temperature Converter</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .card {
+    background: #1e293b;
+    border-radius: 16px;
+    padding: 32px;
+    width: 100%;
+    max-width: 420px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+  }
+  h1 { font-size: 1.4rem; margin: 0 0 4px; }
+  p.sub { margin: 0 0 24px; color: #94a3b8; font-size: 0.9rem; }
+  label { display: block; font-size: 0.85rem; margin-bottom: 6px; color: #cbd5e1; }
+  input, select {
+    width: 100%;
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid #334155;
+    background: #0f172a;
+    color: #e2e8f0;
+    font-size: 1rem;
+    margin-bottom: 16px;
+  }
+  button {
+    width: 100%;
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    background: #38bdf8;
+    color: #0f172a;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  button:hover { background: #0ea5e9; }
+  .result {
+    margin-top: 20px;
+    padding: 16px;
+    border-radius: 8px;
+    background: #0f172a;
+    border: 1px solid #334155;
+    min-height: 24px;
+    font-size: 1.1rem;
+    text-align: center;
+  }
+  .result.error { color: #f87171; border-color: #7f1d1d; }
+  .result .big { font-size: 1.6rem; font-weight: 700; color: #38bdf8; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Temperature Converter</h1>
+    <p class="sub">Convert between Celsius and Fahrenheit.</p>
+
+    <label for="value">Value</label>
+    <input type="number" id="value" placeholder="e.g. 100" step="any" />
+
+    <label for="direction">Direction</label>
+    <select id="direction">
+      <option value="c2f">Celsius → Fahrenheit</option>
+      <option value="f2c">Fahrenheit → Celsius</option>
+    </select>
+
+    <button id="convertBtn">Convert</button>
+
+    <div class="result" id="result">Enter a value and click Convert.</div>
+  </div>
+
+<script>
+  const btn = document.getElementById('convertBtn');
+  const resultEl = document.getElementById('result');
+
+  async function convert() {
+    const value = document.getElementById('value').value;
+    const direction = document.getElementById('direction').value;
+
+    resultEl.classList.remove('error');
+
+    if (value === '' || value === null) {
+      resultEl.classList.add('error');
+      resultEl.textContent = 'Please enter a value.';
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/convert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: parseFloat(value), direction: direction })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        resultEl.classList.add('error');
+        resultEl.textContent = data.error || 'Conversion failed.';
+        return;
+      }
+      resultEl.innerHTML = '<span class="big">' + data.result + ' °' + data.unit + '</span>';
+    } catch (e) {
+      resultEl.classList.add('error');
+      resultEl.textContent = 'Network error: ' + e.message;
+    }
+  }
+
+  btn.addEventListener('click', convert);
+  document.getElementById('value').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') convert();
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>URL Shortener</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+        #result {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>URL Shortener</h1>
+    <input id="url" type="text" placeholder="Enter URL">
+    <button id="shorten">Shorten</button>
+    <div id="result"></div>
+    <script>
+        const urlInput = document.getElementById('url');
+        const shortenButton = document.getElementById('shorten');
+        const resultDiv = document.getElementById('result');
+        shortenButton.addEventListener('click', async () => {
+            const url = urlInput.value;
+            if (url) {
+                try {
+                    const response = await fetch('/api/shorten', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ url })
+                    });
+                    const data = await response.json();
+                    resultDiv.innerHTML = `Short URL: <a href="${data.short_url}">${data.short_url}</a> (<a href="#" onclick="copyToClipboard('${data.short_url}')">Copy</a>)`;
+                } catch (error) {
+                    resultDiv.innerHTML = 'Error: ' + error.message;
+                }
+            } else {
+                resultDiv.innerHTML = 'Please enter a URL';
+            }
+        });
+
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                resultDiv.innerHTML = 'Copied to clipboard!';
+            }, () => {
+                resultDiv.innerHTML = 'Failed to copy to clipboard';
+            });
+        }
+    </script>
+</body>
+</html>

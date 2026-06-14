@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Start orchestration API with dashboard chat powered by Cursor CLI (cursor-agent).
 set -euo pipefail
-FRAMEWORK_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+FRAMEWORK_ROOT="${ORCH_REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 ROOT="${ORCH_REPO_ROOT:-$(cd "$FRAMEWORK_ROOT/.." && pwd)}"
 export ORCH_REPO_ROOT="$ROOT"
 export ORCH_CHAT_USE_CURSOR=1
