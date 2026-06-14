@@ -221,14 +221,17 @@ def call_nvidia(messages, timeout):
         return None
     model = os.environ.get("ADF_RUNNER_MODEL", "meta/llama-3.3-70b-instruct")
     base = os.environ.get("ORCH_NVIDIA_BASE_URL", NVIDIA_BASE).rstrip("/")
-    log(f"using NVIDIA NIM model {model}")
+    # Cap NVIDIA's read time so a slow free-tier response fails FAST to the next
+    # backend instead of hanging the whole build for minutes.
+    nv_timeout = min(timeout, int(os.environ.get("ADF_NVIDIA_TIMEOUT_SEC", "75")))
+    log(f"using NVIDIA NIM model {model} (timeout {nv_timeout}s)")
     try:
         out = http_post_json(
             f"{base}/chat/completions",
             {"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
             {"model": model, "max_tokens": _max_tokens(), "temperature": 0.2,
              "messages": messages},
-            timeout,
+            nv_timeout,
         )
         choice = (out.get("choices") or [{}])[0]
         text = (choice.get("message") or {}).get("content") or ""
@@ -306,12 +309,23 @@ def apply_headroom(messages):
 
 def generate(messages, timeout):
     """Try each configured backend in order; return (text, usage) or None.
-    Pins to one backend per run via ADF_RUNNER_BACKEND=nvidia|anthropic|ollama.
-    Headroom runs FIRST, before any backend dispatch."""
+    Headroom runs FIRST, before any backend dispatch.
+
+    Backend order:
+      - ADF_RUNNER_BACKEND=nvidia|anthropic|ollama pins exactly one.
+      - Otherwise RELIABILITY-FIRST: if ANTHROPIC_API_KEY is set, Claude leads
+        (it builds in one shot — no slow free-tier self-heal grind), with NVIDIA
+        and Ollama as fallbacks. Set ADF_RUNNER_BACKEND=nvidia for the free path.
+      - With no Claude key, fall back to NVIDIA (free) then Ollama (local)."""
     messages = apply_headroom(messages)
     pin = os.environ.get("ADF_RUNNER_BACKEND", "").strip().lower()
-    order = {"nvidia": [call_nvidia], "anthropic": [call_anthropic],
-             "ollama": [call_ollama]}.get(pin, [call_nvidia, call_anthropic, call_ollama])
+    if pin in ("nvidia", "anthropic", "ollama"):
+        order = {"nvidia": [call_nvidia], "anthropic": [call_anthropic],
+                 "ollama": [call_ollama]}[pin]
+    elif (os.environ.get("ANTHROPIC_API_KEY") or "").strip():
+        order = [call_anthropic, call_nvidia, call_ollama]
+    else:
+        order = [call_nvidia, call_anthropic, call_ollama]
     for backend in order:
         res = backend(messages, timeout)
         if res and res[0] and res[0].strip():
