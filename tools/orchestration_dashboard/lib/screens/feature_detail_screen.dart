@@ -622,15 +622,127 @@ $clarification
     }
   }
 
+  // Review dialog: list the spec/plan/tests and built code (tap to read), plus
+  // the live build log — so the user can see what was created and what the
+  // agent is doing before approving.
+  Future<void> _openReviewDialog() async {
+    Map<String, dynamic> artifacts = {};
+    List<Map<String, dynamic>> log = const [];
+    try {
+      artifacts = await widget.api.listArtifacts(widget.featureId);
+      log = await widget.api.getRunLog(widget.featureId, limit: 40);
+    } catch (e) {
+      if (mounted) showMessage(context, 'Could not load artifacts: $e');
+    }
+    if (!mounted) return;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Review artifacts & build log'),
+        content: SizedBox(
+          width: 560,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (artifacts.isEmpty)
+                  const Text('No artifacts yet — the crew is still working.'),
+                for (final group in artifacts.entries) ...[
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8, bottom: 2),
+                    child: Text(
+                      group.key == 'code'
+                          ? 'Built code'
+                          : 'Spec · plan · tasks · tests',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  for (final f in (group.value as List).cast<Map<String, dynamic>>())
+                    ListTile(
+                      dense: true,
+                      leading: const Icon(Icons.description_outlined, size: 18),
+                      title: Text(f['name'] as String? ?? '?'),
+                      subtitle: Text('${f['bytes'] ?? 0} bytes'),
+                      onTap: () => _viewArtifact(
+                          f['path'] as String? ?? '', f['name'] as String? ?? ''),
+                    ),
+                ],
+                if (log.isNotEmpty) ...[
+                  const Divider(height: 20),
+                  const Text('Build log (live)',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 4),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(8),
+                    color: Colors.black.withValues(alpha: 0.05),
+                    child: SelectableText(
+                      log
+                          .map((e) => (e['message'] ?? '').toString())
+                          .where((m) => m.isNotEmpty)
+                          .join('\n'),
+                      style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _viewArtifact(String path, String name) async {
+    String content;
+    try {
+      content = await widget.api.getArtifact(widget.featureId, path);
+    } catch (e) {
+      content = 'Could not load: $e';
+    }
+    if (!mounted) return;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(name),
+        content: SizedBox(
+          width: 660,
+          height: 460,
+          child: SingleChildScrollView(
+            child: SelectableText(
+              content,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+        ],
+      ),
+    );
+  }
+
   Future<void> _approve(String decision, {String notes = ''}) async {
-    if (decision == 'approved' && !_verdictPassed) {
+    final approvePhase = _pendingPhase > 0 ? _pendingPhase : _phase;
+    // The crew's spec phases (1-6) are deterministic — there is no judge verdict
+    // — so the human's review of the spec/plan/tests IS the approval. Waive the
+    // (absent) judge for that gate; other phases still require a PASS verdict.
+    final v = _judgeVerdict;
+    final isSpecGate =
+        approvePhase <= 6 && (v == null || v.isEmpty || v == 'null');
+    if (decision == 'approved' && !_verdictPassed && !isSpecGate) {
       showMessage(
         context,
         'Cannot approve: judge verdict is $_judgeVerdict. Clarify and redo until PASS.',
       );
       return;
     }
-    final approvePhase = _pendingPhase > 0 ? _pendingPhase : _phase;
     if (decision == 'approved' &&
         approvePhase >= 2 &&
         approvePhase <= 4 &&
@@ -645,9 +757,10 @@ $clarification
     try {
       final updated = await widget.api.approve(
         id: widget.featureId,
-        phase: _pendingPhase > 0 ? _pendingPhase : _phase,
+        phase: approvePhase,
         decision: decision,
         notes: notes,
+        judgeWaiver: isSpecGate,
       );
       if (!mounted) return;
       showMessage(context, 'Recorded: $decision');
@@ -952,6 +1065,11 @@ $clarification
                       : const Icon(Icons.rocket_launch, size: 16),
                   label: Text(_autopilotRunning ? 'Autopilot…' : 'Autopilot'),
                 ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.fact_check_outlined),
+                tooltip: 'Review artifacts & build log',
+                onPressed: _openReviewDialog,
               ),
               IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
             ],

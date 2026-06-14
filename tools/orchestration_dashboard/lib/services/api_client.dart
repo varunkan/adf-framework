@@ -238,6 +238,30 @@ class ApiClient {
     return (data['agents'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ?? [];
   }
 
+  /// Live build log lines (runner stdout: which model, attempts, tests).
+  Future<List<Map<String, dynamic>>> getRunLog(String id, {int limit = 60}) async {
+    final r = await _get('/features/$id/run-log?limit=$limit');
+    if (r.statusCode != 200) throw Exception(r.body);
+    final data = jsonDecode(r.body) as Map<String, dynamic>;
+    return (data['entries'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ?? [];
+  }
+
+  /// Reviewable artifacts grouped as {spec: [...], code: [...]}.
+  Future<Map<String, dynamic>> listArtifacts(String id) async {
+    final r = await _get('/features/$id/artifacts');
+    if (r.statusCode != 200) throw Exception(r.body);
+    final data = jsonDecode(r.body) as Map<String, dynamic>;
+    return (data['artifacts'] as Map<String, dynamic>?) ?? {};
+  }
+
+  /// Text content of one artifact (path is the server-relative path).
+  Future<String> getArtifact(String id, String path) async {
+    final r = await _get('/features/$id/artifact?path=${Uri.encodeQueryComponent(path)}');
+    if (r.statusCode != 200) throw Exception(_formatError(r));
+    final data = jsonDecode(r.body) as Map<String, dynamic>;
+    return (data['content'] as String?) ?? '';
+  }
+
   Future<Map<String, dynamic>> runAutopilot(String id) async {
     final r = await _post('/features/$id/autopilot', {});
     if (r.statusCode != 200) {
