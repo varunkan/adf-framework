@@ -40,6 +40,12 @@ class CostMeter {
     final usage = event['usage'];
     final inputTokens = usage is Map ? _toInt(usage['input_tokens']) : 0;
     final outputTokens = usage is Map ? _toInt(usage['output_tokens']) : 0;
+    // Prompt-cache accounting: writes bill ~1.25x input, reads ~0.10x. Tracked
+    // so the framework can finally measure cache hits (and the savings).
+    final cacheWrite =
+        usage is Map ? _toInt(usage['cache_creation_input_tokens']) : 0;
+    final cacheRead =
+        usage is Map ? _toInt(usage['cache_read_input_tokens']) : 0;
 
     final reported = event['total_cost_usd'];
     final rateIn = _rate('ORCH_PRICE_IN_PER_MTOK');
@@ -51,8 +57,10 @@ class CostMeter {
       usd = reported.toDouble();
       source = sourceReported;
     } else if ((rateIn != null || rateOut != null) &&
-        inputTokens + outputTokens > 0) {
-      usd = inputTokens * (rateIn ?? 0) / 1e6 +
+        inputTokens + outputTokens + cacheRead + cacheWrite > 0) {
+      usd = (inputTokens + cacheWrite * 1.25 + cacheRead * 0.10) *
+              (rateIn ?? 0) /
+              1e6 +
           outputTokens * (rateOut ?? 0) / 1e6;
       source = sourceEstimated;
     } else {
@@ -66,6 +74,8 @@ class CostMeter {
       'usd': _round(usd),
       'input_tokens': inputTokens,
       'output_tokens': outputTokens,
+      if (cacheWrite > 0) 'cache_creation_input_tokens': cacheWrite,
+      if (cacheRead > 0) 'cache_read_input_tokens': cacheRead,
       'source': source,
     };
 
@@ -105,18 +115,30 @@ class CostMeter {
     var usd = 0.0;
     var inputTokens = 0;
     var outputTokens = 0;
+    var cacheRead = 0;
+    var cacheWrite = 0;
     var allZero = true;
     for (final run in runs) {
       usd += (run['usd'] as num? ?? 0).toDouble();
       inputTokens += _toInt(run['input_tokens']);
       outputTokens += _toInt(run['output_tokens']);
+      cacheRead += _toInt(run['cache_read_input_tokens']);
+      cacheWrite += _toInt(run['cache_creation_input_tokens']);
       if (run['source'] != sourceZero) allZero = false;
     }
+    // Hit rate = cached input served from the cache vs all input that flowed
+    // through it (fresh + written + read). The number prompt caching exists to
+    // move; 0 before this change because nothing was ever cached.
+    final totalInputFlow = inputTokens + cacheWrite + cacheRead;
     return {
       'feature_id': id,
       'total_usd': _round(usd),
       'total_input_tokens': inputTokens,
       'total_output_tokens': outputTokens,
+      'total_cache_read_tokens': cacheRead,
+      'total_cache_creation_tokens': cacheWrite,
+      'cache_hit_rate':
+          totalInputFlow == 0 ? 0.0 : _round(cacheRead / totalInputFlow),
       'zero_cost': allZero,
       'runs': runs,
     };

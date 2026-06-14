@@ -115,6 +115,20 @@ class ClaudeApiBrain implements AdfBrain {
   /// sending it to Haiku/Sonnet tiers is out of contract for the router.
   bool get _sendsAdaptiveThinking => model.startsWith('claude-opus');
 
+  /// Prompt caching is ON by default (`ORCH_PROMPT_CACHE=0` to disable). The
+  /// system prefix (constitution/spec/context) is byte-identical across the
+  /// many parallel agent turns and self-heal retries, so caching it turns N
+  /// re-transmissions into 1 write (~1.25x) + (N-1) reads (~0.1x).
+  bool get _promptCacheOn {
+    final v = _env['ORCH_PROMPT_CACHE'];
+    return v != '0' && v != 'false' && v != 'off';
+  }
+
+  /// Below the provider's cacheable minimum (~1024 tokens) `cache_control` is
+  /// ignored, so only mark prompts worth caching. ~4 chars/token heuristic.
+  int get _promptCacheMinChars =>
+      int.tryParse(_env['ORCH_PROMPT_CACHE_MIN_CHARS'] ?? '') ?? 4096;
+
   Future<String?> _post(
     HttpClient client,
     String key,
@@ -129,6 +143,12 @@ class ClaudeApiBrain implements AdfBrain {
     final turns = messages.where((m) => m['role'] != 'system').toList();
     if (turns.isEmpty) return null;
 
+    // Mark the stable system prefix as an ephemeral cache breakpoint when it is
+    // large enough to cache; otherwise send the plain string (no benefit, and
+    // keeps tiny prompts byte-compatible with the legacy request shape).
+    final cacheSystem =
+        system.isNotEmpty && _promptCacheOn && system.length >= _promptCacheMinChars;
+
     final req = await client.postUrl(Uri.parse('$baseUrl/v1/messages'));
     req.headers
       ..set('x-api-key', key)
@@ -137,7 +157,16 @@ class ClaudeApiBrain implements AdfBrain {
     req.write(jsonEncode({
       'model': model,
       'max_tokens': maxTokens,
-      if (system.isNotEmpty) 'system': system,
+      if (system.isNotEmpty)
+        'system': cacheSystem
+            ? [
+                {
+                  'type': 'text',
+                  'text': system,
+                  'cache_control': {'type': 'ephemeral'},
+                }
+              ]
+            : system,
       'messages': turns,
       // Never add temperature/top_p/top_k here — they 400 on Opus 4.7+.
       if (_sendsAdaptiveThinking) 'thinking': {'type': 'adaptive'},
@@ -170,15 +199,23 @@ class ClaudeApiBrain implements AdfBrain {
     if (report == null || usage is! Map) return;
     final inputTokens = _toInt(usage['input_tokens']);
     final outputTokens = _toInt(usage['output_tokens']);
+    // Cache tokens are reported separately from input_tokens by Anthropic:
+    // writes bill ~1.25x input, reads ~0.10x input. This is where the prompt
+    // cache pays off — a cache_read is ~10x cheaper than re-sending the prefix.
+    final cacheWrite = _toInt(usage['cache_creation_input_tokens']);
+    final cacheRead = _toInt(usage['cache_read_input_tokens']);
     final price = pricePerMTok[model];
     report({
       'type': 'result',
       if (price != null)
         'total_cost_usd':
-            inputTokens * price.$1 / 1e6 + outputTokens * price.$2 / 1e6,
+            (inputTokens + cacheWrite * 1.25 + cacheRead * 0.10) * price.$1 / 1e6 +
+                outputTokens * price.$2 / 1e6,
       'usage': {
         'input_tokens': inputTokens,
         'output_tokens': outputTokens,
+        if (cacheWrite > 0) 'cache_creation_input_tokens': cacheWrite,
+        if (cacheRead > 0) 'cache_read_input_tokens': cacheRead,
       },
     });
   }
