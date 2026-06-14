@@ -747,6 +747,12 @@ class PhaseRunner {
           phase: phase,
           message: reason,
         );
+        store.appendSystemMessage(
+          featureId,
+          'Build timed out after ${budget.inSeconds}s. '
+          'Tap "Reset & retry" to run again, or open Review to see what was '
+          'written so far.',
+        );
         return {
           'success': false,
           'exit_code': code,
@@ -780,7 +786,22 @@ class PhaseRunner {
           phase: phase,
           message: errorMsg,
         );
-        if (!needsLogin) {
+        if (needsLogin) {
+          store.appendSystemMessage(
+            featureId,
+            'Sign-in required — the builder needs you to sign in before it can '
+            'run. Complete the runner sign-in, then send your message again.',
+          );
+        } else {
+          final attempt =
+              ((store.readState(featureId)['heal_attempts'] as num?)?.toInt() ??
+                      0) +
+                  1;
+          store.appendSystemMessage(
+            featureId,
+            'Build hit a problem — fixing and retrying automatically '
+            '(attempt $attempt of $maxHealAttempts)…',
+          );
           unawaited(_scheduleSelfHeal(featureId, phase, errorMsg, lastPrompt: prompt));
         }
         return {'success': false, 'exit_code': code, 'error': errText};
@@ -813,6 +834,27 @@ class PhaseRunner {
         message: nowAwaiting
             ? 'Phase $phase complete — awaiting your approval (verdict: $verdict)'
             : 'Phase $phase finished',
+      );
+      // Durable, scrollable record of the outcome — so the chat doesn't go blank
+      // when the live trace ends. (The user: "looks like nothing was built.")
+      final outcomeHead = nowAwaiting
+          ? 'Build complete — Phase $phase is ready for your review and approval.'
+          : 'Build complete — Phase $phase finished; the build ran and tests passed.';
+      // Strip emoji from the agent's verbatim tail — the dashboard's CanvasKit
+      // build has no emoji font, so they render as tofu boxes (▯).
+      final emoji = RegExp(
+        r'[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2300}-\u{23FF}\u{2B00}-\u{2BFF}\uFE0F]',
+        unicode: true,
+      );
+      final resultTail = (fullResultText ?? '')
+          .replaceAll(emoji, '')
+          .replaceAll(RegExp(r'  +'), ' ')
+          .trim();
+      store.appendSystemMessage(
+        featureId,
+        resultTail.isEmpty
+            ? outcomeHead
+            : '$outcomeHead\n\n${resultTail.length > 600 ? resultTail.substring(resultTail.length - 600) : resultTail}',
       );
       if (((after['heal_attempts'] as num?)?.toInt() ?? 0) > 0) {
         after['heal_attempts'] = 0;
@@ -910,6 +952,12 @@ Instructions:
           'Reset heal_attempts in state.json and Retry',
         ],
       });
+      store.appendSystemMessage(
+        featureId,
+        'Build stopped after $maxHealAttempts attempts. '
+        'Tap "Reset & retry" to start the build over, or open Review to read '
+        'the build log and see where it got stuck.',
+      );
       return;
     }
 

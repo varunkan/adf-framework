@@ -2,23 +2,18 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "orchestration-api",
-      "runtimeExecutable": "bash",
+      "name": "adf-dashboard",
+      "runtimeExecutable": "python3",
       "runtimeArgs": [
-        "-c",
-        "ORCH_CHAT_LLM=auto ORCH_OLLAMA_MODEL='hf.co/nvidia/NVIDIA-Nemotron-3-Nano-4B-GGUF:Q4_K_M' dart run tools/orchestration_server/bin/server.dart"
+        "-m",
+        "http.server",
+        "3850",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "/Users/varunkumar/ai_pos_system/adf-framework/tools/orchestration_dashboard/build/web"
       ],
-      "port": 3847
-    },
-    {
-      "name": "orchestration-dashboard",
-      "runtimeExecutable": "bash",
-      "runtimeArgs": [
-        "-c",
-        "cd tools/orchestration_dashboard && flutter run -d web-server --web-port=${PORT:-3848} --dart-define=ORCH_API_URL=http://localhost:3847"
-      ],
-      "port": 3848,
-      "autoPort": true
+      "port": 3850
     }
   ]
 }

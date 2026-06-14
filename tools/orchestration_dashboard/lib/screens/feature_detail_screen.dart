@@ -222,23 +222,29 @@ class _FeatureDetailScreenState extends State<FeatureDetailScreen> {
     final serverConv =
         (d['conversation'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ??
             [];
+    // Prune optimistic bubbles once the durable server log represents them —
+    // by command_id (a real reply has landed) OR by role+text (the message the
+    // server persisted under its own id). This is housekeeping only; the merge
+    // already de-dupes, so a momentary miss can never drop a visible bubble.
     if (_optimisticMessages.isNotEmpty && serverConv.isNotEmpty) {
-      for (final om in List<Map<String, dynamic>>.from(_optimisticMessages)) {
+      final serverKeys = serverConv
+          .map((s) => '${s['role']}|${(s['text'] as String? ?? '').trim()}')
+          .toSet();
+      _optimisticMessages.removeWhere((om) {
         final cid = om['command_id'] as String?;
-        if (cid == null) continue;
-        final serverReply = serverConv.where(
-          (s) =>
-              s['role'] == 'assistant' &&
-              s['command_id'] == cid &&
-              s['llm_source'] != 'pending' &&
-              s['llm_source'] != null,
-        );
-        if (serverReply.isNotEmpty) {
-          _optimisticMessages.removeWhere(
-            (m) => m['command_id'] == cid,
+        if (cid != null) {
+          final hasReply = serverConv.any(
+            (s) =>
+                s['role'] == 'assistant' &&
+                s['command_id'] == cid &&
+                s['llm_source'] != 'pending' &&
+                s['llm_source'] != null,
           );
+          if (hasReply) return true;
         }
-      }
+        final key = '${om['role']}|${(om['text'] as String? ?? '').trim()}';
+        return serverKeys.contains(key);
+      });
     }
     setState(() {
       _detail = d;
@@ -396,6 +402,12 @@ $clarification
     return '@orch-orchestrator resume ${widget.featureId}';
   }
 
+  /// The rendered conversation = the durable server log + any optimistic bubble
+  /// not yet represented server-side. An optimistic message is hidden once the
+  /// server has it (matched by command_id, or — for a just-typed message the
+  /// server persisted under its own id — by role+text). This is a strict,
+  /// de-duplicated SUPERSET: nothing the user sent or received ever vanishes,
+  /// and nothing is shown twice.
   List<Map<String, dynamic>> _mergedConversation() {
     final server =
         (_detail?['conversation'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ??
@@ -405,12 +417,14 @@ $clarification
         .map((m) => m['command_id'])
         .whereType<String>()
         .toSet();
+    final serverKeys = server
+        .map((m) => '${m['role']}|${(m['text'] as String? ?? '').trim()}')
+        .toSet();
     final extra = _optimisticMessages.where((m) {
       final cid = m['command_id'] as String?;
-      if (cid != null && serverIds.contains(cid)) {
-        final src = m['llm_source'] as String?;
-        if (src == 'pending') return false;
-      }
+      if (cid != null && serverIds.contains(cid)) return false;
+      final key = '${m['role']}|${(m['text'] as String? ?? '').trim()}';
+      if (serverKeys.contains(key)) return false;
       return true;
     });
     return [...server, ...extra];
@@ -527,7 +541,9 @@ $clarification
       }
       if (reply != null) {
         if (!mounted) return;
-        setState(() => _optimisticMessages.clear());
+        // Do NOT clear optimistic messages wholesale — that was the flash-then-
+        // gone bug. _applyDetail() (run by _load above) has already pruned the
+        // entries the server now holds; _mergedConversation() de-dupes the rest.
         showMessage(
           context,
           reply['llm_source'] == 'cursor_agent'
@@ -731,11 +747,17 @@ $clarification
   Future<void> _approve(String decision, {String notes = ''}) async {
     final approvePhase = _pendingPhase > 0 ? _pendingPhase : _phase;
     // The crew's spec phases (1-6) are deterministic — there is no judge verdict
-    // — so the human's review of the spec/plan/tests IS the approval. Waive the
-    // (absent) judge for that gate; other phases still require a PASS verdict.
-    final v = _judgeVerdict;
-    final isSpecGate =
-        approvePhase <= 6 && (v == null || v.isEmpty || v == 'null');
+    // — so the human's review of the spec/plan/tests IS the approval. Detect
+    // "no real PASS verdict" from the RAW state: the _judgeVerdict getter
+    // defaults to 'revise', which would otherwise mask the absent-verdict case
+    // and wrongly block the spec-gate approval. Other phases still require PASS.
+    final rawVerdict =
+        (_detail?['state'] as Map<String, dynamic>?)?['last_judge_verdict']
+            as String?;
+    final isSpecGate = approvePhase <= 6 &&
+        (rawVerdict == null ||
+            rawVerdict.trim().isEmpty ||
+            rawVerdict.toLowerCase() != 'pass');
     if (decision == 'approved' && !_verdictPassed && !isSpecGate) {
       showMessage(
         context,
@@ -852,6 +874,15 @@ $clarification
     }
   }
 
+  /// Seconds since an ISO-8601 (UTC) timestamp, or null if unparseable.
+  int? _elapsedSeconds(String? iso) {
+    if (iso == null || iso.isEmpty) return null;
+    final t = DateTime.tryParse(iso);
+    if (t == null) return null;
+    final secs = DateTime.now().toUtc().difference(t.toUtc()).inSeconds;
+    return secs < 0 ? 0 : secs;
+  }
+
   Widget _statusBar(BuildContext context) {
     final status = context.orchStatus;
     final run = _detail?['run_status'] as Map<String, dynamic>?;
@@ -859,6 +890,10 @@ $clarification
     final state = _detail?['state'] as Map<String, dynamic>? ?? {};
     final awaiting = _showApprovalGate;
     final error = run?['error'] as String?;
+    // A run that has been going >45s gets a "still building" treatment so the
+    // user isn't staring at a dead spinner — with Cancel + Reset & retry.
+    final elapsed = _elapsedSeconds(run?['started_at'] as String?);
+    final longRun = _isRunning && !awaiting && elapsed != null && elapsed >= 45;
 
     Color bg;
     String title;
@@ -904,10 +939,18 @@ $clarification
       // nothing during phase 7 — the user stared at a blank "running" with no
       // feedback. Show what's actually happening.
       bg = status.runningBg;
-      title = _phase >= 7 ? 'Building your app…' : 'Working… (step $_phase of 9)';
-      body = _phase >= 7
-          ? 'Writing the code and running the tests. This usually takes about a minute.'
-          : 'Generating the spec, plan, and tests (a few seconds).';
+      if (longRun) {
+        title = _phase >= 7
+            ? 'Still building — ${elapsed}s elapsed'
+            : 'Still working — ${elapsed}s elapsed';
+        body = 'This is taking longer than usual. You can keep waiting, or '
+            'Cancel and tap Reset & retry to start over.';
+      } else {
+        title = _phase >= 7 ? 'Building your app…' : 'Working… (step $_phase of 9)';
+        body = _phase >= 7
+            ? 'Writing the code and running the tests. This usually takes about a minute.'
+            : 'Generating the spec, plan, and tests (a few seconds).';
+      }
     } else if (_phase == 0) {
       bg = status.runningBg;
       title = 'Ready';
@@ -960,10 +1003,15 @@ $clarification
                     : const Icon(Icons.play_arrow, size: 18),
                 label: Text(_phase == 0 ? 'Start' : 'Run phase'),
               ),
-            if (runSt == 'needs_login' || runSt == 'error' || runSt == 'blocked')
+            if (runSt == 'needs_login' ||
+                runSt == 'error' ||
+                runSt == 'blocked' ||
+                longRun)
               TextButton(
                 onPressed: _retry,
-                child: Text(runSt == 'blocked' ? 'Reset & retry' : 'Retry'),
+                child: Text(
+                  runSt == 'blocked' || longRun ? 'Reset & retry' : 'Retry',
+                ),
               ),
           ],
         ),

@@ -442,6 +442,32 @@ $t
     return cmd;
   }
 
+  /// Append a standalone assistant/system message to the conversation — a run
+  /// outcome ("Build complete", "Build stopped", …) that must persist and be
+  /// scrollable in the chat. It rides the same `commands.jsonl` store the chat
+  /// view is built from, but with an EMPTY prompt so it renders as a single
+  /// assistant bubble (no phantom user message). `buildChatView` surfaces these.
+  Map<String, dynamic> appendSystemMessage(
+    String id,
+    String text, {
+    String source = 'runner',
+  }) {
+    final cmd = {
+      'id': DateTime.now().microsecondsSinceEpoch.toString(),
+      'prompt': '',
+      'type': 'system',
+      'status': 'executed',
+      'assistant_reply': text,
+      'llm_source': source,
+      'created_at': DateTime.now().toUtc().toIso8601String(),
+      'executed_at': DateTime.now().toUtc().toIso8601String(),
+    };
+    final file = File('${featurePath(id)}/commands.jsonl');
+    file.parent.createSync(recursive: true);
+    file.writeAsStringSync('${jsonEncode(cmd)}\n', mode: FileMode.append);
+    return cmd;
+  }
+
   List<Map<String, dynamic>> listCommands(String id, {int limit = 20}) {
     final file = File('${featurePath(id)}/commands.jsonl');
     if (!file.existsSync()) return [];

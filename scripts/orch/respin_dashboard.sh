@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 FRAMEWORK_ROOT="${ORCH_REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
-ROOT="${ORCH_REPO_ROOT:-$(cd "$FRAMEWORK_ROOT/.." && pwd)}"
+# Repo root defaults to the framework dir (where the feature store, specs/, and
+# apps/ live), NOT its parent — otherwise a plain restart points at a stale,
+# unrelated feature set and the user's features appear to vanish. Explicit
+# ORCH_REPO_ROOT still overrides.
+ROOT="${ORCH_REPO_ROOT:-$FRAMEWORK_ROOT}"
 export ORCH_REPO_ROOT="$ROOT"
 API_PORT="${ORCH_PORT:-3847}"
 WEB_PORT="${ORCH_WEB_PORT:-3848}"

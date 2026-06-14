@@ -171,20 +171,26 @@ class ConversationBuilder {
     final messages = <Map<String, dynamic>>[];
     for (final cmd in store.listCommands(featureId, limit: 200)) {
       final prompt = cmd['prompt'] as String? ?? '';
-      if (prompt.trim().isEmpty) continue;
-      messages.add({
-        'role': 'user',
-        'type': 'command',
-        'text': prompt.trim(),
-        'timestamp': cmd['created_at'] as String?,
-        'command_id': cmd['id'],
-        'status': cmd['status'],
-      });
       final ar = cmd['assistant_reply'] as String?;
+      // A standalone system/run message (appendSystemMessage) has an empty
+      // prompt but carries an assistant_reply — render it as a single bubble so
+      // run outcomes persist in the scrollable log. Skip only when BOTH are empty.
+      final hasPrompt = prompt.trim().isNotEmpty;
+      if (!hasPrompt && (ar == null || ar.trim().isEmpty)) continue;
+      if (hasPrompt) {
+        messages.add({
+          'role': 'user',
+          'type': 'command',
+          'text': prompt.trim(),
+          'timestamp': cmd['created_at'] as String?,
+          'command_id': cmd['id'],
+          'status': cmd['status'],
+        });
+      }
       if (ar != null && ar.trim().isNotEmpty) {
         messages.add({
           'role': 'assistant',
-          'type': 'orchestrator',
+          'type': cmd['type'] == 'system' ? 'system' : 'orchestrator',
           'text': ar.trim(),
           'timestamp': cmd['created_at'] as String?,
           'command_id': cmd['id'],
