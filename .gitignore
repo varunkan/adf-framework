@@ -38,3 +38,7 @@ dist/
 # python bytecode
 __pycache__/
 *.pyc
+
+# app runtime data
+apps/*/expenses.json
+apps/*/*.db
