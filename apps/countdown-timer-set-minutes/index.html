@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Countdown Timer</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: linear-gradient(135deg, #1e1e2f, #2d2d44);
+    color: #fff;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .card {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 20px;
+    padding: 40px;
+    width: 420px;
+    max-width: 92vw;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+    text-align: center;
+  }
+  h1 { margin: 0 0 24px; font-weight: 600; font-size: 1.4rem; letter-spacing: .5px; }
+  .display {
+    font-size: 5rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 4px;
+    margin: 10px 0 28px;
+    color: #7ee0c0;
+    text-shadow: 0 0 20px rgba(126,224,192,0.3);
+  }
+  .inputs {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    margin-bottom: 24px;
+  }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field label { font-size: .75rem; opacity: .7; text-transform: uppercase; letter-spacing: 1px; }
+  .field input {
+    width: 90px;
+    padding: 10px;
+    font-size: 1.4rem;
+    text-align: center;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.15);
+    background: rgba(0,0,0,0.25);
+    color: #fff;
+  }
+  .buttons { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  button {
+    flex: 1 1 90px;
+    padding: 12px 14px;
+    font-size: 1rem;
+    font-weight: 600;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: transform .08s ease, opacity .2s;
+  }
+  button:active { transform: scale(0.96); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  .btn-set { background: #4a6cf7; color: #fff; }
+  .btn-start { background: #2ecc71; color: #06281a; }
+  .btn-pause { background: #f39c12; color: #2b1a00; }
+  .btn-reset { background: #e74c3c; color: #fff; }
+  .status { margin-top: 18px; font-size: .85rem; min-height: 1.2em; opacity: .85; }
+  .err { color: #ff8a80; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Countdown Timer</h1>
+    <div class="display" id="display">00:00</div>
+    <div class="inputs">
+      <div class="field">
+        <label for="min">Minutes</label>
+        <input id="min" type="number" min="0" max="1439" value="0">
+      </div>
+      <div class="field">
+        <label for="sec">Seconds</label>
+        <input id="sec" type="number" min="0" max="59" value="0">
+      </div>
+    </div>
+    <div class="buttons">
+      <button class="btn-set" id="btnSet">Set</button>
+      <button class="btn-start" id="btnStart">Start</button>
+      <button class="btn-pause" id="btnPause">Pause</button>
+      <button class="btn-reset" id="btnReset">Reset</button>
+    </div>
+    <div class="status" id="status"></div>
+  </div>
+
+<script>
+const display = document.getElementById('display');
+const status = document.getElementById('status');
+let ticker = null;
+
+function render(state) {
+  display.textContent = state.display;
+  if (state.running) {
+    status.textContent = 'Running…';
+    status.className = 'status';
+    startTicker();
+  } else {
+    status.textContent = state.remaining === 0 ? 'Done / idle' : 'Paused';
+    status.className = 'status';
+    stopTicker();
+  }
+}
+
+function showError(msg) {
+  status.textContent = msg;
+  status.className = 'status err';
+}
+
+async function api(path, body) {
+  const opts = { method: 'POST', headers: { 'Content-Type': 'application/json' } };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const res = await fetch(path, opts);
+  const data = await res.json();
+  if (!res.ok) { showError(data.error || 'error'); throw new Error(data.error); }
+  return data;
+}
+
+function startTicker() {
+  if (ticker) return;
+  ticker = setInterval(async () => {
+    try {
+      const state = await api('/api/timer/tick');
+      display.textContent = state.display;
+      if (!state.running) {
+        stopTicker();
+        status.textContent = state.remaining === 0 ? 'Time is up!' : 'Paused';
+      }
+    } catch (e) { stopTicker(); }
+  }, 1000);
+}
+
+function stopTicker() {
+  if (ticker) { clearInterval(ticker); ticker = null; }
+}
+
+document.getElementById('btnSet').onclick = async () => {
+  const minutes = parseInt(document.getElementById('min').value, 10) || 0;
+  const seconds = parseInt(document.getElementById('sec').value, 10) || 0;
+  try { render(await api('/api/timer/set', { minutes, seconds })); }
+  catch (e) {}
+};
+
+document.getElementById('btnStart').onclick = async () => {
+  try { render(await api('/api/timer/start')); } catch (e) {}
+};
+
+document.getElementById('btnPause').onclick = async () => {
+  try { render(await api('/api/timer/pause')); } catch (e) {}
+};
+
+document.getElementById('btnReset').onclick = async () => {
+  try { render(await api('/api/timer/reset')); } catch (e) {}
+};
+
+(async function init() {
+  const res = await fetch('/api/timer');
+  render(await res.json());
+})();
+</script>
+</body>
+</html>
