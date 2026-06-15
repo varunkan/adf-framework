@@ -6,6 +6,7 @@ import 'package:orchestration_server/adf_brain.dart';
 import 'package:orchestration_server/agent_crew.dart';
 import 'package:orchestration_server/app_runner.dart';
 import 'package:orchestration_server/proof_check.dart';
+import 'package:orchestration_server/compaction.dart';
 import 'package:orchestration_server/artifact_validator.dart';
 import 'package:orchestration_server/audit_bundle.dart';
 import 'package:orchestration_server/deterministic_artifacts.dart';
@@ -163,6 +164,8 @@ Future<void> main(List<String> args) async {
 
   // Verifies an app's Proof of Build (the offline tamper-evident seal) on demand.
   final proofCheck = ProofCheck(repoRoot);
+  // Estimates + applies the `/compact` context fold via the canonical engine.
+  final compaction = Compaction(repoRoot);
   final autoAutopilot = Platform.environment['ORCH_AUTO_AUTOPILOT'] != 'false';
 
   final crewTraces = TraceWriter(repoRoot);
@@ -1001,6 +1004,43 @@ Future<void> main(List<String> args) async {
         return _json({'error': 'not found'}, status: 404);
       }
       return _json(await proofCheck.verify(id));
+    } catch (e) {
+      return _json({'error': e.toString()}, status: 500);
+    }
+  });
+
+  // Context budget for the app's `/compact` chip: tokens now vs the budget.
+  router.get('/features/<id>/context', (Request request, String id) async {
+    try {
+      if (!store.featureExists(id)) {
+        return _json({'error': 'not found'}, status: 404);
+      }
+      return _json(await compaction.estimate(id));
+    } catch (e) {
+      return _json({'error': e.toString()}, status: 500);
+    }
+  });
+
+  // The `/compact` command: fold the app's context, write a durable card, and
+  // drop a scrollable bubble in the chat so the action is visible + auditable.
+  router.post('/features/<id>/compact', (Request request, String id) async {
+    try {
+      if (!store.featureExists(id)) {
+        return _json({'error': 'not found'}, status: 404);
+      }
+      final res = await compaction.apply(id);
+      if (res['did_compact'] == true) {
+        final before = res['tokens'] ?? '?';
+        final after = res['tokens_after'] ?? '?';
+        final n = res['n_files'] ?? '?';
+        store.appendSystemMessage(
+          id,
+          '🗜 Compacted context ($before → $after tokens, $n files reviewed) — '
+          'durable card written to .adf-context/.',
+          source: 'compaction',
+        );
+      }
+      return _json(res);
     } catch (e) {
       return _json({'error': e.toString()}, status: 500);
     }

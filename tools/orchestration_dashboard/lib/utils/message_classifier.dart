@@ -3,6 +3,11 @@
 ///
 /// Deliberately conservative — empty/whitespace counts as a question so we never
 /// trigger an accidental rebuild on a stray submit.
+///
+/// A slash command the one-box loop handles directly (not a question, not an
+/// edit): `/compact` folds the app's accumulated context and writes a card.
+bool isCompactCommand(String s) => s.trim().toLowerCase() == '/compact';
+
 bool looksLikeQuestion(String s) {
   final t = s.trim().toLowerCase();
   if (t.isEmpty) return true;

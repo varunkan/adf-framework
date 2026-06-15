@@ -575,9 +575,31 @@ $clarification
     });
     _wakePolling();
 
+    final p = prompt.trim();
+
+    // `/compact` is a direct command: fold the app's accumulated context (the
+    // same /compact discipline Claude Code uses) and surface the result inline.
+    if (isCompactCommand(p)) {
+      try {
+        final res = await widget.api.compact(widget.featureId);
+        if (mounted) {
+          final did = res['did_compact'] == true;
+          showMessage(
+            context,
+            did
+                ? 'Compacted context (${res['tokens']} → ${res['tokens_after']} tokens).'
+                : 'Context already within budget — nothing to compact.',
+          );
+          await _load(silent: true);
+        }
+      } catch (_) {
+        if (mounted) showMessage(context, 'Could not compact context right now.');
+      }
+      return;
+    }
+
     // One-box iteration: once the app is built, a plain (non-question, non-@command)
     // message edits the app and re-renders the live preview — the Lovable loop.
-    final p = prompt.trim();
     if (_phase >= 7 && !p.startsWith('@') && !looksLikeQuestion(p)) {
       try {
         await widget.api.editApp(widget.featureId, prompt);

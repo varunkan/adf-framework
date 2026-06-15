@@ -131,6 +131,20 @@ class ApiClient {
     return jsonDecode(r.body) as Map<String, dynamic>;
   }
 
+  /// The app's context budget: `{has_app, tokens, budget, over, n_files}`.
+  Future<Map<String, dynamic>> getContext(String id) async {
+    final r = await _get('/features/$id/context');
+    if (r.statusCode != 200) throw Exception(_formatError(r));
+    return jsonDecode(r.body) as Map<String, dynamic>;
+  }
+
+  /// Run the `/compact` fold over the app's context; returns the engine report.
+  Future<Map<String, dynamic>> compact(String id) async {
+    final r = await _post('/features/$id/compact', {});
+    if (r.statusCode != 200) throw Exception(_formatError(r));
+    return jsonDecode(r.body) as Map<String, dynamic>;
+  }
+
   Future<Map<String, dynamic>> createFeature({
     required String id,
     required String requirement,

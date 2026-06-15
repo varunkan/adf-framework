@@ -347,7 +347,25 @@ level completes, run integration for that level → after L3, run E2E.
   server `POST /compact` + dashboard `/compact` command + auto-compact at phase
   boundary. Complements (does not replace) the transparent `headroom` byte-squeeze:
   compaction is a LOGICAL, DURABLE, reviewable decision. Build order N11 → {N12, N13}.
-- 2026-06-15 — Next: finish compaction (N11–N13), then the rest of the governed/local
-  moat (Data tab, share/export, proof+policy folded into the audit-bundle +
-  agent-operable MCP for the react stack, air-gapped Ollama build) + Phase 5
-  ADF-vs-Lovable scorecard. N3 npm-warm-cache optional.
+- 2026-06-15 — Context Compaction SHIPPED (N11–N13, all gated). N11
+  `scripts/orch/compaction.py` — deterministic/offline engine: estimate_tokens,
+  context_budget (ADF_CONTEXT_BUDGET_TOKENS, default 120k), should_compact,
+  compact_messages/files/conversation, durable lossless-by-anchor context cards,
+  `--json/--apply` CLI (test_compaction.py 25/25). N12 runner wiring — `assemble_edit`
+  compacts the edit payload by relevance to the instruction (keep relevant whole,
+  outline the rest) + writes a card; `fix_messages` compacts the self-heal payload by
+  relevance to the failure; main() notes 🗜 in the summary (test_agent_runner.Compaction
+  5/5; e2e + generate gates still green). N13 surface — Dart `Compaction` shells the
+  engine (`estimate`/`apply`/`autoCompactIfNeeded`); `GET /features/<id>/context` +
+  `POST /features/<id>/compact` (writes a chat bubble); dashboard `/compact` chat
+  command (classifier `isCompactCommand` + detail-screen interception) + a `ContextChip`
+  in the live-preview header (amber + "Compact" when over budget) (compaction_test.dart
+  5/5, compact_command_test.dart 4/4). AUTOMATIC path = the runner self-compacts its
+  model payload whenever over budget (N12); EXPLICIT path = the `/compact` command. The
+  engine complements (does not replace) the transparent `headroom` byte-squeeze.
+  Full suites: server 206/1-skip, dashboard 45, python 25+11+10+17. ADF now applies the
+  same `/compact` discipline Claude Code uses — to the apps IT builds.
+- 2026-06-15 — Next: the rest of the governed/local moat (Data tab, share/export,
+  proof+policy+compaction folded into the audit-bundle + agent-operable MCP for the
+  react stack, air-gapped Ollama build) + Phase 5 ADF-vs-Lovable scorecard.
+  N3 npm-warm-cache optional.
