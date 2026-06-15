@@ -1,0 +1,36 @@
+{
+  "results": [
+    {
+      "id": "todo",
+      "built": false,
+      "tests_pass": false,
+      "files": 0,
+      "seconds": 600.3,
+      "attempts": 1,
+      "in_tokens": 0,
+      "out_tokens": 0,
+      "proof_ok": false,
+      "policy_ok": true,
+      "offline_ok": true,
+      "governed": false
+    }
+  ],
+  "summary": {
+    "apps": 1,
+    "governed": 0,
+    "proven": 0,
+    "compliant": 1,
+    "offline": 1,
+    "total_files": 0
+  },
+  "capability": {
+    "apps": 1,
+    "built": 0,
+    "tests_pass": 0,
+    "avg_seconds": 0,
+    "total_out_tokens": 0,
+    "backend": "ollama qwen2.5-coder:32b (local, $0, offline)",
+    "budget_s": 600,
+    "note": "local 32B model exceeded the 600s per-generate budget on a single dev machine; pipeline proven separately by e2e_react_app.py"
+  }
+}

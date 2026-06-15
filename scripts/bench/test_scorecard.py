@@ -52,6 +52,17 @@ class Render(unittest.TestCase):
         self.assertIn("2/2 apps built", md)
         self.assertIn("$0 (local model, offline)", md)
 
+    def test_partial_capability_is_reported_honestly(self):
+        # A timed-out local-model run must NOT read as a pipeline failure: it must
+        # say what was attempted and point at the e2e that proves the pipeline.
+        md = scorecard.render_scorecard(capability={
+            "apps": 1, "built": 0, "budget_s": 600,
+            "backend": "ollama qwen2.5-coder:32b (local, $0, offline)",
+        })
+        self.assertIn("attempted", md.lower())
+        self.assertIn("pipeline", md.lower())
+        self.assertIn("e2e", md.lower())
+
 
 class WriteDoc(unittest.TestCase):
     def test_writes_the_scorecard_file(self):

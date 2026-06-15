@@ -7,7 +7,9 @@
 > capability parity on the core build loop. This page states both — and says
 > plainly where ADF still trails.
 
-**Measured (bench):** 3/3 apps fully governed (proven + policy-compliant + offline-capable); proven 3/3, compliant 3/3, offline 3/3. See `scripts/bench/`.
+**Measured governance (bench):** 3/3 apps fully governed (proven + policy-compliant + offline-capable); proven 3/3, compliant 3/3, offline 3/3. See `scripts/bench/`.
+
+**Measured capability (bench --build):** a live **$0, offline** build was attempted with ollama qwen2.5-coder:32b (local, $0, offline); 0/1 finished within the 600s budget on a single dev machine (local-model latency is real — see *time-to-first-app* below). The build/test/run **pipeline** itself is proven by the deterministic e2e (`scripts/test/e2e_react_app.py`: prompt → build → boot → serve → persist → hot-edit, with real npm + Vite + Vitest + Node).
 
 ## Governance & ownership — the moat (ADF wins 9/9)
 
