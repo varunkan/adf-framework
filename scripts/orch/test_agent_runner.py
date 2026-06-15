@@ -116,5 +116,40 @@ class StackProfiles(unittest.TestCase):
         self.assertEqual(ar.stack_profile("bogus-stack")["name"], ar.STACK_STDLIB)
 
 
+class VerifyDispatch(unittest.TestCase):
+    """N5 — `verify_app` dispatches to the right per-stack pipeline and fails
+    gracefully (clear message, no crash) when the app is missing its entrypoints.
+    These are fast/offline; the real npm pipeline is exercised by the system
+    script `runner_verify_check.py`."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.app = os.path.join(self.tmp, "apps", "demo")
+        os.makedirs(self.app)
+
+    def test_stdlib_verify_missing_tests_is_clear_error(self):
+        ok, out = ar.verify_app(self.app, ar.STACK_STDLIB)
+        self.assertFalse(ok)
+        self.assertIn("test_app.py", out)
+
+    def test_react_verify_missing_package_json_is_clear_error(self):
+        ok, out = ar.verify_app(self.app, ar.STACK_REACT)
+        self.assertFalse(ok)
+        self.assertIn("package.json", out)
+
+    def test_verify_app_detects_stack_from_manifest(self):
+        # No stack arg: detect react from the .adf-stack.json manifest, so the
+        # react pipeline (not stdlib) runs — proven by the package.json error.
+        with open(os.path.join(self.app, ".adf-stack.json"), "w") as f:
+            f.write('{"stack":"react-vite-sqlite"}')
+        ok, out = ar.verify_app(self.app)
+        self.assertFalse(ok)
+        self.assertIn("package.json", out)
+
+    def test_stack_profile_exposes_verify_callable(self):
+        self.assertIs(ar.stack_profile(ar.STACK_REACT)["verify"], ar._react_verify)
+        self.assertIs(ar.stack_profile(ar.STACK_STDLIB)["verify"], ar.run_verification)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

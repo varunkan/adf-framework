@@ -551,6 +551,105 @@ def run_verification(app_root, timeout=60):
     return True, f"{out}\n\nboot check: {boot_msg}"
 
 
+# --- react verify pipeline (N5) --------------------------------------------
+def _npm(app_root, args, timeout):
+    """Run `npm <args>` in the app dir; returns (ok, combined_output)."""
+    try:
+        p = subprocess.run(
+            ["npm", *args], cwd=app_root, capture_output=True, text=True,
+            timeout=timeout, env=dict(os.environ),
+        )
+        return p.returncode == 0, (p.stdout + "\n" + p.stderr).strip()
+    except FileNotFoundError:
+        return False, "npm not found on PATH"
+    except subprocess.TimeoutExpired:
+        return False, f"npm {' '.join(args)} timed out after {timeout}s"
+
+
+def _node_smoke_boot(app_root, secs=20):
+    """Authoritative end-to-end check for the react stack: `node server/index.mjs`
+    must start a server that honors PORT and answers GET `/` (the built SPA) and
+    `/api/health` with 200 — the same contract AppRunner relies on."""
+    import socket
+    import time
+    import urllib.request
+    entry = os.path.join(app_root, "server", "index.mjs")
+    if not os.path.isfile(entry):
+        return False, "server/index.mjs was not generated"
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as _s:
+        _s.bind(("127.0.0.1", 0))
+        port = _s.getsockname()[1]
+    proc = subprocess.Popen(
+        ["node", "server/index.mjs"], cwd=app_root,
+        env=dict(os.environ, PORT=str(port)),
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+    )
+    try:
+        deadline = time.time() + secs
+        while time.time() < deadline:
+            if proc.poll() is not None:
+                out = proc.stdout.read() if proc.stdout else ""
+                return False, f"`node server/index.mjs` exited on launch:\n{out[-1500:]}"
+            try:
+                for path in ("/", "/api/health"):
+                    with urllib.request.urlopen(
+                        f"http://127.0.0.1:{port}{path}", timeout=1
+                    ) as r:
+                        if r.status != 200:
+                            raise OSError(f"{path} -> HTTP {r.status}")
+                return True, f"node server serves / and /api/health on :{port}"
+            except OSError:
+                time.sleep(0.5)
+        return False, f"node server did not serve / and /api/health within {secs}s"
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
+def _react_verify(app_root, timeout=None):
+    """Verify a React+Vite+Tailwind+SQLite app: install (once) → typecheck+build
+    (`tsc --noEmit && vite build`) → vitest → boot. Each stage's failure is
+    surfaced verbatim (and attributed) so the self-heal loop can fix the right
+    file. Authoritative: a green here means the app really builds, tests, boots."""
+    timeout = timeout or int(os.environ.get("ADF_REACT_VERIFY_TIMEOUT_SEC", "600"))
+    if not os.path.isfile(os.path.join(app_root, "package.json")):
+        return False, "package.json missing — react scaffold was not applied"
+    # Install once (npm ci needs the committed lockfile); reuse on re-verify.
+    if not os.path.isdir(os.path.join(app_root, "node_modules")):
+        ok, out = _npm(app_root, ["ci", "--no-audit", "--no-fund"], timeout)
+        if not ok:
+            return False, f"DEPENDENCY INSTALL FAILED (npm ci):\n{out[-3000:]}"
+    ok, out = _npm(app_root, ["run", "build"], timeout)
+    if not ok:
+        return False, f"BUILD FAILED (tsc --noEmit && vite build):\n{out[-3000:]}"
+    ok, out = _npm(app_root, ["test"], timeout)
+    if not ok:
+        return False, f"TESTS FAILED (vitest):\n{out[-3000:]}"
+    boot_ok, boot_msg = _node_smoke_boot(app_root)
+    if not boot_ok:
+        return False, f"BUILD + TESTS PASSED but SERVER BOOT FAILED:\n{boot_msg}"
+    return True, f"build + vitest passed; {boot_msg}"
+
+
+def verify_app(app_root, stack=None, timeout=None):
+    """Dispatch verification to the stack's pipeline (contract C2). `stack` is
+    resolved from the manifest when omitted. stdlib → unittest + python boot;
+    react → npm build + vitest + node boot. Unknown stacks fall back to stdlib."""
+    stack = stack or detect_stack(app_root)
+    if stack == STACK_REACT:
+        return _react_verify(app_root, timeout)
+    return run_verification(app_root, timeout or 60)
+
+
+# Wire the per-stack verify callables now that the pipelines are defined (the
+# registry literal lives above, before these functions exist).
+_STACK_PROFILES[STACK_STDLIB]["verify"] = run_verification
+_STACK_PROFILES[STACK_REACT]["verify"] = _react_verify
+
+
 def headroom_compress_log(text):
     """Compress bulky test-failure output (logs/tracebacks — headroom's sweet
     spot) before re-sending it in a self-heal turn. Returns the original text
