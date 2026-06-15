@@ -1,0 +1,36 @@
+{
+  "results": [
+    {
+      "app": "expense-tracker",
+      "files": 17,
+      "proof_ok": true,
+      "policy_ok": true,
+      "offline_ok": true,
+      "governed": true
+    },
+    {
+      "app": "kanban",
+      "files": 17,
+      "proof_ok": true,
+      "policy_ok": true,
+      "offline_ok": true,
+      "governed": true
+    },
+    {
+      "app": "todo",
+      "files": 17,
+      "proof_ok": true,
+      "policy_ok": true,
+      "offline_ok": true,
+      "governed": true
+    }
+  ],
+  "summary": {
+    "apps": 3,
+    "governed": 3,
+    "proven": 3,
+    "compliant": 3,
+    "offline": 3,
+    "total_files": 51
+  }
+}
