@@ -123,6 +123,14 @@ class ApiClient {
   bool wasNotModified(String id) => _lastNotModified.contains(id);
   final Set<String> _lastNotModified = {};
 
+  /// Recompute the app's Proof of Build seal offline. Returns
+  /// `{has_proof, ok, status:'VERIFIED'|'TAMPERED', seal, files, ...}`.
+  Future<Map<String, dynamic>> getProof(String id) async {
+    final r = await _get('/features/$id/proof');
+    if (r.statusCode != 200) throw Exception(_formatError(r));
+    return jsonDecode(r.body) as Map<String, dynamic>;
+  }
+
   Future<Map<String, dynamic>> createFeature({
     required String id,
     required String requirement,

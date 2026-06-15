@@ -9,6 +9,7 @@ import '../theme/studio_theme.dart';
 import 'app_preview_frame.dart';
 import 'cost_badge.dart';
 import 'integrity_badge.dart';
+import 'proof_badge.dart';
 
 /// Right-rail live preview (Lovable-style): phase, artifacts, spec, integrity, crew.
 class LivePreviewPanel extends StatefulWidget {
@@ -231,6 +232,7 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
             spacing: 8,
             runSpacing: 8,
             children: [
+              ProofBadge(api: widget.api, featureId: widget.featureId),
               _chip(context, 'Phase ${widget.phase}', StudioTheme.accent),
               _chip(context, widget.status, scheme.outline),
               if (_isBuilding) _chip(context, 'Building…', StudioTheme.accentSoft),

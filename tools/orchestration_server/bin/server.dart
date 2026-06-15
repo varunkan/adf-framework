@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:orchestration_server/adf_brain.dart';
 import 'package:orchestration_server/agent_crew.dart';
 import 'package:orchestration_server/app_runner.dart';
+import 'package:orchestration_server/proof_check.dart';
 import 'package:orchestration_server/artifact_validator.dart';
 import 'package:orchestration_server/audit_bundle.dart';
 import 'package:orchestration_server/deterministic_artifacts.dart';
@@ -159,6 +160,9 @@ Future<void> main(List<String> args) async {
   // Runs built apps (apps/<id>/server.py) on a live port so the dashboard can
   // render the REAL running app inline.
   final appRunner = AppRunner(repoRoot);
+
+  // Verifies an app's Proof of Build (the offline tamper-evident seal) on demand.
+  final proofCheck = ProofCheck(repoRoot);
   final autoAutopilot = Platform.environment['ORCH_AUTO_AUTOPILOT'] != 'false';
 
   final crewTraces = TraceWriter(repoRoot);
@@ -983,6 +987,20 @@ Future<void> main(List<String> args) async {
       }
       final res = await appRunner.restart(id);
       return _json(res);
+    } catch (e) {
+      return _json({'error': e.toString()}, status: 500);
+    }
+  });
+
+  // Proof of Build: recompute the app's tamper-evident seal offline and report
+  // VERIFIED / TAMPERED (naming any divergent file). Lets the dashboard show a
+  // live "this app is provably what ADF built" badge — the governed-stack moat.
+  router.get('/features/<id>/proof', (Request request, String id) async {
+    try {
+      if (!store.featureExists(id)) {
+        return _json({'error': 'not found'}, status: 404);
+      }
+      return _json(await proofCheck.verify(id));
     } catch (e) {
       return _json({'error': e.toString()}, status: 500);
     }

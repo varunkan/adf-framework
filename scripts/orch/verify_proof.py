@@ -2,10 +2,12 @@
 """Verify an ADF Proof of Build — offline, no network, no key.
 
     python3 scripts/orch/verify_proof.py <app-dir>
+    python3 scripts/orch/verify_proof.py --json <app-dir>   # machine-readable
 
 Recomputes the Merkle seal from the files on disk and reports VERIFIED or
 TAMPERED, naming any file that diverges from the sealed build. Exit 0 = VERIFIED.
 """
+import json
 import os
 import sys
 
@@ -16,11 +18,20 @@ _TICK, _CROSS = "✔", "✘"
 
 
 def main(argv):
-    if len(argv) != 2:
+    args = argv[1:]
+    as_json = False
+    if args and args[0] == "--json":
+        as_json = True
+        args = args[1:]
+    if len(args) != 1:
         print(__doc__.strip(), file=sys.stderr)
         return 2
-    app_dir = argv[1]
+    app_dir = args[0]
     ok, r = pob.verify_proof(app_dir)
+
+    if as_json:
+        print(json.dumps({"ok": ok, **r}))
+        return 0 if ok else (2 if r.get("status") == "NO_PROOF" else 1)
     if r.get("status") == "NO_PROOF":
         print(f"NO PROOF: {r['reason']}", file=sys.stderr)
         return 2

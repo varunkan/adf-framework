@@ -247,6 +247,18 @@ level completes, run integration for that level → after L3, run E2E.
   React app, and a one-box edit that rebuilds + re-serves with the change in the
   live bundle (12/12). Also fixed a pre-existing stale dashboard test (requirement
   moved to the Overview tab when the App-tab iframe became the default).
-- 2026-06-15 — Next: governed/local moat (Phase 3–4: Data tab, share/export, proof
-  bundle shipped WITH each app, agent-operable MCP for the react stack, air-gapped
-  Ollama build, policy gates) + Phase 5 scorecard. N3 npm-warm-cache optional.
+- 2026-06-15 — MOAT shipped: **Proof of Build**. Every verified build is sealed
+  into a Merkle root over (all source files) + (the spec, copied to
+  `.adf-proof/spec.md`) + (the build verdict), written INTO the app as
+  `.adf-proof.json` + human `PROOF.md`. `scripts/orch/proof_of_build.py`
+  (compute/seal/verify) + `verify_proof.py` (offline CLI, `--json`) +
+  `agent_runner.py` seals after verify. Recomputable offline by anyone — no
+  network/trust/key — VERIFIED or TAMPERED-naming-the-file. Surfaced live in the
+  dashboard: `GET /features/<id>/proof` (Dart `ProofCheck` relays the canonical
+  python verifier) + a `ProofBadge` in the live-preview header (🔏 Verified·seal /
+  TAMPERED, tap to re-verify). Gates: `test_proof_of_build.py` 10/10,
+  `proof_of_build_demo.py` 5/5 (real app → seal → VERIFIED → tamper → TAMPERED),
+  `proof_check_test.dart` 3/3, `proof_badge_test.dart` 3/3.
+- 2026-06-15 — Next: rest of governed/local moat (Data tab, share/export, proof
+  bundle into the audit/MCP surfaces, agent-operable MCP for the react stack,
+  air-gapped Ollama build, policy gates) + Phase 5 scorecard. N3 npm-warm-cache optional.
