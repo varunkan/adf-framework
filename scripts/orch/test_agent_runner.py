@@ -275,5 +275,29 @@ class Compaction(unittest.TestCase):
         self.assertNotIn("const z = 3\nconst z = 3", fixer)
 
 
+class FileWriteEvents(unittest.TestCase):
+    """N21 — the runner narrates each file as it writes it, so a 1-3 min build
+    doesn't go dark. Each write emits a structured `file_write` progress line the
+    phase runner turns into a live trace span."""
+
+    def test_write_files_emits_progress_events(self):
+        import contextlib
+        import io
+        import json as _json
+        tmp = tempfile.mkdtemp()
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            ar.write_files(tmp, "demo",
+                           [("src/App.tsx", "x"), ("server/index.mjs", "y")])
+        events = [_json.loads(ln) for ln in buf.getvalue().splitlines()
+                  if ln.strip().startswith("{")]
+        fw = [e for e in events if e.get("type") == "file_write"]
+        self.assertEqual(len(fw), 2)
+        self.assertEqual(fw[0]["path"], "src/App.tsx")
+        self.assertEqual(fw[0]["index"], 1)
+        self.assertEqual(fw[0]["total"], 2)
+        self.assertEqual(fw[1]["index"], 2)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

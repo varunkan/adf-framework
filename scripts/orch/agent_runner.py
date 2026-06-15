@@ -55,6 +55,13 @@ def emit_result(text, usage=None):
     print(json.dumps(evt), flush=True)
 
 
+def emit_event(obj):
+    """A structured progress line on stdout the phase runner narrates live (so a
+    1-3 min build doesn't go dark). Any `type` other than 'result' is progress;
+    the runner's final answer is still the single emit_result line."""
+    print(json.dumps(obj), flush=True)
+
+
 # --- .env loading (NVIDIA_API_KEY / ANTHROPIC_API_KEY live here) ------------
 def load_env(repo_root):
     for rel in (".env", "../.env"):
@@ -553,6 +560,9 @@ def write_files(workspace, fid, files):
             content += "\n"
         open(dest, "w", encoding="utf-8").write(content)
         written.append(os.path.relpath(dest, workspace))
+        emit_event({"type": "file_write",
+                    "path": os.path.relpath(dest, app_root),
+                    "index": len(written), "total": len(files)})
     return app_root, written
 
 

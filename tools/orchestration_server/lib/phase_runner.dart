@@ -18,7 +18,9 @@ class PhaseRunner {
     Map<String, String>? env,
   })  : _health = RunnerHealth(repoRoot: store.repoRoot),
         _costs = CostMeter(store),
-        _env = env ?? Platform.environment;
+        _env = env ?? Platform.environment {
+    _traces = TraceWriter(store.repoRoot);
+  }
 
   /// Outer self-heal attempts the Dart layer makes after a runner failure. The
   /// file-writing runner ALREADY self-heals internally (ADF_RUNNER_FIX_ITERS,
@@ -1122,6 +1124,21 @@ Instructions:
     );
   }
 
+  /// Narration for a runner `file_write` progress event: `Writing <path> (i/n)`.
+  static String fileWriteNarration(Map<String, dynamic> obj) {
+    final path = obj['path'] ?? '?';
+    final idx = obj['index'];
+    final total = obj['total'];
+    return (idx != null && total != null)
+        ? 'Writing $path ($idx/$total)'
+        : 'Writing $path';
+  }
+
+  /// Exposed for tests: feed one runner-stdout line through the live-narration
+  /// path (in production this is driven by the spawned runner's stdout stream).
+  void ingestAgentLine(String featureId, int phase, String line) =>
+      _ingestAgentLine(featureId, phase, line);
+
   void _ingestAgentLine(String featureId, int phase, String line) {
     if (line.trim().isEmpty) return;
     try {
@@ -1151,6 +1168,20 @@ Instructions:
           event: 'tool',
           phase: phase,
           extra: extra,
+        );
+        return;
+      }
+
+      if (type == 'file_write') {
+        // The runner narrates each file as it writes it, so a 1-3 min build
+        // doesn't go dark. Surface it as a live span.
+        _flushReasoningBuffer(featureId, phase);
+        _traces.append(
+          featureId: featureId,
+          name: 'file.write',
+          event: 'runner',
+          phase: phase,
+          message: fileWriteNarration(obj),
         );
         return;
       }
