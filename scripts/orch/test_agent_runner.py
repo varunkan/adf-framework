@@ -207,5 +207,73 @@ class ScaffoldThenDiff(unittest.TestCase):
         self.assertNotIn(".test.ts", blob)
 
 
+class Compaction(unittest.TestCase):
+    """N12 — the runner uses the /compact engine where context actually blows up:
+    the edit-mode payload (ALL app files) and the self-heal `files` block. Over
+    budget, it keeps the files relevant to the request whole, outlines the rest,
+    and writes a durable context card. A no-op (and importless-safe) under budget."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.app = os.path.join(self.tmp, "apps", "demo")
+        os.makedirs(self.app)
+        self._prev = os.environ.get("ADF_CONTEXT_BUDGET_TOKENS")
+        os.environ["ADF_CONTEXT_BUDGET_TOKENS"] = "200"  # force compaction in-test
+
+    def tearDown(self):
+        if self._prev is None:
+            os.environ.pop("ADF_CONTEXT_BUDGET_TOKENS", None)
+        else:
+            os.environ["ADF_CONTEXT_BUDGET_TOKENS"] = self._prev
+
+    def test_edit_over_budget_outlines_rest_and_writes_card(self):
+        files = [
+            ("src/Header.tsx", "export const Header = () => <h1>hi</h1>\n"),
+            ("src/Huge.tsx", "// huge\n" + "const x = 1\n" * 800),
+            ("server/api/orders.mjs", "// orders\n" + "const y = 2\n" * 800),
+        ]
+        system, user = ar.assemble_edit(
+            self.app, "demo", files, "make the Header blue", ar.STACK_REACT)
+        # the relevant file is shown WHOLE...
+        self.assertIn("src/Header.tsx", user)
+        self.assertIn("export const Header", user)
+        # ...the big, unrelated files are outlined, not dumped in full.
+        self.assertIn("outline only", user.lower())
+        self.assertIn("src/Huge.tsx", user)
+        self.assertNotIn("const x = 1\nconst x = 1", user)  # full body NOT included
+        # and the decision is recorded as a durable, reviewable context card.
+        self.assertTrue(os.path.isdir(os.path.join(self.app, ".adf-context")))
+
+    def test_edit_under_budget_is_a_no_op(self):
+        os.environ["ADF_CONTEXT_BUDGET_TOKENS"] = "120000"
+        files = [("a.tsx", "small"), ("b.mjs", "also small")]
+        _system, user = ar.assemble_edit(
+            self.app, "demo", files, "tweak a", ar.STACK_REACT)
+        self.assertNotIn("outline only", user.lower())
+        self.assertFalse(os.path.isdir(os.path.join(self.app, ".adf-context")))
+
+    def test_build_edit_messages_accepts_file_summary(self):
+        files = [("index.html", "<h1>hi</h1>")]
+        _system, user = ar.build_edit_messages(
+            "demo", files, "make it blue", ar.STACK_STDLIB,
+            file_summary="- src/Other.tsx (40 lines)")
+        self.assertIn("src/Other.tsx", user)
+        self.assertIn("<h1>hi</h1>", user)
+
+    def test_fix_messages_compacts_a_large_payload(self):
+        files = [
+            ("server/api/orders.mjs", "// the failing file\n" + "bad();\n" * 5),
+            ("src/Huge.tsx", "// unrelated\n" + "const z = 3\n" * 800),
+        ]
+        msgs = ar.fix_messages(
+            "sys", "usr", files,
+            "server/api/orders.mjs:2 SyntaxError: orders route broke",
+            ar.STACK_REACT)
+        fixer = msgs[-1]["content"]
+        self.assertIn("the failing file", fixer)      # the relevant file stays whole
+        self.assertIn("src/Huge.tsx", fixer)          # the rest is outlined
+        self.assertNotIn("const z = 3\nconst z = 3", fixer)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

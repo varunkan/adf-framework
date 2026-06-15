@@ -756,9 +756,16 @@ def fix_messages(system, user, files, failure, stack=None):
     """Build the follow-up turn asking the model to fix the failing files. The
     hint about WHICH files may be wrong is stack-aware so the model fixes the
     right surface (server.mjs/vitest for react, server.py/test_app.py for stdlib)."""
+    # Self-heal payload can be large (a full build re-emits ALL files); compact it
+    # by relevance to the FAILURE so the model keeps the broken file(s) whole and
+    # only sees an outline of the rest. No-op under budget.
+    files, file_outline, _ = _compact_files_for_prompt(files, failure)
     current = "\n".join(
         f"<<<FILE: {p}>>>\n{c}\n<<<END>>>" for p, c in files
     )
+    if file_outline:
+        current += ("\n\n=== OTHER FILES (outline only — unchanged, not central to "
+                    "this failure) ===\n" + file_outline)
     failure = headroom_compress_log(failure)
     if (stack or DEFAULT_STACK) == STACK_REACT:
         where = ("whichever files are wrong (schema.sql, server/api/*.mjs, src/**.tsx, "
@@ -832,11 +839,15 @@ def current_app_files(app_dir, max_files=60, max_bytes=200_000):
     return out
 
 
-def build_edit_messages(fid, files, instruction, stack=None):
+def build_edit_messages(fid, files, instruction, stack=None, file_summary=None):
     """Apply a scoped change to an existing app — the Lovable 'type a change,
     watch it update' loop. We hand the model the current files + the request and
     ask for the SMALLEST edit, re-emitting only the changed files. The
-    architecture note + the test it must keep green are stack-aware."""
+    architecture note + the test it must keep green are stack-aware.
+
+    `file_summary` (optional): a one-line-per-file outline of OTHER files that were
+    compacted out of the prompt (over budget). They still exist on disk; the model
+    is told it can ask for one if the change turns out to need it."""
     if (stack or DEFAULT_STACK) == STACK_REACT:
         arch = (
             "a React+Vite+TypeScript+Tailwind app with a Fastify + better-sqlite3 "
@@ -865,13 +876,56 @@ def build_edit_messages(fid, files, instruction, stack=None):
     blocks = "\n\n".join(
         f"<<<FILE: {name}>>>\n{content}\n<<<END>>>" for name, content in files
     )
+    other = ""
+    if file_summary:
+        other = ("=== OTHER FILES (outline only — these exist on disk but aren't "
+                 "central to this change; ask for one's full contents if you must "
+                 "edit it) ===\n" + file_summary + "\n\n")
     user = (
         f"App: `{fid}` — the files below are the current, working version.\n\n"
         f"=== CURRENT FILES ===\n{blocks}\n\n"
+        f"{other}"
         f"=== CHANGE REQUESTED ===\n{instruction}\n\n"
         f"Apply the change and re-emit the complete updated file(s) now. {keep_tests}"
     )
     return system, user
+
+
+def _compact_files_for_prompt(files, instruction):
+    """Context compaction (the /compact engine) for a file payload that would blow
+    the model's context window: keep the files most relevant to `instruction` whole,
+    replace the rest with a one-line-per-file outline. Returns
+    (files_for_prompt, outline_or_None, result_or_None). No-op + import-safe when the
+    payload is under budget or the engine isn't importable."""
+    try:
+        import compaction
+    except Exception:
+        return list(files), None, None
+    if not compaction.should_compact(files):
+        return list(files), None, None
+    res = compaction.compact_files(files, instruction or "")
+    if not res.did_compact:
+        return list(files), None, None
+    return res.items, res.summary, res
+
+
+def assemble_edit(app_dir, fid, files, instruction, stack=None):
+    """Build the EDIT-mode prompt, compacting the file payload first when it's over
+    the context budget (keep edit-relevant files whole, outline the rest) and
+    recording the fold as a durable, reviewable context card. Returns (system, user)."""
+    files_for_prompt, outline, res = _compact_files_for_prompt(files, instruction)
+    if res is not None:
+        try:
+            import compaction
+            compaction.write_context_card(
+                app_dir, res, kind="edit",
+                meta={"feature": fid, "instruction": (instruction or "")[:200]})
+        except Exception:
+            pass
+        log(f"compaction (edit): {res.tokens_before}->{res.tokens_after} tokens, "
+            f"{res.n_summarized} file(s) outlined (kept {len(files_for_prompt)} whole)")
+    return build_edit_messages(fid, files_for_prompt, instruction, stack,
+                               file_summary=outline)
 
 
 def main():
@@ -911,8 +965,8 @@ def main():
 
     if is_edit:
         log(f"EDIT mode ({stack}): applying change -> {edit_instruction[:100]}")
-        system, user = build_edit_messages(
-            fid, current_app_files(app_dir), edit_instruction, stack)
+        system, user = assemble_edit(
+            app_dir, fid, current_app_files(app_dir), edit_instruction, stack)
     else:
         # Scaffold-then-diff (N7): a fresh react build starts from the checked-in
         # working template; the model then emits ONLY the feature's files.
@@ -1040,6 +1094,10 @@ def main():
             f"\n\n🔏 Proof of Build sealed: {proof_seal}{pol}\n"
             f"Verify (offline): python3 scripts/orch/verify_proof.py {rel_root}"
         )
+    if os.path.isdir(os.path.join(app_root, ".adf-context")):
+        summary += ("\n\n🗜 Context compacted to fit the model budget "
+                    "(durable card in .adf-context/ — the fold is reviewable, "
+                    "not a silent drop).")
     if not verified:
         summary += f"\n\nLast test output:\n{last_failure[:1500]}"
     log(f"done: {status}")
