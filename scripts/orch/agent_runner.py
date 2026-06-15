@@ -105,7 +105,59 @@ def load_feature_context(repo_root, fid):
     return ctx
 
 
-def build_messages(fid, ctx):
+# --- stack profiles --------------------------------------------------------
+# A "stack profile" parameterizes everything stack-specific: how to GENERATE,
+# VERIFY, BOOT and (for edit mode) which files are app source. This is the seam
+# that lets ADF target a single-file Python app OR a real React+Vite+SQLite app
+# without touching the crew, the dashboard, or the <<<FILE:>>> protocol.
+STACK_STDLIB = "stdlib"
+STACK_REACT = "react-vite-sqlite"
+DEFAULT_STACK = os.environ.get("ADF_STACK", STACK_STDLIB)
+
+# Editable app source (multi-file edit). Everything else — deps, build output,
+# caches, lockfiles — is excluded so big apps don't blow the prompt.
+_EDIT_EXTS = (".py", ".ts", ".tsx", ".js", ".jsx", ".html", ".css", ".scss",
+              ".sql", ".json", ".md", ".cjs", ".mjs")
+_SKIP_DIRS = {"node_modules", "dist", "build", "__pycache__", ".git", ".vite",
+              "coverage", ".next", ".turbo"}
+_SKIP_FILES = {"package-lock.json", "pnpm-lock.yaml", "yarn.lock"}
+
+
+def detect_stack(app_dir):
+    """Infer the stack: the `.adf-stack.json` manifest is authoritative (contract
+    C1); else package.json -> react; else stdlib. No language guessing."""
+    manifest = os.path.join(app_dir, ".adf-stack.json")
+    if os.path.isfile(manifest):
+        try:
+            with open(manifest, encoding="utf-8") as f:
+                return json.load(f).get("stack") or STACK_STDLIB
+        except (OSError, ValueError):
+            pass
+    if os.path.isfile(os.path.join(app_dir, "package.json")):
+        return STACK_REACT
+    return STACK_STDLIB
+
+
+def build_messages(fid, ctx, stack=None):
+    """Dispatch to the stack's generation prompt."""
+    if (stack or DEFAULT_STACK) == STACK_REACT:
+        return _react_build_messages(fid, ctx)
+    return _stdlib_build_messages(fid, ctx)
+
+
+def _spec_block(ctx):
+    return "\n\n".join(
+        s for s in (
+            f"## Requirement\n{ctx['requirement']}" if ctx["requirement"] else "",
+            f"## Problem statement\n{ctx['problem']}" if ctx["problem"] else "",
+            f"## Spec (EARS)\n{ctx['spec']}" if ctx["spec"] else "",
+            f"## Plan\n{ctx['plan']}" if ctx["plan"] else "",
+            f"## Tasks\n{ctx['tasks']}" if ctx["tasks"] else "",
+        ) if s
+    )
+
+
+def _stdlib_build_messages(fid, ctx):
     system = (
         "You are an expert full-stack engineer acting as the ADF implementation "
         "agent. You output COMPLETE, RUNNABLE code — never placeholders, never "
@@ -179,6 +231,62 @@ def build_messages(fid, ctx):
         "pass with zero failures. No placeholders. Emit all files now."
     )
     return system, user
+
+
+def _react_build_messages(fid, ctx):
+    """React+Vite+Tailwind front + Fastify+better-sqlite3 server. Scaffold-then-diff:
+    the template provides build config + the server bootstrap; the model emits ONLY
+    the feature's files (schema, API routes, components, tests)."""
+    system = (
+        "You are an expert full-stack TypeScript engineer acting as the ADF "
+        "implementation agent. You output COMPLETE, RUNNABLE code — never "
+        "placeholders, never '...', never TODO stubs.\n\n"
+        "TARGET STACK (a checked-in scaffold already provides the wiring — you only "
+        "write the app-specific files):\n"
+        "- Frontend: React 18 + Vite + TypeScript + Tailwind CSS (utility classes; "
+        "no extra UI libraries unless already in package.json).\n"
+        "- Backend: a single Fastify server (Node + TypeScript) that serves the built "
+        "Vite `dist/` AND a JSON API under `/api/*`, owning data via better-sqlite3 "
+        "(one SQLite file). It binds the PORT env var (default 8000).\n"
+        "- Tests: Vitest. Frontend calls the API with relative `fetch('/api/...')`.\n\n"
+        "SCAFFOLD-THEN-DIFF: the project root already contains a working template "
+        "(package.json, vite/tailwind/tsconfig, a Fastify entry that serves dist + "
+        "registers API route plugins + runs schema.sql at boot). DO NOT re-emit build "
+        "config or the server bootstrap unless a change requires it. Emit ONLY the "
+        "files that implement THIS feature.\n\n"
+        "OUTPUT FORMAT — emit each file EXACTLY like this, nothing else between "
+        "files:\n<<<FILE: relative/path>>>\n<full file content>\n<<<END>>>\n"
+        "No markdown fences, no commentary outside file blocks."
+    )
+    user = (
+        f"Implement the feature `{fid}` as a real React+Vite+Tailwind app backed by a "
+        f"Fastify + SQLite API.\n\n{_spec_block(ctx)}\n\n"
+        "Deliver (relative to the app root):\n"
+        "- `schema.sql` — the SQLite tables the spec implies (run at boot by the "
+        "template).\n"
+        "- `server/api/<feature>.ts` — a Fastify route plugin exposing the `/api/...` "
+        "endpoints the spec needs, correct status codes (200/201/400/404), using the "
+        "shared better-sqlite3 `db` the template exports.\n"
+        "- `src/**` — React + TypeScript components with Tailwind styling implementing "
+        "the full UI, calling `/api/...` via fetch. Keep components small (one concern "
+        "per file).\n"
+        "- `test/<feature>.test.ts` — Vitest tests for the main success path and at "
+        "least one validation/error case of the API.\n\n"
+        "CRITICAL: `npm run build` (tsc + vite) and `npm test` (vitest) MUST pass. "
+        "No placeholders. Emit all files now."
+    )
+    return system, user
+
+
+_STACK_PROFILES = {
+    STACK_STDLIB: {"name": STACK_STDLIB, "build_messages": _stdlib_build_messages},
+    STACK_REACT: {"name": STACK_REACT, "build_messages": _react_build_messages},
+}
+
+
+def stack_profile(stack):
+    """Look up a stack profile; unknown stacks fall back to stdlib (never crash)."""
+    return _STACK_PROFILES.get(stack) or _STACK_PROFILES[STACK_STDLIB]
 
 
 # --- model backends --------------------------------------------------------
@@ -523,16 +631,26 @@ def clear_pending_edit(app_dir):
         pass
 
 
-def current_app_files(app_dir):
-    out = []
-    for name in ("index.html", "server.py", "test_app.py"):
-        fp = os.path.join(app_dir, name)
-        if os.path.isfile(fp):
+def current_app_files(app_dir, max_files=60, max_bytes=200_000):
+    """All editable SOURCE files under the app (multi-file edit) — skips deps,
+    build output, caches and lockfiles so a large React app can't blow the prompt.
+    Replaces the old hardcoded 3-file (index.html/server.py/test_app.py) list."""
+    out, total = [], 0
+    for root, dirs, files in os.walk(app_dir):
+        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS and not d.startswith(".")]
+        for fn in sorted(files):
+            if fn.startswith(".") or fn in _SKIP_FILES or not fn.endswith(_EDIT_EXTS):
+                continue
+            fp = os.path.join(root, fn)
             try:
                 with open(fp, encoding="utf-8") as f:
-                    out.append((name, f.read()))
-            except OSError:
-                pass
+                    content = f.read()
+            except (OSError, UnicodeDecodeError):
+                continue
+            if len(out) >= max_files or total + len(content) > max_bytes:
+                continue
+            total += len(content)
+            out.append((os.path.relpath(fp, app_dir), content))
     return out
 
 

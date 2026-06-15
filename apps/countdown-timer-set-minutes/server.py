@@ -1,165 +1,178 @@
-import json
 import os
+import json
 import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
+from socketserver import ThreadingTCPServer
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-INDEX_PATH = os.path.join(BASE_DIR, 'index.html')
+HERE = os.path.dirname(os.path.abspath(__file__))
+INDEX_PATH = os.path.join(HERE, 'index.html')
 
-# In-memory timer state guarded by a lock
+# In-memory timer state with a lock for thread safety.
 _lock = threading.Lock()
 _state = {
-    'minutes': 0,
+    'minutes': 5,
     'seconds': 0,
-    'remaining': 0,   # total seconds remaining
+    'remaining': 5 * 60,   # remaining seconds
     'running': False,
 }
 
 
-def _clamp_state():
-    total = _state['minutes'] * 60 + _state['seconds']
-    _state['remaining'] = total
+def _clamp_int(value, lo, hi):
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return None
+    if n < lo or n > hi:
+        return None
+    return n
 
 
-def validate_set(minutes, seconds):
-    if not isinstance(minutes, int) or not isinstance(seconds, int):
-        return 'minutes and seconds must be integers'
-    if minutes < 0 or minutes > 1439:
-        return 'minutes out of range (0-1439)'
-    if seconds < 0 or seconds > 59:
-        return 'seconds out of range (0-59)'
-    return None
+def get_state():
+    with _lock:
+        return dict(_state)
+
+
+def set_timer(minutes, seconds):
+    """Set timer minutes (0-60) and seconds (0-59). Returns (state, error)."""
+    m = _clamp_int(minutes, 0, 60)
+    s = _clamp_int(seconds, 0, 59)
+    if m is None or s is None:
+        return None, 'minutes must be 0-60 and seconds must be 0-59'
+    with _lock:
+        _state['minutes'] = m
+        _state['seconds'] = s
+        _state['remaining'] = m * 60 + s
+        _state['running'] = False
+        return dict(_state), None
+
+
+def start_timer():
+    with _lock:
+        if _state['remaining'] > 0:
+            _state['running'] = True
+        return dict(_state)
+
+
+def pause_timer():
+    with _lock:
+        _state['running'] = False
+        return dict(_state)
+
+
+def reset_timer():
+    with _lock:
+        _state['running'] = False
+        _state['remaining'] = _state['minutes'] * 60 + _state['seconds']
+        return dict(_state)
+
+
+def tick():
+    """Decrement remaining by one second if running. Returns state."""
+    with _lock:
+        if _state['running'] and _state['remaining'] > 0:
+            _state['remaining'] -= 1
+            if _state['remaining'] <= 0:
+                _state['remaining'] = 0
+                _state['running'] = False
+        return dict(_state)
 
 
 class RequestHandler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
-    def _send_json(self, code, payload):
+    def _send_json(self, status, payload):
         body = json.dumps(payload).encode('utf-8')
-        self.send_response(code)
+        self.send_response(status)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
-    def _read_json(self):
+    def _send_html(self, status, html):
+        body = html.encode('utf-8')
+        self.send_response(status)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _read_body(self):
         length = int(self.headers.get('Content-Length', 0) or 0)
-        if length == 0:
+        if length <= 0:
             return {}
         raw = self.rfile.read(length)
         try:
             return json.loads(raw.decode('utf-8'))
-        except Exception:
+        except (ValueError, UnicodeDecodeError):
             return None
-
-    def _snapshot(self):
-        with _lock:
-            return {
-                'minutes': _state['minutes'],
-                'seconds': _state['seconds'],
-                'remaining': _state['remaining'],
-                'running': _state['running'],
-                'display': _format(_state['remaining']),
-            }
 
     def do_GET(self):
         if self.path == '/' or self.path == '/index.html':
             try:
-                with open(INDEX_PATH, 'rb') as f:
-                    body = f.read()
+                with open(INDEX_PATH, 'r', encoding='utf-8') as f:
+                    html = f.read()
             except OSError:
-                self.send_response(500)
-                self.end_headers()
-                self.wfile.write(b'index.html not found')
+                self._send_html(500, '<h1>index.html not found</h1>')
                 return
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/html; charset=utf-8')
-            self.send_header('Content-Length', str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            self._send_html(200, html)
             return
 
         if self.path == '/api/timer':
-            self._send_json(200, self._snapshot())
+            self._send_json(200, get_state())
             return
 
         self._send_json(404, {'error': 'not found'})
 
     def do_POST(self):
-        # REQ-001/002: set minutes and seconds
-        if self.path == '/api/timer/set':
-            data = self._read_json()
-            if data is None:
-                self._send_json(400, {'error': 'invalid JSON'})
+        if self.path == '/api/timer':
+            body = self._read_body()
+            if body is None or not isinstance(body, dict):
+                self._send_json(400, {'error': 'invalid JSON body'})
                 return
-            minutes = data.get('minutes', 0)
-            seconds = data.get('seconds', 0)
-            err = validate_set(minutes, seconds)
+            if 'minutes' not in body or 'seconds' not in body:
+                self._send_json(400, {'error': 'minutes and seconds are required'})
+                return
+            state, err = set_timer(body.get('minutes'), body.get('seconds'))
             if err:
                 self._send_json(400, {'error': err})
                 return
-            with _lock:
-                _state['minutes'] = minutes
-                _state['seconds'] = seconds
-                _clamp_state()
-                _state['running'] = False
-            self._send_json(200, self._snapshot())
+            self._send_json(201, state)
             return
 
-        # REQ-002: start
         if self.path == '/api/timer/start':
-            with _lock:
-                if _state['remaining'] <= 0:
-                    self._send_json(400, {'error': 'nothing to count down'})
-                    return
-                _state['running'] = True
-            self._send_json(200, self._snapshot())
+            self._send_json(200, start_timer())
             return
 
-        # REQ-002: pause
         if self.path == '/api/timer/pause':
-            with _lock:
-                _state['running'] = False
-            self._send_json(200, self._snapshot())
+            self._send_json(200, pause_timer())
             return
 
-        # REQ-002: tick (decrement one second)
-        if self.path == '/api/timer/tick':
-            with _lock:
-                if _state['running'] and _state['remaining'] > 0:
-                    _state['remaining'] -= 1
-                    if _state['remaining'] <= 0:
-                        _state['remaining'] = 0
-                        _state['running'] = False
-            self._send_json(200, self._snapshot())
-            return
-
-        # REQ-003: reset
         if self.path == '/api/timer/reset':
-            with _lock:
-                _state['running'] = False
-                _clamp_state()
-            self._send_json(200, self._snapshot())
+            self._send_json(200, reset_timer())
+            return
+
+        if self.path == '/api/timer/tick':
+            self._send_json(200, tick())
             return
 
         self._send_json(404, {'error': 'not found'})
 
 
-def _format(total_seconds):
-    if total_seconds < 0:
-        total_seconds = 0
-    m = total_seconds // 60
-    s = total_seconds % 60
-    return '%02d:%02d' % (m, s)
+class _Server(ThreadingTCPServer):
+    allow_reuse_address = True
+    daemon_threads = True
 
 
 def make_server(port=0):
-    return ThreadingHTTPServer(('0.0.0.0', port), RequestHandler)
+    return _Server(('', port), RequestHandler)
 
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', '8000'))
     server = make_server(port)
-    print('Countdown timer server ready on port %d' % server.server_address[1])
-    server.serve_forever()
+    print('Server ready on port %d (http://localhost:%d)' % (server.server_address[1], server.server_address[1]))
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        server.shutdown()

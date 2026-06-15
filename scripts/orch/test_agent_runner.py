@@ -61,13 +61,59 @@ class GenerationPrompt(unittest.TestCase):
             "plan": "",
             "tasks": "",
         }
-        system, user = ar.build_messages("todo-app", ctx)
+        system, user = ar.build_messages("todo-app", ctx, stack=ar.STACK_STDLIB)
         blob = (system + "\n" + user)
         # PORT-aware servers (so live previews never collide on 8000).
         self.assertIn("os.environ.get('PORT'", blob)
         # No URL-shortener specifics leaking into a generic builder prompt.
         self.assertNotIn("shorten", blob.lower())
         self.assertNotIn("Shorten button", blob)
+
+
+class StackProfiles(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.app = os.path.join(self.tmp, "apps", "demo")
+        os.makedirs(self.app)
+
+    def test_detect_stack_stdlib_vs_react(self):
+        self.assertEqual(ar.detect_stack(self.app), ar.STACK_STDLIB)
+        with open(os.path.join(self.app, "package.json"), "w") as f:
+            f.write("{}")
+        self.assertEqual(ar.detect_stack(self.app), ar.STACK_REACT)
+
+    def test_current_app_files_is_multifile_and_skips_deps(self):
+        os.makedirs(os.path.join(self.app, "src", "components"))
+        os.makedirs(os.path.join(self.app, "node_modules", "react"))
+        with open(os.path.join(self.app, "src", "App.tsx"), "w") as f:
+            f.write("export default function App(){return null}")
+        with open(os.path.join(self.app, "src", "components", "Board.tsx"), "w") as f:
+            f.write("export const Board = () => null")
+        with open(os.path.join(self.app, "node_modules", "react", "index.js"), "w") as f:
+            f.write("module.exports = {}")
+        files = dict(ar.current_app_files(self.app))
+        self.assertIn(os.path.join("src", "App.tsx"), files)
+        self.assertIn(os.path.join("src", "components", "Board.tsx"), files)
+        self.assertFalse(any("node_modules" in k for k in files),
+                         "deps must be excluded from editable files")
+
+    def test_build_messages_selects_stack_prompt(self):
+        ctx = {"requirement": "A kanban board", "problem": "",
+               "spec": "", "plan": "", "tasks": ""}
+        sys_s, _ = ar.build_messages("kb", ctx, stack=ar.STACK_STDLIB)
+        self.assertIn("Python 3 standard library", sys_s)
+        sys_r, usr_r = ar.build_messages("kb", ctx, stack=ar.STACK_REACT)
+        blob = sys_r + usr_r
+        self.assertIn("React", blob)
+        self.assertIn("Vite", blob)
+        self.assertIn("Tailwind", blob)
+        self.assertNotIn("Python 3 standard library", sys_r)
+
+    def test_stack_profile_registry_with_fallback(self):
+        self.assertEqual(ar.stack_profile(ar.STACK_REACT)["name"], ar.STACK_REACT)
+        self.assertEqual(ar.stack_profile(ar.STACK_STDLIB)["name"], ar.STACK_STDLIB)
+        # Unknown stack falls back to stdlib (never crashes a build).
+        self.assertEqual(ar.stack_profile("bogus-stack")["name"], ar.STACK_STDLIB)
 
 
 if __name__ == "__main__":

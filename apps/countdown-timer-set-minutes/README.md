@@ -1,8 +1,11 @@
 # Countdown Timer — `countdown-timer-set-minutes`
 
-A self-contained countdown timer web app. Set minutes and seconds, start,
-pause, and reset, with a big live display. Backend is Python 3 standard
-library only; frontend is a single static HTML file with vanilla JS.
+A self-contained countdown timer web app. Set minutes and seconds, then start,
+pause, and reset, with a large legible display.
+
+## Requirements
+
+- Python 3 (standard library only — no pip installs)
 
 ## Run
 
@@ -24,42 +27,35 @@ PORT=9000 python3 server.py
 python3 test_app.py
 ```
 
-All tests should pass with zero failures.
+All tests must pass with zero failures.
 
 ## API
 
-| Method | Path                | Body                              | Description                          |
-|--------|---------------------|-----------------------------------|--------------------------------------|
-| GET    | `/`                 | —                                 | Serves the frontend (index.html).    |
-| GET    | `/api/timer`        | —                                 | Returns current timer state.         |
-| POST   | `/api/timer/set`    | `{"minutes":int,"seconds":int}`   | Sets the timer (REQ-001/002).        |
-| POST   | `/api/timer/start`  | —                                 | Starts countdown (REQ-002).          |
-| POST   | `/api/timer/pause`  | —                                 | Pauses countdown (REQ-002).          |
-| POST   | `/api/timer/tick`   | —                                 | Decrements remaining by one second.  |
-| POST   | `/api/timer/reset`  | —                                 | Resets to set duration (REQ-003).    |
+| Method | Path                | Body                         | Description                          |
+|--------|---------------------|------------------------------|--------------------------------------|
+| GET    | `/`                 | —                            | Serves the frontend (index.html)     |
+| GET    | `/api/timer`        | —                            | Returns current timer state          |
+| POST   | `/api/timer`        | `{"minutes":2,"seconds":30}` | Set timer (minutes 0–60, seconds 0–59) → 201 |
+| POST   | `/api/timer/start`  | —                            | Start countdown                      |
+| POST   | `/api/timer/pause`  | —                            | Pause countdown                      |
+| POST   | `/api/timer/reset`  | —                            | Reset to the last set value          |
+| POST   | `/api/timer/tick`   | —                            | Decrement remaining by 1s if running |
 
 ### State shape
 
 ```json
-{
-  "minutes": 1,
-  "seconds": 5,
-  "remaining": 65,
-  "running": false,
-  "display": "01:05"
-}
+{ "minutes": 2, "seconds": 30, "remaining": 150, "running": false }
 ```
 
 ### Validation
 
-- `minutes` must be an integer in range 0–1439.
-- `seconds` must be an integer in range 0–59.
-- Invalid input returns HTTP 400 with `{"error": "..."}`.
-- Starting with zero remaining returns HTTP 400.
-- Unknown routes return HTTP 404.
+- `minutes` must be an integer between 0 and 60.
+- `seconds` must be an integer between 0 and 59.
+- Missing fields or out-of-range values return `400` with an `error` message.
+- Unknown routes return `404`.
 
 ## Requirement traceability
 
-- **REQ-001** — set minutes → `/api/timer/set`
-- **REQ-002** — seconds, start, pause → `/api/timer/set`, `/api/timer/start`, `/api/timer/pause`, `/api/timer/tick`
-- **REQ-003** — reset, big display → `/api/timer/reset`, large `.display` element in `index.html`
+- **REQ-001** — set minutes: `POST /api/timer` accepts and stores minutes.
+- **REQ-002** — seconds, start, pause: seconds stored; `start`/`pause` endpoints.
+- **REQ-003** — reset, with a big display: `reset` endpoint + large display in UI.

@@ -8,169 +8,176 @@
   * { box-sizing: border-box; }
   body {
     margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: linear-gradient(135deg, #1e1e2f, #2d2d44);
-    color: #fff;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    background: linear-gradient(135deg, #1e293b, #0f172a);
+    color: #f1f5f9;
     min-height: 100vh;
     display: flex;
     align-items: center;
     justify-content: center;
   }
   .card {
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 20px;
+    background: rgba(30, 41, 59, 0.85);
     padding: 40px;
-    width: 420px;
-    max-width: 92vw;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+    border-radius: 20px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    width: 100%;
+    max-width: 480px;
     text-align: center;
   }
-  h1 { margin: 0 0 24px; font-weight: 600; font-size: 1.4rem; letter-spacing: .5px; }
+  h1 { margin: 0 0 24px; font-weight: 600; font-size: 1.4rem; color: #cbd5e1; }
   .display {
-    font-size: 5rem;
+    font-size: 6rem;
     font-weight: 700;
-    font-variant-numeric: tabular-nums;
     letter-spacing: 4px;
-    margin: 10px 0 28px;
-    color: #7ee0c0;
-    text-shadow: 0 0 20px rgba(126,224,192,0.3);
+    font-variant-numeric: tabular-nums;
+    margin: 10px 0 30px;
+    color: #38bdf8;
+    text-shadow: 0 0 20px rgba(56, 189, 248, 0.4);
   }
+  .display.done { color: #f87171; text-shadow: 0 0 20px rgba(248,113,113,0.5); }
   .inputs {
     display: flex;
-    gap: 12px;
+    gap: 16px;
     justify-content: center;
     margin-bottom: 24px;
   }
-  .field { display: flex; flex-direction: column; gap: 6px; }
-  .field label { font-size: .75rem; opacity: .7; text-transform: uppercase; letter-spacing: 1px; }
+  .field { display: flex; flex-direction: column; align-items: center; }
+  .field label { font-size: 0.8rem; color: #94a3b8; margin-bottom: 6px; }
   .field input {
     width: 90px;
     padding: 10px;
     font-size: 1.4rem;
     text-align: center;
     border-radius: 10px;
-    border: 1px solid rgba(255,255,255,0.15);
-    background: rgba(0,0,0,0.25);
-    color: #fff;
+    border: 1px solid #334155;
+    background: #0f172a;
+    color: #f1f5f9;
   }
-  .buttons { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  .buttons { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
   button {
-    flex: 1 1 90px;
-    padding: 12px 14px;
+    padding: 12px 22px;
     font-size: 1rem;
     font-weight: 600;
     border: none;
     border-radius: 10px;
     cursor: pointer;
-    transition: transform .08s ease, opacity .2s;
+    transition: transform .1s, opacity .2s;
+    color: #fff;
   }
   button:active { transform: scale(0.96); }
-  button:disabled { opacity: .4; cursor: not-allowed; }
-  .btn-set { background: #4a6cf7; color: #fff; }
-  .btn-start { background: #2ecc71; color: #06281a; }
-  .btn-pause { background: #f39c12; color: #2b1a00; }
-  .btn-reset { background: #e74c3c; color: #fff; }
-  .status { margin-top: 18px; font-size: .85rem; min-height: 1.2em; opacity: .85; }
-  .err { color: #ff8a80; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  #setBtn { background: #6366f1; }
+  #startBtn { background: #22c55e; }
+  #pauseBtn { background: #f59e0b; }
+  #resetBtn { background: #ef4444; }
+  .msg { margin-top: 16px; min-height: 20px; font-size: 0.9rem; color: #f87171; }
 </style>
 </head>
 <body>
   <div class="card">
     <h1>Countdown Timer</h1>
-    <div class="display" id="display">00:00</div>
+    <div id="display" class="display">05:00</div>
     <div class="inputs">
       <div class="field">
-        <label for="min">Minutes</label>
-        <input id="min" type="number" min="0" max="1439" value="0">
+        <label for="minutes">Minutes (0–60)</label>
+        <input id="minutes" type="number" min="0" max="60" value="5">
       </div>
       <div class="field">
-        <label for="sec">Seconds</label>
-        <input id="sec" type="number" min="0" max="59" value="0">
+        <label for="seconds">Seconds (0–59)</label>
+        <input id="seconds" type="number" min="0" max="59" value="0">
       </div>
     </div>
     <div class="buttons">
-      <button class="btn-set" id="btnSet">Set</button>
-      <button class="btn-start" id="btnStart">Start</button>
-      <button class="btn-pause" id="btnPause">Pause</button>
-      <button class="btn-reset" id="btnReset">Reset</button>
+      <button id="setBtn">Set</button>
+      <button id="startBtn">Start</button>
+      <button id="pauseBtn">Pause</button>
+      <button id="resetBtn">Reset</button>
     </div>
-    <div class="status" id="status"></div>
+    <div id="msg" class="msg"></div>
   </div>
 
 <script>
 const display = document.getElementById('display');
-const status = document.getElementById('status');
+const msg = document.getElementById('msg');
+const minutesInput = document.getElementById('minutes');
+const secondsInput = document.getElementById('seconds');
 let ticker = null;
 
+function fmt(total) {
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+}
+
 function render(state) {
-  display.textContent = state.display;
-  if (state.running) {
-    status.textContent = 'Running…';
-    status.className = 'status';
-    startTicker();
-  } else {
-    status.textContent = state.remaining === 0 ? 'Done / idle' : 'Paused';
-    status.className = 'status';
-    stopTicker();
+  display.textContent = fmt(state.remaining);
+  display.classList.toggle('done', state.remaining === 0);
+  manageTicker(state.running);
+}
+
+function manageTicker(running) {
+  if (running && !ticker) {
+    ticker = setInterval(doTick, 1000);
+  } else if (!running && ticker) {
+    clearInterval(ticker);
+    ticker = null;
   }
 }
 
-function showError(msg) {
-  status.textContent = msg;
-  status.className = 'status err';
-}
-
-async function api(path, body) {
-  const opts = { method: 'POST', headers: { 'Content-Type': 'application/json' } };
-  if (body !== undefined) opts.body = JSON.stringify(body);
+async function api(path, opts) {
   const res = await fetch(path, opts);
-  const data = await res.json();
-  if (!res.ok) { showError(data.error || 'error'); throw new Error(data.error); }
-  return data;
+  let data = {};
+  try { data = await res.json(); } catch (e) {}
+  return { ok: res.ok, status: res.status, data };
 }
 
-function startTicker() {
-  if (ticker) return;
-  ticker = setInterval(async () => {
-    try {
-      const state = await api('/api/timer/tick');
-      display.textContent = state.display;
-      if (!state.running) {
-        stopTicker();
-        status.textContent = state.remaining === 0 ? 'Time is up!' : 'Paused';
-      }
-    } catch (e) { stopTicker(); }
-  }, 1000);
+async function loadState() {
+  const r = await api('/api/timer');
+  if (r.ok) render(r.data);
 }
 
-function stopTicker() {
-  if (ticker) { clearInterval(ticker); ticker = null; }
+async function doTick() {
+  const r = await api('/api/timer/tick', { method: 'POST' });
+  if (r.ok) render(r.data);
 }
 
-document.getElementById('btnSet').onclick = async () => {
-  const minutes = parseInt(document.getElementById('min').value, 10) || 0;
-  const seconds = parseInt(document.getElementById('sec').value, 10) || 0;
-  try { render(await api('/api/timer/set', { minutes, seconds })); }
-  catch (e) {}
-};
+document.getElementById('setBtn').addEventListener('click', async () => {
+  msg.textContent = '';
+  const body = {
+    minutes: Number(minutesInput.value),
+    seconds: Number(secondsInput.value)
+  };
+  const r = await api('/api/timer', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (r.ok) {
+    render(r.data);
+  } else {
+    msg.textContent = r.data.error || 'Invalid input';
+  }
+});
 
-document.getElementById('btnStart').onclick = async () => {
-  try { render(await api('/api/timer/start')); } catch (e) {}
-};
+document.getElementById('startBtn').addEventListener('click', async () => {
+  msg.textContent = '';
+  const r = await api('/api/timer/start', { method: 'POST' });
+  if (r.ok) render(r.data);
+});
 
-document.getElementById('btnPause').onclick = async () => {
-  try { render(await api('/api/timer/pause')); } catch (e) {}
-};
+document.getElementById('pauseBtn').addEventListener('click', async () => {
+  const r = await api('/api/timer/pause', { method: 'POST' });
+  if (r.ok) render(r.data);
+});
 
-document.getElementById('btnReset').onclick = async () => {
-  try { render(await api('/api/timer/reset')); } catch (e) {}
-};
+document.getElementById('resetBtn').addEventListener('click', async () => {
+  msg.textContent = '';
+  const r = await api('/api/timer/reset', { method: 'POST' });
+  if (r.ok) render(r.data);
+});
 
-(async function init() {
-  const res = await fetch('/api/timer');
-  render(await res.json());
-})();
+loadState();
 </script>
 </body>
 </html>
