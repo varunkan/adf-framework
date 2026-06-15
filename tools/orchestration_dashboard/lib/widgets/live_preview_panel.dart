@@ -12,6 +12,7 @@ import 'integrity_badge.dart';
 import 'proof_badge.dart';
 import 'context_chip.dart';
 import 'data_tab.dart';
+import 'export_button.dart';
 
 /// Right-rail live preview (Lovable-style): phase, artifacts, spec, integrity, crew.
 class LivePreviewPanel extends StatefulWidget {
@@ -451,6 +452,11 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: ExportButton(api: widget.api, featureId: widget.featureId),
+          ),
+          const SizedBox(height: 16),
           if (previewUrl != null) ...[
             Text('App preview', style: Theme.of(context).textTheme.labelLarge),
             const SizedBox(height: 8),

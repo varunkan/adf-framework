@@ -145,6 +145,14 @@ class ApiClient {
     return jsonDecode(r.body) as Map<String, dynamic>;
   }
 
+  /// Export the app as a portable, self-verifying zip (source + audit bundle +
+  /// proof). Returns `{ok, out, files, bytes}`.
+  Future<Map<String, dynamic>> exportApp(String id) async {
+    final r = await _post('/features/$id/export', {});
+    if (r.statusCode != 200) throw Exception(_formatError(r));
+    return jsonDecode(r.body) as Map<String, dynamic>;
+  }
+
   /// The app's live SQLite tables: `{has_db, tables:[{name, rows}]}`.
   Future<Map<String, dynamic>> getData(String id) async {
     final r = await _get('/features/$id/data');

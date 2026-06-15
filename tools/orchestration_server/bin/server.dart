@@ -8,6 +8,7 @@ import 'package:orchestration_server/app_runner.dart';
 import 'package:orchestration_server/proof_check.dart';
 import 'package:orchestration_server/compaction.dart';
 import 'package:orchestration_server/app_data.dart';
+import 'package:orchestration_server/exporter.dart';
 import 'package:orchestration_server/artifact_validator.dart';
 import 'package:orchestration_server/audit_bundle.dart';
 import 'package:orchestration_server/deterministic_artifacts.dart';
@@ -152,6 +153,8 @@ Future<void> main(List<String> args) async {
   final integrity = IntegrityChain(store);
   final auditBundles =
       AuditBundleBuilder(store, integrity: integrity, costs: costs);
+  // Packages an app + its sealed audit bundle into a portable, verifiable zip.
+  final exporter = Exporter(repoRoot);
   final previewService = PreviewService(
     store,
     repoRoot,
@@ -1118,6 +1121,21 @@ Future<void> main(List<String> args) async {
     // Self-verifying proof document — check it offline (no server, no Dart)
     // with scripts/orch/verify_audit_bundle.py.
     return _json(auditBundles.build(id));
+  });
+
+  // Export the app as a portable, self-verifying zip (source + audit bundle +
+  // Proof of Build). "Own your code" — written to <repo>/.adf-exports/<id>.zip.
+  router.post('/features/<id>/export', (Request request, String id) async {
+    if (!store.featureExists(id)) {
+      return _json({'error': 'unknown feature: $id'}, status: 404);
+    }
+    try {
+      final bundle = auditBundles.build(id);
+      final res = await exporter.export(id, bundle);
+      return _json(res, status: res['ok'] == true ? 200 : 409);
+    } catch (e) {
+      return _json({'error': e.toString()}, status: 500);
+    }
   });
 
   router.post('/features/<id>/figma', (Request request, String id) async {
