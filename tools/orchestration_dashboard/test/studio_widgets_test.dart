@@ -43,8 +43,13 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
     expect(find.text('Live preview'), findsOneWidget);
     expect(find.textContaining('Phase 2'), findsOneWidget);
-    expect(find.textContaining('Build login'), findsOneWidget);
     expect(find.text('Run preview'), findsOneWidget);
+    // The requirement lives on the Overview tab (the App tab is now the default,
+    // showing the live iframe). Switch to it to assert the requirement renders.
+    await tester.tap(find.text('Overview'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.textContaining('Build login'), findsOneWidget);
   });
 
   testWidgets('StudioShell renders chat and preview on wide screen', (tester) async {
