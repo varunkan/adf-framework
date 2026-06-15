@@ -144,6 +144,15 @@ has an explicit TEST GATE that must be RED before and GREEN after.
 Topological order: **L0 {N1,N2,N3} → L1 {N4,N5,N6} → L2 {N7,N8} → L3 {N9,N10}**.
 Within a level, nodes are independent → parallel agents. Edges enforce order.
 
+**STATUS (2026-06-15): FOUNDATION MILESTONE MET. ✅** N1,N2,N4,N5,N6,N7,N8,N9,N10
+done + gated (N3 npm-warm-cache is the only optional/deferred node). The e2e gate
+`scripts/test/e2e_react_app.py` proves the §0 definition of done end-to-end: one
+prompt → a real React+Vite+Tailwind+SQLite app that builds (npm ci + tsc + vite +
+vitest), boots exactly as AppRunner boots it (`node server/index.mjs` on PORT),
+serves the SPA at `/`, round-trips its API with SQLite persistence, and a one-box
+edit applies the smallest multi-file change + rebuilds + re-serves with the change
+compiled into the live bundle (12/12 checks, ~8s, deterministic/offline).
+
 **Adjustment policy:** if a node's implementation can't reach its green gate in one
 agent pass, split it (e.g. N2 → N2a template-frontend, N2b template-server,
 N2c template-tests) and re-topologize. Log the split in the Decision Log (§6).
@@ -229,3 +238,15 @@ level completes, run integration for that level → after L3, run E2E.
   scaffolds a fresh react build then generates only the feature's files; self-heal
   + edit prompts are now stack-aware. Gate `runner_generate_check.py` drives real
   `main()` with a stubbed model → a verified, booting app (8/8 checks).
+- 2026-06-15 — N8 done: per-feature stack selection (C5). `FeatureStore.stackFor`
+  + `state.stack` persisted; `PhaseRunner.childEnvFor` injects `ADF_STACK` into the
+  phase-7 runner subprocess; `POST /features` validates+echoes `stack`; dashboard
+  New-feature picker defaults to react-vite-sqlite. Legacy features → stdlib.
+- 2026-06-15 — N9+N10 done → FOUNDATION MILESTONE MET. `e2e_react_app.py` (stubbed
+  model, real build/boot/HTTP) proves prompt → buildable+booting+serving+persisting
+  React app, and a one-box edit that rebuilds + re-serves with the change in the
+  live bundle (12/12). Also fixed a pre-existing stale dashboard test (requirement
+  moved to the Overview tab when the App-tab iframe became the default).
+- 2026-06-15 — Next: governed/local moat (Phase 3–4: Data tab, share/export, proof
+  bundle shipped WITH each app, agent-operable MCP for the react stack, air-gapped
+  Ollama build, policy gates) + Phase 5 scorecard. N3 npm-warm-cache optional.
