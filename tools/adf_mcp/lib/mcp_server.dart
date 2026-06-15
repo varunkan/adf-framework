@@ -366,5 +366,37 @@ class AdfMcpServer {
       call: (api, args) =>
           api.getJson('/features/${_requireId(args)}/audit-bundle'),
     ),
+    _ToolSpec(
+      name: 'adf_proof',
+      description:
+          "Recompute a built app's Proof of Build offline (tamper-evident "
+          'Merkle seal over every source file + the spec + the build verdict) '
+          'AND its live governance verdict. Returns {has_proof, ok, '
+          "status:'VERIFIED'|'TAMPERED', seal, files, policy:{ok, "
+          'n_violations, rules}}. The headless way to ask "is this exactly what '
+          'ADF built, and does it obey policy?".',
+      inputSchema: _idSchema('Feature id whose app to verify.'),
+      call: (api, args) => api.getJson('/features/${_requireId(args)}/proof'),
+    ),
+    _ToolSpec(
+      name: 'adf_compact',
+      description:
+          "Run the /compact context fold over a built app: keep the high-value "
+          'context, summarize the rest, and write a durable .adf-context card. '
+          'Returns the engine report (tokens before/after, files reviewed). Use '
+          'before a large edit when the app has grown.',
+      inputSchema: _idSchema('Feature id whose context to compact.'),
+      call: (api, args) =>
+          api.postJson('/features/${_requireId(args)}/compact'),
+    ),
+    _ToolSpec(
+      name: 'adf_data',
+      description:
+          "Browse a built app's live SQLite tables (read-only): table names "
+          'with row counts. ADF owns the data layer, so an agent can inspect '
+          'exactly what the app persisted.',
+      inputSchema: _idSchema('Feature id whose database to read.'),
+      call: (api, args) => api.getJson('/features/${_requireId(args)}/data'),
+    ),
   ];
 }

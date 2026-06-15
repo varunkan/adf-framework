@@ -17,6 +17,9 @@ const _allToolNames = [
   'adf_cost_summary',
   'adf_integrity_verify',
   'adf_audit_bundle',
+  'adf_proof',
+  'adf_compact',
+  'adf_data',
 ];
 
 /// StringSink that re-emits complete lines as a stream, so tests can read the
@@ -158,6 +161,23 @@ void main() {
           'ok': true,
           'strict': request.uri.queryParameters['strict'] == 'true',
         };
+      case 'GET /features/F0001/proof':
+        payload = {
+          'has_proof': true,
+          'ok': true,
+          'status': 'VERIFIED',
+          'seal': 'adf1:abc123',
+          'policy': {'ok': true, 'n_violations': 0},
+        };
+      case 'POST /features/F0001/compact':
+        payload = {'did_compact': true, 'tokens': 5000, 'tokens_after': 400};
+      case 'GET /features/F0001/data':
+        payload = {
+          'has_db': true,
+          'tables': [
+            {'name': 'notes', 'rows': 2},
+          ],
+        };
       default:
         status = HttpStatus.notFound;
         payload = {'error': 'not found'};
@@ -201,7 +221,7 @@ void main() {
     expect(ping['result'], isEmpty);
   });
 
-  test('tools/list advertises all 10 tools with object schemas', () async {
+  test('tools/list advertises all 13 tools with object schemas', () async {
     final response = await harness.request('tools/list');
     final tools = (response['result']
         as Map<String, dynamic>)['tools'] as List<dynamic>;
@@ -244,6 +264,27 @@ void main() {
     expect(payload['pipeline'], {
       'phases': ['plan', 'build', 'verify'],
     });
+  });
+
+  test('adf_proof returns the offline verdict + live policy', () async {
+    final response = await harness.callTool('adf_proof', {'id': 'F0001'});
+    final payload = _toolPayload(response) as Map<String, dynamic>;
+    expect(payload['status'], 'VERIFIED');
+    expect(payload['seal'], 'adf1:abc123');
+    expect((payload['policy'] as Map)['ok'], isTrue);
+  });
+
+  test('adf_compact folds the app context', () async {
+    final response = await harness.callTool('adf_compact', {'id': 'F0001'});
+    final payload = _toolPayload(response) as Map<String, dynamic>;
+    expect(payload['did_compact'], isTrue);
+    expect(payload['tokens_after'], 400);
+  });
+
+  test('adf_data lists the app SQLite tables', () async {
+    final response = await harness.callTool('adf_data', {'id': 'F0001'});
+    final payload = _toolPayload(response) as Map<String, dynamic>;
+    expect((payload['tables'] as List).first['name'], 'notes');
   });
 
   test('adf_integrity_verify forwards the strict flag', () async {
