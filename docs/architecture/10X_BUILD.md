@@ -116,6 +116,51 @@ static), `schema.sql`, `test/**` (vitest), `.adf-stack.json`, `README.md`.
 invoked with `ADF_STACK`/arg = that stack. Dashboard "New feature" picks stack
 (default `react-vite-sqlite`).
 
+### C6 — Context compaction engine (Python, `scripts/orch/compaction.py`)
+The single source of truth for context budgeting + the `/compact` transforms.
+Deterministic and **offline-first** ($0, no model call) by default — an optional
+model `summarizer` callable only upgrades the prose. Complements (does NOT replace)
+the transparent `headroom` token-squeeze: headroom crushes payload bytes before a
+call; compaction makes a **logical, durable** decision — which whole turns/files to
+keep verbatim, which to fold into a summary — and records it.
+- `estimate_tokens(x) -> int` — `x` is str | message dict | list; deterministic
+  (`ceil(chars/4)` + small per-message overhead). Documented as a model-agnostic estimate.
+- `context_budget(env=os.environ) -> int` — `ADF_CONTEXT_BUDGET_TOKENS` (default 120_000).
+- `should_compact(items, budget=None) -> bool`.
+- `compact_messages(messages, budget=None, *, preserve_last=2, summarizer=None) -> CompactionResult`
+  — keep ALL `system` messages + the last `preserve_last` non-system turns verbatim;
+  replace the middle with ONE `[compacted]` summary turn. **Idempotent** under a fixed budget.
+- `compact_files(files, instruction, budget=None, *, summarizer=None) -> (kept, summaries, record)`
+  — edit-mode: rank by relevance to `instruction` (path/symbol token overlap), keep
+  top files whole within budget, replace the rest with a one-line outline
+  (path + exported/def symbols + line count). The biggest real win on large apps.
+- `compact_conversation(entries, budget=None, *, preserve_last=6, summarizer=None)`
+  — same idea for a feature's `commands.jsonl` chat log.
+- `CompactionResult`: `items, tokens_before, tokens_after, n_summarized, summary, did_compact`.
+- `write_context_card(app_dir, record) -> path` — durable, **lossless-by-anchor**:
+  `apps/<id>/.adf-context/compaction-<n>.json` + human `.adf-context/CONTEXT.md`
+  (preserves the pre-compaction digest, like the proof's sealed spec copy).
+- CLI: `compaction.py [--json] [--apply] <dir>` — estimate + would-compact verdict; `--apply` writes a card.
+
+### C7 — Runner compaction wiring (`agent_runner.py`)
+- Edit mode: if `should_compact(files)`, run `compact_files(files, instruction)` →
+  keep edit-relevant files whole, summarize the rest into the user message; write a
+  context card; result carries `compaction:{did,before,after,card}`.
+- Self-heal: collapse prior failed-attempt history into a one-line summary, keeping
+  only the current files + latest failure verbatim.
+- Guarded `import compaction` (in-repo → always importable from `scripts/orch`).
+
+### C8 — Compaction surface (server + dashboard) — the `/compact` command
+- Dart `Compaction` (`lib/compaction.dart`) shells `compaction.py --json|--apply`
+  (single source of truth, no drift): `estimate(id)`, `apply(id)`.
+- `POST /features/<id>/compact` → applies, writes the card, appends a system bubble
+  `🗜 Compacted context (N→M tokens, K items summarized)`.
+- `GET /features/<id>/context` → `{tokens, budget, over, last_card}`.
+- Dashboard: a `/compact` chat command routes to the endpoint (classifier, like the
+  edit route); a context-size chip near the chat turns amber when over budget.
+- **Automatic** ("whenever logical compaction is required"): at a phase boundary, if
+  over budget and `ADF_AUTO_COMPACT` (default on), apply + bubble.
+
 ---
 
 ## §3 — Dependency DAG (nodes = tasks, edges = deps; topological levels)
@@ -156,6 +201,23 @@ compiled into the live bundle (12/12 checks, ~8s, deterministic/offline).
 **Adjustment policy:** if a node's implementation can't reach its green gate in one
 agent pass, split it (e.g. N2 → N2a template-frontend, N2b template-server,
 N2c template-tests) and re-topologize. Log the split in the Decision Log (§6).
+
+### §3.1 — Context Compaction (the `/compact` command; extends the DAG)
+
+Long-lived agent tasks accumulate context: the runner's edit-mode payload (ALL app
+files) and self-heal history grow, and a feature's chat log is unbounded. ADF's own
+agents need the same `/compact` discipline Claude Code uses. Built test-first, same
+single-source-of-truth-in-Python layering as proof/policy (C6/C7/C8).
+
+| Node | Task | Depends on | Test gate |
+|---|---|---|---|
+| **L4** | | | |
+| `N11 compaction-engine` | `scripts/orch/compaction.py` (C6): estimate, budget, compact_messages/files/conversation, durable cards, `--json/--apply` CLI | — | `test_compaction.py` |
+| **L5** | | | |
+| `N12 runner-compaction` | Wire compaction into edit/self-heal in `agent_runner.py` (C7) + write a context card | N11, N7 | `test_agent_runner.Compaction` |
+| `N13 compaction-surface` | Dart `Compaction` + `POST /compact` + `GET /context` + dashboard `/compact` command + auto-compact at phase boundary (C8) | N11, N12 | `compaction_test.dart`, `compact_command_test.dart` |
+
+Topological add: **… → L4 {N11} → L5 {N12, N13}**.
 
 ---
 
@@ -276,6 +338,16 @@ level completes, run integration for that level → after L3, run E2E.
   proof now answers not just "is this the build that was verified?" but "does this
   build obey the org's security policy?" — the exact question regulated/IP-sensitive
   buyers ask, and the one Lovable structurally cannot answer.
-- 2026-06-15 — Next: rest of governed/local moat (Data tab, share/export, proof+policy
-  folded into the audit-bundle + agent-operable MCP for the react stack, air-gapped
-  Ollama build) + Phase 5 ADF-vs-Lovable scorecard. N3 npm-warm-cache optional.
+- 2026-06-15 — Context Compaction planned (the `/compact` command; §3.1, C6/C7/C8,
+  nodes N11–N13). ADF's own long-lived agent tasks accumulate context (edit-mode
+  payload = ALL files; self-heal history; unbounded chat log) and need the same
+  `/compact` discipline Claude Code uses — explicit per-task AND automatic at logical
+  boundaries. Design: offline-first/deterministic engine in Python (single source of
+  truth), durable lossless-by-anchor context cards, runner wiring for edit/self-heal,
+  server `POST /compact` + dashboard `/compact` command + auto-compact at phase
+  boundary. Complements (does not replace) the transparent `headroom` byte-squeeze:
+  compaction is a LOGICAL, DURABLE, reviewable decision. Build order N11 → {N12, N13}.
+- 2026-06-15 — Next: finish compaction (N11–N13), then the rest of the governed/local
+  moat (Data tab, share/export, proof+policy folded into the audit-bundle +
+  agent-operable MCP for the react stack, air-gapped Ollama build) + Phase 5
+  ADF-vs-Lovable scorecard. N3 npm-warm-cache optional.
