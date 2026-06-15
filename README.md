@@ -31,6 +31,31 @@ cd your-project
 
 Open http://localhost:3848 (dashboard) and http://localhost:3847 (API).
 
+## Why ADF — the moat
+
+ADF turns a prompt into a real **React + Vite + Tailwind + SQLite** app with a live
+preview and a one-box edit loop — and then does what a hosted builder structurally
+can't: it makes the result **verifiable, governed, offline-capable, and yours.**
+
+- **Proof of Build** — every verified build is sealed under a tamper-evident Merkle
+  root (source + spec + verdict). Recompute it anywhere: `VERIFIED` or `TAMPERED`.
+- **Policy Gates** — deterministic checks (no secrets / no network egress / offline /
+  no plaintext PII / vetted deps), with the verdict sealed *into* the proof.
+- **Air-gapped** — builds, tests, and runs with no network once deps are cached
+  (proven, not claimed: `scripts/orch/offline_build.py --live`).
+- **Own your code** — export a portable, self-verifying zip (source + audit bundle +
+  proof); browse your live SQLite in the Data tab.
+- **Agent-operable** — drive the whole loop headless over MCP; **$0** on a local model.
+
+See the whole chain in one command:
+
+```bash
+python3 scripts/test/moat_demo.py          # PROVEN → GOVERNED → OFFLINE → OWNED
+```
+
+And the honest, bench-backed comparison: **[docs/ADF_VS_LOVABLE.md](docs/ADF_VS_LOVABLE.md)**
+(it also says, plainly, where ADF still trails).
+
 ## Supported IDEs
 
 | IDE | `-i` flag | Installed paths |
