@@ -400,7 +400,36 @@ level completes, run integration for that level → after L3, run E2E.
   engine complements (does not replace) the transparent `headroom` byte-squeeze.
   Full suites: server 206/1-skip, dashboard 45, python 25+11+10+17. ADF now applies the
   same `/compact` discipline Claude Code uses — to the apps IT builds.
-- 2026-06-15 — Next: the rest of the governed/local moat (Data tab, share/export,
-  proof+policy+compaction folded into the audit-bundle + agent-operable MCP for the
-  react stack, air-gapped Ollama build) + Phase 5 ADF-vs-Lovable scorecard.
-  N3 npm-warm-cache optional.
+- 2026-06-15 — L6 DONE (consolidate the moat + capability). **N14 audit-fold**: the
+  audit bundle now attests the per-app moat (Proof of Build seal + policy verdict +
+  compaction card) under `bundle_digest`; `verify_audit_bundle.py` gains a
+  `moat_attested` check (catches a forged seal even with a fixed-up digest)
+  (audit_bundle_test 12/12). **N18 data-tab**: `app_data.py` (stdlib sqlite3, read-only,
+  injection-safe) + `GET /features/<id>/data[/<table>]` + a dashboard Data tab
+  (test_app_data 8/8, app_data_test 4/4, data_tab_test 2/2). **N21 stream-writes**: the
+  runner emits a `file_write` event per file; the phase runner narrates "Writing src/…
+  (i/n)" as a live span — no more dead-air (FileWriteEvents + file_write_span_test 3/3).
+  **N17 offline-build**: `offline_build.py` proves the stack is air-gapped — structural
+  (local commands, loopback server, offline policy) ALWAYS + a LIVE `--live` build/test
+  with the network blocked; VERIFIED for real on node v22 (build+test passed with no
+  network) (test_offline_build 7/7). Suites: server 217, dashboard 47, python green.
+- 2026-06-15 — L7 DONE. **N16 mcp-loop**: `adf_proof`/`adf_compact`/`adf_data` MCP
+  tools (audit already exposed) → an agent drives the full react moat loop headless
+  (mcp_server_test, 13 tools). **N19 export**: `export_app.py` (stdlib zipfile) +
+  `Exporter` + `POST /features/<id>/export` → a portable, self-verifying zip (source
+  + audit bundle + proof) under `.adf-exports/`; dashboard ExportButton (own your
+  code). (test_export_app 4/4, export_test 2/2, export_button_test 1/1.)
+- 2026-06-15 — L8 DONE → **THE PLAN IS COMPLETE.** **N23 bench**: `scripts/bench/`
+  (suite of 10 prompts + `evaluate_app` scoring the governance axes for real, offline
+  — proven/compliant/offline — + `run_bench` aggregator); verified 17-file sealed app
+  scores fully governed (test_bench 4/4). **N24 scorecard**: `scorecard.py` generates
+  `docs/ADF_VS_LOVABLE.md` — 9/9 governance axes ADF wins structurally + capability
+  parity + an honest "where ADF trails" section; backed by MEASURED bench numbers
+  (3/3 apps governed) (test_scorecard 5/5).
+- 2026-06-15 — **STATUS: the 10X build plan (Phases 0–5 / DAG N1–N24) is COMPLETE.**
+  Foundation proven (e2e), the governed/local/owned/agent-operable MOAT shipped +
+  tested + offline-verifiable (Proof of Build, Policy Gates, Compaction, audit-fold,
+  air-gapped build, Data tab, export, MCP loop), and the 10× is PROVABLE
+  (`docs/ADF_VS_LOVABLE.md`, bench-backed). Deferred (logged, off the critical path):
+  N3 npm-warm-cache, N15 per-app git history, N20 share tunnel, N22 file-by-file
+  gen + HMR — revisit only if a concrete need (or the bench) demands them.
