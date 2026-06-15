@@ -120,7 +120,7 @@ _EDIT_EXTS = (".py", ".ts", ".tsx", ".js", ".jsx", ".html", ".css", ".scss",
               ".sql", ".json", ".md", ".cjs", ".mjs")
 _SKIP_DIRS = {"node_modules", "dist", "build", "__pycache__", ".git", ".vite",
               "coverage", ".next", ".turbo"}
-_SKIP_FILES = {"package-lock.json", "pnpm-lock.yaml", "yarn.lock"}
+_SKIP_FILES = {"package-lock.json", "pnpm-lock.yaml", "yarn.lock", "PROOF.md"}
 
 
 def detect_stack(app_dir):
@@ -935,6 +935,7 @@ def main():
     app_root = written = None
     verified = False
     last_failure = ""
+    verify_summary = ""
 
     for attempt in range(1, max_iters + 1):
         gen = generate(messages, timeout)
@@ -957,6 +958,7 @@ def main():
         log(f"attempt {attempt}: wrote {len(written)} files; verify {'PASSED' if ok else 'FAILED'}")
         if ok:
             verified = True
+            verify_summary = output
             break
         if attempt < max_iters:
             log(f"attempt {attempt}: feeding failure back to the model to self-correct")
@@ -965,6 +967,32 @@ def main():
     if app_root is None:
         log("implementation produced no files")
         sys.exit(5)
+
+    # Seal a Proof of Build INTO the app — a tamper-evident Merkle certificate
+    # of exactly what ADF generated and verified, recomputable offline by anyone.
+    # Best-effort: never let sealing fail an otherwise-good build.
+    proof_seal = None
+    if verified:
+        try:
+            import proof_of_build
+            from datetime import datetime, timezone
+            proof = proof_of_build.seal_app(
+                app_root, fid, stack,
+                _spec_block(ctx) or ctx.get("requirement", ""),
+                {
+                    "backend": os.environ.get("ADF_RUNNER_BACKEND") or "auto",
+                    "model": (os.environ.get("ADF_RUNNER_MODEL")
+                              or os.environ.get("ADF_RUNNER_CLAUDE_MODEL")),
+                    "verified": True,
+                    "verify_summary": verify_summary,
+                    "prompt": args.prompt,
+                },
+                created_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            )
+            proof_seal = proof["seal"]
+            log(f"sealed Proof of Build {proof_seal} over {len(proof['files'])} files")
+        except Exception as e:
+            log(f"proof-of-build sealing skipped: {e}")
 
     # Consume the one-box edit request so the next plain run rebuilds normally.
     if is_edit:
@@ -985,6 +1013,11 @@ def main():
         + "\n".join(f"- {w}" for w in written)
         + f"\n\n{run_hint}\n{test_hint}"
     )
+    if proof_seal:
+        summary += (
+            f"\n\n🔏 Proof of Build sealed: {proof_seal}\n"
+            f"Verify (offline): python3 scripts/orch/verify_proof.py {rel_root}"
+        )
     if not verified:
         summary += f"\n\nLast test output:\n{last_failure[:1500]}"
     log(f"done: {status}")
