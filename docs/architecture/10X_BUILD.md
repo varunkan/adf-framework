@@ -219,6 +219,41 @@ single-source-of-truth-in-Python layering as proof/policy (C6/C7/C8).
 
 Topological add: **… → L4 {N11} → L5 {N12, N13}**.
 
+### §3.2 — Finish the moat + prove the 10× (the remaining DAG)
+
+The foundation (Phases 0–1) is proven and three moat keystones (Proof of Build,
+Policy Gates, Compaction) shipped. This section finishes the job: **consolidate** the
+keystones into one sealed, agent-operable, exportable artifact; close the visible
+**capability** gaps (data, dead-air); and **prove** the 10× with a benchmark +
+honest scorecard.
+
+| Node | Task | Depends on | Test gate |
+|---|---|---|---|
+| **L6** (consolidate the moat / capability — only need shipped work) | | | |
+| `N14 audit-fold` | Fold Proof of Build + Policy verdict + Compaction card into the audit bundle (`audit_bundle.dart`) under the existing `bundle_digest`; `verify_audit_bundle.py` validates them offline | proof, policy, compaction | `audit_bundle_test.dart`, `test_verify_audit_bundle.py` |
+| `N18 data-tab` | Read-only **Data tab**: `GET /features/<id>/data[/<table>]` lists the app's live SQLite tables + rows; dashboard tab renders them | foundation | `app_data_test.dart`, `data_tab_test.dart` |
+| `N21 stream-writes` | Implement-phase **file-write trace spans** ("Writing src/…") so a 1–3 min build narrates instead of going dark | foundation | `runner_trace_test` (runner emits `file.write` events) |
+| `N17 offline-build` | Prove a **fully-offline** build (no network after deps are cached) + air-gapped script; gate asserts no egress is needed | foundation | `offline_build_check.py` |
+| **L7** (agent-operability + ownership) | | | |
+| `N16 mcp-loop` | Agent-operable MCP tools for the full react loop: `adf_proof`, `adf_policy`, `adf_compact`, `adf_audit` (proxy the endpoints) → create→build→verify→prove→policy→compact→audit headless | N14 | `mcp_tools_test.dart` |
+| `N19 export` | **Export**: `GET /features/<id>/export` → a portable zip of `apps/<id>/` + the audit bundle + proof; optional `gh`-based repo push (best-effort) | N14 | `export_test.dart` |
+| **L8** (prove the 10×) | | | |
+| `N23 bench` | `scripts/bench/`: a fixed prompt suite built on ADF, capturing time, $ cost, tests-pass, file count, capability + governance axes (audit valid? offline? owned?) | N14,N16,N18,N19 | `bench_harness_test.py` |
+| `N24 scorecard` | **ADF-vs-Lovable scorecard** generated from bench results + an honest log of where ADF still trails | N23 | `scorecard_test.py` |
+
+Topological add: **… → L6 {N14, N18, N21, N17} → L7 {N16, N19} → L8 {N23, N24}**.
+
+**Deferred (logged, like N3 — not on the 10× critical path):**
+- *N15 per-app git history* — redundant with the integrity chain + the proof's file
+  hashes (provenance is already sealed); revisit only if a buyer needs a `git`-native
+  artifact specifically.
+- *N20 share tunnel* (cloudflared/ngrok public URL) — hosted convenience, explicitly
+  NOT the wedge (§0 says win owned/local, don't chase hosted polish). Export (N19)
+  delivers the ownership half; a tunnel can be added later, untested-in-CI.
+- *N22 file-by-file generation + Vite HMR* — scaffold-then-diff + compaction already
+  handle large apps; revisit only if the bench (N23) shows one-shot generation failing
+  on big prompts.
+
 ---
 
 ## §4 — Test Strategy (red-first; gates at every boundary)
