@@ -836,7 +836,21 @@ Future<void> main(List<String> args) async {
         final existing = store.listFeatures().toSet();
         id = FeatureStore.generateFeatureId(requirement, existing: existing);
       }
-      store.createFeature(id: id, requirement: requirement, track: track);
+      // Build stack (contract C5): client picks it; absent → ADF_DEFAULT_STACK or
+      // stdlib (back-compat). Reject unknown stacks so a typo can't silently fall
+      // back. The dashboard's New-feature picker defaults to react-vite-sqlite.
+      final rawStack = (body['stack'] as String?)?.trim();
+      final stack = (rawStack != null && rawStack.isNotEmpty)
+          ? rawStack
+          : (Platform.environment['ADF_DEFAULT_STACK'] ?? 'stdlib');
+      if (!FeatureStore.isKnownStack(stack)) {
+        return _json({
+          'error': 'unknown stack: $stack',
+          'known_stacks': FeatureStore.knownStacks.toList(),
+        }, status: 400);
+      }
+      store.createFeature(
+          id: id, requirement: requirement, track: track, stack: stack);
       // Persist the per-feature "proceed without approval" choice so the crew
       // handoff knows whether to pause for review or build straight through.
       if (body['auto_approve'] == true) {
@@ -854,6 +868,7 @@ Future<void> main(List<String> args) async {
       }
       final payload = featureDetailPayload(id);
       payload['id'] = id;
+      payload['stack'] = stack;
       final fromPrompt = prompt.trim().isNotEmpty;
       final autopilotOnCreate =
           body['autopilot'] == true || (fromPrompt && autoAutopilot);

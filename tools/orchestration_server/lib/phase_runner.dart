@@ -47,6 +47,15 @@ class PhaseRunner {
 
   RunnerHealth get health => _health;
 
+  /// The environment a runner subprocess inherits for [featureId]: the base env
+  /// plus `ADF_STACK` resolved from the feature's persisted stack (contract C5),
+  /// so the Python runner generates and verifies with the matching StackProfile
+  /// (single-file stdlib vs. React+Vite+SQLite). Defaults to stdlib for legacy
+  /// features, preserving today's behavior.
+  Map<String, String> childEnvFor(String featureId) {
+    return {..._env, 'ADF_STACK': store.stackFor(featureId)};
+  }
+
   late TraceWriter _traces;
   final Set<String> _active = {};
   final Set<String> _healing = {};
@@ -678,7 +687,8 @@ class PhaseRunner {
       });
     }
 
-    final proc = await Process.start(agent, args, workingDirectory: cwd);
+    final proc = await Process.start(agent, args,
+        workingDirectory: cwd, environment: childEnvFor(featureId));
     _processes[featureId] = proc;
     final killTimer = Timer(maxRunDuration, () {
       if (_processes[featureId] == proc) {

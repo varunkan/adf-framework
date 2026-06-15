@@ -1,0 +1,71 @@
+import 'dart:io';
+
+import 'package:orchestration_server/feature_store.dart';
+import 'package:orchestration_server/phase_runner.dart';
+import 'package:test/test.dart';
+
+/// N8 (stack-select) — a feature's build stack is chosen at create time,
+/// persisted in state.json (`state.stack`, contract C5), and threaded to the
+/// Python runner as the ADF_STACK env var so it generates/verifies with the
+/// right StackProfile. Existing features (no stack field) stay on stdlib.
+void main() {
+  late Directory repo;
+  late FeatureStore store;
+
+  setUp(() {
+    repo = Directory.systemTemp.createTempSync('adf-stack');
+    store = FeatureStore(repo.path);
+  });
+
+  tearDown(() {
+    if (repo.existsSync()) repo.deleteSync(recursive: true);
+  });
+
+  test('createFeature persists the chosen stack in state.json', () {
+    store.createFeature(
+      id: 'kanban',
+      requirement: 'A kanban board',
+      track: 'M',
+      stack: 'react-vite-sqlite',
+    );
+    expect(store.readState('kanban')['stack'], 'react-vite-sqlite');
+    expect(store.stackFor('kanban'), 'react-vite-sqlite');
+  });
+
+  test('createFeature defaults to stdlib (back-compat)', () {
+    store.createFeature(id: 'tool', requirement: 'A small tool', track: 'S');
+    expect(store.readState('tool')['stack'], 'stdlib');
+    expect(store.stackFor('tool'), 'stdlib');
+  });
+
+  test('stackFor falls back to stdlib for a legacy feature with no stack field',
+      () {
+    store.createFeature(id: 'legacy', requirement: 'Old', track: 'S');
+    final st = store.readState('legacy');
+    st.remove('stack'); // simulate a feature created before stack selection
+    store.writeState('legacy', st);
+    expect(store.stackFor('legacy'), 'stdlib');
+  });
+
+  test('isKnownStack validates the allowlist', () {
+    expect(FeatureStore.isKnownStack('stdlib'), isTrue);
+    expect(FeatureStore.isKnownStack('react-vite-sqlite'), isTrue);
+    expect(FeatureStore.isKnownStack('php-laravel'), isFalse);
+  });
+
+  test('PhaseRunner.childEnvFor threads ADF_STACK from the feature state', () {
+    store.createFeature(
+      id: 'board',
+      requirement: 'x',
+      track: 'M',
+      stack: 'react-vite-sqlite',
+    );
+    final runner = PhaseRunner(store, env: {'PATH': '/usr/bin'});
+    final env = runner.childEnvFor('board');
+    expect(env['ADF_STACK'], 'react-vite-sqlite');
+    expect(env['PATH'], '/usr/bin'); // base env preserved
+    // A legacy/stdlib feature yields stdlib.
+    store.createFeature(id: 'plain', requirement: 'y', track: 'S');
+    expect(runner.childEnvFor('plain')['ADF_STACK'], 'stdlib');
+  });
+}

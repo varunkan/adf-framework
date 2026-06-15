@@ -651,10 +651,30 @@ $t
     return File('$repoRoot/$relativePath').existsSync();
   }
 
+  /// Build stacks ADF can target (contract C5). `stdlib` = the original
+  /// single-file Python app; `react-vite-sqlite` = a real React+Vite+Tailwind
+  /// front + Fastify/better-sqlite3 server. The runner's StackProfile mirrors
+  /// these names; an unknown stack falls back to stdlib there.
+  static const Set<String> knownStacks = {'stdlib', 'react-vite-sqlite'};
+
+  static bool isKnownStack(String stack) => knownStacks.contains(stack);
+
+  /// The build stack chosen for [id] (contract C5), read from `state.stack`.
+  /// Features created before stack selection have no field → stdlib, so legacy
+  /// single-file apps keep building exactly as before.
+  String stackFor(String id) {
+    try {
+      final s = (readState(id)['stack'] as String?)?.trim();
+      if (s != null && s.isNotEmpty) return s;
+    } catch (_) {/* no state yet → default below */}
+    return 'stdlib';
+  }
+
   void createFeature({
     required String id,
     required String requirement,
     required String track,
+    String stack = 'stdlib',
   }) {
     if (!RegExp(r'^[a-z0-9]+(-[a-z0-9]+)*$').hasMatch(id)) {
       throw ArgumentError('Invalid feature id: $id');
@@ -686,16 +706,18 @@ $requirement
       '${const JsonEncoder.withIndent('  ').convert({'feature_directory': specRel})}\n',
     );
 
-    writeState(id, defaultState(id: id, track: track));
+    writeState(id, defaultState(id: id, track: track, stack: stack));
   }
 
   Map<String, dynamic> defaultState({
     required String id,
     required String track,
+    String stack = 'stdlib',
   }) {
     return {
       'feature_id': id,
       'track': track,
+      'stack': stack,
       'spec_feature_dir': 'specs/$id',
       'coverage_mode': 'repo_wide',
       'current_phase': 0,

@@ -127,11 +127,13 @@ class ApiClient {
     required String id,
     required String requirement,
     required String track,
+    String stack = 'react-vite-sqlite',
   }) async {
     final r = await _post('/features', {
       'id': id,
       'requirement': requirement,
       'track': track,
+      'stack': stack,
     });
     if (r.statusCode != 201 && r.statusCode != 200) {
       throw Exception(_formatError(r));

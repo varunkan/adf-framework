@@ -16,6 +16,7 @@ class _NewFeatureScreenState extends State<NewFeatureScreen> {
   final _idController = TextEditingController();
   final _reqController = TextEditingController();
   String _track = 'M';
+  String _stack = 'react-vite-sqlite';
   bool _saving = false;
 
   @override
@@ -37,6 +38,7 @@ class _NewFeatureScreenState extends State<NewFeatureScreen> {
         id: id,
         requirement: _reqController.text.trim(),
         track: _track,
+        stack: _stack,
       );
       if (!mounted) return;
       final mode = detail['mode'] as String?;
@@ -94,6 +96,24 @@ class _NewFeatureScreenState extends State<NewFeatureScreen> {
                 DropdownMenuItem(value: 'XL', child: Text('XL — extra large')),
               ],
               onChanged: (v) => setState(() => _track = v ?? 'M'),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              key: const Key('stack-picker'),
+              initialValue: _stack,
+              decoration: const InputDecoration(labelText: 'Stack'),
+              items: const [
+                DropdownMenuItem(
+                  value: 'react-vite-sqlite',
+                  child: Text('React + Vite + Tailwind + SQLite'),
+                ),
+                DropdownMenuItem(
+                  value: 'stdlib',
+                  child: Text('Single-file (Python stdlib)'),
+                ),
+              ],
+              onChanged: (v) =>
+                  setState(() => _stack = v ?? 'react-vite-sqlite'),
             ),
             const SizedBox(height: 12),
             Expanded(
