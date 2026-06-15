@@ -100,4 +100,45 @@ void main() {
     final relaunched = await runner.ensureRunning(id);
     expect(relaunched['available'], isTrue, reason: relaunched.toString());
   }, skip: _pythonAvailable() ? false : 'python3 not available');
+
+  // ---- N6: multi-stack via .adf-stack.json --------------------------------
+  void writeNodeApp() {
+    final d = Directory('${repo.path}/apps/$id')..createSync(recursive: true);
+    File('${d.path}/.adf-stack.json').writeAsStringSync(
+      '{"stack":"react-vite-sqlite","run_cmd":["node","server.mjs"],'
+      '"port_env":"PORT","health_path":"/"}',
+    );
+    File('${d.path}/server.mjs').writeAsStringSync(
+      "import http from 'node:http'\n"
+      "const port = parseInt(process.env.PORT || '8000', 10)\n"
+      "http.createServer((req,res)=>{res.writeHead(200);res.end('ok')})"
+      ".listen(port,'127.0.0.1')\n",
+    );
+  }
+
+  test('hasApp is true when only .adf-stack.json is present (no server.py)', () {
+    writeNodeApp();
+    expect(runner.hasApp(id), isTrue);
+    expect(runner.resolveStack(id)?['stack'], 'react-vite-sqlite');
+  });
+
+  test('ensureRunning launches a node app via run_cmd and serves it', () async {
+    writeNodeApp();
+    final res = await runner.ensureRunning(id);
+    expect(res['available'], isTrue, reason: res.toString());
+    final url = res['url'] as String;
+    final client = HttpClient();
+    final req = await client.getUrl(Uri.parse(url));
+    final resp = await req.close();
+    expect(resp.statusCode, 200);
+    client.close(force: true);
+  }, skip: _nodeAvailable() ? false : 'node not available');
+}
+
+bool _nodeAvailable() {
+  try {
+    return Process.runSync('node', ['--version']).exitCode == 0;
+  } catch (_) {
+    return false;
+  }
 }
