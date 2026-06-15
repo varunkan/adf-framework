@@ -67,3 +67,32 @@ jobs:
             ( set -a; . "$dir/.adf/runner.env"; set +a )
             grep -q "ADF_RUNNER=" "$dir/.adf/runner.env"
           done
+
+  python:
+    name: Moat suites (python unit + offline gates)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Unit suites (stdlib only, no model, no npm)
+        run: |
+          set -euo pipefail
+          for t in test_compaction test_agent_runner test_proof_of_build \
+                   test_policy_gate test_app_data test_offline_build \
+                   test_export_app; do
+            echo "== scripts/orch/$t =="
+            python3 "scripts/orch/$t.py"
+          done
+          for t in test_bench test_bench_build test_scorecard; do
+            echo "== scripts/bench/$t =="
+            python3 "scripts/bench/$t.py"
+          done
+      - name: Offline moat gates (deterministic, no network)
+        run: |
+          set -euo pipefail
+          python3 scripts/orch/offline_build.py
+          python3 scripts/test/proof_of_build_demo.py
+          python3 scripts/test/policy_gate_demo.py
+          python3 scripts/test/moat_demo.py
