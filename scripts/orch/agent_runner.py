@@ -236,24 +236,34 @@ def _stdlib_build_messages(fid, ctx):
 def _react_build_messages(fid, ctx):
     """React+Vite+Tailwind front + Fastify+better-sqlite3 server. Scaffold-then-diff:
     the template provides build config + the server bootstrap; the model emits ONLY
-    the feature's files (schema, API routes, components, tests)."""
+    the feature's files (schema, API routes, components, tests).
+
+    The prompt mirrors the REAL template shape exactly (an earlier version asked for
+    a TypeScript server the template can't run): the server is PLAIN ESM `.mjs`
+    (started by `node`, never tsc-compiled); each `server/api/<name>.mjs` is a
+    Fastify plugin whose routes are registered under the `/api` prefix by the
+    template, so routes are written RELATIVE (`app.get('/items')` => `/api/items`);
+    it imports the shared db as `import { db } from '../db.mjs'`; tests are
+    `test/<name>.test.mjs` using `app.inject` against `buildApp` from
+    `../server/app.mjs`. Only `src/**` (.tsx) is TypeScript (tsc typechecks it)."""
     system = (
-        "You are an expert full-stack TypeScript engineer acting as the ADF "
-        "implementation agent. You output COMPLETE, RUNNABLE code — never "
-        "placeholders, never '...', never TODO stubs.\n\n"
-        "TARGET STACK (a checked-in scaffold already provides the wiring — you only "
-        "write the app-specific files):\n"
-        "- Frontend: React 18 + Vite + TypeScript + Tailwind CSS (utility classes; "
-        "no extra UI libraries unless already in package.json).\n"
-        "- Backend: a single Fastify server (Node + TypeScript) that serves the built "
-        "Vite `dist/` AND a JSON API under `/api/*`, owning data via better-sqlite3 "
-        "(one SQLite file). It binds the PORT env var (default 8000).\n"
-        "- Tests: Vitest. Frontend calls the API with relative `fetch('/api/...')`.\n\n"
-        "SCAFFOLD-THEN-DIFF: the project root already contains a working template "
-        "(package.json, vite/tailwind/tsconfig, a Fastify entry that serves dist + "
-        "registers API route plugins + runs schema.sql at boot). DO NOT re-emit build "
-        "config or the server bootstrap unless a change requires it. Emit ONLY the "
-        "files that implement THIS feature.\n\n"
+        "You are an expert full-stack engineer acting as the ADF implementation "
+        "agent. You output COMPLETE, RUNNABLE code — never placeholders, never "
+        "'...', never TODO stubs.\n\n"
+        "TARGET STACK (a checked-in scaffold already provides ALL the wiring — you "
+        "write ONLY the app-specific files):\n"
+        "- Frontend: React 18 + Vite + TypeScript + Tailwind CSS utility classes. "
+        "Only `src/**` is TypeScript and `tsc --noEmit` typechecks it, so it must be "
+        "type-correct. No extra UI/npm libraries (only what's in package.json).\n"
+        "- Backend: a single Fastify server already serves the built Vite `dist/` and "
+        "auto-registers every `server/api/*.mjs` plugin under the `/api` prefix, and a "
+        "shared better-sqlite3 connection runs `schema.sql` at boot. The server is "
+        "PLAIN ES MODULES (`.mjs`) run by `node` — it is NEVER compiled by tsc, so "
+        "DO NOT write server code in TypeScript.\n"
+        "- Tests: Vitest (`*.test.mjs`).\n\n"
+        "SCAFFOLD-THEN-DIFF: DO NOT re-emit build config, `server/app.mjs`, "
+        "`server/db.mjs`, `server/index.mjs`, or `index.html`. Emit ONLY the files "
+        "that implement THIS feature, overwriting the scaffold's sample where needed.\n\n"
         "OUTPUT FORMAT — emit each file EXACTLY like this, nothing else between "
         "files:\n<<<FILE: relative/path>>>\n<full file content>\n<<<END>>>\n"
         "No markdown fences, no commentary outside file blocks."
@@ -261,21 +271,81 @@ def _react_build_messages(fid, ctx):
     user = (
         f"Implement the feature `{fid}` as a real React+Vite+Tailwind app backed by a "
         f"Fastify + SQLite API.\n\n{_spec_block(ctx)}\n\n"
-        "Deliver (relative to the app root):\n"
-        "- `schema.sql` — the SQLite tables the spec implies (run at boot by the "
-        "template).\n"
-        "- `server/api/<feature>.ts` — a Fastify route plugin exposing the `/api/...` "
-        "endpoints the spec needs, correct status codes (200/201/400/404), using the "
-        "shared better-sqlite3 `db` the template exports.\n"
-        "- `src/**` — React + TypeScript components with Tailwind styling implementing "
-        "the full UI, calling `/api/...` via fetch. Keep components small (one concern "
-        "per file).\n"
-        "- `test/<feature>.test.ts` — Vitest tests for the main success path and at "
-        "least one validation/error case of the API.\n\n"
-        "CRITICAL: `npm run build` (tsc + vite) and `npm test` (vitest) MUST pass. "
-        "No placeholders. Emit all files now."
+        "Deliver (paths relative to the app root):\n"
+        "- `schema.sql` — the SQLite tables the spec implies (executed at boot). Use "
+        "`CREATE TABLE IF NOT EXISTS`.\n"
+        "- `server/api/<feature>.mjs` — a Fastify plugin: "
+        "`export default async function <feature>(app) { ... }`. Import the shared db "
+        "with `import { db } from '../db.mjs'` and use better-sqlite3's SYNC API "
+        "(`db.prepare(...).all()/.get()/.run()`). Register routes RELATIVE to `/api` "
+        "(the loader adds the `/api` prefix) — e.g. `app.get('/items', ...)` is served "
+        "at `/api/items`. Return correct status codes (200/201 success, 400 invalid "
+        "input, 404 not found) via `reply.code(n).send(...)`.\n"
+        "- `src/App.tsx` (+ small `src/components/*.tsx` as needed) — React + "
+        "TypeScript with Tailwind, implementing the full UI and calling the API with "
+        "relative `fetch('/api/...')`. `src/App.tsx` must be the default export "
+        "rendered by the existing `src/main.tsx`. Keep it type-correct.\n"
+        "- `test/<feature>.test.mjs` — Vitest importing "
+        "`import { buildApp } from '../server/app.mjs'`, exercising the API via "
+        "`app.inject({ method, url: '/api/...', payload })` (NO network/port): assert "
+        "the main success path AND at least one validation/error case (400 or 404). "
+        "The vitest config already points the db at an in-memory SQLite.\n\n"
+        "CRITICAL: `npm run build` (`tsc --noEmit && vite build`) and `npm test` "
+        "(vitest) MUST pass, and `node server/index.mjs` must boot. No placeholders. "
+        "Emit all files now."
     )
     return system, user
+
+
+# --- scaffold-then-diff (N7): copy the checked-in template, strip the sample --
+# Stacks whose generation starts from a checked-in working template. stdlib has
+# no template (single-file generation), so it maps to None.
+_STACK_TEMPLATES = {STACK_REACT: "react-vite-sqlite"}
+# Sample-feature files the scaffold ships to prove itself; removed before the
+# generated feature is written so a stale `/api/items` + its test can't interfere.
+_SCAFFOLD_SAMPLE_REMOVE = ("server/api/items.mjs", "test/api.test.mjs")
+
+
+def template_dir(repo_root, workspace, stack):
+    """Locate the checked-in template for `stack`: prefer the repo root, then the
+    workspace (worktree). Returns an absolute path or None (stacks without a
+    template, e.g. stdlib, generate from scratch)."""
+    name = _STACK_TEMPLATES.get(stack)
+    if not name:
+        return None
+    for base in (repo_root, workspace):
+        if not base:
+            continue
+        cand = os.path.join(base, "templates", name)
+        if os.path.isdir(cand):
+            return cand
+    return None
+
+
+def scaffold_app(app_dir, tpl_dir):
+    """Copy the template into the app dir (scaffold-then-diff), keeping the build
+    wiring + lockfile + `.adf-stack.json`, skipping heavy/generated dirs. Then
+    strip the sample feature and reset `schema.sql` so the generated feature is
+    clean. Idempotent for the parts it owns."""
+    import shutil
+    for root, dirs, files in os.walk(tpl_dir):
+        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
+        for fn in files:
+            if fn in (".adf-deps",) or fn.endswith(".db"):
+                continue
+            src = os.path.join(root, fn)
+            rel = os.path.relpath(src, tpl_dir)
+            dest = os.path.join(app_dir, rel)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.copy2(src, dest)
+    for rel in _SCAFFOLD_SAMPLE_REMOVE:
+        p = os.path.join(app_dir, rel)
+        if os.path.isfile(p):
+            os.remove(p)
+    # Reset schema to a placeholder; the generated schema.sql replaces it (so no
+    # leftover sample `items` table lingers in a fresh app's database).
+    with open(os.path.join(app_dir, "schema.sql"), "w", encoding="utf-8") as f:
+        f.write("-- schema for this app (generated at build time)\n")
 
 
 _STACK_PROFILES = {
@@ -682,20 +752,29 @@ def headroom_compress_log(text):
         return text
 
 
-def fix_messages(system, user, files, failure):
-    """Build the follow-up turn asking the model to fix the failing files."""
+def fix_messages(system, user, files, failure, stack=None):
+    """Build the follow-up turn asking the model to fix the failing files. The
+    hint about WHICH files may be wrong is stack-aware so the model fixes the
+    right surface (server.mjs/vitest for react, server.py/test_app.py for stdlib)."""
     current = "\n".join(
         f"<<<FILE: {p}>>>\n{c}\n<<<END>>>" for p, c in files
     )
     failure = headroom_compress_log(failure)
+    if (stack or DEFAULT_STACK) == STACK_REACT:
+        where = ("whichever files are wrong (schema.sql, server/api/*.mjs, src/**.tsx, "
+                 "and/or test/*.test.mjs). Common causes: a tsc type error in src, a "
+                 "missing/renamed SQLite table or column, a route registered with the "
+                 "wrong path (routes are relative to `/api`), or a vitest assertion "
+                 "mismatch")
+    else:
+        where = "whichever files are wrong (server.py and/or test_app.py and/or index.html)"
     fixer = (
-        "Your previous implementation FAILED its tests. Here is the current "
-        "code and the exact failure output. Fix the root cause in whichever "
-        "files are wrong (server.py and/or test_app.py and/or index.html) and "
+        "Your previous implementation FAILED verification. Here is the current "
+        f"code and the exact failure output. Fix the root cause in {where} and "
         "re-emit the COMPLETE set of files in the same <<<FILE:>>> format. Do "
         "not explain — emit only the corrected files.\n\n"
         f"=== CURRENT FILES ===\n{current}\n\n"
-        f"=== TEST FAILURE OUTPUT ===\n{failure[:4000]}\n\n"
+        f"=== VERIFICATION FAILURE OUTPUT ===\n{failure[:4000]}\n\n"
         "Re-emit all files now, corrected."
     )
     return [
@@ -753,17 +832,33 @@ def current_app_files(app_dir, max_files=60, max_bytes=200_000):
     return out
 
 
-def build_edit_messages(fid, files, instruction):
+def build_edit_messages(fid, files, instruction, stack=None):
     """Apply a scoped change to an existing app — the Lovable 'type a change,
     watch it update' loop. We hand the model the current files + the request and
-    ask for the SMALLEST edit, re-emitting only the changed files."""
+    ask for the SMALLEST edit, re-emitting only the changed files. The
+    architecture note + the test it must keep green are stack-aware."""
+    if (stack or DEFAULT_STACK) == STACK_REACT:
+        arch = (
+            "a React+Vite+TypeScript+Tailwind app with a Fastify + better-sqlite3 "
+            "server (plain-ESM `server/**.mjs`, routes under `/api`, schema.sql at "
+            "boot). Keep `src/**` type-correct (tsc checks it), keep server files as "
+            "`.mjs`, and keep the PORT-from-env contract"
+        )
+        keep_tests = ("Keep the vitest suite (`test/*.test.mjs`) passing; update it "
+                      "only if the change requires it.")
+    else:
+        arch = (
+            "a Python stdlib http.server app + a single static index.html. Keep the "
+            "same architecture and the PORT-from-env contract "
+            "(`port = int(os.environ.get('PORT','8000'))`)"
+        )
+        keep_tests = ("Keep test_app.py passing; update it only if the change "
+                      "requires it.")
     system = (
-        "You are editing an EXISTING, working web app (Python stdlib http.server "
-        "+ a single static index.html). Apply the user's requested change with "
-        "the SMALLEST edit that fully satisfies it — preserve all other behavior "
-        "and styling exactly. Keep the same architecture and the PORT-from-env "
-        "contract (`port = int(os.environ.get('PORT','8000'))`). Re-emit the "
-        "COMPLETE content of every file you change (and ONLY those), as:\n"
+        f"You are editing an EXISTING, working web app: {arch}. Apply the user's "
+        "requested change with the SMALLEST edit that fully satisfies it — preserve "
+        "all other behavior and styling exactly. Re-emit the COMPLETE content of "
+        "every file you change (and ONLY those), as:\n"
         "<<<FILE: relative/path>>>\n<full file content>\n<<<END>>>\n"
         "No commentary, no markdown fences."
     )
@@ -774,8 +869,7 @@ def build_edit_messages(fid, files, instruction):
         f"App: `{fid}` — the files below are the current, working version.\n\n"
         f"=== CURRENT FILES ===\n{blocks}\n\n"
         f"=== CHANGE REQUESTED ===\n{instruction}\n\n"
-        "Apply the change and re-emit the complete updated file(s) now. Keep "
-        "test_app.py passing; update it only if the change requires it."
+        f"Apply the change and re-emit the complete updated file(s) now. {keep_tests}"
     )
     return system, user
 
@@ -798,20 +892,41 @@ def main():
 
     ctx = load_feature_context(repo_root, fid)
     app_dir = os.path.join(workspace, "apps", fid)
+
+    # Resolve the target stack (contract C5): an already-built app's manifest
+    # wins (re-runs/edits keep their stack); a fresh build uses the env default
+    # (ADF_STACK), which the server sets from the feature's chosen stack.
+    app_built = os.path.isdir(app_dir) and (
+        os.path.isfile(os.path.join(app_dir, ".adf-stack.json"))
+        or os.path.isfile(os.path.join(app_dir, "package.json"))
+        or os.path.isfile(os.path.join(app_dir, "server.py")))
+    stack = detect_stack(app_dir) if app_built else DEFAULT_STACK
+
     edit_instruction = read_pending_edit(app_dir)
-    is_edit = bool(edit_instruction) and os.path.isfile(
-        os.path.join(app_dir, "index.html"))
+    is_edit = bool(edit_instruction) and app_built
 
     if not is_edit and not any(ctx.values()):
         log(f"no spec/requirement found for {fid} under {repo_root}")
         sys.exit(3)
 
     if is_edit:
-        log(f"EDIT mode: applying change -> {edit_instruction[:100]}")
+        log(f"EDIT mode ({stack}): applying change -> {edit_instruction[:100]}")
         system, user = build_edit_messages(
-            fid, current_app_files(app_dir), edit_instruction)
+            fid, current_app_files(app_dir), edit_instruction, stack)
     else:
-        system, user = build_messages(fid, ctx)
+        # Scaffold-then-diff (N7): a fresh react build starts from the checked-in
+        # working template; the model then emits ONLY the feature's files.
+        if stack == STACK_REACT and not os.path.isfile(
+                os.path.join(app_dir, "package.json")):
+            tpl = template_dir(repo_root, workspace, stack)
+            if not tpl:
+                log(f"stack {stack} selected but no template found under templates/")
+                sys.exit(7)
+            os.makedirs(app_dir, exist_ok=True)
+            scaffold_app(app_dir, tpl)
+            log(f"scaffolded {stack} template -> apps/{fid}/")
+        log(f"BUILD mode ({stack})")
+        system, user = build_messages(fid, ctx, stack)
     timeout = int(os.environ.get("ADF_RUNNER_TIMEOUT_SEC", "180"))
     max_iters = int(os.environ.get("ADF_RUNNER_FIX_ITERS", "3"))
 
@@ -837,15 +952,15 @@ def main():
             continue
 
         app_root, written = write_files(workspace, fid, files)
-        ok, output = run_verification(app_root)
+        ok, output = verify_app(app_root, stack)
         last_failure = output
-        log(f"attempt {attempt}: wrote {len(written)} files; tests {'PASSED' if ok else 'FAILED'}")
+        log(f"attempt {attempt}: wrote {len(written)} files; verify {'PASSED' if ok else 'FAILED'}")
         if ok:
             verified = True
             break
         if attempt < max_iters:
             log(f"attempt {attempt}: feeding failure back to the model to self-correct")
-            messages = fix_messages(system, user, files, output)
+            messages = fix_messages(system, user, files, output, stack)
 
     if app_root is None:
         log("implementation produced no files")
@@ -858,11 +973,17 @@ def main():
     rel_root = os.path.relpath(app_root, workspace)
     status = "✅ tests PASS" if verified else "⚠️ tests still failing after retries"
     verb = "Updated" if is_edit else "Implemented"
+    if stack == STACK_REACT:
+        run_hint = (f"Run:  cd {rel_root} && npm ci && npm run build && "
+                    f"PORT=8000 node server/index.mjs")
+        test_hint = f"Test: cd {rel_root} && npm test"
+    else:
+        run_hint = f"Run:  cd {rel_root} && python3 server.py"
+        test_hint = f"Test: cd {rel_root} && python3 test_app.py"
     summary = (
-        f"{verb} `{fid}` — {status} ({len(written)} files in {rel_root}/)\n"
+        f"{verb} `{fid}` ({stack}) — {status} ({len(written)} files in {rel_root}/)\n"
         + "\n".join(f"- {w}" for w in written)
-        + f"\n\nRun:  cd {rel_root} && python3 server.py\n"
-        + f"Test: cd {rel_root} && python3 test_app.py"
+        + f"\n\n{run_hint}\n{test_hint}"
     )
     if not verified:
         summary += f"\n\nLast test output:\n{last_failure[:1500]}"

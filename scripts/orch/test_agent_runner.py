@@ -12,6 +12,8 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import agent_runner as ar  # noqa: E402
 
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
 
 class EditHelpers(unittest.TestCase):
     def setUp(self):
@@ -149,6 +151,60 @@ class VerifyDispatch(unittest.TestCase):
     def test_stack_profile_exposes_verify_callable(self):
         self.assertIs(ar.stack_profile(ar.STACK_REACT)["verify"], ar._react_verify)
         self.assertIs(ar.stack_profile(ar.STACK_STDLIB)["verify"], ar.run_verification)
+
+
+class ScaffoldThenDiff(unittest.TestCase):
+    """N7 — the react generate flow: locate the template, scaffold it into the
+    app dir, strip the sample feature, and emit a generation prompt that matches
+    the REAL template shape (plain-ESM `.mjs` server, routes relative to /api,
+    vitest `app.inject` tests) — never the unrunnable `.ts` server it asked for."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.app = os.path.join(self.tmp, "apps", "demo")
+
+    def test_template_dir_resolves_to_checked_in_scaffold(self):
+        tpl = ar.template_dir(REPO_ROOT, REPO_ROOT, ar.STACK_REACT)
+        self.assertTrue(tpl and os.path.isdir(tpl), f"template not found: {tpl}")
+        self.assertTrue(os.path.isfile(os.path.join(tpl, "package.json")))
+        # stdlib has no template dir (single-file generation) -> None.
+        self.assertIsNone(ar.template_dir(REPO_ROOT, REPO_ROOT, ar.STACK_STDLIB))
+
+    def test_scaffold_app_copies_wiring_and_strips_sample(self):
+        tpl = ar.template_dir(REPO_ROOT, REPO_ROOT, ar.STACK_REACT)
+        ar.scaffold_app(self.app, tpl)
+        # build wiring + lockfile (npm ci needs it) + manifest are copied.
+        for rel in ("package.json", "package-lock.json", ".adf-stack.json",
+                    "server/app.mjs", "server/db.mjs", "server/index.mjs",
+                    "src/main.tsx", "vite.config.ts", "tsconfig.json"):
+            self.assertTrue(os.path.isfile(os.path.join(self.app, rel)),
+                            f"scaffold missing {rel}")
+        # the sample feature is stripped so the generated one is clean.
+        self.assertFalse(os.path.isfile(os.path.join(self.app, "server/api/items.mjs")))
+        self.assertFalse(os.path.isfile(os.path.join(self.app, "test/api.test.mjs")))
+        # heavy dirs never copied.
+        self.assertFalse(os.path.isdir(os.path.join(self.app, "node_modules")))
+        # schema is reset (no leftover sample `items` table).
+        schema = open(os.path.join(self.app, "schema.sql")).read().lower()
+        self.assertNotIn("create table", schema)
+        # detect_stack now sees a react app.
+        self.assertEqual(ar.detect_stack(self.app), ar.STACK_REACT)
+
+    def test_react_prompt_matches_template_shape(self):
+        ctx = {"requirement": "A kanban board", "problem": "",
+               "spec": "", "plan": "", "tasks": ""}
+        system, user = ar.build_messages("kb", ctx, stack=ar.STACK_REACT)
+        blob = system + "\n" + user
+        # server routes are plain-ESM .mjs (the template runs node, not tsc on server).
+        self.assertIn("server/api/", blob)
+        self.assertIn(".mjs", blob)
+        self.assertIn("../db.mjs", blob)
+        # vitest tests use app.inject against buildApp, as .test.mjs.
+        self.assertIn(".test.mjs", blob)
+        self.assertIn("inject", blob)
+        # MUST NOT ask for an unrunnable TypeScript server / test (the bug we fixed).
+        self.assertNotIn("server/api/<feature>.ts", blob)
+        self.assertNotIn(".test.ts", blob)
 
 
 if __name__ == "__main__":

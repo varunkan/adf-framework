@@ -216,3 +216,16 @@ level completes, run integration for that level → after L3, run E2E.
   language detection guessing).
 - 2026-06-14 — Security v1 = pinned-dep allowlist + `npm ci` + loopback bind + cwd
   jail; Docker isolation deferred to Phase 4.
+- 2026-06-15 — N5 done: `verify_app(app_root, stack)` dispatches stdlib vs react;
+  react = npm ci → `tsc --noEmit && vite build` → vitest → `node` boot (GET `/` +
+  `/api/health` = 200). Each stage's failure attributed verbatim for self-heal.
+  Gates: fast `VerifyDispatch` units + slow `runner_verify_check.py` (real pipeline).
+- 2026-06-15 — N7 done: scaffold-then-diff generate flow. The react generation
+  prompt was CORRECTED to the real template shape — server is plain-ESM `.mjs`
+  (never tsc-compiled), routes are RELATIVE to the `/api` prefix, db via
+  `import {db} from '../db.mjs'`, tests are `*.test.mjs` using `app.inject`. Only
+  `src/**` is TypeScript. `scaffold_app()` copies the template (keeps lockfile +
+  `.adf-stack.json`), strips the sample feature, resets `schema.sql`; `main()`
+  scaffolds a fresh react build then generates only the feature's files; self-heal
+  + edit prompts are now stack-aware. Gate `runner_generate_check.py` drives real
+  `main()` with a stubbed model → a verified, booting app (8/8 checks).
