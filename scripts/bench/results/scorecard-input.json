@@ -15,6 +15,7 @@
     "total_out_tokens": 0,
     "backend": "ollama qwen2.5-coder:32b (local, $0, offline)",
     "budget_s": 600,
-    "note": "local 32B model exceeded the 600s per-generate budget on a single dev machine; pipeline proven separately by e2e_react_app.py"
+    "note": "local 32B model exceeded the 600s per-generate budget on a single dev machine; pipeline proven separately by e2e_react_app.py",
+    "pipeline_seconds": 10.7
   }
 }

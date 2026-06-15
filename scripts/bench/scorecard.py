@@ -103,6 +103,8 @@ def render_scorecard(bench=None, capability=None):
             # Honest: distinguish the (proven) pipeline from a (latency-bound) local
             # model run. Do not pass a raw "0/N built" off as a pipeline failure.
             budget = capability.get("budget_s", "the")
+            pipe = capability.get("pipeline_seconds")
+            pipe_txt = (f" — measured at ~{pipe}s end to end" if pipe else "")
             measured += (
                 f"\n**Measured capability (bench --build):** a live **$0, offline** "
                 f"build was attempted with {backend}; {built}/{apps} finished within "
@@ -110,7 +112,9 @@ def render_scorecard(bench=None, capability=None):
                 f"real — see *time-to-first-app* below). The build/test/run **pipeline** "
                 f"itself is proven by the deterministic e2e "
                 f"(`scripts/test/e2e_react_app.py`: prompt → build → boot → serve → "
-                f"persist → hot-edit, with real npm + Vite + Vitest + Node).\n")
+                f"persist → hot-edit, with real npm + Vite + Vitest + Node{pipe_txt}). "
+                f"So the pipeline is fast; the variable cost is the model's generation "
+                f"time, which you control by choosing the backend.\n")
 
     return f"""# ADF vs Lovable — the honest scorecard
 
