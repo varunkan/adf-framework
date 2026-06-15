@@ -286,6 +286,37 @@ def verify_bundle(bundle, repo=None):
             else "; ".join(bad),
         )
 
+    # The moat, attested in the same sealed document (added 2026-06): Proof of
+    # Build seal + policy verdict + compaction summary. Already digest-covered;
+    # this adds a semantic sanity check. Absent/null is fine (older bundles, or a
+    # feature that was never built into an app).
+    moat = bundle.get("moat")
+    if moat in (None, {}):
+        add("moat_attested", True, "no per-app moat (feature not built into an app)")
+    elif not isinstance(moat, dict):
+        add("moat_attested", False, "moat is present but not an object")
+    else:
+        problems = []
+        proof = moat.get("proof")
+        if proof is not None:
+            seal = proof.get("seal")
+            if not (isinstance(seal, str) and seal.startswith("adf1:")):
+                problems.append("proof seal malformed (%r)" % seal)
+        policy = moat.get("policy")
+        if policy is not None and not isinstance(policy.get("ok"), bool):
+            problems.append("policy verdict is not a boolean")
+        parts = []
+        if proof is not None:
+            parts.append("proof %s" % proof.get("seal"))
+        if policy is not None:
+            parts.append(
+                "policy %s" % ("compliant" if policy.get("ok") else "VIOLATIONS"))
+        if moat.get("context") is not None:
+            parts.append("%s compaction card(s)" % moat["context"].get("cards"))
+        add("moat_attested", not problems,
+            ("; ".join(problems)) if problems
+            else ("attested: " + ", ".join(parts) if parts else "moat present"))
+
     return all(c["ok"] for c in checks), checks
 
 
@@ -485,6 +516,7 @@ def main(argv=None):
             "bundle": args.bundle,
             "feature_id": bundle.get("feature_id") if isinstance(bundle, dict) else None,
             "bundle_digest": bundle.get("bundle_digest") if isinstance(bundle, dict) else None,
+            "moat": bundle.get("moat") if isinstance(bundle, dict) else None,
             "checks": checks,
         }))
     else:

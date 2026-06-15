@@ -127,6 +127,54 @@ void main() {
     expect(digestOf(tampered), isNot(bundle['bundle_digest']));
   });
 
+  // The per-app moat artifacts the runner seals into apps/<id>/.
+  void writeMoatArtifacts() {
+    final app = Directory('${tmp.path}/apps/$id')..createSync(recursive: true);
+    File('${app.path}/.adf-proof.json').writeAsStringSync(jsonEncode({
+      'seal': 'adf1:abc123def456',
+      'root': 'abc123def456aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      'files': [
+        {'path': 'src/App.tsx', 'sha256': 'aa'},
+        {'path': 'server/index.mjs', 'sha256': 'bb'},
+      ],
+    }));
+    File('${app.path}/.adf-policy-report.json').writeAsStringSync(jsonEncode({
+      'policy_id': 'adf-default-secure',
+      'ok': true,
+      'n_violations': 0,
+      'rules': [],
+    }));
+    Directory('${app.path}/.adf-context').createSync();
+    File('${app.path}/.adf-context/compaction-1.json').writeAsStringSync(jsonEncode({
+      'kind': 'edit',
+      'tokens_before': 5000,
+      'tokens_after': 400,
+      'n_summarized': 3,
+    }));
+  }
+
+  test('the bundle attests the per-app moat (proof + policy + compaction)', () {
+    writeMoatArtifacts();
+    final bundle = sealedBundle();
+    final moat = bundle['moat'] as Map<String, dynamic>;
+    expect((moat['proof'] as Map)['seal'], 'adf1:abc123def456');
+    expect((moat['proof'] as Map)['n_files'], 2);
+    expect((moat['policy'] as Map)['ok'], isTrue);
+    expect((moat['policy'] as Map)['policy_id'], 'adf-default-secure');
+    expect((moat['context'] as Map)['cards'], 1);
+    expect(((moat['context'] as Map)['last'] as Map)['tokens_after'], 400);
+    // the digest covers the moat: flip the policy verdict and it no longer matches.
+    expect(bundle['bundle_digest'], digestOf(bundle));
+    final tampered = jsonDecode(jsonEncode(bundle)) as Map<String, dynamic>;
+    ((tampered['moat'] as Map)['policy'] as Map)['ok'] = false;
+    expect(digestOf(tampered), isNot(bundle['bundle_digest']));
+  });
+
+  test('a feature never built into an app has moat: null', () {
+    final bundle = sealedBundle();
+    expect(bundle['moat'], isNull);
+  });
+
   group('python3 verifier interop', () {
     late String script;
     String? python;
@@ -248,6 +296,48 @@ void main() {
       final result = await Process.run(python!, [script, '--self-test']);
       expect(result.exitCode, 0,
           reason: '${result.stdout}\n${result.stderr}');
+    });
+
+    test('accepts a bundle whose moat is attested + surfaces it (exit 0)',
+        () async {
+      if (python == null) {
+        markTestSkipped('python3 not on PATH — skipping verifier interop');
+        return;
+      }
+      writeMoatArtifacts();
+      final result = await Process.run(
+          python!, [script, '--json', writeBundle(sealedBundle()).path]);
+      expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
+      final report =
+          jsonDecode(result.stdout as String) as Map<String, dynamic>;
+      expect(report['valid'], isTrue);
+      expect(((report['moat'] as Map)['proof'] as Map)['seal'],
+          'adf1:abc123def456');
+      final moatCheck = (report['checks'] as List)
+          .firstWhere((c) => c['check'] == 'moat_attested');
+      expect(moatCheck['ok'], isTrue);
+    });
+
+    test('a forged proof seal in the moat fails even with a fixed-up digest',
+        () async {
+      if (python == null) {
+        markTestSkipped('python3 not on PATH — skipping verifier interop');
+        return;
+      }
+      writeMoatArtifacts();
+      final bundle =
+          jsonDecode(jsonEncode(sealedBundle())) as Map<String, dynamic>;
+      ((bundle['moat'] as Map)['proof'] as Map)['seal'] = 'forged-not-adf1';
+      bundle['bundle_digest'] = digestOf(bundle); // digest passes; semantics fail
+      final result = await Process.run(
+          python!, [script, '--json', writeBundle(bundle).path]);
+      expect(result.exitCode, 1, reason: '${result.stdout}\n${result.stderr}');
+      final report =
+          jsonDecode(result.stdout as String) as Map<String, dynamic>;
+      final failing = (report['checks'] as List)
+          .where((c) => c['ok'] != true)
+          .map((c) => c['check']);
+      expect(failing, ['moat_attested']);
     });
   });
 }

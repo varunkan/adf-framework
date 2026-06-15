@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'cost_meter.dart';
@@ -67,12 +68,78 @@ class AuditBundleBuilder {
       ],
       'gates': gates,
       'cost': costFile.existsSync() ? costs.featureCost(id) : null,
+      // The moat, attested in the same sealed document: what was generated is
+      // tamper-evidently proven (Proof of Build), governed (Policy Gates), and
+      // context-managed (Compaction). Summaries ride under `bundle_digest`, so a
+      // forged seal or flipped policy verdict breaks the bundle.
+      'moat': _moat(id),
     };
     return {
       ...bundle,
       'bundle_digest':
           IntegrityChain.hashString(IntegrityChain.canonical(bundle)),
     };
+  }
+
+  /// Lift the per-app moat artifacts (written into `apps/<id>/` by the runner)
+  /// into compact, digest-covered summaries. Null when nothing was built.
+  Map<String, dynamic>? _moat(String id) {
+    final appDir = '${store.repoRoot}/apps/$id';
+    final proof = _readJson('$appDir/.adf-proof.json');
+    final policy = _readJson('$appDir/.adf-policy-report.json');
+    final ctxDir = Directory('$appDir/.adf-context');
+    Map<String, dynamic>? context;
+    if (ctxDir.existsSync()) {
+      final cards = ctxDir
+          .listSync()
+          .whereType<File>()
+          .where((f) =>
+              f.path.contains('compaction-') && f.path.endsWith('.json'))
+          .toList()
+        ..sort((a, b) => a.path.compareTo(b.path));
+      if (cards.isNotEmpty) {
+        final last = _readJson(cards.last.path);
+        context = {
+          'cards': cards.length,
+          'last': last == null
+              ? null
+              : {
+                  'kind': last['kind'],
+                  'tokens_before': last['tokens_before'],
+                  'tokens_after': last['tokens_after'],
+                  'n_summarized': last['n_summarized'],
+                },
+        };
+      }
+    }
+    if (proof == null && policy == null && context == null) return null;
+    return {
+      'proof': proof == null
+          ? null
+          : {
+              'seal': proof['seal'],
+              'root': proof['root'],
+              'n_files': (proof['files'] as List?)?.length,
+            },
+      'policy': policy == null
+          ? null
+          : {
+              'policy_id': policy['policy_id'],
+              'ok': policy['ok'],
+              'n_violations': policy['n_violations'],
+            },
+      'context': context,
+    };
+  }
+
+  static Map<String, dynamic>? _readJson(String path) {
+    final f = File(path);
+    if (!f.existsSync()) return null;
+    try {
+      return jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Size on disk of a sealed artifact; -1 when it has since vanished
