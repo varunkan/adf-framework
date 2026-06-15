@@ -17,7 +17,8 @@ Widget _wrap(ApiClient api) => MaterialApp(
     );
 
 void main() {
-  testWidgets('shows VERIFIED with the seal when the proof holds', (tester) async {
+  testWidgets('shows VERIFIED + compliant shield when proof holds and policy ok',
+      (tester) async {
     await tester.pumpWidget(_wrap(_api({
       'has_proof': true,
       'ok': true,
@@ -25,6 +26,7 @@ void main() {
       'seal': 'adf1:521bbfe29991',
       'n_files': 17,
       'files': [],
+      'policy': {'ok': true, 'n_violations': 0, 'policy_id': 'adf-default-secure'},
     })));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
@@ -32,7 +34,31 @@ void main() {
     expect(find.byKey(const Key('proof-badge')), findsOneWidget);
     expect(find.textContaining('Verified'), findsOneWidget);
     expect(find.textContaining('adf1:521bbfe29991'), findsOneWidget);
+    expect(find.textContaining('🛡'), findsOneWidget);
     expect(find.byIcon(Icons.verified_user), findsOneWidget);
+  });
+
+  testWidgets('verified build with policy violations is flagged on the badge',
+      (tester) async {
+    await tester.pumpWidget(_wrap(_api({
+      'has_proof': true,
+      'ok': true,
+      'status': 'VERIFIED',
+      'seal': 'adf1:521bbfe29991',
+      'n_files': 17,
+      'files': [],
+      'policy': {
+        'ok': false,
+        'n_violations': 2,
+        'rules': [
+          {'rule': 'no_secrets', 'ok': false},
+          {'rule': 'no_network_egress', 'ok': true},
+        ],
+      },
+    })));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.textContaining('policy'), findsOneWidget);
   });
 
   testWidgets('shows TAMPERED when a file diverges from the seal', (tester) async {

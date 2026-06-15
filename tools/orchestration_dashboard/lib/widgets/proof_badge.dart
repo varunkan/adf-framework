@@ -63,8 +63,14 @@ class _ProofBadgeState extends State<ProofBadge> {
     }
     final ok = _proof!['ok'] == true;
     final seal = _proof!['seal'] as String? ?? '';
+    final policy = _proof!['policy'] as Map<String, dynamic>?;
+    final policyOk = policy?['ok'] == true;
+    final hasPolicy = policy != null;
     final color = ok ? const Color(0xFF16A34A) : const Color(0xFFDC2626);
-    final label = ok ? 'Verified · $seal' : 'TAMPERED';
+    // Verified + compliant = green seal with a shield; verified but policy
+    // violations = green seal with an amber shield marker.
+    var label = ok ? 'Verified · $seal' : 'TAMPERED';
+    if (ok && hasPolicy) label += policyOk ? ' 🛡' : ' · ⚠ policy';
     return Tooltip(
       message: _tooltip(ok),
       child: InkWell(
@@ -76,16 +82,30 @@ class _ProofBadgeState extends State<ProofBadge> {
   }
 
   String _tooltip(bool ok) {
+    final policy = _proof!['policy'] as Map<String, dynamic>?;
+    String policyLine = '';
+    if (policy != null) {
+      if (policy['ok'] == true) {
+        policyLine = '\nPolicy: ✅ COMPLIANT (${policy['policy_id'] ?? 'default'})';
+      } else {
+        final failed = ((policy['rules'] as List?) ?? const [])
+            .where((r) => r['ok'] != true)
+            .map((r) => r['rule'])
+            .join(', ');
+        policyLine = '\nPolicy: ⚠ ${policy['n_violations']} violation(s) — $failed';
+      }
+    }
     if (ok) {
       final n = _proof!['n_files'] ?? '?';
       return 'Proof of Build VERIFIED offline\n'
-          '$n files + spec + build verdict sealed under a Merkle root\n'
-          'Tap to re-verify';
+          '$n files + spec + build verdict sealed under a Merkle root'
+          '$policyLine\nTap to re-verify';
     }
     final files = (_proof!['files'] as List?)?.cast<Map>() ?? const [];
     final bad = files.where((f) => f['status'] != 'ok').toList();
     final lines = bad.take(4).map((f) => '• ${f['path']} (${f['status']})').join('\n');
-    return 'TAMPERED — diverges from the sealed build:\n$lines\nTap to re-verify';
+    return 'TAMPERED — diverges from the sealed build:\n$lines'
+        '$policyLine\nTap to re-verify';
   }
 
   Widget _shell(Color color, IconData icon, String text, Widget? trailing) {

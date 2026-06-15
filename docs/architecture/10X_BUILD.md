@@ -259,6 +259,23 @@ level completes, run integration for that level → after L3, run E2E.
   TAMPERED, tap to re-verify). Gates: `test_proof_of_build.py` 10/10,
   `proof_of_build_demo.py` 5/5 (real app → seal → VERIFIED → tamper → TAMPERED),
   `proof_check_test.dart` 3/3, `proof_badge_test.dart` 3/3.
-- 2026-06-15 — Next: rest of governed/local moat (Data tab, share/export, proof
-  bundle into the audit/MCP surfaces, agent-operable MCP for the react stack,
-  air-gapped Ollama build, policy gates) + Phase 5 scorecard. N3 npm-warm-cache optional.
+- 2026-06-15 — MOAT extended: **Policy Gates** (governance). Static, deterministic,
+  offline checks over the app's source — `no_secrets`, `no_network_egress`,
+  `offline_capable`, `no_plaintext_pii`, `dependency_allowlist` — each violation
+  located to `file:line`. `scripts/orch/policy_gate.py` (`DEFAULT_POLICY`
+  `adf-default-secure`; app `.adf-policy.json` > repo `adf-policy.json` > default;
+  `check_policy`/`policy_summary` + `--json` CLI). The runner runs the gate after a
+  verified build, writes `.adf-policy-report.json`, and SEALS the policy verdict into
+  the Proof of Build (`_verdict_bytes` now folds `policy` into the Merkle root, so the
+  governance verdict is tamper-evident too). Surfaced live: `ProofCheck.checkPolicy`
+  re-runs the gate and rides along on `GET /features/<id>/proof`; `ProofBadge` shows
+  🛡 (compliant) or ⚠ policy (violations, failing rules in tooltip). Single source of
+  truth = Python; Dart shells the CLI (no drift). Gates: `test_policy_gate.py` 11/11,
+  `policy_gate_demo.py` (template COMPLIANT + all 5 violations caught/located),
+  `proof_check_test.dart` 4/4, `proof_badge_test.dart` 4/4. Why this matters: the
+  proof now answers not just "is this the build that was verified?" but "does this
+  build obey the org's security policy?" — the exact question regulated/IP-sensitive
+  buyers ask, and the one Lovable structurally cannot answer.
+- 2026-06-15 — Next: rest of governed/local moat (Data tab, share/export, proof+policy
+  folded into the audit-bundle + agent-operable MCP for the react stack, air-gapped
+  Ollama build) + Phase 5 ADF-vs-Lovable scorecard. N3 npm-warm-cache optional.

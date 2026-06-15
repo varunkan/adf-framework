@@ -972,7 +972,26 @@ def main():
     # of exactly what ADF generated and verified, recomputable offline by anyone.
     # Best-effort: never let sealing fail an otherwise-good build.
     proof_seal = None
+    policy_ok = None
     if verified:
+        # Governance gate: prove the app obeys org policy (no secrets / no network
+        # egress / offline-capable / no plaintext PII / vetted deps), write the
+        # report, and seal the verdict INTO the Proof of Build so "built + verified
+        # + policy-compliant" is provable offline.
+        policy_summary_obj = None
+        try:
+            import policy_gate
+            pol_res = policy_gate.check_policy(app_root)
+            policy_summary_obj = policy_gate.policy_summary(pol_res)
+            policy_ok = pol_res["ok"]
+            with open(os.path.join(app_root, ".adf-policy-report.json"),
+                      "w", encoding="utf-8") as f:
+                json.dump(pol_res, f, indent=2, sort_keys=True)
+            n = pol_res["n_violations"]
+            log(f"policy gate ({pol_res['policy_id']}): "
+                f"{'PASS' if policy_ok else f'{n} violation(s)'}")
+        except Exception as e:
+            log(f"policy gate skipped: {e}")
         try:
             import proof_of_build
             from datetime import datetime, timezone
@@ -986,6 +1005,7 @@ def main():
                     "verified": True,
                     "verify_summary": verify_summary,
                     "prompt": args.prompt,
+                    "policy": policy_summary_obj,
                 },
                 created_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
             )
@@ -1014,8 +1034,10 @@ def main():
         + f"\n\n{run_hint}\n{test_hint}"
     )
     if proof_seal:
+        pol = "" if policy_ok is None else (
+            " · policy ✅ compliant" if policy_ok else " · policy ⚠️ violations")
         summary += (
-            f"\n\n🔏 Proof of Build sealed: {proof_seal}\n"
+            f"\n\n🔏 Proof of Build sealed: {proof_seal}{pol}\n"
             f"Verify (offline): python3 scripts/orch/verify_proof.py {rel_root}"
         )
     if not verified:

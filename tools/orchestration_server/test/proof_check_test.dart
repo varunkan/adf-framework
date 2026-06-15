@@ -32,7 +32,12 @@ void main() {
     repo = Directory.systemTemp.createTempSync('adf-proofcheck');
     // Bring the canonical verifier + sealer into the temp repo.
     Directory('${repo.path}/scripts/orch').createSync(recursive: true);
-    for (final f in ['proof_of_build.py', 'verify_proof.py', 'agent_runner.py']) {
+    for (final f in [
+      'proof_of_build.py',
+      'verify_proof.py',
+      'agent_runner.py',
+      'policy_gate.py',
+    ]) {
       File('$srcScripts/$f').copySync('${repo.path}/scripts/orch/$f');
     }
     proof = ProofCheck(repo.path);
@@ -68,6 +73,20 @@ void main() {
     expect(res['ok'], isTrue, reason: res.toString());
     expect(res['status'], 'VERIFIED');
     expect((res['seal'] as String).startsWith('adf1:'), isTrue);
+    // A live governance verdict rides along with the proof.
+    final policy = res['policy'] as Map<String, dynamic>?;
+    expect(policy, isNotNull, reason: res.toString());
+    expect(policy!['ok'], isTrue, reason: policy.toString());
+  }, skip: _pythonAvailable() ? false : 'python3 not available');
+
+  test('a hardcoded secret makes the live policy verdict fail', () async {
+    sealDemoApp();
+    File('${repo.path}/apps/demo/leak.mjs')
+        .writeAsStringSync("const K = 'sk-abcdEFGH1234567890ZXCVbnmQWERtyui'\n");
+    final res = await proof.verify('demo');
+    final policy = res['policy'] as Map<String, dynamic>?;
+    expect(policy?['ok'], isFalse, reason: res.toString());
+    expect((policy?['n_violations'] as num) >= 1, isTrue);
   }, skip: _pythonAvailable() ? false : 'python3 not available');
 
   test('tampering a sealed file is reported as TAMPERED', () async {

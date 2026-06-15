@@ -58,12 +58,15 @@ def _merkle_root(leaves) -> str:
 
 def _verdict_bytes(stack: str, build: dict) -> bytes:
     """The canonical, sealed subset of the build verdict — the claim being made:
-    this stack, verified, with this summary. Serialized deterministically."""
+    this stack, verified, with this summary, and (when present) the governance
+    policy outcome. Serialized deterministically so it re-seals identically."""
     verdict = {
         "stack": stack,
         "verified": bool(build.get("verified")),
         "verify_summary": build.get("verify_summary", ""),
     }
+    if build.get("policy") is not None:
+        verdict["policy"] = build["policy"]
     return json.dumps(verdict, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
