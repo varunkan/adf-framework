@@ -74,18 +74,31 @@ def _table(rows):
     return "\n".join(out)
 
 
-def render_scorecard(bench=None):
+def render_scorecard(bench=None, capability=None):
     gov_yes = sum(1 for r in GOVERNANCE if r[1] == "yes")
     measured = ""
     if bench:
         measured = (
-            f"\n**Measured (bench):** {bench.get('governed', 0)}/"
+            f"\n**Measured governance (bench):** {bench.get('governed', 0)}/"
             f"{bench.get('apps', 0)} apps fully governed "
             f"(proven + policy-compliant + offline-capable); "
             f"proven {bench.get('proven', 0)}/{bench.get('apps', 0)}, "
             f"compliant {bench.get('compliant', 0)}/{bench.get('apps', 0)}, "
             f"offline {bench.get('offline', 0)}/{bench.get('apps', 0)}. "
             f"See `scripts/bench/`.\n")
+    if capability:
+        cost = ("$0 (local model, offline)"
+                if capability.get("local") else "see run")
+        measured += (
+            f"\n**Measured capability (bench --build):** "
+            f"{capability.get('built', 0)}/{capability.get('apps', 0)} apps built "
+            f"and tests-passing"
+            + (f", avg {capability['avg_seconds']}s each"
+               if capability.get('avg_seconds') else "")
+            + f", cost {cost}"
+            + (f" — backend: {capability['backend']}"
+               if capability.get('backend') else "")
+            + ".\n")
 
     return f"""# ADF vs Lovable — the honest scorecard
 
@@ -140,13 +153,15 @@ def _main(argv=None):
     ap.add_argument("--results", help="a run_bench results JSON to embed")
     args = ap.parse_args(argv)
 
-    bench = None
+    bench = capability = None
     if args.results and os.path.isfile(args.results):
         import json
         with open(args.results, encoding="utf-8") as f:
-            bench = json.load(f).get("summary")
+            data = json.load(f)
+        bench = data.get("summary")
+        capability = data.get("capability")
 
-    md = render_scorecard(bench)
+    md = render_scorecard(bench, capability)
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:
         f.write(md)

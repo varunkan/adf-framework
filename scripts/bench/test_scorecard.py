@@ -44,6 +44,14 @@ class Render(unittest.TestCase):
         })
         self.assertIn("3/3", md)
 
+    def test_embeds_measured_capability(self):
+        md = scorecard.render_scorecard(capability={
+            "apps": 2, "built": 2, "tests_pass": 2, "avg_seconds": 95.0,
+            "local": True, "backend": "ollama:qwen2.5-coder:32b",
+        })
+        self.assertIn("2/2 apps built", md)
+        self.assertIn("$0 (local model, offline)", md)
+
 
 class WriteDoc(unittest.TestCase):
     def test_writes_the_scorecard_file(self):

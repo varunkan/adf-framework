@@ -44,3 +44,7 @@ apps/*/expenses.json
 apps/*/*.db
 # Added by code-review-graph
 .code-review-graph/
+
+# Bench/export run artifacts (not source)
+.adf-bench-workspace/
+.adf-exports/
