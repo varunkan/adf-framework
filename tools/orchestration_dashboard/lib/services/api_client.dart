@@ -145,6 +145,20 @@ class ApiClient {
     return jsonDecode(r.body) as Map<String, dynamic>;
   }
 
+  /// The app's live SQLite tables: `{has_db, tables:[{name, rows}]}`.
+  Future<Map<String, dynamic>> getData(String id) async {
+    final r = await _get('/features/$id/data');
+    if (r.statusCode != 200) throw Exception(_formatError(r));
+    return jsonDecode(r.body) as Map<String, dynamic>;
+  }
+
+  /// One table's rows: `{columns:[...], rows:[[...]], truncated}`.
+  Future<Map<String, dynamic>> getTableRows(String id, String table) async {
+    final r = await _get('/features/$id/data/${Uri.encodeComponent(table)}');
+    if (r.statusCode != 200) throw Exception(_formatError(r));
+    return jsonDecode(r.body) as Map<String, dynamic>;
+  }
+
   Future<Map<String, dynamic>> createFeature({
     required String id,
     required String requirement,

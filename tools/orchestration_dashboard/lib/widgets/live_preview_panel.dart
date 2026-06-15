@@ -11,6 +11,7 @@ import 'cost_badge.dart';
 import 'integrity_badge.dart';
 import 'proof_badge.dart';
 import 'context_chip.dart';
+import 'data_tab.dart';
 
 /// Right-rail live preview (Lovable-style): phase, artifacts, spec, integrity, crew.
 class LivePreviewPanel extends StatefulWidget {
@@ -58,7 +59,7 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
   @override
   void initState() {
     super.initState();
-    _tabs = TabController(length: 5, vsync: this);
+    _tabs = TabController(length: 6, vsync: this);
     _load();
     _schedulePoll();
   }
@@ -309,6 +310,7 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
           tabs: const [
             Tab(text: 'App'),
             Tab(text: 'Overview'),
+            Tab(text: 'Data'),
             Tab(text: 'Spec'),
             Tab(text: 'Crew'),
             Tab(text: 'Artifacts'),
@@ -322,6 +324,7 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
                   children: [
                     _appTab(context),
                     _overviewTab(context, scheme, codeExcerpt, previewUrl),
+                    DataTab(api: widget.api, featureId: widget.featureId),
                     _specTab(context, scheme, specExcerpt),
                     _crewTab(context),
                     _artifactsTab(context),

@@ -7,6 +7,7 @@ import 'package:orchestration_server/agent_crew.dart';
 import 'package:orchestration_server/app_runner.dart';
 import 'package:orchestration_server/proof_check.dart';
 import 'package:orchestration_server/compaction.dart';
+import 'package:orchestration_server/app_data.dart';
 import 'package:orchestration_server/artifact_validator.dart';
 import 'package:orchestration_server/audit_bundle.dart';
 import 'package:orchestration_server/deterministic_artifacts.dart';
@@ -166,6 +167,8 @@ Future<void> main(List<String> args) async {
   final proofCheck = ProofCheck(repoRoot);
   // Estimates + applies the `/compact` context fold via the canonical engine.
   final compaction = Compaction(repoRoot);
+  // Read-only browser for an app's live SQLite DB (the Data tab).
+  final appData = AppData(repoRoot);
   final autoAutopilot = Platform.environment['ORCH_AUTO_AUTOPILOT'] != 'false';
 
   final crewTraces = TraceWriter(repoRoot);
@@ -1016,6 +1019,32 @@ Future<void> main(List<String> args) async {
         return _json({'error': 'not found'}, status: 404);
       }
       return _json(await compaction.estimate(id));
+    } catch (e) {
+      return _json({'error': e.toString()}, status: 500);
+    }
+  });
+
+  // Data tab: list the app's live SQLite tables (read-only, offline).
+  router.get('/features/<id>/data', (Request request, String id) async {
+    try {
+      if (!store.featureExists(id)) {
+        return _json({'error': 'not found'}, status: 404);
+      }
+      return _json(await appData.tables(id));
+    } catch (e) {
+      return _json({'error': e.toString()}, status: 500);
+    }
+  });
+
+  // Data tab: browse one table's rows (capped, read-only, injection-safe).
+  router.get('/features/<id>/data/<table>',
+      (Request request, String id, String table) async {
+    try {
+      if (!store.featureExists(id)) {
+        return _json({'error': 'not found'}, status: 404);
+      }
+      final limit = int.tryParse(request.url.queryParameters['limit'] ?? '');
+      return _json(await appData.rows(id, table, limit: limit));
     } catch (e) {
       return _json({'error': e.toString()}, status: 500);
     }
