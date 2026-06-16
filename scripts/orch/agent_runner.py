@@ -670,10 +670,12 @@ def _npm(app_root, args, timeout):
         return False, f"npm {' '.join(args)} timed out after {timeout}s"
 
 
-def _node_smoke_boot(app_root, secs=20):
-    """Authoritative end-to-end check for the react stack: `node server/index.mjs`
-    must start a server that honors PORT and answers GET `/` (the built SPA) and
-    `/api/health` with 200 — the same contract AppRunner relies on."""
+def _node_smoke_boot(app_root, secs=20, visual=True):
+    """End-to-end check for the react stack: `node server/index.mjs` must start a
+    server that honors PORT, answers GET `/` (the built SPA) + `/api/health` with
+    200 (the AppRunner contract), AND — the authoritative part — actually RENDER in
+    a headless browser (`visual=True`), so a white screen / runtime crash can't pass
+    as 'verified'. The render check runs against the same booted server."""
     import socket
     import time
     import urllib.request
@@ -701,6 +703,22 @@ def _node_smoke_boot(app_root, secs=20):
                     ) as r:
                         if r.status != 200:
                             raise OSError(f"{path} -> HTTP {r.status}")
+                # The server is LIVE — now actually RENDER it. GET /->200 only
+                # proves the static SPA shell loads; a white screen / runtime crash
+                # passes that. Drive a headless browser against THIS booted server
+                # and assert the app mounted. Failures route to self-heal verbatim.
+                if visual:
+                    try:
+                        import visual_verify
+                        v_ok, v_msg, _shot = visual_verify.visual_verify(
+                            f"http://127.0.0.1:{port}/", app_root=app_root)
+                    except Exception as e:
+                        v_ok, v_msg = True, f"visual verify skipped: {e}"
+                    if not v_ok:
+                        return False, (f"server boots and serves 200, but the APP "
+                                       f"DOES NOT RENDER in a browser:\n{v_msg}")
+                    return True, (f"node serves / and /api/health on :{port}; "
+                                  f"{v_msg}")
                 return True, f"node server serves / and /api/health on :{port}"
             except OSError:
                 time.sleep(0.5)
@@ -715,9 +733,10 @@ def _node_smoke_boot(app_root, secs=20):
 
 def _react_verify(app_root, timeout=None):
     """Verify a React+Vite+Tailwind+SQLite app: install (once) → typecheck+build
-    (`tsc --noEmit && vite build`) → vitest → boot. Each stage's failure is
-    surfaced verbatim (and attributed) so the self-heal loop can fix the right
-    file. Authoritative: a green here means the app really builds, tests, boots."""
+    (`tsc --noEmit && vite build`) → vitest → boot → RENDER (headless browser).
+    Each stage's failure is surfaced verbatim (and attributed) so the self-heal loop
+    can fix the right file. Authoritative: a green here means the app builds, tests,
+    boots, AND actually renders in a browser (not a white screen / runtime crash)."""
     timeout = timeout or int(os.environ.get("ADF_REACT_VERIFY_TIMEOUT_SEC", "600"))
     if not os.path.isfile(os.path.join(app_root, "package.json")):
         return False, "package.json missing — react scaffold was not applied"
