@@ -35,7 +35,7 @@ def run(repo, app_dirs):
     return {"results": results, "summary": evaluate.summarize(results)}
 
 
-def run_build(repo, items, workspace, timeout, fix_iters):
+def run_build(repo, items, workspace, timeout, fix_iters, backend_label=None):
     """Build each suite item for real, then score capability + governance."""
     import bench_build
     cap = [bench_build.build_one(it, workspace, timeout=timeout,
@@ -47,10 +47,13 @@ def run_build(repo, items, workspace, timeout, fix_iters):
         merged.append({**c, **{k: gov[k] for k in
                                ("proof_ok", "policy_ok", "offline_ok", "governed")
                                if k in gov}})
+    cap_summary = bench_build.capability_summary(cap)
+    if backend_label:
+        cap_summary["backend"] = backend_label
     return {
         "results": merged,
         "summary": evaluate.summarize(merged),
-        "capability": bench_build.capability_summary(cap),
+        "capability": cap_summary,
     }
 
 
@@ -66,16 +69,28 @@ def _main(argv=None):
     ap.add_argument("--timeout", type=int, default=240)
     ap.add_argument("--fix-iters", type=int, default=3, dest="fix_iters")
     ap.add_argument("--build-workspace", dest="build_workspace")
+    ap.add_argument("--backend",
+                    help="pin ADF_RUNNER_BACKEND (nvidia|anthropic|ollama)")
+    ap.add_argument("--load-env", action="store_true",
+                    help="load <repo>/.env so configured cloud backends work")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args(argv)
 
     if args.build:
         import suite as suite_mod
+        sys.path.insert(0, os.path.join(args.repo, "scripts", "orch"))
+        import agent_runner as ar
+        if args.load_env:
+            ar.load_env(args.repo)
+        label = args.backend
+        if args.backend:
+            os.environ["ADF_RUNNER_BACKEND"] = args.backend
         items = suite_mod.SUITE[:args.limit] if args.limit else suite_mod.SUITE
         ws = args.build_workspace or os.path.join(args.repo, ".adf-bench-workspace")
         print(f"building {len(items)} app(s) via the real pipeline into {ws} …",
               file=sys.stderr)
-        report = run_build(args.repo, items, ws, args.timeout, args.fix_iters)
+        report = run_build(args.repo, items, ws, args.timeout, args.fix_iters,
+                           backend_label=label)
     else:
         dirs = _app_dirs(args.repo, args.apps)
         report = run(args.repo, dirs)
