@@ -81,7 +81,7 @@ jobs:
           set -euo pipefail
           for t in test_compaction test_agent_runner test_proof_of_build \
                    test_policy_gate test_app_data test_offline_build \
-                   test_export_app; do
+                   test_export_app test_template_auth; do
             echo "== scripts/orch/$t =="
             python3 "scripts/orch/$t.py"
           done

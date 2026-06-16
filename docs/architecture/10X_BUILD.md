@@ -241,6 +241,7 @@ honest scorecard.
 | `N23 bench` | `scripts/bench/`: a fixed prompt suite built on ADF, capturing time, $ cost, tests-pass, file count, capability + governance axes (audit valid? offline? owned?) | N14,N16,N18,N19 | `bench_harness_test.py` |
 | `N24 scorecard` | **ADF-vs-Lovable scorecard** generated from bench results + an honest log of where ADF still trails | N23 | `scorecard_test.py` |
 | `N25 bench-build` | `run_bench --build`: drive a REAL build per prompt (`bench_build.build_one` reuses the runner's scaffold→generate→verify→seal path) and MEASURE capability (built?, tests-pass, files, seconds, tokens); scorecard embeds it | N23 | `test_bench_build.py` |
+| `N26 auth` | Ship tested, OFFLINE auth primitives in the template (`server/auth.mjs`: scrypt hashing + HMAC sessions, node:crypto only) + `test/auth.test.mjs`; policy enforces no-plaintext-PII; build prompt points at it | — | `test_template_auth.py` (node-driven) |
 
 Topological add: **… → L6 {N14, N18, N21, N17} → L7 {N16, N19} → L8 {N23, N24, N25}**.
 

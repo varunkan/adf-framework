@@ -42,7 +42,10 @@ CAPABILITY = [
     ("Generated tests enforced as a build gate", "yes", "partial",
      "ADF fails the build if tests don't pass; Lovable doesn't enforce."),
     ("Browse your live data", "yes", "yes", "ADF: read-only Data tab. Lovable: Supabase UI."),
-    ("Built-in auth", "partial", "yes", "ADF: roll-your-own; Lovable: Supabase auth."),
+    ("Built-in auth", "yes", "yes",
+     "ADF: tested scrypt + HMAC session primitives ship in every app — offline, "
+     "no dep, policy-enforced (a plaintext password column fails the gate). "
+     "Lovable: a fuller hosted auth product (social providers, UI)."),
     ("Hosted deploy + instant public URL", "partial", "yes",
      "ADF favors self-host/export; a tunnel is deferred (not the wedge)."),
     ("Third-party integrations (payments, etc.)", "no", "yes",
@@ -56,8 +59,9 @@ CAPABILITY = [
 TRAILS = [
     "Hosted deploy + instant public share URL — Lovable's hosting is better; ADF "
     "deliberately favors self-host + verifiable export (own your code).",
-    "Ecosystem — built-in auth, payments, and third-party integrations: Lovable "
-    "has them, ADF doesn't yet.",
+    "Ecosystem — payments and third-party integrations (Stripe, email, social "
+    "login providers): Lovable has them; ADF ships tested auth primitives but not a "
+    "turnkey provider/UI catalog.",
     "Time-to-first-app — ADF trades ~1-3 min (npm install, cached after) for "
     "capability + verifiability; Lovable's hosted path is faster to first paint.",
     "Mass-market polish, template gallery, and community size — Lovable is "
