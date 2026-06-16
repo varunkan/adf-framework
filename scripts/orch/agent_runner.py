@@ -656,12 +656,34 @@ def run_verification(app_root, timeout=60):
 
 
 # --- react verify pipeline (N5) --------------------------------------------
+# Secrets the ADF process holds to call the MODEL must NEVER reach model-generated
+# code, its dependencies' install scripts, or the spawned app — that would hand the
+# operator's API keys to arbitrary code. Scrubbed from every npm/node child env.
+_SECRET_ENV_RE = re.compile(r"(API_KEY|_TOKEN|SECRET|PASSWORD|CREDENTIAL)", re.I)
+_SECRET_ENV_EXACT = {"ANTHROPIC_API_KEY", "NVIDIA_API_KEY", "ORCH_NVIDIA_API_KEY",
+                     "OPENAI_API_KEY", "CURSOR_API_KEY", "HF_TOKEN", "GITHUB_TOKEN"}
+
+
+def scrubbed_env(**extra):
+    """A child environment with the operator's secrets removed — for running
+    model-generated code, npm, and the built app (none of which should ever see
+    ADF's model API keys)."""
+    env = {k: v for k, v in os.environ.items()
+           if k not in _SECRET_ENV_EXACT and not _SECRET_ENV_RE.search(k)}
+    env.update(extra)
+    return env
+
+
 def _npm(app_root, args, timeout):
-    """Run `npm <args>` in the app dir; returns (ok, combined_output)."""
+    """Run `npm <args>` in the app dir; returns (ok, combined_output). The child
+    env is scrubbed of ADF's API keys so install scripts / the build never see them.
+    (Install scripts are NOT disabled — better-sqlite3 needs its postinstall to fetch
+    its native binary; the supply-chain risk is bounded instead by the pinned
+    lockfile + the policy gate's dependency allowlist, which vets every package.)"""
     try:
         p = subprocess.run(
             ["npm", *args], cwd=app_root, capture_output=True, text=True,
-            timeout=timeout, env=dict(os.environ),
+            timeout=timeout, env=scrubbed_env(),
         )
         return p.returncode == 0, (p.stdout + "\n" + p.stderr).strip()
     except FileNotFoundError:
@@ -687,7 +709,7 @@ def _node_smoke_boot(app_root, secs=20, visual=True):
         port = _s.getsockname()[1]
     proc = subprocess.Popen(
         ["node", "server/index.mjs"], cwd=app_root,
-        env=dict(os.environ, PORT=str(port)),
+        env=scrubbed_env(PORT=str(port)),  # the app must not inherit ADF's API keys
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
     )
     try:

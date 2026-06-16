@@ -297,6 +297,31 @@ class ResolveFeatureId(unittest.TestCase):
         self.assertIsNone(ar.resolve_feature_id("implement phase 7", {}))
 
 
+class ScrubbedEnv(unittest.TestCase):
+    """Model-generated code, npm, and the spawned app must NEVER inherit ADF's API
+    keys — that would hand the operator's secrets to arbitrary code."""
+
+    def test_secrets_are_removed_but_normal_vars_kept(self):
+        keys = ["ANTHROPIC_API_KEY", "NVIDIA_API_KEY", "OPENAI_API_KEY",
+                "SOME_TOKEN", "DB_PASSWORD", "MY_SECRET"]
+        saved = {k: os.environ.get(k) for k in keys}
+        try:
+            for k in keys:
+                os.environ[k] = "sensitive"
+            os.environ["PATH"] = os.environ.get("PATH", "/usr/bin")
+            env = ar.scrubbed_env(PORT="8000")
+            for k in keys:
+                self.assertNotIn(k, env, f"{k} must be scrubbed")
+            self.assertIn("PATH", env)            # normal vars kept
+            self.assertEqual(env["PORT"], "8000")  # extras applied
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+
 class FileWriteEvents(unittest.TestCase):
     """N21 — the runner narrates each file as it writes it, so a 1-3 min build
     doesn't go dark. Each write emits a structured `file_write` progress line the
