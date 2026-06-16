@@ -146,7 +146,8 @@ _EDIT_EXTS = (".py", ".ts", ".tsx", ".js", ".jsx", ".html", ".css", ".scss",
               ".sql", ".json", ".md", ".cjs", ".mjs")
 _SKIP_DIRS = {"node_modules", "dist", "build", "__pycache__", ".git", ".vite",
               "coverage", ".next", ".turbo"}
-_SKIP_FILES = {"package-lock.json", "pnpm-lock.yaml", "yarn.lock", "PROOF.md"}
+_SKIP_FILES = {"package-lock.json", "pnpm-lock.yaml", "yarn.lock", "PROOF.md",
+               ".adf-components.json", "COMPONENTS.md"}
 
 
 def detect_stack(app_dir):
@@ -307,10 +308,19 @@ def _react_build_messages(fid, ctx):
         "(the loader adds the `/api` prefix) — e.g. `app.get('/items', ...)` is served "
         "at `/api/items`. Return correct status codes (200/201 success, 400 invalid "
         "input, 404 not found) via `reply.code(n).send(...)`.\n"
-        "- `src/App.tsx` (+ small `src/components/*.tsx` as needed) — React + "
-        "TypeScript with Tailwind, implementing the full UI and calling the API with "
-        "relative `fetch('/api/...')`. `src/App.tsx` must be the default export "
-        "rendered by the existing `src/main.tsx`. Keep it type-correct.\n"
+        "- `src/components/<Name>.tsx` — build the UI as MULTIPLE small, "
+        "SELF-CONTAINED, REUSABLE components (NOT one monolithic App.tsx). Each "
+        "component is **props-driven**: it exports the component AND a typed "
+        "`interface <Name>Props`, receives its data + callbacks via props, owns no "
+        "global state, and never reaches into another component's internals — so it "
+        "can be dropped into any other feature unchanged. Put shared primitives "
+        "(Button, Input, Card) under `src/components/ui/`. Co-locate data access in a "
+        "`src/hooks/use<Feature>.ts` hook that calls `fetch('/api/...')` and returns "
+        "typed data + actions; components call the hook, not fetch directly.\n"
+        "- `src/App.tsx` — the composition ROOT only: import and arrange the feature "
+        "components (keep it thin). It must be the default export rendered by the "
+        "existing `src/main.tsx`. Keep ALL `src/**` type-correct with Tailwind "
+        "classes (tsc --noEmit checks it).\n"
         "- `test/<feature>.test.mjs` — Vitest importing "
         "`import { buildApp } from '../server/app.mjs'`, exercising the API via "
         "`app.inject({ method, url: '/api/...', payload })` (NO network/port): assert "
@@ -914,7 +924,8 @@ def current_app_files(app_dir, max_files=60, max_bytes=200_000):
     return out
 
 
-def build_edit_messages(fid, files, instruction, stack=None, file_summary=None):
+def build_edit_messages(fid, files, instruction, stack=None, file_summary=None,
+                        components=None):
     """Apply a scoped change to an existing app — the Lovable 'type a change,
     watch it update' loop. We hand the model the current files + the request and
     ask for the SMALLEST edit, re-emitting only the changed files. The
@@ -956,12 +967,18 @@ def build_edit_messages(fid, files, instruction, stack=None, file_summary=None):
         other = ("=== OTHER FILES (outline only — these exist on disk but aren't "
                  "central to this change; ask for one's full contents if you must "
                  "edit it) ===\n" + file_summary + "\n\n")
+    comps = ""
+    if components:
+        comps = ("=== EXISTING REUSABLE COMPONENTS (prefer reusing these over "
+                 "writing new ones; compose them) ===\n" + components + "\n\n")
     user = (
         f"App: `{fid}` — the files below are the current, working version.\n\n"
         f"=== CURRENT FILES ===\n{blocks}\n\n"
-        f"{other}"
+        f"{comps}{other}"
         f"=== CHANGE REQUESTED ===\n{instruction}\n\n"
-        f"Apply the change and re-emit the complete updated file(s) now. {keep_tests}"
+        f"Apply the change as the SMALLEST modular edit — reuse existing components, "
+        f"and keep any new UI as its own self-contained props-driven component. "
+        f"Re-emit the complete updated file(s) now. {keep_tests}"
     )
     return system, user
 
@@ -999,8 +1016,15 @@ def assemble_edit(app_dir, fid, files, instruction, stack=None):
             pass
         log(f"compaction (edit): {res.tokens_before}->{res.tokens_after} tokens, "
             f"{res.n_summarized} file(s) outlined (kept {len(files_for_prompt)} whole)")
+    # Feed the component manifest so the edit REUSES existing components.
+    components = None
+    try:
+        import component_manifest
+        components = component_manifest.manifest_summary(app_dir) or None
+    except Exception:
+        components = None
     return build_edit_messages(fid, files_for_prompt, instruction, stack,
-                               file_summary=outline)
+                               file_summary=outline, components=components)
 
 
 def main():
@@ -1103,6 +1127,18 @@ def main():
     # Best-effort: never let sealing fail an otherwise-good build.
     proof_seal = None
     policy_ok = None
+    n_components = None
+    if verified and (stack or DEFAULT_STACK) == STACK_REACT:
+        # Project-specific artifact: catalog the app's reusable, props-driven
+        # components (.adf-components.json + COMPONENTS.md) so future features can
+        # discover and REUSE them instead of duplicating. Best-effort.
+        try:
+            import component_manifest
+            manifest = component_manifest.generate(app_root)
+            n_components = manifest["count"]
+            log(f"component manifest: {n_components} reusable component(s) cataloged")
+        except Exception as e:
+            log(f"component manifest skipped: {e}")
     if verified:
         # Governance gate: prove the app obeys org policy (no secrets / no network
         # egress / offline-capable / no plaintext PII / vetted deps), write the
