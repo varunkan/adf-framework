@@ -68,4 +68,18 @@ void main() {
     store.createFeature(id: 'plain', requirement: 'y', track: 'S');
     expect(runner.childEnvFor('plain')['ADF_STACK'], 'stdlib');
   });
+
+  test('PhaseRunner.childEnvFor passes ADF_FEATURE_ID explicitly (regression '
+      'guard for the prose-parse build bug)', () {
+    // The shipped bug: the runner parsed the feature id from the prompt prose, so
+    // "implement phase 7" became id "phase" and the build failed. The fix is that
+    // the server passes the id EXPLICITLY. If this line is ever dropped, the runner
+    // silently falls back to prose-parsing and the bug returns — so assert it here.
+    store.createFeature(
+        id: 'snake-ladder-games', requirement: 'x', track: 'M',
+        stack: 'react-vite-sqlite');
+    final runner = PhaseRunner(store, env: {'PATH': '/usr/bin'});
+    expect(runner.childEnvFor('snake-ladder-games')['ADF_FEATURE_ID'],
+        'snake-ladder-games');
+  });
 }

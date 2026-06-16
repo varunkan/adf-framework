@@ -30,12 +30,22 @@ import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as io;
 import 'package:shelf_router/shelf_router.dart';
 
+// Base CORS headers WITHOUT Access-Control-Allow-Origin — the origin is decided
+// per-request in the middleware (never a blanket `*`, which let any website drive
+// this code-generating-and-executing localhost API → drive-by RCE).
 const _corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, HEAD',
   'Access-Control-Allow-Headers': 'Content-Type, Accept, Origin, Authorization',
   'Access-Control-Max-Age': '86400',
+  'Vary': 'Origin',
 };
+
+final _localOrigin = RegExp(
+    r'^https?://(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(:\d+)?$',
+    caseSensitive: false);
+
+bool _isLocalOrigin(String? origin) =>
+    origin == null || _localOrigin.hasMatch(origin);
 
 Response _json(Object body, {int status = 200}) => Response(
       status,
@@ -46,14 +56,44 @@ Response _json(Object body, {int status = 200}) => Response(
       },
     );
 
+/// Coerce a JSON value to int (int, double-as-int, or numeric string) → null if
+/// it isn't a whole number. Stops `as int?` from throwing a 500 on `6.0`/`"6"`.
+int? _asInt(Object? v) {
+  if (v is int) return v;
+  if (v is double) return v == v.roundToDouble() ? v.toInt() : null;
+  if (v is String) return int.tryParse(v.trim());
+  return null;
+}
+
+Map<String, String> _corsFor(String? origin) => {
+      ..._corsHeaders,
+      // Reflect only same-machine origins; omit ACAO entirely for foreign origins
+      // so a browser blocks them.
+      if (origin != null && _isLocalOrigin(origin))
+        'Access-Control-Allow-Origin': origin,
+    };
+
 Middleware _corsMiddleware() {
   return (Handler inner) {
     return (Request request) async {
+      final origin = request.headers['origin'];
+      // Hard block: a state-changing request carrying a NON-local Origin is a
+      // cross-site attack (a website you visited POSTing to 127.0.0.1). Reject it
+      // outright — loopback binding is not the boundary; the Origin is.
+      final stateChanging = request.method == 'POST' ||
+          request.method == 'PUT' ||
+          request.method == 'DELETE';
+      if (stateChanging && origin != null && !_isLocalOrigin(origin)) {
+        return Response.forbidden(
+          jsonEncode({'error': 'cross-origin request rejected', 'origin': origin}),
+          headers: {'Content-Type': 'application/json', ..._corsFor(null)},
+        );
+      }
       if (request.method == 'OPTIONS') {
-        return Response(204, headers: _corsHeaders);
+        return Response(204, headers: _corsFor(origin));
       }
       final response = await inner(request);
-      return response.change(headers: _corsHeaders);
+      return response.change(headers: _corsFor(origin));
     };
   };
 }
@@ -1190,8 +1230,19 @@ Future<void> main(List<String> args) async {
       }
       final body =
           jsonDecode(await request.readAsString()) as Map<String, dynamic>;
-      final phase = body['phase'] as int?;
+      // Defensive parse: JSON numbers can arrive as double (6.0) or string ("6");
+      // `as int?` would THROW a 500. Coerce instead.
+      final phase = _asInt(body['phase']);
       final decision = body['decision'] as String? ?? 'approved';
+      // Governance: an unknown decision (e.g. 'reject' typo, 'deny') must NOT
+      // silently no-op the gate and return 200 — it would bypass enforcement.
+      const validDecisions = {'approved', 'revise', 'rejected'};
+      if (!validDecisions.contains(decision)) {
+        return _json({
+          'error': 'invalid decision "$decision" — must be one of '
+              '${validDecisions.join(", ")}',
+        }, status: 400);
+      }
       final notes = body['notes'] as String? ?? '';
       final source = body['source'] as String? ?? 'dashboard';
       final judgeWaiver = body['judge_waiver'] as bool? ?? false;
@@ -1355,7 +1406,7 @@ Future<void> main(List<String> args) async {
       }
       final body =
           jsonDecode(await request.readAsString()) as Map<String, dynamic>;
-      final phase = body['phase'] as int?;
+      final phase = _asInt(body['phase']);
       final autoRun = body['auto_run'] as bool? ?? true;
       if (autoRun && autoRunner) {
         final status = await runner.enqueue(id, phase: phase);
@@ -1389,7 +1440,7 @@ Future<void> main(List<String> args) async {
       int? phase;
       if (bodyStr.isNotEmpty) {
         final parsed = jsonDecode(bodyStr) as Map<String, dynamic>;
-        phase = parsed['phase'] as int?;
+        phase = _asInt(parsed['phase']);
       }
       final status = await runner.enqueue(id, phase: phase);
       return _json({

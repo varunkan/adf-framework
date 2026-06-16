@@ -215,7 +215,18 @@ class FeatureStore {
     }
     final file = File('${featurePath(id)}/state.json');
     file.parent.createSync(recursive: true);
-    file.writeAsStringSync(const JsonEncoder.withIndent('  ').convert(toWrite));
+    writeFileAtomic(
+        file, const JsonEncoder.withIndent('  ').convert(toWrite));
+  }
+
+  /// Write durably: a kill mid-write must never leave a half-written / corrupt
+  /// file (which would brick the feature). Write to a temp sibling then rename
+  /// (atomic on POSIX), so a reader sees either the old file or the new one,
+  /// never a torn one.
+  static void writeFileAtomic(File file, String contents) {
+    final tmp = File('${file.path}.tmp');
+    tmp.writeAsStringSync(contents, flush: true);
+    tmp.renameSync(file.path);
   }
 
   String readRequirement(String id) {
