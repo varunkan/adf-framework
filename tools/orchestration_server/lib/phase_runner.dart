@@ -55,7 +55,13 @@ class PhaseRunner {
   /// (single-file stdlib vs. React+Vite+SQLite). Defaults to stdlib for legacy
   /// features, preserving today's behavior.
   Map<String, String> childEnvFor(String featureId) {
-    return {..._env, 'ADF_STACK': store.stackFor(featureId)};
+    // Pass the feature id EXPLICITLY — the runner must never have to guess it from
+    // the prompt prose (which mis-parsed 'phase' and failed the build).
+    return {
+      ..._env,
+      'ADF_STACK': store.stackFor(featureId),
+      'ADF_FEATURE_ID': featureId,
+    };
   }
 
   late TraceWriter _traces;

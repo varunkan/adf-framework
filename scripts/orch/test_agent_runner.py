@@ -275,6 +275,28 @@ class Compaction(unittest.TestCase):
         self.assertNotIn("const z = 3\nconst z = 3", fixer)
 
 
+class ResolveFeatureId(unittest.TestCase):
+    """The build failed because the runner mis-parsed the feature id out of prose
+    ('implement phase 7' -> 'phase' -> 'no spec found'). The orchestrator now passes
+    ADF_FEATURE_ID explicitly, which must always win."""
+
+    def test_explicit_env_id_wins(self):
+        self.assertEqual(
+            ar.resolve_feature_id("@orch-orchestrator resume whatever",
+                                  {"ADF_FEATURE_ID": "snake-ladder-games"}),
+            "snake-ladder-games")
+
+    def test_falls_back_to_prompt_when_no_env(self):
+        self.assertEqual(
+            ar.resolve_feature_id("@orch-orchestrator resume my-todo", {}),
+            "my-todo")
+
+    def test_rejects_the_phase_misparse(self):
+        # the exact bug: a prompt that would parse to 'phase' must NOT become a
+        # feature id (it would look up a non-existent spec and fail the build).
+        self.assertIsNone(ar.resolve_feature_id("implement phase 7", {}))
+
+
 class FileWriteEvents(unittest.TestCase):
     """N21 — the runner narrates each file as it writes it, so a 1-3 min build
     doesn't go dark. Each write emits a structured `file_write` progress line the

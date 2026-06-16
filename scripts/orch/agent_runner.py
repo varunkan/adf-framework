@@ -88,6 +88,25 @@ def feature_id_from_prompt(prompt):
     return slugs[-1] if slugs else None
 
 
+# Words that are NEVER a feature id, even if the prompt regex grabs them — guards
+# against prompts like "implement phase 7" / "run phase" resolving to "phase".
+_NON_FEATURE_WORDS = {"phase", "resume", "sync", "implement", "run", "build",
+                      "feature", "orchestrator", "orch"}
+
+
+def resolve_feature_id(prompt, env=None):
+    """The feature id the runner should act on. The orchestrator KNOWS the id, so
+    it passes `ADF_FEATURE_ID` explicitly — that always wins. Only when it's absent
+    do we fall back to parsing the prompt (and reject obvious non-ids like
+    'phase')."""
+    env = os.environ if env is None else env
+    explicit = (env.get("ADF_FEATURE_ID") or "").strip()
+    if explicit:
+        return explicit
+    guess = feature_id_from_prompt(prompt)
+    return None if guess in _NON_FEATURE_WORDS else guess
+
+
 def read_first(*paths):
     for p in paths:
         if p and os.path.isfile(p):
@@ -953,9 +972,10 @@ def main():
     repo_root = os.environ.get("ORCH_REPO_ROOT", workspace)
     load_env(repo_root)
 
-    fid = feature_id_from_prompt(args.prompt)
+    fid = resolve_feature_id(args.prompt)
     if not fid:
-        log("could not resolve a feature id from the prompt")
+        log("could not resolve a feature id (set ADF_FEATURE_ID, or include "
+            "'resume <id>' in the prompt)")
         sys.exit(2)
     log(f"feature: {fid} | workspace: {workspace}")
 
