@@ -405,6 +405,11 @@ Future<void> main(List<String> args) async {
     }
     final detail = store.featureDetail(id, pipeline: pipeline);
     detail['conversation'] = conversation.buildChatView(id);
+    // Tell the dashboard whether approval auto-flows — so it never renders an
+    // approval gate the server will not actually wait on (the confirm/revise nag).
+    final st = detail['state'];
+    detail['auto_approve'] = FeatureStore.autoApprove(
+        st is Map<String, dynamic> ? st : store.readState(id));
     return detail;
   }
 
@@ -434,11 +439,8 @@ Future<void> main(List<String> args) async {
   // a 'blocked' crew (validator/timeout) never auto-pushes code generation.
   // True when the user opted to skip the review gate ("proceed without
   // approval"): per-feature state.auto_approve, or global ORCH_AUTO_APPROVE.
-  bool autoApproveFor(Map<String, dynamic> state) {
-    if (state['auto_approve'] == true) return true;
-    final g = (Platform.environment['ORCH_AUTO_APPROVE'] ?? '').toLowerCase();
-    return g == 'true' || g == '1';
-  }
+  bool autoApproveFor(Map<String, dynamic> state) =>
+      FeatureStore.autoApprove(state);
 
   Future<void> autoEnqueueImplement(String id, Map<String, dynamic> summary) async {
     if (summary['stop_reason'] != 'implementation_handoff') return;

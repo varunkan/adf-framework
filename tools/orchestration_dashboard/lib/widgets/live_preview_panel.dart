@@ -13,6 +13,7 @@ import 'proof_badge.dart';
 import 'context_chip.dart';
 import 'data_tab.dart';
 import 'export_button.dart';
+import 'stage_artifacts.dart';
 
 /// Right-rail live preview (Lovable-style): phase, artifacts, spec, integrity, crew.
 class LivePreviewPanel extends StatefulWidget {
@@ -183,9 +184,6 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
   List<Map<String, dynamic>> get _agents =>
       (_crew?['agents'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ?? [];
 
-  List<Map<String, dynamic>> get _artifacts =>
-      (_preview?['artifacts'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ??
-          [];
 
   bool get _isBuilding =>
       widget.building || _preview?['building'] == true || _crew?['running'] == true;
@@ -577,31 +575,11 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
     );
   }
 
-  Widget _artifactsTab(BuildContext context) {
-    final gateItems = _artifacts.where((a) => a['gate'] != null).toList();
-    final fileItems = _artifacts.where((a) => a['file'] != null).toList();
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        Text('Pipeline gates', style: Theme.of(context).textTheme.labelLarge),
-        const SizedBox(height: 8),
-        ...gateItems.map((g) => _checkRow(
-              label: 'Phase ${g['phase']}: ${g['gate']}',
-              done: g['done'] == true,
-            )),
-        if (fileItems.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          Text('Phase artifacts', style: Theme.of(context).textTheme.labelLarge),
-          const SizedBox(height: 8),
-          ...fileItems.map((f) => _checkRow(
-                label: f['file'] as String? ?? '',
-                done: f['done'] == true,
-                required: f['required'] == true,
-              )),
-        ],
-      ],
-    );
-  }
+  // The Artifacts tab is now a per-stage browser: every phase's artifacts, each
+  // clickable to read its full content (problem → spec → plan → tasks → tests →
+  // review → code). Available during AND after the build.
+  Widget _artifactsTab(BuildContext context) =>
+      StageArtifacts(api: widget.api, featureId: widget.featureId);
 
   Widget _skeleton(BuildContext context) {
     return ListView(
@@ -684,36 +662,6 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
     );
   }
 
-  Widget _checkRow({
-    required String label,
-    required bool done,
-    bool required = false,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Row(
-        children: [
-          Icon(
-            done ? Icons.check_box : Icons.check_box_outline_blank,
-            size: 18,
-            color: done ? Colors.greenAccent : Colors.white38,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                color: done ? Colors.white : Colors.white70,
-              ),
-            ),
-          ),
-          if (required && !done)
-            const Text('required', style: TextStyle(fontSize: 10, color: Colors.amber)),
-        ],
-      ),
-    );
-  }
 
 
   Future<void> _runPreviewBuild() async {

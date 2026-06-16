@@ -503,6 +503,12 @@ $t
       state['status'] = 'active';
       changed = true;
     }
+    // Auto-flow: a feature stranded `awaiting_user` (e.g. from before auto-approve
+    // was on) must not stay stuck nagging — clear the gate so it can advance.
+    if (awaiting && autoApprove(state)) {
+      state['awaiting_user'] = false;
+      changed = true;
+    }
     if (repairPipelineState(id, state)) {
       changed = true;
     }
@@ -669,6 +675,18 @@ $t
   static const Set<String> knownStacks = {'stdlib', 'react-vite-sqlite'};
 
   static bool isKnownStack(String stack) => knownStacks.contains(stack);
+
+  /// Whether the proof-governed approval gates should auto-flow (no human pause):
+  /// per-feature `state.auto_approve`, or globally via `ORCH_AUTO_APPROVE`. Single
+  /// source of truth so the server route AND the per-phase post-sync agree (they
+  /// disagreed before — auto-approve only covered the 6→7 handoff, so phases 1–6
+  /// still nagged). `env` is injectable for tests.
+  static bool autoApprove(Map<String, dynamic> state, [Map<String, String>? env]) {
+    if (state['auto_approve'] == true) return true;
+    final g = ((env ?? Platform.environment)['ORCH_AUTO_APPROVE'] ?? '')
+        .toLowerCase();
+    return g == 'true' || g == '1';
+  }
 
   /// The build stack chosen for [id] (contract C5), read from `state.stack`.
   /// Features created before stack selection have no field → stdlib, so legacy

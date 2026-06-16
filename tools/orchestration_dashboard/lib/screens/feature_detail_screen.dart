@@ -285,8 +285,16 @@ class _FeatureDetailScreenState extends State<FeatureDetailScreen> {
     return state['awaiting_user'] == true && !_verdictPassed;
   }
 
+  /// Whether the server is auto-flowing approvals (no human pause). When on, the
+  /// dashboard must NOT render an approval gate — the server never waits on it, so
+  /// showing it was the "confirm/revise again and again" nag.
+  bool get _autoApprove =>
+      _detail?['auto_approve'] == true ||
+      (_detail?['state'] as Map<String, dynamic>?)?['auto_approve'] == true;
+
   /// Approval gate — includes recovery when revise was recorded but awaiting_user was cleared.
   bool get _showApprovalGate {
+    if (_autoApprove) return false; // auto-flow: never nag
     final state = _detail?['state'] as Map<String, dynamic>? ?? {};
     if (state['awaiting_user'] == true) return true;
     final pending = state['pending_approval_phase'] as num?;

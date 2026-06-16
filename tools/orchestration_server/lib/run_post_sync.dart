@@ -71,15 +71,24 @@ class RunPostSync {
       changed = true;
     }
 
+    // Auto-flow (the user's chosen default): record the verdict for transparency
+    // but DO NOT pause for approval at every phase — that was the confirm/revise
+    // nag. The artifacts remain viewable; the pipeline advances on its own. Only
+    // when auto-approve is OFF do we gate the phase on a human.
+    final autoFlow = FeatureStore.autoApprove(state);
     if (verdictWord != null || verdictFile.existsSync()) {
       state['pending_approval_phase'] = phase;
-      state['awaiting_user'] = true;
+      if (!autoFlow) {
+        state['awaiting_user'] = true;
+      }
       changed = true;
     } else if (store.artifactExists(
         store.paths.featureRel(featureId, '00-intake.md'))) {
       state['pending_approval_phase'] = phase;
-      state['awaiting_user'] = true;
       state['last_judge_verdict'] ??= 'pending';
+      if (!autoFlow) {
+        state['awaiting_user'] = true;
+      }
       changed = true;
     }
 
