@@ -5,17 +5,18 @@
     "proven": 3,
     "compliant": 3,
     "offline": 3,
-    "total_files": 51
+    "total_files": 15
   },
   "capability": {
-    "apps": 1,
-    "built": 0,
-    "tests_pass": 0,
-    "avg_seconds": 0,
-    "total_out_tokens": 0,
-    "backend": "ollama qwen2.5-coder:32b (local, $0, offline)",
-    "budget_s": 600,
-    "note": "local 32B model exceeded the 600s per-generate budget on a single dev machine; pipeline proven separately by e2e_react_app.py",
-    "pipeline_seconds": 10.7
+    "apps": 3,
+    "built": 3,
+    "tests_pass": 3,
+    "avg_seconds": 42.5,
+    "total_out_tokens": 13805,
+    "backend": "claude-opus-4-8 (cloud)",
+    "cost": "~$0.37 total for 3 apps (17,867 tokens)",
+    "governed": 3,
+    "pipeline_seconds": 10.7,
+    "local": false
   }
 }

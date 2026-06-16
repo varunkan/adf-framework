@@ -52,6 +52,16 @@ class Render(unittest.TestCase):
         self.assertIn("2/2 apps built", md)
         self.assertIn("$0 (local model, offline)", md)
 
+    def test_capability_success_shows_cost_and_governed(self):
+        md = scorecard.render_scorecard(capability={
+            "apps": 3, "built": 3, "avg_seconds": 42.5,
+            "backend": "claude-opus-4-8 (cloud)", "cost": "~$0.37 for 3 apps",
+            "governed": 3,
+        })
+        self.assertIn("3/3 apps built", md)
+        self.assertIn("~$0.37", md)
+        self.assertIn("governed", md.lower())
+
     def test_partial_capability_is_reported_honestly(self):
         # A timed-out local-model run must NOT read as a pipeline failure: it must
         # say what was attempted and point at the e2e that proves the pipeline.

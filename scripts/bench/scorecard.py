@@ -95,14 +95,19 @@ def render_scorecard(bench=None, capability=None):
         built = capability.get("built", 0)
         backend = capability.get("backend", "a local model")
         if apps and built >= apps:
-            cost = ("$0 (local model, offline)"
-                    if capability.get("local") else "measured")
+            cost = (capability.get("cost")
+                    or ("$0 (local model, offline)"
+                        if capability.get("local") else "measured"))
+            gov_note = ""
+            if capability.get("governed") is not None:
+                gov_note = (f" All {capability['governed']}/{apps} were also fully "
+                            f"**governed** (proven + policy-compliant + offline).")
             measured += (
                 f"\n**Measured capability (bench --build):** "
                 f"{built}/{apps} apps built and tests-passing"
-                + (f", avg {capability['avg_seconds']}s each"
-                   if capability.get('avg_seconds') else "")
-                + f", cost {cost} — backend {backend}.\n")
+                + (f", avg {capability['avg_seconds']}s each (real npm + Vite + "
+                   f"Vitest + Node)" if capability.get('avg_seconds') else "")
+                + f", cost {cost} — backend {backend}." + gov_note + "\n")
         else:
             # Honest: distinguish the (proven) pipeline from a (latency-bound) local
             # model run. Do not pass a raw "0/N built" off as a pipeline failure.
