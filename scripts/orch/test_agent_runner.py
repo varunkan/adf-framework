@@ -548,6 +548,56 @@ class EditGuards(unittest.TestCase):
         self.assertTrue(any("skipped STALE" in n for n in notes))
 
 
+class CompletionAudit(unittest.TestCase):
+    """5.9 — a shaped feature's generated tests must cover the shape's required
+    behavior before sealing; a vacuous test (GET→200 only) is flagged so one more
+    heal closes the gap. Deterministic, $0, never fails an already-verified build."""
+
+    CRUD_CTX = {"requirement": "A to-do list where you add, edit and delete tasks."}
+
+    def _app(self, test_body):
+        d = tempfile.mkdtemp(prefix="adf-audit-")
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        os.makedirs(os.path.join(d, "test"))
+        with open(os.path.join(d, "test", "feature.test.mjs"), "w") as f:
+            f.write(test_body)
+        return d
+
+    def test_flags_vacuous_crud_test(self):
+        app = self._app("it('lists', async () => {"
+                        " const r = await app.inject({method:'GET', url:'/api/tasks'});"
+                        " expect(r.statusCode).toBe(200) })")
+        gaps = ar.audit_completion(app, ar.STACK_REACT, self.CRUD_CTX, "todo")
+        self.assertTrue(any("POST" in g for g in gaps))
+        self.assertTrue(any(("400" in g or "404" in g) for g in gaps))
+
+    def test_complete_crud_test_has_no_gaps(self):
+        app = self._app("GET /api/tasks 200; POST create 201; "
+                        "POST invalid 400; DELETE missing 404")
+        self.assertEqual(
+            ar.audit_completion(app, ar.STACK_REACT, self.CRUD_CTX, "todo"), [])
+
+    def test_stdlib_stack_is_not_audited(self):
+        app = self._app("anything")
+        self.assertEqual(
+            ar.audit_completion(app, ar.STACK_STDLIB, self.CRUD_CTX, "todo"), [])
+
+    def test_disabled_by_env(self):
+        app = self._app("GET only 200")
+        os.environ["ADF_COMPLETION_AUDIT"] = "0"
+        try:
+            self.assertEqual(
+                ar.audit_completion(app, ar.STACK_REACT, self.CRUD_CTX, "todo"), [])
+        finally:
+            os.environ.pop("ADF_COMPLETION_AUDIT", None)
+
+    def test_missing_tests_flagged(self):
+        d = tempfile.mkdtemp(prefix="adf-audit-")
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        gaps = ar.audit_completion(d, ar.STACK_REACT, self.CRUD_CTX, "todo")
+        self.assertTrue(any("no test file" in g for g in gaps))
+
+
 class FileWriteEvents(unittest.TestCase):
     """N21 — the runner narrates each file as it writes it, so a 1-3 min build
     doesn't go dark. Each write emits a structured `file_write` progress line the

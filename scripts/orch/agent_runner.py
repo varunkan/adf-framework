@@ -1324,6 +1324,63 @@ def assemble_edit(app_dir, fid, files, instruction, stack=None):
                                file_summary=outline, components=components)
 
 
+# Per-shape REQUIRED test signals for the completion audit (5.9). Lenient by design
+# (presence of the verb/status anywhere in the test text), so it catches a VACUOUS
+# test — one that only asserts GET→200 — without false-flagging a real test suite.
+_AUDIT_REQUIRED = {
+    "crud-list": [
+        ("a POST/create test", re.compile(r"\bpost\b", re.I)),
+        ("an error-case test (400/404)", re.compile(r"\b(?:400|404)\b")),
+    ],
+    "form": [
+        ("a POST/submit test", re.compile(r"\bpost\b", re.I)),
+        ("a validation test (400)", re.compile(r"\b400\b")),
+    ],
+    "single-record": [
+        ("a PUT/update test", re.compile(r"\bput\b", re.I)),
+    ],
+    "dashboard": [
+        ("a GET/summary test", re.compile(r"\bget\b", re.I)),
+    ],
+}
+
+
+def audit_completion(app_root, stack, ctx, fid):
+    """Deterministic completion audit BEFORE sealing (oh-my-pi §5.9). A green
+    verify_app only ran whatever tests the model wrote — a vacuous test (asserts
+    200, never checks the body) passes the gate. For a SHAPED react feature, derive
+    the required test signals from the feature shape and report any the generated
+    tests don't cover. Returns gap descriptions ([] = complete or not applicable).
+    $0, no model call; disabled via ADF_COMPLETION_AUDIT=0. Advisory — the caller
+    uses it to trigger one more heal, never to fail an already-verified build."""
+    if os.environ.get("ADF_COMPLETION_AUDIT", "1") in ("0", "false", "off"):
+        return []
+    if (stack or DEFAULT_STACK) != STACK_REACT:
+        return []
+    try:
+        import feature_shapes
+        shape, _ = feature_shapes.contract_for(ctx, fid)
+    except Exception:
+        return []
+    required = _AUDIT_REQUIRED.get(shape)
+    if not required:
+        return []                       # generic shape — no deterministic checklist
+    test_text = ""
+    test_dir = os.path.join(app_root, "test")
+    if os.path.isdir(test_dir):
+        for root, _d, files in os.walk(test_dir):
+            for fn in files:
+                if fn.endswith((".mjs", ".ts", ".js")):
+                    try:
+                        with open(os.path.join(root, fn), encoding="utf-8") as f:
+                            test_text += f.read() + "\n"
+                    except (OSError, UnicodeDecodeError):
+                        pass
+    if not test_text.strip():
+        return [f"no test file found for a {shape} feature"]
+    return [label for label, pat in required if not pat.search(test_text)]
+
+
 def _content_hash(text):
     return hashlib.blake2s((text or "").encode("utf-8")).hexdigest()[:12]
 
@@ -1475,8 +1532,28 @@ def main():
         last_failure = output
         log(f"attempt {attempt}: wrote {len(written)} files; verify {'PASSED' if ok else 'FAILED'}")
         if ok:
+            # Completion audit (5.9): a green verify only ran the tests the model
+            # wrote — a vacuous test passes. For a shaped feature, if the tests
+            # don't cover the shape's required behavior AND there's heal budget
+            # left, spend ONE more iteration closing the gap. Never fails an
+            # already-verified build: the last attempt always seals.
+            gaps = [] if is_edit else audit_completion(app_root, stack, ctx, fid)
+            if gaps and attempt < max_iters:
+                log(f"attempt {attempt}: verify passed but completion audit found "
+                    f"uncovered deliverables: {gaps}")
+                last_failure = (
+                    "VERIFICATION PASSED, but the generated tests do not cover "
+                    "required behavior for this feature:\n- " + "\n- ".join(gaps)
+                    + "\nAdd the missing test assertion(s) (keep everything else "
+                    "green) and re-emit all files.")
+                messages = fix_messages(system, user, files, last_failure, stack)
+                continue
             verified = True
             verify_summary = output
+            if gaps:
+                verify_summary += ("\n\n[completion audit] sealed with uncovered "
+                                   "deliverables (heal budget exhausted): "
+                                   + "; ".join(gaps))
             break
         if attempt < max_iters:
             log(f"attempt {attempt}: feeding failure back to the model to self-correct")
