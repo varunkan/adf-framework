@@ -789,5 +789,92 @@ class FileWriteEvents(unittest.TestCase):
         self.assertEqual(fw[1]["index"], 2)
 
 
+class MobileStackProfile(unittest.TestCase):
+    """M1 — the cross-platform mobile (Expo / React Native) StackProfile: the
+    generation + verify CONTRACT + dispatch that lets ADF build iOS/Android apps via
+    the same governed pipeline as web. Fully unit-testable in a dev box; the live
+    device build + signed artifact are later nodes (M2..M7)."""
+
+    CTX = {"requirement": "A to-do list to add and delete tasks.",
+           "problem": "", "spec": "", "plan": "", "tasks": ""}
+
+    def _tmp(self):
+        d = tempfile.mkdtemp(prefix="adf-expo-")
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        return d
+
+    def test_expo_stack_registered(self):
+        self.assertEqual(ar.STACK_EXPO, "expo-rn")
+        self.assertIn("expo-rn", ar._STACK_PROFILES)
+        prof = ar._STACK_PROFILES["expo-rn"]
+        self.assertIn("build_messages", prof)
+        self.assertIn("verify", prof)
+
+    def test_detect_stack_reads_expo_manifest(self):
+        d = self._tmp()
+        with open(os.path.join(d, ".adf-stack.json"), "w") as f:
+            json.dump({"stack": "expo-rn"}, f)
+        with open(os.path.join(d, "package.json"), "w") as f:  # conflicting signal
+            f.write("{}")
+        self.assertEqual(ar.detect_stack(d), ar.STACK_EXPO)   # manifest wins
+
+    def test_stack_profile_lookup_and_unknown_fallback(self):
+        self.assertEqual(ar.stack_profile(ar.STACK_EXPO)["name"], "expo-rn")
+        self.assertEqual(ar.stack_profile("bogus")["name"], ar.STACK_STDLIB)
+
+    def test_build_messages_emits_expo_prompt(self):
+        system, user = ar.build_messages("kb", self.CTX, stack=ar.STACK_EXPO)
+        blob = system + user
+        for token in ("React Native", "Expo", "react-native-web", "expo-sqlite"):
+            self.assertIn(token, blob, token)
+        self.assertIn("<<<FILE:", blob)
+        self.assertNotIn("Python 3 standard library", system)
+        rsys, ruser = ar.build_messages("kb", self.CTX, stack=ar.STACK_REACT)
+        self.assertNotEqual(blob, rsys + ruser)        # distinct from the web prompt
+
+    def test_template_mapping(self):
+        self.assertEqual(ar._STACK_TEMPLATES[ar.STACK_EXPO], "expo-rn")
+
+    def test_stack_profile_exposes_expo_verify_callable(self):
+        self.assertIs(ar.stack_profile(ar.STACK_EXPO)["verify"], ar._expo_verify)
+
+    def test_expo_verify_missing_entrypoint_is_clear_error(self):
+        ok, out = ar.verify_app(self._tmp(), ar.STACK_EXPO)
+        self.assertFalse(ok)
+        self.assertTrue("app.json" in out or "package.json" in out)
+        self.assertNotIn("Traceback", out)
+
+    def test_verify_app_detects_expo_from_manifest(self):
+        d = self._tmp()
+        with open(os.path.join(d, ".adf-stack.json"), "w") as f:
+            json.dump({"stack": "expo-rn"}, f)
+        ok, out = ar.verify_app(d)        # no stack arg → detect → expo pipeline
+        self.assertFalse(ok)
+        self.assertIn("Expo", out)        # the expo message, not stdlib's
+
+    def test_native_build_skipped_when_toolchain_absent_and_not_strict(self):
+        orig = ar._native_toolchain
+        ar._native_toolchain = lambda: None
+        os.environ.pop("ADF_MOBILE_NATIVE", None)
+        try:
+            ok, msg = ar._expo_native_stage(self._tmp())
+        finally:
+            ar._native_toolchain = orig
+        self.assertTrue(ok)
+        self.assertIn("skip", msg.lower())
+
+    def test_native_build_strict_fails_when_toolchain_absent(self):
+        orig = ar._native_toolchain
+        ar._native_toolchain = lambda: None
+        os.environ["ADF_MOBILE_NATIVE"] = "strict"
+        try:
+            ok, msg = ar._expo_native_stage(self._tmp())
+        finally:
+            ar._native_toolchain = orig
+            os.environ.pop("ADF_MOBILE_NATIVE", None)
+        self.assertFalse(ok)
+        self.assertIn("native build", msg.lower())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

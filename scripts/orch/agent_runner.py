@@ -240,6 +240,7 @@ def load_feature_context(repo_root, fid):
 # without touching the crew, the dashboard, or the <<<FILE:>>> protocol.
 STACK_STDLIB = "stdlib"
 STACK_REACT = "react-vite-sqlite"
+STACK_EXPO = "expo-rn"   # cross-platform mobile (Expo / React Native, iOS + Android)
 DEFAULT_STACK = os.environ.get("ADF_STACK", STACK_STDLIB)
 
 # Editable app source (multi-file edit). Everything else — deps, build output,
@@ -254,7 +255,8 @@ _SKIP_FILES = {"package-lock.json", "pnpm-lock.yaml", "yarn.lock", "PROOF.md",
 
 def detect_stack(app_dir):
     """Infer the stack: the `.adf-stack.json` manifest is authoritative (contract
-    C1); else package.json -> react; else stdlib. No language guessing."""
+    C1); else `app.json` -> expo (mobile); else package.json -> react; else stdlib.
+    No language guessing."""
     manifest = os.path.join(app_dir, ".adf-stack.json")
     if os.path.isfile(manifest):
         try:
@@ -262,16 +264,17 @@ def detect_stack(app_dir):
                 return json.load(f).get("stack") or STACK_STDLIB
         except (OSError, ValueError):
             pass
+    if os.path.isfile(os.path.join(app_dir, "app.json")):
+        return STACK_EXPO            # Expo's manifest — present only on RN/Expo apps
     if os.path.isfile(os.path.join(app_dir, "package.json")):
         return STACK_REACT
     return STACK_STDLIB
 
 
 def build_messages(fid, ctx, stack=None):
-    """Dispatch to the stack's generation prompt."""
-    if (stack or DEFAULT_STACK) == STACK_REACT:
-        return _react_build_messages(fid, ctx)
-    return _stdlib_build_messages(fid, ctx)
+    """Dispatch to the stack's generation prompt via the StackProfile registry."""
+    stack = stack or DEFAULT_STACK
+    return stack_profile(stack)["build_messages"](fid, ctx)
 
 
 def _spec_block(ctx):
@@ -449,10 +452,74 @@ def _react_build_messages(fid, ctx):
     return system, user
 
 
+def _expo_build_messages(fid, ctx):
+    """Cross-platform MOBILE (iOS + Android) generation prompt — Expo + React Native
+    + react-native-web + TypeScript + expo-sqlite. Same scaffold-then-diff + modular,
+    props-driven component discipline as the web stack, but the UI is React Native
+    primitives (View/Text/TextInput/Pressable/FlatList), NOT DOM. react-native-web
+    means the same app also renders on web, so ADF's headless render gate + Proof of
+    Build still apply (requirement C2)."""
+    system = (
+        "You are an expert React Native / Expo engineer acting as the ADF "
+        "implementation agent. You output COMPLETE, RUNNABLE code — never "
+        "placeholders, never '...', never TODO stubs.\n\n"
+        "TARGET STACK (a checked-in Expo scaffold already provides ALL the wiring — "
+        "you write ONLY the app-specific files):\n"
+        "- Expo (managed) + React Native + TypeScript. Only `src/**` + `App.tsx` are "
+        "TypeScript and `tsc --noEmit` typechecks them, so they MUST be type-correct.\n"
+        "- UI is REACT NATIVE primitives: `View`, `Text`, `TextInput`, `Pressable`/"
+        "`Button`, `FlatList`, `ScrollView` from 'react-native'. There is NO DOM — do "
+        "NOT import `react-dom`, do NOT use `<div>`/`<button>`/HTML tags, do NOT write "
+        "an `index.html`. Styling uses `StyleSheet.create` (no Tailwind, no CSS).\n"
+        "- The app also runs on the web via react-native-web (so it can be "
+        "render-verified) — keep components platform-neutral (no direct DOM/Node APIs).\n"
+        "- Local persistence is expo-sqlite (`import * as SQLite from 'expo-sqlite'`) "
+        "for data the spec stores; there is NO server — the app is self-contained.\n"
+        "- Tests: jest (jest-expo) + @testing-library/react-native (`*.test.tsx`).\n\n"
+        "SCAFFOLD-THEN-DIFF: DO NOT re-emit `app.json`, `package.json`, "
+        "`babel.config.js`, `tsconfig.json`, or the Expo bootstrap. Emit ONLY the "
+        "files that implement THIS feature, overwriting the scaffold's sample.\n\n"
+        "OUTPUT FORMAT — emit each file EXACTLY like this, nothing else between "
+        "files:\n<<<FILE: relative/path>>>\n<full file content>\n<<<END>>>\n"
+        "No markdown fences, no commentary outside file blocks."
+    )
+    # DET-2: the deterministic feature-shape contract is platform-agnostic — fill
+    # domain logic, not boilerplate.
+    import feature_shapes
+    _shape, _contract = feature_shapes.contract_for(ctx, fid)
+    shape_block = f"{_contract}\n\n" if _contract else ""
+    user = (
+        f"Implement the feature `{fid}` as a real cross-platform Expo / React Native "
+        f"app (iOS + Android + web).\n\n{_spec_block(ctx)}\n\n{shape_block}"
+        "Deliver (paths relative to the app root). Treat the shape contract above as "
+        "the data model + behavior; translate its REST/route ideas into local "
+        "expo-sqlite operations (the mobile app has no server):\n"
+        "- `src/db.ts` — open an expo-sqlite database, run `CREATE TABLE IF NOT "
+        "EXISTS` for the tables the spec implies, and export typed query helpers.\n"
+        "- `src/hooks/use<Feature>.ts` — a hook that calls `src/db.ts` and returns "
+        "typed data + actions (create/update/remove/reload as the shape needs); "
+        "components call the hook, never the db directly.\n"
+        "- `src/components/<Name>.tsx` — MULTIPLE small, SELF-CONTAINED, REUSABLE, "
+        "props-driven React Native components (each exports the component AND a typed "
+        "`interface <Name>Props`; receives data + callbacks via props; owns no global "
+        "state). Use `TextInput` for inputs and `Pressable`/`Button` for actions so "
+        "the app has real interactive controls.\n"
+        "- `App.tsx` — the composition ROOT only (default export): import and arrange "
+        "the feature components inside a `SafeAreaView`/`View`. Keep it thin.\n"
+        "- `__tests__/<feature>.test.tsx` — jest + @testing-library/react-native: "
+        "`render(<App/>)` (or a component), assert the main success path AND at least "
+        "one validation/empty/error case via `fireEvent` + `findByText`/`getByPlaceholderText`.\n\n"
+        "CRITICAL: `npm run typecheck` (`tsc --noEmit`) and `npm test` (jest) MUST "
+        "pass. Use ONLY the dependencies in package.json (expo, react-native, "
+        "expo-sqlite, @testing-library/react-native). No placeholders. Emit all files now."
+    )
+    return system, user
+
+
 # --- scaffold-then-diff (N7): copy the checked-in template, strip the sample --
 # Stacks whose generation starts from a checked-in working template. stdlib has
 # no template (single-file generation), so it maps to None.
-_STACK_TEMPLATES = {STACK_REACT: "react-vite-sqlite"}
+_STACK_TEMPLATES = {STACK_REACT: "react-vite-sqlite", STACK_EXPO: "expo-rn"}
 # Sample-feature files the scaffold ships to prove itself; removed before the
 # generated feature is written so a stale `/api/items` + its test can't interfere.
 _SCAFFOLD_SAMPLE_REMOVE = ("server/api/items.mjs", "test/api.test.mjs")
@@ -564,6 +631,7 @@ def warm_node_modules(tpl_dir, app_dir):
 _STACK_PROFILES = {
     STACK_STDLIB: {"name": STACK_STDLIB, "build_messages": _stdlib_build_messages},
     STACK_REACT: {"name": STACK_REACT, "build_messages": _react_build_messages},
+    STACK_EXPO: {"name": STACK_EXPO, "build_messages": _expo_build_messages},
 }
 
 
@@ -1130,13 +1198,80 @@ def _react_verify(app_root, timeout=None):
     return True, f"build + vitest passed; {boot_msg}"
 
 
+# --- expo / react-native verify pipeline (M1) ------------------------------
+def _native_toolchain():
+    """Locate a native mobile build toolchain (eas/xcodebuild/gradle), or None. A
+    deterministic offline box has none — so the native device stage degrades
+    gracefully (like the headless render gate does without Chrome). Overridable via
+    ADF_NATIVE_TOOLCHAIN for tests/CI."""
+    override = os.environ.get("ADF_NATIVE_TOOLCHAIN")
+    if override:
+        return override
+    import shutil
+    for name in ("eas", "xcodebuild", "gradle"):
+        if shutil.which(name):
+            return name
+    return None
+
+
+def _expo_native_stage(app_root):
+    """The native (iOS/Android) device build stage. Gated by ADF_MOBILE_NATIVE: when
+    the toolchain is ABSENT it is SKIPPED (ok=True) unless ADF_MOBILE_NATIVE=strict,
+    which fails LOUDLY — never a silent pass (requirement T3/B3). A signed .ipa/.aab
+    is never claimed from the deterministic offline path; the full device build is a
+    later node."""
+    strict = os.environ.get("ADF_MOBILE_NATIVE", "").lower() == "strict"
+    tool = _native_toolchain()
+    if not tool:
+        if strict:
+            return (False, "native build required (ADF_MOBILE_NATIVE=strict) but no "
+                           "toolchain found — need eas / xcodebuild / gradle")
+        return (True, "native build stage skipped (no toolchain; set "
+                      "ADF_MOBILE_NATIVE=strict to require it)")
+    return (True, f"native toolchain present ({tool}); full device build is a later node")
+
+
+def _expo_verify(app_root, timeout=None):
+    """Verify an Expo / React Native app: typecheck (`tsc --noEmit`) + jest, then the
+    gated native stage. Mirrors `_react_verify`'s attributed-failure contract. The
+    deterministic tsc/jest stages run when the template's deps are warm-cloned; the
+    native device build degrades gracefully off the offline path. Honest scope:
+    'verified' means typechecks + tests (+ later: renders on expo-web), NOT a signed
+    binary."""
+    timeout = timeout or int(os.environ.get("ADF_EXPO_VERIFY_TIMEOUT_SEC", "600"))
+    has_app = os.path.isfile(os.path.join(app_root, "app.json"))
+    has_pkg = os.path.isfile(os.path.join(app_root, "package.json"))
+    if not (has_app or has_pkg):
+        return False, ("app.json / package.json missing — the Expo scaffold was not "
+                       "applied")
+    if not os.path.isdir(os.path.join(app_root, "node_modules")):
+        return False, ("Expo dependencies are not installed (no node_modules) — a "
+                       "verified mobile build needs the warm-cloned `expo-rn` "
+                       "template (M2/M3).")
+    ok, out = _npm(app_root, ["run", "typecheck"], timeout)
+    if not ok:
+        return False, ("TYPECHECK FAILED (tsc --noEmit):\n"
+                       + _spill_and_bound(app_root, "expo-typecheck", out))
+    ok, out = _npm(app_root, ["test"], timeout)
+    if not ok:
+        return False, ("TESTS FAILED (jest):\n"
+                       + _spill_and_bound(app_root, "expo-test", out))
+    native_ok, native_msg = _expo_native_stage(app_root)
+    if not native_ok:
+        return False, native_msg
+    return True, f"typecheck + jest passed; {native_msg}"
+
+
 def verify_app(app_root, stack=None, timeout=None):
     """Dispatch verification to the stack's pipeline (contract C2). `stack` is
     resolved from the manifest when omitted. stdlib → unittest + python boot;
-    react → npm build + vitest + node boot. Unknown stacks fall back to stdlib."""
+    react → npm build + vitest + node boot; expo-rn → tsc + jest + gated native.
+    Unknown stacks fall back to stdlib."""
     stack = stack or detect_stack(app_root)
     if stack == STACK_REACT:
         return _react_verify(app_root, timeout)
+    if stack == STACK_EXPO:
+        return _expo_verify(app_root, timeout)
     return run_verification(app_root, timeout or 60)
 
 
@@ -1144,6 +1279,7 @@ def verify_app(app_root, stack=None, timeout=None):
 # registry literal lives above, before these functions exist).
 _STACK_PROFILES[STACK_STDLIB]["verify"] = run_verification
 _STACK_PROFILES[STACK_REACT]["verify"] = _react_verify
+_STACK_PROFILES[STACK_EXPO]["verify"] = _expo_verify
 
 
 def headroom_compress_log(text):
