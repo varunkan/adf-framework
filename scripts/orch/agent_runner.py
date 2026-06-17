@@ -387,6 +387,40 @@ def scaffold_app(app_dir, tpl_dir):
     # leftover sample `items` table lingers in a fresh app's database).
     with open(os.path.join(app_dir, "schema.sql"), "w", encoding="utf-8") as f:
         f.write("-- schema for this app (generated at build time)\n")
+    # 10-50x first-build win + deterministic offline install: clone the template's
+    # already-installed node_modules into the app so `npm ci` is skipped entirely
+    # (the deps are pinned + identical for every app). On APFS this is an instant,
+    # copy-on-write clone (no extra disk until a file is touched).
+    warm_node_modules(tpl_dir, app_dir)
+
+
+def warm_node_modules(tpl_dir, app_dir):
+    """Clone the template's node_modules into the app (no per-app `npm ci`). Tries,
+    fastest-first: APFS clonefile (`cp -c`, instant + zero extra disk) → hardlink
+    (`cp -al`, Linux) → plain copy. No-op if the template has none or the app
+    already has one. Returns True on success."""
+    import shutil
+    src = os.path.join(tpl_dir, "node_modules")
+    dst = os.path.join(app_dir, "node_modules")
+    if not os.path.isdir(src) or os.path.isdir(dst):
+        return False
+    for cmd in (["cp", "-c", "-R", src, dst], ["cp", "-al", src, dst]):
+        try:
+            if subprocess.run(cmd, capture_output=True).returncode == 0 \
+                    and os.path.isdir(dst):
+                log("warm node_modules cloned from template — npm ci skipped")
+                return True
+        except Exception:
+            pass
+        if os.path.isdir(dst):  # partial — clear before the next strategy
+            shutil.rmtree(dst, ignore_errors=True)
+    try:
+        shutil.copytree(src, dst, symlinks=True)
+        log("warm node_modules copied from template — npm ci skipped")
+        return True
+    except Exception as e:
+        log(f"warm node_modules skipped ({e}); will run npm ci")
+        return False
 
 
 _STACK_PROFILES = {

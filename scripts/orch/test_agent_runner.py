@@ -297,6 +297,31 @@ class ResolveFeatureId(unittest.TestCase):
         self.assertIsNone(ar.resolve_feature_id("implement phase 7", {}))
 
 
+class WarmNodeModules(unittest.TestCase):
+    """Cloning the template's node_modules into each app makes `npm ci` a no-op —
+    10-50x on first build + a deterministic, offline install."""
+
+    def test_clones_template_node_modules_into_app(self):
+        tpl = tempfile.mkdtemp()
+        os.makedirs(os.path.join(tpl, "node_modules", "react"))
+        with open(os.path.join(tpl, "node_modules", "react", "index.js"), "w") as f:
+            f.write("module.exports = {}\n")
+        app = tempfile.mkdtemp()
+        ok = ar.warm_node_modules(tpl, app)
+        self.assertTrue(ok)
+        self.assertTrue(os.path.isfile(
+            os.path.join(app, "node_modules", "react", "index.js")))
+
+    def test_no_op_when_template_has_none_or_app_has_one(self):
+        tpl = tempfile.mkdtemp()  # no node_modules
+        app = tempfile.mkdtemp()
+        self.assertFalse(ar.warm_node_modules(tpl, app))
+        # app already has node_modules -> don't clobber
+        os.makedirs(os.path.join(tpl, "node_modules"))
+        os.makedirs(os.path.join(app, "node_modules"))
+        self.assertFalse(ar.warm_node_modules(tpl, app))
+
+
 class ScrubbedEnv(unittest.TestCase):
     """Model-generated code, npm, and the spawned app must NEVER inherit ADF's API
     keys — that would hand the operator's secrets to arbitrary code."""
