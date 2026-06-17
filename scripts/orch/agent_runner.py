@@ -1557,6 +1557,8 @@ def main():
         if not files:
             log(f"attempt {attempt}: no parseable <<<FILE:>>> blocks; first 400 chars:\n{text[:400]}")
             if attempt == max_iters:
+                record_build_outcome(repo_root, fid, False,
+                                     "model emitted no parseable <<<FILE:>>> blocks")
                 sys.exit(5)
             continue
 
@@ -1569,6 +1571,9 @@ def main():
                 log(f"attempt {attempt}: every emitted file was rejected by the "
                     f"edit guard (blind/stale)")
                 if attempt == max_iters:
+                    record_build_outcome(
+                        repo_root, fid, False,
+                        "all edits rejected by the guard: " + "; ".join(guard_notes))
                     sys.exit(5)
                 # Tell the model WHY its edits were rejected + re-show the real
                 # current files, so the next attempt is productive (not an
