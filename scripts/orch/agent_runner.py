@@ -27,6 +27,7 @@ Honest failure: if the model returns no parseable files, this exits non-zero
 so the phase fails loudly instead of "succeeding" with no code written.
 """
 import argparse
+import hashlib
 import json
 import os
 import random
@@ -1323,6 +1324,51 @@ def assemble_edit(app_dir, fid, files, instruction, stack=None):
                                file_summary=outline, components=components)
 
 
+def _content_hash(text):
+    return hashlib.blake2s((text or "").encode("utf-8")).hexdigest()[:12]
+
+
+def edit_read_guard(read_files, instruction):
+    """For EDIT mode: stamp every file the model is shown (read_hashes) and record
+    which files it saw only as a one-line OUTLINE rather than full source
+    (outlined_paths). Used to reject unsafe writes before they hit disk. (oh-my-pi
+    §5.7 seenLines + §5.8 staleness gate.)"""
+    read_hashes = {p: _content_hash(c) for p, c in read_files}
+    _, _, res = _compact_files_for_prompt(read_files, instruction)
+    outlined = set(getattr(res, "summarized_paths", []) or []) if res else set()
+    return read_hashes, outlined
+
+
+def apply_edit_guards(app_dir, files, read_hashes, outlined):
+    """Drop unsafe model-emitted edits before write_files persists them:
+      5.7  a file the model saw only OUTLINED is rejected — it would be
+           hallucinating the body it never saw.
+      5.8  a file whose on-disk content changed since ADF read it is flagged STALE;
+           with ADF_EDIT_STALE_GUARD=block it is skipped rather than silently
+           clobbered (default: warn loudly but still write).
+    Returns (safe_files, notes)."""
+    block_stale = os.environ.get("ADF_EDIT_STALE_GUARD", "warn").lower() == "block"
+    safe, notes = [], []
+    for rel, content in files:
+        norm = rel.lstrip("/")
+        if norm in outlined:
+            notes.append(f"rejected blind edit to outlined-only file: {norm}")
+            continue
+        if norm in read_hashes:
+            try:
+                with open(os.path.join(app_dir, norm), encoding="utf-8") as f:
+                    live = _content_hash(f.read())
+            except (OSError, UnicodeDecodeError):
+                live = None
+            if live is not None and live != read_hashes[norm]:
+                if block_stale:
+                    notes.append(f"skipped STALE overwrite (changed since read): {norm}")
+                    continue
+                notes.append(f"stale overwrite (file changed since read): {norm}")
+        safe.append((rel, content))
+    return safe, notes
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("prompt")
@@ -1359,10 +1405,13 @@ def main():
         log(f"no spec/requirement found for {fid} under {repo_root}")
         sys.exit(3)
 
+    edit_read_hashes, edit_outlined = {}, set()
     if is_edit:
         log(f"EDIT mode ({stack}): applying change -> {edit_instruction[:100]}")
+        read_files = current_app_files(app_dir)
+        edit_read_hashes, edit_outlined = edit_read_guard(read_files, edit_instruction)
         system, user = assemble_edit(
-            app_dir, fid, current_app_files(app_dir), edit_instruction, stack)
+            app_dir, fid, read_files, edit_instruction, stack)
     else:
         # Scaffold-then-diff (N7): a fresh react build starts from the checked-in
         # working template; the model then emits ONLY the feature's files.
@@ -1408,6 +1457,18 @@ def main():
             if attempt == max_iters:
                 sys.exit(5)
             continue
+
+        if is_edit and (edit_outlined or edit_read_hashes):
+            files, guard_notes = apply_edit_guards(
+                app_dir, files, edit_read_hashes, edit_outlined)
+            for note in guard_notes:
+                log(f"edit guard: {note}")
+            if not files:
+                log(f"attempt {attempt}: every emitted file was rejected by the "
+                    f"edit guard (blind/stale)")
+                if attempt == max_iters:
+                    sys.exit(5)
+                continue
 
         app_root, written = write_files(workspace, fid, files)
         ok, output = verify_app(app_root, stack)

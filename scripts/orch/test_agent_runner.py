@@ -496,6 +496,58 @@ class RecallBlockers(unittest.TestCase):
             os.environ.pop("ADF_RECALL_BLOCKERS", None)
 
 
+class EditGuards(unittest.TestCase):
+    """5.7/5.8 — reject blind edits to outlined-only files; flag/skip stale
+    overwrites so a model can't clobber a file it never fully saw or that changed
+    out-of-band since ADF read it."""
+
+    def _app(self, files):
+        d = tempfile.mkdtemp(prefix="adf-guard-")
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        for rel, content in files:
+            p = os.path.join(d, rel)
+            os.makedirs(os.path.dirname(p) or d, exist_ok=True)
+            with open(p, "w") as f:
+                f.write(content)
+        return d
+
+    def test_rejects_outlined_only_file(self):
+        app = self._app([("src/A.tsx", "orig")])
+        hashes = {"src/A.tsx": ar._content_hash("orig")}
+        safe, notes = ar.apply_edit_guards(
+            app, [("src/A.tsx", "hallucinated")], hashes, {"src/A.tsx"})
+        self.assertEqual(safe, [])  # blind edit dropped
+        self.assertTrue(any("outlined-only" in n for n in notes))
+
+    def test_passes_unchanged_and_new_files(self):
+        app = self._app([("src/A.tsx", "orig")])
+        hashes = {"src/A.tsx": ar._content_hash("orig")}
+        emitted = [("src/A.tsx", "edited"), ("src/New.tsx", "brand new")]
+        safe, notes = ar.apply_edit_guards(app, emitted, hashes, set())
+        self.assertEqual(len(safe), 2)
+        self.assertFalse(notes)
+
+    def test_warns_on_stale_but_still_writes_by_default(self):
+        app = self._app([("src/A.tsx", "DISK CHANGED OUT OF BAND")])
+        hashes = {"src/A.tsx": ar._content_hash("orig")}  # read-time hash differs
+        safe, notes = ar.apply_edit_guards(
+            app, [("src/A.tsx", "edited")], hashes, set())
+        self.assertEqual(len(safe), 1)
+        self.assertTrue(any("stale" in n.lower() for n in notes))
+
+    def test_blocks_stale_when_configured(self):
+        app = self._app([("src/A.tsx", "DISK CHANGED OUT OF BAND")])
+        hashes = {"src/A.tsx": ar._content_hash("orig")}
+        os.environ["ADF_EDIT_STALE_GUARD"] = "block"
+        try:
+            safe, notes = ar.apply_edit_guards(
+                app, [("src/A.tsx", "edited")], hashes, set())
+        finally:
+            os.environ.pop("ADF_EDIT_STALE_GUARD", None)
+        self.assertEqual(safe, [])
+        self.assertTrue(any("skipped STALE" in n for n in notes))
+
+
 class FileWriteEvents(unittest.TestCase):
     """N21 — the runner narrates each file as it writes it, so a 1-3 min build
     doesn't go dark. Each write emits a structured `file_write` progress line the
