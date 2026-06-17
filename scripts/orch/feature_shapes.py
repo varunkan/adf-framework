@@ -180,6 +180,24 @@ def skeleton_contract(shape):
     return _CONTRACTS.get(shape, "")
 
 
+# Minimal ALWAYS-PRESENT interactive controls each shape must render regardless of
+# DATA — a crud-list/form/single-record always shows an input + a button even with
+# zero rows, so a render that lacks them is a blank/broken UI. Empty for
+# dashboard/generic (read-mostly / unconstrained) so the render audit never
+# false-flags them. (SOLID-2.)
+_EXPECTED_DOM = {
+    "crud-list": {"inputs": 1, "buttons": 1},
+    "form": {"inputs": 1, "buttons": 1},
+    "single-record": {"inputs": 1, "buttons": 1},
+}
+
+
+def expected_dom(shape):
+    """The minimal core controls `shape` must render (control-group → min count),
+    for the shape-aware render audit. Empty dict for shapes with no fixed control."""
+    return dict(_EXPECTED_DOM.get(shape, {}))
+
+
 def contract_for(ctx, fid=""):
     """(shape, contract_text) for a feature context. The text is '' when the shape
     is generic, so callers can inject unconditionally."""

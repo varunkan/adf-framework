@@ -93,5 +93,40 @@ class AssessDom(unittest.TestCase):
         self.assertGreaterEqual(a["interactive"], 1)
 
 
+class DomControlCounts(unittest.TestCase):
+    """SOLID-2: per-control counts so the render gate can assert a shape's core
+    controls actually rendered (not just 'something mounted')."""
+
+    def test_counts_buttons_inputs_headings(self):
+        s = vv.assess_dom(
+            "<body><div id=root><h1>Tasks</h1>"
+            "<form><input type=text><button>Add</button></form>"
+            "<ul><li>a</li></ul></div></body>")
+        self.assertGreaterEqual(s["buttons"], 1)
+        self.assertGreaterEqual(s["inputs"], 1)
+        self.assertGreaterEqual(s["headings"], 1)
+
+    def test_input_submit_counts_as_a_button(self):
+        s = vv.assess_dom(
+            "<body><form><input type=text><input type=submit></form></body>")
+        self.assertGreaterEqual(s["inputs"], 1)
+        self.assertGreaterEqual(s["buttons"], 1)  # <input type=submit> is a button
+
+    def test_check_expected_dom(self):
+        ok, missing = vv.check_expected_dom(
+            {"inputs": 1, "buttons": 1}, {"inputs": 1, "buttons": 1})
+        self.assertTrue(ok)
+        self.assertEqual(missing, [])
+        ok2, missing2 = vv.check_expected_dom(
+            {"inputs": 1, "buttons": 0}, {"inputs": 1, "buttons": 1})
+        self.assertFalse(ok2)
+        self.assertTrue(any("button" in m for m in missing2))
+
+    def test_check_expected_dom_empty_requirement_always_ok(self):
+        ok, missing = vv.check_expected_dom({"buttons": 0}, {})
+        self.assertTrue(ok)
+        self.assertEqual(missing, [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

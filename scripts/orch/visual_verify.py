@@ -13,6 +13,7 @@ browser is present it SKIPS (ok=True) unless ADF_VISUAL_VERIFY=strict, so the
 offline/zero-cost path never turns red just for lack of a browser. ADF_VISUAL_VERIFY=0
 disables it entirely.
 """
+import json
 import os
 import shutil
 import subprocess
@@ -55,6 +56,9 @@ class _BodyStats(HTMLParser):
         self.text_len = 0
         self.interactive = 0
         self.elements = 0
+        self.buttons = 0
+        self.inputs = 0
+        self.headings = 0
 
     def handle_starttag(self, tag, attrs):
         if tag == "body":
@@ -68,6 +72,18 @@ class _BodyStats(HTMLParser):
         self.elements += 1
         if tag in self._INTERACTIVE:
             self.interactive += 1
+        # Per-control counts so the render gate can assert a shape's core controls
+        # actually rendered (SOLID-2).
+        if tag == "button":
+            self.buttons += 1
+        elif tag in ("input", "select", "textarea"):
+            self.inputs += 1
+            if tag == "input":
+                kind = dict(attrs).get("type", "").lower()
+                if kind in ("submit", "button"):
+                    self.buttons += 1   # <input type=submit> is also a button
+        elif tag in ("h1", "h2", "h3"):
+            self.headings += 1
 
     def handle_endtag(self, tag):
         if tag == "body":
@@ -95,7 +111,26 @@ def assess_dom(rendered_html):
         "text_len": p.text_len,
         "interactive": p.interactive,
         "elements": p.elements,
+        "buttons": p.buttons,
+        "inputs": p.inputs,
+        "headings": p.headings,
     }
+
+
+def check_expected_dom(stats, expected):
+    """Did the rendered DOM include the shape's required core controls? `expected`
+    maps a control group (e.g. 'inputs', 'buttons') to a minimum count. Returns
+    (ok, missing_descriptions). An empty requirement is always ok (no false-flag for
+    read-mostly shapes). (SOLID-2.)"""
+    stats = stats or {}
+    missing = []
+    for key, minimum in (expected or {}).items():
+        found = stats.get(key, 0)
+        if found < minimum:
+            missing.append(
+                f"the app did not render the expected {key} "
+                f"(need >={minimum}, rendered {found})")
+    return (not missing, missing)
 
 
 # --- browser drivers --------------------------------------------------------
@@ -142,6 +177,14 @@ def visual_verify(url, app_root=None, strict=None):
         if app_root:
             vdir = os.path.join(app_root, ".adf-visual")
             os.makedirs(vdir, exist_ok=True)
+            # Persist the render stats so the completion audit (agent_runner) can
+            # assert the feature shape's core controls actually rendered (SOLID-2).
+            try:
+                with open(os.path.join(vdir, "render-stats.json"), "w",
+                          encoding="utf-8") as f:
+                    json.dump(stats, f)
+            except OSError:
+                pass
             dest = os.path.join(vdir, "render.png")
             if screenshot(chrome, url, dest):
                 shot = dest

@@ -80,6 +80,16 @@ class Contract(unittest.TestCase):
     def test_generic_contract_is_empty(self):
         self.assertEqual(fs.skeleton_contract("generic"), "")
 
+    def test_expected_dom_per_shape(self):
+        # SOLID-2: input-driven shapes must render at least one input + one button.
+        for shape in ("crud-list", "form", "single-record"):
+            e = fs.expected_dom(shape)
+            self.assertGreaterEqual(e.get("inputs", 0), 1, shape)
+            self.assertGreaterEqual(e.get("buttons", 0), 1, shape)
+        # read-mostly / unconstrained shapes carry no DOM requirement (no false-flag).
+        self.assertEqual(fs.expected_dom("dashboard"), {})
+        self.assertEqual(fs.expected_dom("generic"), {})
+
     def test_shape_specific_routes(self):
         self.assertIn("DELETE", fs.skeleton_contract("crud-list"))
         self.assertIn("/summary", fs.skeleton_contract("dashboard"))

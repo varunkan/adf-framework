@@ -708,6 +708,41 @@ class CompletionAudit(unittest.TestCase):
         gaps = ar.audit_completion(d, ar.STACK_REACT, self.CRUD_CTX, "todo")
         self.assertTrue(any("no test file" in g for g in gaps))
 
+    # --- SOLID-2: shape-aware render audit -------------------------------
+    _COMPLETE_CRUD = (
+        "const c = await app.inject({ method: 'POST', url: '/api/tasks',"
+        " payload: { title: 'x' } }); expect(c.statusCode).toBe(201);\n"
+        "const bad = await app.inject({ method: 'POST', url: '/api/tasks',"
+        " payload: {} }); expect(bad.statusCode).toBe(400);")
+
+    def _with_render_stats(self, stats):
+        # a crud-list app whose TESTS are complete, so only the render gap can show
+        app = self._app(self._COMPLETE_CRUD)
+        vdir = os.path.join(app, ".adf-visual")
+        os.makedirs(vdir)
+        with open(os.path.join(vdir, "render-stats.json"), "w") as f:
+            json.dump(stats, f)
+        return app
+
+    def test_render_audit_flags_missing_controls(self):
+        # a crud-list that rendered NO button/input (blank/broken UI) is flagged
+        # even though its tests pass — catches "renders a wrong/empty screen".
+        app = self._with_render_stats({"buttons": 0, "inputs": 0})
+        gaps = ar.audit_completion(app, ar.STACK_REACT, self.CRUD_CTX, "todo")
+        self.assertTrue(any("button" in g.lower() or "input" in g.lower()
+                            for g in gaps), gaps)
+
+    def test_render_audit_passes_with_controls(self):
+        app = self._with_render_stats({"buttons": 2, "inputs": 1})
+        self.assertEqual(
+            ar.audit_completion(app, ar.STACK_REACT, self.CRUD_CTX, "todo"), [])
+
+    def test_render_audit_skipped_when_not_measured(self):
+        # no render-stats.json (browser absent / disabled) → no render gap
+        app = self._app(self._COMPLETE_CRUD)
+        self.assertEqual(
+            ar.audit_completion(app, ar.STACK_REACT, self.CRUD_CTX, "todo"), [])
+
 
 class FileWriteEvents(unittest.TestCase):
     """N21 — the runner narrates each file as it writes it, so a 1-3 min build

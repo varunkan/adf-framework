@@ -1426,6 +1426,12 @@ def audit_completion(app_root, stack, ctx, fid):
         shape, _ = feature_shapes.contract_for(ctx, fid)
     except Exception:
         return []
+    return _audit_tests(app_root, shape) + _audit_render(app_root, shape)
+
+
+def _audit_tests(app_root, shape):
+    """Test-coverage half of the audit: do the generated tests assert the shape's
+    required behavior (structural — see _AUDIT_REQUIRED)?"""
     required = _AUDIT_REQUIRED.get(shape)
     if not required:
         return []                       # generic shape — no deterministic checklist
@@ -1443,6 +1449,34 @@ def audit_completion(app_root, stack, ctx, fid):
     if not test_text.strip():
         return [f"no test file found for a {shape} feature"]
     return [label for label, pat in required if not pat.search(test_text)]
+
+
+def _audit_render(app_root, shape):
+    """Render half of the audit (SOLID-2): did the app actually render the shape's
+    core controls? Reads the render stats visual_verify dumped during the boot/render
+    check and compares against feature_shapes.expected_dom. Returns [] when the
+    render wasn't measured (no browser / disabled) so it never false-flags."""
+    try:
+        import feature_shapes
+        expected = feature_shapes.expected_dom(shape)
+    except Exception:
+        return []
+    if not expected:
+        return []
+    stats_path = os.path.join(app_root, ".adf-visual", "render-stats.json")
+    if not os.path.isfile(stats_path):
+        return []
+    try:
+        with open(stats_path, encoding="utf-8") as f:
+            stats = json.load(f)
+    except (OSError, ValueError):
+        return []
+    try:
+        import visual_verify
+        _ok, missing = visual_verify.check_expected_dom(stats, expected)
+        return missing
+    except Exception:
+        return []
 
 
 def _content_hash(text):
