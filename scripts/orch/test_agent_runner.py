@@ -425,6 +425,38 @@ class RetryAndClassify(unittest.TestCase):
         self.assertEqual(
             ar._retry_backoff_seconds("rate_limit", 0, retry_after="9999"), cap)
 
+    def test_classify_auth_and_server_statuses(self):
+        self.assertEqual(ar.classify_http_status(401), "auth")
+        self.assertEqual(ar.classify_http_status(403), "auth")
+        self.assertEqual(ar.classify_http_status(500), "server_error")
+        self.assertEqual(ar.classify_http_status(504), "unknown")
+
+    def test_backoff_clamps_garbage_retry_after(self):
+        # bug#1: a negative / non-finite Retry-After must never become sleep(-1).
+        import math as _m
+        for bad in ("-1", "-999", "inf", "-inf", "nan", "garbage", None):
+            d = ar._retry_backoff_seconds("rate_limit", 0, retry_after=bad)
+            self.assertTrue(_m.isfinite(d) and d >= 0.0, f"bad delay for {bad!r}: {d}")
+
+    def test_http_post_json_raises_typed_httperror(self):
+        import io
+        import urllib.error
+        orig = ar.urllib.request.urlopen
+
+        def fake(*a, **k):
+            raise urllib.error.HTTPError(
+                "http://x", 529, "overloaded",
+                {"retry-after": "3"}, io.BytesIO(b"busy"))
+
+        ar.urllib.request.urlopen = fake
+        try:
+            with self.assertRaises(ar.HttpError) as cm:
+                ar.http_post_json("https://x", {}, {}, 1)
+            self.assertEqual(cm.exception.status, 529)
+            self.assertEqual(cm.exception.retry_after, "3")
+        finally:
+            ar.urllib.request.urlopen = orig
+
 
 class OutputSinkSpill(unittest.TestCase):
     """5.6 — verify logs keep the HEAD (where the first error is) + the tail, and
@@ -495,6 +527,28 @@ class RecallBlockers(unittest.TestCase):
         finally:
             os.environ.pop("ADF_RECALL_BLOCKERS", None)
 
+    def test_ignores_non_object_json_lines(self):
+        # bug#5: a bare-value JSON line must be skipped, not crash with AttributeError
+        repo = self._repo([])
+        path = os.path.join(repo, ".cursor", "orchestration", "learnings.jsonl")
+        with open(path, "w") as f:
+            f.write("42\n\"x\"\ntrue\n[1,2]\n")
+            f.write(json.dumps(
+                {"phase": 7, "kind": "failure", "blockers": ["real-one"]}) + "\n")
+        block = ar.recall_blockers(repo, phase=7)
+        self.assertIn("real-one", block)  # didn't crash; found the valid record
+
+    def test_record_build_outcome_then_recall_roundtrip(self):
+        # bug#4: the runner records its OWN phase-7 outcomes so recall is not inert.
+        repo = tempfile.mkdtemp(prefix="adf-recall-")
+        self.addCleanup(shutil.rmtree, repo, ignore_errors=True)
+        ar.record_build_outcome(
+            repo, "feat-a", False, "BUILD FAILED (tsc): missing type Foo\nmore")
+        self.assertIn("BUILD FAILED (tsc): missing type Foo",
+                      ar.recall_blockers(repo, phase=7))
+        ar.record_build_outcome(repo, "feat-b", True, "")  # success → no blocker
+        self.assertIn("BUILD FAILED", ar.recall_blockers(repo, phase=7))
+
 
 class EditGuards(unittest.TestCase):
     """5.7/5.8 — reject blind edits to outlined-only files; flag/skip stale
@@ -547,6 +601,16 @@ class EditGuards(unittest.TestCase):
         self.assertEqual(safe, [])
         self.assertTrue(any("skipped STALE" in n for n in notes))
 
+    def test_refreshed_baseline_is_not_flagged_stale(self):
+        # bug#2: after the runner writes a file, the next attempt's baseline is the
+        # written content (refreshed in main); re-editing it must NOT read as stale.
+        app = self._app([("src/A.tsx", "v2\n")])  # disk holds what the runner wrote
+        hashes = {"src/A.tsx": ar._content_hash("v2\n")}  # refreshed baseline
+        safe, notes = ar.apply_edit_guards(
+            app, [("src/A.tsx", "v3")], hashes, set())
+        self.assertEqual(len(safe), 1)
+        self.assertFalse(any("stale" in n.lower() for n in notes))
+
 
 class CompletionAudit(unittest.TestCase):
     """5.9 — a shaped feature's generated tests must cover the shape's required
@@ -554,6 +618,8 @@ class CompletionAudit(unittest.TestCase):
     heal closes the gap. Deterministic, $0, never fails an already-verified build."""
 
     CRUD_CTX = {"requirement": "A to-do list where you add, edit and delete tasks."}
+    SINGLE_CTX = {"requirement":
+                  "A settings page to view and update your profile preferences."}
 
     def _app(self, test_body):
         d = tempfile.mkdtemp(prefix="adf-audit-")
@@ -562,6 +628,17 @@ class CompletionAudit(unittest.TestCase):
         with open(os.path.join(d, "test", "feature.test.mjs"), "w") as f:
             f.write(test_body)
         return d
+
+    def test_single_record_requires_a_validation_test(self):
+        # bug#8: a PUT-200-only single-record test must be flagged (its shape
+        # contract demands PUT-invalid → 400).
+        app = self._app("PUT /api/settings 200 ok")
+        gaps = ar.audit_completion(app, ar.STACK_REACT, self.SINGLE_CTX, "settings")
+        self.assertTrue(any("400" in g for g in gaps))
+        full = self._app("PUT /api/settings 200; PUT invalid 400")
+        self.assertEqual(
+            ar.audit_completion(full, ar.STACK_REACT, self.SINGLE_CTX, "settings"),
+            [])
 
     def test_flags_vacuous_crud_test(self):
         app = self._app("it('lists', async () => {"

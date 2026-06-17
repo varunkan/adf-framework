@@ -146,19 +146,49 @@ class CompactMessages(unittest.TestCase):
         self.assertIn("Next Steps:", seen["t"])
 
     def test_refold_carries_prior_summary_forward_losslessly(self):
-        # 5.5: a second fold after more turns must NOT drop the first summary.
-        once = cx.compact_messages(self.messages, budget=300, preserve_last=2)
-        # Append fresh oversized turns and re-fold.
+        # 5.5/bug#3: a second fold must NOT drop the first summary's state. Seed a
+        # unique marker in the GOAL and assert it SURVIVES the re-fold (the prior
+        # version only checked the literal "Prior:" prefix, which always appears).
+        marker = "ZZUNIQUEGOAL42"
+        msgs = [
+            self.system,
+            _msg("user", f"{marker} build the dashboard " + _big("x", 700)),
+            _msg("assistant", _big("a0", 800)),
+            _msg("user", _big("u1", 800)),
+            _msg("assistant", _big("a1", 800)),
+        ]
+        once = cx.compact_messages(msgs, budget=300, preserve_last=2)
+        self.assertIn(marker, once.summary)  # captured in the Goal
         grown = once.items + [
             _msg("user" if i % 2 == 0 else "assistant", _big(f"more{i}", 800))
             for i in range(4)
         ]
         twice = cx.compact_messages(grown, budget=300, preserve_last=2)
         self.assertTrue(twice.did_compact)
-        # exactly one summary again, and it carries the earlier summary's content
-        middle = [m for m in twice.items if "compacted" in (m.get("content") or "").lower()]
+        middle = [m for m in twice.items
+                  if "compacted" in (m.get("content") or "").lower()]
         self.assertEqual(len(middle), 1)
-        self.assertIn("Prior:", middle[0]["content"])
+        self.assertIn(marker, middle[0]["content"])      # earlier goal survived
+        self.assertNotIn("Prior: Prior:", middle[0]["content"])  # de-nested
+
+    def test_refold_survives_three_folds_without_prior_nesting(self):
+        marker = "KEEPME_GOAL_7"
+        items = [
+            self.system,
+            _msg("user", f"{marker} the goal " + _big("g", 700)),
+            _msg("assistant", _big("a", 800)),
+            _msg("user", _big("u", 800)),
+            _msg("assistant", _big("b", 800)),
+        ]
+        for _ in range(3):
+            res = cx.compact_messages(items, budget=300, preserve_last=2)
+            items = res.items + [
+                _msg("user", _big("nu", 800)),
+                _msg("assistant", _big("na", 800)),
+            ]
+        joined = " ".join(m.get("content") or "" for m in items)
+        self.assertIn(marker, joined)        # still present after 3 folds
+        self.assertNotIn("Prior: Prior:", joined)
 
 
 class CompactFiles(unittest.TestCase):

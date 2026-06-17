@@ -27,8 +27,10 @@ Honest failure: if the model returns no parseable files, this exits non-zero
 so the phase fails loudly instead of "succeeding" with no code written.
 """
 import argparse
+import datetime
 import hashlib
 import json
+import math
 import os
 import random
 import re
@@ -147,6 +149,8 @@ def recall_blockers(repo_root, phase=7, k=5):
                     e = json.loads(line)
                 except ValueError:
                     continue
+                if not isinstance(e, dict):   # a bare 42/"x"/[..] line must not crash
+                    continue
                 if e.get("phase") != phase:
                     continue
                 if e.get("kind") == "failure":
@@ -177,6 +181,42 @@ def recall_blockers(repo_root, phase=7, k=5):
             block += ("\nFixes that resolved past failures:\n"
                       + "\n".join(f"- {fx[:200]}" for fx in uniq))
     return block
+
+
+def _first_failure_line(failure):
+    """A concise blocker string from a verify-failure blob: the first informative
+    non-empty line (e.g. 'BUILD FAILED (tsc --noEmit && vite build): ...'), capped."""
+    for ln in (failure or "").splitlines():
+        ln = ln.strip()
+        if ln:
+            return ln[:160]
+    return "implement phase failed"
+
+
+def record_build_outcome(repo_root, fid, verified, failure="", phase=7):
+    """Append this implement-phase (7) outcome to the learning store so
+    recall_blockers can surface it on FUTURE builds. Closes the loop end-to-end:
+    the Dart crew records phases 1-6 and the validator phases {2,3,4}, but NOTHING
+    recorded phase 7 — so recall_blockers(phase=7) was inert. Matches LearningStore's
+    JSONL schema exactly (append-only; the Dart writer and this one coexist).
+    Best-effort; disabled with ADF_RECALL_BLOCKERS=0."""
+    if os.environ.get("ADF_RECALL_BLOCKERS", "1") in ("0", "false", "off"):
+        return
+    entry = {
+        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "feature": fid,
+        "phase": phase,
+        "kind": "success" if verified else "failure",
+    }
+    if not verified:
+        entry["blockers"] = [_first_failure_line(failure)]
+    path = os.path.join(repo_root, LEARNINGS_REL)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+    except OSError:
+        pass
 
 
 def load_feature_context(repo_root, fid):
@@ -602,7 +642,11 @@ def _retry_backoff_seconds(reason, attempt, retry_after=None):
     cap = float(os.environ.get("ADF_RUNNER_RETRY_CAP_SEC", "20"))
     if retry_after is not None:
         try:
-            return min(float(retry_after), cap)
+            v = float(retry_after)
+            if math.isfinite(v):
+                # Clamp to [0, cap]: a malicious/garbled `Retry-After: -1` (or inf/
+                # nan) must never reach time.sleep() and crash the build.
+                return min(max(0.0, v), cap)
         except (TypeError, ValueError):
             pass
     base = {"capacity": 1.5, "rate_limit": 2.0, "server_error": 1.0}.get(reason, 1.5)
@@ -630,7 +674,7 @@ def call_with_retry(call, messages, timeout, *, attempts=None, sleeper=None):
             delay = _retry_backoff_seconds(reason, i, e.retry_after)
             log(f"backend HTTP {e.status} ({reason}) — retry "
                 f"{i + 1}/{attempts} in {delay:.1f}s")
-            sleeper(delay)
+            sleeper(max(0.0, delay))   # never sleep a negative duration
     return None
 
 
@@ -1338,6 +1382,7 @@ _AUDIT_REQUIRED = {
     ],
     "single-record": [
         ("a PUT/update test", re.compile(r"\bput\b", re.I)),
+        ("a validation test (400)", re.compile(r"\b400\b")),
     ],
     "dashboard": [
         ("a GET/summary test", re.compile(r"\bget\b", re.I)),
@@ -1525,9 +1570,26 @@ def main():
                     f"edit guard (blind/stale)")
                 if attempt == max_iters:
                     sys.exit(5)
+                # Tell the model WHY its edits were rejected + re-show the real
+                # current files, so the next attempt is productive (not an
+                # identical regeneration that gets rejected again).
+                last_failure = ("Your edits were REJECTED before writing: "
+                                + "; ".join(guard_notes) + ". Only edit files shown "
+                                "to you in FULL (not files shown as an outline), and "
+                                "base your edit on the current contents below.")
+                messages = fix_messages(system, user, current_app_files(app_dir),
+                                        last_failure, stack)
                 continue
 
         app_root, written = write_files(workspace, fid, files)
+        # Refresh the staleness baseline to what we just wrote: a later self-heal
+        # attempt re-reads these files and must compare against the runner's OWN last
+        # write, not the pre-loop original (else attempt 2+ self-flags as "stale").
+        if is_edit:
+            for rel, content in files:
+                norm = rel.lstrip("/")
+                edit_read_hashes[norm] = _content_hash(
+                    content if content.endswith("\n") else content + "\n")
         ok, output = verify_app(app_root, stack)
         last_failure = output
         log(f"attempt {attempt}: wrote {len(written)} files; verify {'PASSED' if ok else 'FAILED'}")
@@ -1558,6 +1620,10 @@ def main():
         if attempt < max_iters:
             log(f"attempt {attempt}: feeding failure back to the model to self-correct")
             messages = fix_messages(system, user, files, output, stack)
+
+    # Record this implement-phase outcome so recall_blockers can surface it on a
+    # FUTURE build (the loop is otherwise inert — nothing else writes phase 7).
+    record_build_outcome(repo_root, fid, verified, last_failure)
 
     if app_root is None:
         log("implementation produced no files")

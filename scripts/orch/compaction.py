@@ -171,6 +171,16 @@ def _summary_prompt(turns_digest, carried="") -> str:
     return COMPACTION_SUMMARY_TEMPLATE + f"\n\n<turns>\n{turns_digest}\n</turns>"
 
 
+def _head_tail(text, head=400, tail=400) -> str:
+    """Keep the FRONT and BACK of a long string, eliding the middle — preserves the
+    high-value head (Goal/Constraints) AND tail (Next Steps/Critical Context) of a
+    carried summary while bounding its size across re-folds."""
+    text = (text or "").strip()
+    if len(text) <= head + tail:
+        return text
+    return f"{text[:head]} … {text[-tail:]}"
+
+
 def _structured_digest(msgs, carried="") -> str:
     """Deterministic OFFLINE structured digest (no model call): Goal (first user
     turn), Progress (per-turn first lines), Next (last user turn) — carrying any
@@ -183,15 +193,30 @@ def _structured_digest(msgs, carried="") -> str:
     nxt = line(users[-1]) if users else ""
     parts = []
     if carried:
-        parts.append(f"Prior: {carried[:300]}")
+        # De-nest repeated "Prior:" prefixes from earlier folds, then keep the
+        # head+tail (NOT just the front) so Key Decisions / Next Steps / Critical
+        # Context — which live at the END of the structured summary — survive.
+        c = carried.strip()
+        while c.startswith("Prior:"):
+            c = c[len("Prior:"):].strip()
+        if c:
+            parts.append(f"Prior: {_head_tail(c)}")
     if goal:
         parts.append(f"Goal: {goal}")
     progress = _digest_messages(msgs)
     if progress:
         parts.append(f"Progress: {progress}")
-    if nxt and nxt != goal:
+    # Suppress Next only when it's literally the SAME turn as Goal — compare FULL
+    # content, not the 120-char display lines, so two distinct turns that happen to
+    # share a prefix aren't wrongly merged (losing the most recent intent).
+    same_as_goal = bool(users) and (
+        len(users) < 2
+        or (users[-1].get("content") or users[-1].get("text") or "")
+        == (users[0].get("content") or users[0].get("text") or ""))
+    if nxt and not same_as_goal:
         parts.append(f"Next: {nxt}")
-    return " | ".join(parts) if parts else _digest_messages(msgs)
+    return " | ".join(parts) if parts else (
+        _digest_messages(msgs) or "(no summarizable content)")
 
 
 def _outline_files(files) -> str:
