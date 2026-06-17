@@ -1,9 +1,8 @@
 {
   "mcpServers": {
     "code-review-graph": {
-      "command": "uvx",
+      "command": "/Users/varunkumar/ai_pos_system/adf-framework/.venv-codereview/bin/code-review-graph",
       "args": [
-        "code-review-graph",
         "serve"
       ],
       "cwd": "/Users/varunkumar/ai_pos_system/adf-framework",
