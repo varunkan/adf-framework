@@ -49,6 +49,43 @@ void main() {
         LearningStore(tempLearnings.path),
       );
 
+  CrewAgent agent(String name, {List<String> needs = const []}) => CrewAgent(
+        name: name,
+        role: name,
+        phase: 1,
+        needs: needs,
+        run: () async => <String>[],
+      );
+
+  test('buildExecutionWaves groups independent agents into one parallel wave', () {
+    final waves = AgentCrew.buildExecutionWaves([
+      agent('a'),
+      agent('b', needs: ['a']),
+      agent('c', needs: ['a']),
+      agent('d', needs: ['b', 'c']),
+    ]);
+    expect(waves[0], ['a']);
+    expect(waves[1].toSet(), {'b', 'c'});
+    expect(waves[2], ['d']);
+  });
+
+  test('buildExecutionWaves rejects a self-dependency', () {
+    expect(() => AgentCrew.buildExecutionWaves([agent('a', needs: ['a'])]),
+        throwsArgumentError);
+  });
+
+  test('buildExecutionWaves rejects an unknown dependency', () {
+    expect(() => AgentCrew.buildExecutionWaves([agent('a', needs: ['ghost'])]),
+        throwsArgumentError);
+  });
+
+  test('buildExecutionWaves detects a cycle', () {
+    expect(
+        () => AgentCrew.buildExecutionWaves(
+            [agent('a', needs: ['b']), agent('b', needs: ['a'])]),
+        throwsArgumentError);
+  });
+
   test('crew runs subagents in parallel dependency waves', () async {
     final summary = await buildCrew().run(id);
 

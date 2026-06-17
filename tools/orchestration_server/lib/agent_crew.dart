@@ -136,29 +136,65 @@ class AgentCrew {
         ),
       ];
 
+  /// Plan the crew's parallel execution waves with EXPLICIT validation (Kahn's
+  /// algorithm): each wave is the set of agents whose dependencies are all met by
+  /// earlier waves, so a wave runs fully in parallel. Throws [ArgumentError] naming
+  /// the offending agents on a self-dependency, an unknown dependency, or a cycle —
+  /// instead of the old implicit "empty wave" StateError mid-run. Pure + static, so
+  /// the scheduling is unit-testable. (Adopted from oh-my-pi's swarm/dag.ts;
+  /// see docs/ADF_VS_OH_MY_PI.md §5.10.)
+  static List<List<String>> buildExecutionWaves(List<CrewAgent> agents) {
+    final names = agents.map((a) => a.name).toSet();
+    final deps = <String, Set<String>>{};
+    for (final a in agents) {
+      if (a.needs.contains(a.name)) {
+        throw ArgumentError('crew agent "${a.name}" depends on itself');
+      }
+      for (final n in a.needs) {
+        if (!names.contains(n)) {
+          throw ArgumentError('crew agent "${a.name}" needs unknown agent "$n"');
+        }
+      }
+      deps[a.name] = a.needs.toSet();
+    }
+    final done = <String>{};
+    final waves = <List<String>>[];
+    final remaining = agents.map((a) => a.name).toList();
+    while (remaining.isNotEmpty) {
+      final wave =
+          remaining.where((n) => deps[n]!.every(done.contains)).toList();
+      if (wave.isEmpty) {
+        throw ArgumentError(
+            'crew dependency cycle among: ${remaining.join(', ')}');
+      }
+      waves.add(wave);
+      done.addAll(wave);
+      remaining.removeWhere(wave.contains);
+    }
+    return waves;
+  }
+
   Future<Map<String, dynamic>> run(String id) async {
     final started = DateTime.now();
     final crew = buildCrew(id);
-    final doneAgents = <String>{};
     final agentResults = <Map<String, dynamic>>[];
     final waves = <List<String>>[];
 
-    final remaining = [...crew];
     final crewBlockers = <String>[];
-    while (remaining.isNotEmpty && crewBlockers.isEmpty) {
-      final wave = remaining
-          .where((a) => a.needs.every(doneAgents.contains))
-          .toList();
-      if (wave.isEmpty) {
-        throw StateError('crew dependency cycle: '
-            '${remaining.map((a) => a.name).join(', ')}');
-      }
-      waves.add(wave.map((a) => a.name).toList());
+    final byName = {for (final a in crew) a.name: a};
+    // Plan all execution waves once (validated: self-dep / unknown-dep / cycle all
+    // throw a descriptive error here, before any agent runs), then execute them in
+    // order — stopping after a wave that produced a blocker.
+    final plan = buildExecutionWaves(crew);
+    for (final waveNames in plan) {
+      if (crewBlockers.isNotEmpty) break;
+      final wave = [for (final n in waveNames) byName[n]!];
+      waves.add(waveNames);
       traces?.append(
         featureId: id,
         name: 'crew.wave_start',
         event: 'crew',
-        message: 'Wave ${waves.length}: ${wave.map((a) => a.name).join(', ')}',
+        message: 'Wave ${waves.length}: ${waveNames.join(', ')}',
       );
       // All agents in a wave run concurrently, each under the budget.
       final results =
@@ -184,11 +220,8 @@ class AgentCrew {
             kind: 'failure',
             blockers: [blocker],
           );
-        } else {
-          doneAgents.add(r['agent'] as String);
         }
       }
-      remaining.removeWhere((a) => doneAgents.contains(a.name));
     }
 
     // Machine-validate, then advance gates exactly like a human-led run.
