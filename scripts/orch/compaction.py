@@ -132,6 +132,68 @@ def _digest_messages(msgs) -> str:
     return body[:600]
 
 
+# Structured-section summary templates (adopted from oh-my-pi's compaction-summary /
+# compaction-update-summary; see docs/ADF_VS_OH_MY_PI.md §5.5). A model `summarizer`
+# is fed these so the fold captures task STATE (goal/progress/decisions/next) instead
+# of a flat first-line digest, and a re-fold updates the prior summary LOSSLESSLY.
+COMPACTION_SUMMARY_TEMPLATE = (
+    "Summarize the conversation so far into these exact sections, preserving every "
+    "detail needed to continue the work. Output ONLY the sections:\n"
+    "Goal: <the overall objective>\n"
+    "Constraints: <hard requirements / decisions that must hold>\n"
+    "Progress: Done — <…>; In Progress — <…>; Blocked — <…>\n"
+    "Key Decisions: <choices made and why>\n"
+    "Next Steps: <what to do next>\n"
+    "Critical Context: <file paths, names, values needed to resume>"
+)
+COMPACTION_UPDATE_TEMPLATE = (
+    "Update the previous summary with the new turns. You MUST preserve all "
+    "information from the previous summary; only move items from In Progress to "
+    "Done and append new facts — never drop earlier context. Output ONLY the same "
+    "sections (Goal, Constraints, Progress, Key Decisions, Next Steps, Critical "
+    "Context)."
+)
+
+
+def _summary_body(msg) -> str:
+    """The body of a prior `[compacted N earlier turn(s)] <body>` summary message."""
+    c = msg.get("content") or msg.get("text") or ""
+    return c.split("] ", 1)[-1] if "] " in c else c
+
+
+def _summary_prompt(turns_digest, carried="") -> str:
+    """Wrap the foldable turns in the structured template for a model summarizer;
+    on a re-fold (a prior summary exists), use the lossless update template."""
+    if carried:
+        return (COMPACTION_UPDATE_TEMPLATE
+                + f"\n\n<previous-summary>\n{carried}\n</previous-summary>"
+                + f"\n\n<new-turns>\n{turns_digest}\n</new-turns>")
+    return COMPACTION_SUMMARY_TEMPLATE + f"\n\n<turns>\n{turns_digest}\n</turns>"
+
+
+def _structured_digest(msgs, carried="") -> str:
+    """Deterministic OFFLINE structured digest (no model call): Goal (first user
+    turn), Progress (per-turn first lines), Next (last user turn) — carrying any
+    prior summary forward so a re-fold keeps earlier state. Replaces the flat
+    600-char digest so task state survives a fold even at $0."""
+    def line(m):
+        return _first_line(m.get("content") or m.get("text") or "", 120)
+    users = [m for m in msgs if m.get("role") == "user"]
+    goal = line(users[0]) if users else (line(msgs[0]) if msgs else "")
+    nxt = line(users[-1]) if users else ""
+    parts = []
+    if carried:
+        parts.append(f"Prior: {carried[:300]}")
+    if goal:
+        parts.append(f"Goal: {goal}")
+    progress = _digest_messages(msgs)
+    if progress:
+        parts.append(f"Progress: {progress}")
+    if nxt and nxt != goal:
+        parts.append(f"Next: {nxt}")
+    return " | ".join(parts) if parts else _digest_messages(msgs)
+
+
 def _outline_files(files) -> str:
     lines = []
     for path, content in files:
@@ -180,15 +242,19 @@ def compact_messages(messages, budget=None, *, preserve_last=2, summarizer=None)
     non_system = [m for m in messages if m.get("role") != "system"]
     tail = non_system[-preserve_last:] if preserve_last else []
     middle = non_system[:-preserve_last] if preserve_last else list(non_system)
+    prior = [m for m in middle if _is_summary(m)]
     foldable = [m for m in middle if not _is_summary(m)]
     if before <= budget or not foldable:
         return CompactionResult(messages, before, before, 0, "", False)
 
     n = len(foldable)
+    # Carry any earlier `[compacted ...]` summary FORWARD — the old code dropped it
+    # on a re-fold (lossy); now its captured state is preserved (§5.5).
+    carried = " ".join(_summary_body(m) for m in prior).strip()
     if summarizer:
-        body = summarizer(_digest_messages(foldable))
+        body = summarizer(_summary_prompt(_digest_messages(foldable), carried))
     else:
-        body = _digest_messages(foldable)
+        body = _structured_digest(foldable, carried)
     content = f"{SUMMARY_PREFIX} {n} earlier turn(s)] {body}"
     summary_msg = {"role": "user", "content": content}
     items = system + [summary_msg] + tail

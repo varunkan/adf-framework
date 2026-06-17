@@ -126,6 +126,40 @@ class CompactMessages(unittest.TestCase):
             res.summary,
             cx.compact_messages(self.messages, budget=300, preserve_last=2).summary)
 
+    def test_offline_summary_is_structured(self):
+        # 5.5: the offline digest carries task state (Goal/Progress), not a flat blob.
+        res = cx.compact_messages(self.messages, budget=300, preserve_last=2)
+        self.assertIn("Goal:", res.summary)
+        self.assertIn("Progress:", res.summary)
+
+    def test_summarizer_receives_structured_template(self):
+        # 5.5: a model summarizer is fed the section template (so it emits state).
+        seen = {}
+
+        def cap(text):
+            seen["t"] = text
+            return "MODEL_SUMMARY"
+
+        cx.compact_messages(self.messages, budget=300, preserve_last=2,
+                            summarizer=cap)
+        self.assertIn("Goal:", seen["t"])
+        self.assertIn("Next Steps:", seen["t"])
+
+    def test_refold_carries_prior_summary_forward_losslessly(self):
+        # 5.5: a second fold after more turns must NOT drop the first summary.
+        once = cx.compact_messages(self.messages, budget=300, preserve_last=2)
+        # Append fresh oversized turns and re-fold.
+        grown = once.items + [
+            _msg("user" if i % 2 == 0 else "assistant", _big(f"more{i}", 800))
+            for i in range(4)
+        ]
+        twice = cx.compact_messages(grown, budget=300, preserve_last=2)
+        self.assertTrue(twice.did_compact)
+        # exactly one summary again, and it carries the earlier summary's content
+        middle = [m for m in twice.items if "compacted" in (m.get("content") or "").lower()]
+        self.assertEqual(len(middle), 1)
+        self.assertIn("Prior:", middle[0]["content"])
+
 
 class CompactFiles(unittest.TestCase):
     def setUp(self):
