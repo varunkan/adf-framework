@@ -390,11 +390,38 @@ def scaffold_app(app_dir, tpl_dir):
     # leftover sample `items` table lingers in a fresh app's database).
     with open(os.path.join(app_dir, "schema.sql"), "w", encoding="utf-8") as f:
         f.write("-- schema for this app (generated at build time)\n")
+    # Per-app auth secret: every app that ships the auth primitives signs sessions
+    # with its OWN random secret instead of a world-known dev default (auth.mjs
+    # reads ADF_AUTH_SECRET → this file → a fail-loud ephemeral fallback).
+    if os.path.isfile(os.path.join(app_dir, "server", "auth.mjs")):
+        ensure_auth_secret(app_dir)
     # 10-50x first-build win + deterministic offline install: clone the template's
     # already-installed node_modules into the app so `npm ci` is skipped entirely
     # (the deps are pinned + identical for every app). On APFS this is an instant,
     # copy-on-write clone (no extra disk until a file is touched).
     warm_node_modules(tpl_dir, app_dir)
+
+
+AUTH_SECRET_FILE = ".adf-auth-secret"
+
+
+def ensure_auth_secret(app_dir):
+    """Write a per-app HMAC signing secret (32 random bytes, hex) the first time so
+    every generated app signs sessions with its OWN secret, not a world-known dev
+    default. Idempotent — never rotates an existing secret (that would invalidate
+    live sessions). The file is a dotfile, so the editable-file walker
+    (`current_app_files`) already excludes it from the policy scan, the edit surface,
+    and the proof seal. Returns the secret path."""
+    import secrets
+    p = os.path.join(app_dir, AUTH_SECRET_FILE)
+    if not os.path.isfile(p) or os.path.getsize(p) == 0:
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(secrets.token_hex(32))
+        try:
+            os.chmod(p, 0o600)
+        except OSError:
+            pass
+    return p
 
 
 def warm_node_modules(tpl_dir, app_dir):

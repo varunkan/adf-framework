@@ -11,6 +11,9 @@
 //   // login:   const row = db.prepare('SELECT * FROM users WHERE email=?').get(email)
 //   //          if (verifyPassword(plain, row.password)) token = signToken({ uid: row.id })
 import { scryptSync, randomBytes, timingSafeEqual, createHmac } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
 
 const KEYLEN = 64
 
@@ -31,8 +34,30 @@ export function verifyPassword(password, stored) {
 }
 
 // Sessions: a compact HMAC-signed token (`<base64url body>.<base64url sig>`), no
-// JWT dependency. Set ADF_AUTH_SECRET in production; the dev default is obvious.
-const SECRET = process.env.ADF_AUTH_SECRET || 'adf-dev-secret-set-ADF_AUTH_SECRET'
+// JWT dependency. The signing secret is resolved in priority order:
+//   1. the ADF_AUTH_SECRET env var — set this in production / CI;
+//   2. a per-app `.adf-auth-secret` file (random 32 bytes) that ADF writes at
+//      scaffold time, next to the app root — every generated app gets its OWN
+//      secret, so a token signed for one app can never be replayed against another;
+//   3. a fail-LOUD ephemeral random secret (warns; sessions won't survive a restart).
+// There is deliberately NO world-known constant fallback — a shared default secret
+// would let anyone forge a valid session against every app that shipped it.
+function _resolveSecret() {
+  const fromEnv = (process.env.ADF_AUTH_SECRET || '').trim()
+  if (fromEnv) return fromEnv
+  try {
+    const file = join(dirname(fileURLToPath(import.meta.url)), '..', '.adf-auth-secret')
+    const fromFile = readFileSync(file, 'utf8').trim()
+    if (fromFile) return fromFile
+  } catch { /* app wasn't scaffolded with a secret file — fall through */ }
+  console.warn(
+    '[adf-auth] No ADF_AUTH_SECRET env var and no .adf-auth-secret file found; ' +
+    'using an ephemeral random secret. Sessions will NOT survive a restart. Set ' +
+    'ADF_AUTH_SECRET (or let ADF scaffold .adf-auth-secret) for stable sessions.')
+  return randomBytes(32).toString('hex')
+}
+
+const SECRET = _resolveSecret()
 
 function _b64url(buf) {
   return Buffer.from(buf).toString('base64url')
