@@ -248,7 +248,8 @@ class FeatureStore {
 
 $t
 ''';
-    file.writeAsStringSync(
+    writeFileAtomic(
+      file,
       existing.endsWith('\n') ? '$existing$block' : '$existing\n$block',
     );
   }
@@ -263,7 +264,7 @@ $t
     final list = readApprovals(id);
     list.add(entry);
     final file = File('${featurePath(id)}/approvals.json');
-    file.writeAsStringSync(const JsonEncoder.withIndent('  ').convert(list));
+    writeFileAtomic(file, const JsonEncoder.withIndent('  ').convert(list));
   }
 
   String? readLatestJudgeVerdict(String id) {
@@ -360,7 +361,8 @@ $t
 
   void writePhaseRequest(String id, int phase) {
     final file = File('${featurePath(id)}/phase-request.json');
-    file.writeAsStringSync(
+    writeFileAtomic(
+      file,
       const JsonEncoder.withIndent('  ').convert({
         'action': 'run_phase',
         'phase': phase,
@@ -377,7 +379,7 @@ $t
     updated['consumed'] = true;
     updated['consumed_at'] = DateTime.now().toUtc().toIso8601String();
     final file = File('${featurePath(id)}/phase-request.json');
-    file.writeAsStringSync(const JsonEncoder.withIndent('  ').convert(updated));
+    writeFileAtomic(file, const JsonEncoder.withIndent('  ').convert(updated));
   }
 
   Map<String, dynamic>? readRunStatus(String id) {
@@ -389,7 +391,7 @@ $t
   void writeRunStatus(String id, Map<String, dynamic> status) {
     final file = File('${featurePath(id)}/run-status.json');
     file.parent.createSync(recursive: true);
-    file.writeAsStringSync(const JsonEncoder.withIndent('  ').convert(status));
+    writeFileAtomic(file, const JsonEncoder.withIndent('  ').convert(status));
   }
 
   void appendRunLog(String id, Map<String, dynamic> entry) {
@@ -403,13 +405,14 @@ $t
     if (!file.existsSync()) return;
     final lines = file.readAsLinesSync();
     if (lines.length <= maxLines) return;
-    file.writeAsStringSync('${lines.sublist(lines.length - maxLines).join('\n')}\n');
+    writeFileAtomic(
+        file, '${lines.sublist(lines.length - maxLines).join('\n')}\n');
   }
 
   void writeLastAgentResponse(String id, String text) {
     final file = File('${featurePath(id)}/last-agent-response.md');
     file.parent.createSync(recursive: true);
-    file.writeAsStringSync(text.trim().isEmpty ? '' : '${text.trim()}\n');
+    writeFileAtomic(file, text.trim().isEmpty ? '' : '${text.trim()}\n');
   }
 
   String? readLastAgentResponse(String id) {
@@ -545,7 +548,7 @@ $t
       }
     }
     if (changed) {
-      file.writeAsStringSync('${updated.join('\n')}\n');
+      writeFileAtomic(file, '${updated.join('\n')}\n');
     }
   }
 
@@ -606,7 +609,7 @@ $t
         updated.add(line);
       }
     }
-    if (changed) file.writeAsStringSync('${updated.join('\n')}\n');
+    if (changed) writeFileAtomic(file, '${updated.join('\n')}\n');
   }
 
   void updateCommandMeta(
@@ -640,7 +643,7 @@ $t
         updated.add(line);
       }
     }
-    file.writeAsStringSync('${updated.join('\n')}\n');
+    writeFileAtomic(file, '${updated.join('\n')}\n');
   }
 
   void markCommandExecuted(String id, String commandId, {String? status}) {
@@ -661,7 +664,7 @@ $t
         updated.add(line);
       }
     }
-    file.writeAsStringSync('${updated.join('\n')}\n');
+    writeFileAtomic(file, '${updated.join('\n')}\n');
   }
 
   bool artifactExists(String relativePath) {
@@ -725,7 +728,7 @@ $t
 $requirement
 ''');
 
-    File('${root.path}/approvals.json').writeAsStringSync('[]\n');
+    writeFileAtomic(File('${root.path}/approvals.json'), '[]\n');
 
     // Spec Kit feature directory + pointer
     final specRel = 'specs/$id';
