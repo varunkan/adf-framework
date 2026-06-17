@@ -295,9 +295,15 @@ def _react_build_messages(fid, ctx):
         "files:\n<<<FILE: relative/path>>>\n<full file content>\n<<<END>>>\n"
         "No markdown fences, no commentary outside file blocks."
     )
+    # DET-2: detect a deterministic feature shape and pin the exact schema/route/
+    # hook skeleton so the model fills domain logic, not boilerplate. Empty for
+    # the generic fallback (keeps the base deliverables).
+    import feature_shapes
+    _shape, _contract = feature_shapes.contract_for(ctx, fid)
+    shape_block = f"{_contract}\n\n" if _contract else ""
     user = (
         f"Implement the feature `{fid}` as a real React+Vite+Tailwind app backed by a "
-        f"Fastify + SQLite API.\n\n{_spec_block(ctx)}\n\n"
+        f"Fastify + SQLite API.\n\n{_spec_block(ctx)}\n\n{shape_block}"
         "Deliver (paths relative to the app root):\n"
         "- `schema.sql` — the SQLite tables the spec implies (executed at boot). Use "
         "`CREATE TABLE IF NOT EXISTS`.\n"
