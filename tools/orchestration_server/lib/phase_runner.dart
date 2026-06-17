@@ -25,8 +25,10 @@ class PhaseRunner {
   /// Outer self-heal attempts the Dart layer makes after a runner failure. The
   /// file-writing runner ALREADY self-heals internally (ADF_RUNNER_FIX_ITERS,
   /// default 3), so a hardcoded 3 here meant up to ~9 cold rebuilds per phase.
-  /// Configurable via ORCH_MAX_HEAL_ATTEMPTS; the local-LLM launcher sets it to 1
-  /// (cursor/claude backends keep the default 3 since they re-diagnose).
+  /// Configurable via ORCH_MAX_HEAL_ATTEMPTS; the local-LLM launcher now defaults
+  /// it to 3 (matching the hardcoded fallback) so a transient runner failure
+  /// retries instead of giving up after one attempt — see the "build stopped
+  /// after 1 attempt" fix in run_server_local_llm.sh.
   int get maxHealAttempts {
     final raw = int.tryParse(_env['ORCH_MAX_HEAL_ATTEMPTS']?.trim() ?? '');
     return raw != null && raw >= 0 ? raw : 3;
