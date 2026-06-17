@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:orchestration_server/adf_brain.dart';
 import 'package:orchestration_server/agent_crew.dart';
 import 'package:orchestration_server/app_runner.dart';
+import 'package:orchestration_server/approval_gate.dart';
 import 'package:orchestration_server/proof_check.dart';
 import 'package:orchestration_server/compaction.dart';
 import 'package:orchestration_server/app_data.dart';
@@ -1249,11 +1250,10 @@ Future<void> main(List<String> args) async {
       final decision = body['decision'] as String? ?? 'approved';
       // Governance: an unknown decision (e.g. 'reject' typo, 'deny') must NOT
       // silently no-op the gate and return 200 — it would bypass enforcement.
-      const validDecisions = {'approved', 'revise', 'rejected'};
-      if (!validDecisions.contains(decision)) {
+      if (!isValidDecision(decision)) {
         return _json({
           'error': 'invalid decision "$decision" — must be one of '
-              '${validDecisions.join(", ")}',
+              '${approvalDecisions.join(", ")}',
         }, status: 400);
       }
       final notes = body['notes'] as String? ?? '';
@@ -1278,42 +1278,37 @@ Future<void> main(List<String> args) async {
       final state = store.readState(id);
       final verdict = state['last_judge_verdict'] as String?;
 
-      if (decision == 'approved') {
-        if (phase >= 2 && phase <= 4 && !artifactWaiver) {
-          final checklist = await artifactValidator.checklist(id, phase);
-          if (checklist['pass'] != true) {
-            return _json(
-              {
-                'error':
-                    'Cannot approve: ADF artifact validator failed. Use artifact_waiver: true to override.',
-                'artifact_checklist': checklist,
-              },
-              status: 409,
-            );
-          }
-        }
-        if (verdict != 'pass' && !judgeWaiver) {
+      // Async precondition (stays in the route — it calls the validator and
+      // returns its checklist): approving phases 2–4 needs the artifacts to pass
+      // unless explicitly waived.
+      if (decision == 'approved' &&
+          phase >= 2 &&
+          phase <= 4 &&
+          !artifactWaiver) {
+        final checklist = await artifactValidator.checklist(id, phase);
+        if (checklist['pass'] != true) {
           return _json(
             {
               'error':
-                  'Cannot approve: BMAD verdict is not pass (current: $verdict). Use judge_waiver: true to override.',
+                  'Cannot approve: ADF artifact validator failed. Use artifact_waiver: true to override.',
+              'artifact_checklist': checklist,
             },
             status: 409,
           );
         }
       }
-
-      if (decision == 'revise' && !clientConfirmed) {
-        return _json(
-          {
-            'error':
-                'Client confirmation required before revise. Set client_confirmed: true after reviewing combined recommendation.',
-          },
-          status: 400,
-        );
+      // Pure preconditions (decision allowlist already enforced above): the judge
+      // verdict gate and the revise client-confirmation gate.
+      final gate = checkApprovalGate(
+        decision: decision,
+        verdict: verdict,
+        judgeWaiver: judgeWaiver,
+        clientConfirmed: clientConfirmed,
+      );
+      if (gate.blocked) {
+        return _json({'error': gate.reason}, status: gate.status);
       }
 
-      var sealApproval = false;
       store.appendApproval(id, {
         'phase': phase,
         'decision': decision,
@@ -1327,30 +1322,10 @@ Future<void> main(List<String> args) async {
               store.readCombinedRecommendation(id, phase: phase),
       });
 
-      if (decision == 'approved') {
-        store.setGateForPhase(state, phase, true);
-        state['awaiting_user'] = false;
-        state['pending_approval_phase'] = null;
-        sealApproval = true;
-        if (phase >= FeatureStore.lastPipelinePhase) {
-          state['current_phase'] = FeatureStore.lastPipelinePhase;
-          state['status'] = 'completed';
-        } else {
-          final current = (state['current_phase'] as num?)?.toInt() ?? 0;
-          if (current <= phase) {
-            state['current_phase'] = phase + 1;
-          }
-        }
-      } else if (decision == 'revise') {
-        state['pending_approval_phase'] = phase;
-        final rev = (state['phase_revision_count'] as num?)?.toInt() ?? 0;
-        state['phase_revision_count'] = rev + 1;
-        // Keep awaiting_user true so the approval bar stays if the follow-up command fails.
-        state['awaiting_user'] = true;
-      } else if (decision == 'rejected') {
-        state['status'] = 'rejected';
-        state['awaiting_user'] = false;
-      }
+      // Apply the state transition (gate set + advance/complete, revise bookkeeping,
+      // or terminal reject) — the unit-tested core in approval_gate.dart.
+      final sealApproval =
+          applyApprovalDecision(store, state, phase, decision);
 
       store.writeState(id, state);
       if (sealApproval) {
