@@ -508,13 +508,21 @@ def call_anthropic(messages, timeout):
         return None
     model = os.environ.get("ADF_RUNNER_CLAUDE_MODEL", "claude-opus-4-8")
     base = os.environ.get("ANTHROPIC_BASE_URL", ANTHROPIC_BASE).rstrip("/")
-    system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
+    system_text = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
     turns = [m for m in messages if m["role"] != "system"]
+    # Prompt caching: the system prompt is large and IDENTICAL across the (up to 3)
+    # self-heal turns, so mark it cacheable — the first turn writes the cache, the
+    # fix turns read it at ~10% input cost (~90% input-token saving on the prefix).
+    system = ([{"type": "text", "text": system_text,
+                "cache_control": {"type": "ephemeral"}}]
+              if system_text else system_text)
     log(f"using Anthropic model {model}")
     try:
         out = http_post_json(
             f"{base}/v1/messages",
-            {"x-api-key": key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"},
+            {"x-api-key": key, "anthropic-version": "2023-06-01",
+             "anthropic-beta": "prompt-caching-2024-07-31",
+             "Content-Type": "application/json"},
             {"model": model, "max_tokens": _max_tokens(), "system": system, "messages": turns},
             timeout,
         )
