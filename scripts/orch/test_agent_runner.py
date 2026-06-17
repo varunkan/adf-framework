@@ -5,6 +5,7 @@ PORT-aware generation prompt. Pure-function tests (no model calls):
     python3 scripts/orch/test_agent_runner.py
 """
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -422,6 +423,34 @@ class RetryAndClassify(unittest.TestCase):
         cap = float(os.environ.get("ADF_RUNNER_RETRY_CAP_SEC", "20"))
         self.assertEqual(
             ar._retry_backoff_seconds("rate_limit", 0, retry_after="9999"), cap)
+
+
+class OutputSinkSpill(unittest.TestCase):
+    """5.6 — verify logs keep the HEAD (where the first error is) + the tail, and
+    spill the complete log to disk; the old out[-3000:] kept only the tail."""
+
+    def _app(self):
+        d = tempfile.mkdtemp(prefix="adf-sink-")
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        return d
+
+    def test_short_text_passes_through_and_spills(self):
+        app = self._app()
+        s = ar._spill_and_bound(app, "build", "all good")
+        self.assertEqual(s, "all good")
+        with open(os.path.join(app, ".adf-logs", "build.log")) as f:
+            self.assertEqual(f.read(), "all good")
+
+    def test_long_text_keeps_head_and_tail_and_spills_full(self):
+        app = self._app()
+        full = "HEAD_ERROR " + ("x" * 5000) + " TAIL_SUMMARY"
+        s = ar._spill_and_bound(app, "test", full, head=60, tail=60)
+        self.assertIn("HEAD_ERROR", s)   # the first error — old tail-slice dropped it
+        self.assertIn("TAIL_SUMMARY", s)
+        self.assertIn("elided", s)
+        self.assertLess(len(s), len(full))
+        with open(os.path.join(app, ".adf-logs", "test.log")) as f:
+            self.assertEqual(f.read(), full)  # complete log preserved, nothing lost
 
 
 class FileWriteEvents(unittest.TestCase):

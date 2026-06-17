@@ -899,8 +899,40 @@ def _npm(app_root, args, timeout):
         return p.returncode == 0, (p.stdout + "\n" + p.stderr).strip()
     except FileNotFoundError:
         return False, "npm not found on PATH"
-    except subprocess.TimeoutExpired:
-        return False, f"npm {' '.join(args)} timed out after {timeout}s"
+    except subprocess.TimeoutExpired as e:
+        # Keep the partial output captured before the kill — the cause of a hang is
+        # often already on screen — rather than discarding it.
+        partial = ((e.stdout or "") if isinstance(e.stdout, str)
+                   else (e.stdout or b"").decode("utf-8", "replace"))
+        partial += ((e.stderr or "") if isinstance(e.stderr, str)
+                    else (e.stderr or b"").decode("utf-8", "replace"))
+        return False, (f"npm {' '.join(args)} timed out after {timeout}s\n"
+                       f"{partial.strip()}")
+
+
+def _spill_and_bound(app_root, label, text, head=1500, tail=1500):
+    """Write the FULL log to apps/<id>/.adf-logs/<label>.log and return a bounded
+    head+tail view of it. The old `out[-3000:]` kept only the TAIL — discarding the
+    head where the first real error usually is; this keeps both ends and elides the
+    middle, with a pointer to the complete on-disk log. (Adopted from oh-my-pi's
+    OutputSink; see docs/ADF_VS_OH_MY_PI.md §5.6.) `.adf-logs` is a dotfile dir, so
+    current_app_files already excludes it from the edit/proof/policy surface."""
+    text = text or ""
+    rel = None
+    try:
+        log_dir = os.path.join(app_root, ".adf-logs")
+        os.makedirs(log_dir, exist_ok=True)
+        path = os.path.join(log_dir, f"{label}.log")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+        rel = os.path.relpath(path, app_root)
+    except OSError:
+        rel = None
+    if len(text) <= head + tail:
+        return text
+    elided = len(text) - head - tail
+    where = f"full log: {rel}" if rel else "full log spill unavailable"
+    return f"{text[:head]}\n…[{elided} chars elided — {where}]…\n{text[-tail:]}"
 
 
 def _node_smoke_boot(app_root, secs=20, visual=True):
@@ -928,7 +960,8 @@ def _node_smoke_boot(app_root, secs=20, visual=True):
         while time.time() < deadline:
             if proc.poll() is not None:
                 out = proc.stdout.read() if proc.stdout else ""
-                return False, f"`node server/index.mjs` exited on launch:\n{out[-1500:]}"
+                return False, ("`node server/index.mjs` exited on launch:\n"
+                               + _spill_and_bound(app_root, "node-boot", out))
             try:
                 for path in ("/", "/api/health"):
                     with urllib.request.urlopen(
@@ -977,13 +1010,16 @@ def _react_verify(app_root, timeout=None):
     if not os.path.isdir(os.path.join(app_root, "node_modules")):
         ok, out = _npm(app_root, ["ci", "--no-audit", "--no-fund"], timeout)
         if not ok:
-            return False, f"DEPENDENCY INSTALL FAILED (npm ci):\n{out[-3000:]}"
+            return False, ("DEPENDENCY INSTALL FAILED (npm ci):\n"
+                           + _spill_and_bound(app_root, "npm-ci", out))
     ok, out = _npm(app_root, ["run", "build"], timeout)
     if not ok:
-        return False, f"BUILD FAILED (tsc --noEmit && vite build):\n{out[-3000:]}"
+        return False, ("BUILD FAILED (tsc --noEmit && vite build):\n"
+                       + _spill_and_bound(app_root, "build", out))
     ok, out = _npm(app_root, ["test"], timeout)
     if not ok:
-        return False, f"TESTS FAILED (vitest):\n{out[-3000:]}"
+        return False, ("TESTS FAILED (vitest):\n"
+                       + _spill_and_bound(app_root, "test", out))
     boot_ok, boot_msg = _node_smoke_boot(app_root)
     if not boot_ok:
         return False, f"BUILD + TESTS PASSED but SERVER BOOT FAILED:\n{boot_msg}"
