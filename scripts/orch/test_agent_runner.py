@@ -630,12 +630,22 @@ class CompletionAudit(unittest.TestCase):
         return d
 
     def test_single_record_requires_a_validation_test(self):
-        # bug#8: a PUT-200-only single-record test must be flagged (its shape
-        # contract demands PUT-invalid → 400).
-        app = self._app("PUT /api/settings 200 ok")
-        gaps = ar.audit_completion(app, ar.STACK_REACT, self.SINGLE_CTX, "settings")
-        self.assertTrue(any("400" in g for g in gaps))
-        full = self._app("PUT /api/settings 200; PUT invalid 400")
+        # bug#8 + SOLID-1: a PUT-200-only single-record test is flagged (its shape
+        # contract demands PUT-invalid → 400); a real PUT + 400 assertion passes.
+        vacuous = self._app(
+            "const r = await app.inject({ method: 'PUT', url: '/api/settings',"
+            " payload: { theme: 'dark' } });\n"
+            "expect(r.statusCode).toBe(200);")
+        gaps = ar.audit_completion(vacuous, ar.STACK_REACT, self.SINGLE_CTX,
+                                   "settings")
+        self.assertTrue(any("400" in g for g in gaps), gaps)
+        full = self._app(
+            "const r = await app.inject({ method: 'PUT', url: '/api/settings',"
+            " payload: { theme: 'dark' } });\n"
+            "expect(r.statusCode).toBe(200);\n"
+            "const bad = await app.inject({ method: 'PUT', url: '/api/settings',"
+            " payload: { theme: 123 } });\n"
+            "expect(bad.statusCode).toBe(400);")
         self.assertEqual(
             ar.audit_completion(full, ar.STACK_REACT, self.SINGLE_CTX, "settings"),
             [])
@@ -648,9 +658,33 @@ class CompletionAudit(unittest.TestCase):
         self.assertTrue(any("POST" in g for g in gaps))
         self.assertTrue(any(("400" in g or "404" in g) for g in gaps))
 
+    def test_mention_in_a_comment_is_not_real_coverage(self):
+        # SOLID-1: a test that only MENTIONS the verb/status in prose/comments but
+        # never actually injects/asserts it must STILL be flagged (the old regex
+        # passed on bare presence — `\b400\b` in a comment counted as coverage).
+        app = self._app(
+            "it('lists', async () => {\n"
+            "  // TODO: also POST and assert a 400 on invalid input\n"
+            "  const r = await app.inject({ method: 'GET', url: '/api/tasks' });\n"
+            "  expect(r.statusCode).toBe(200);\n"
+            "});")
+        gaps = ar.audit_completion(app, ar.STACK_REACT, self.CRUD_CTX, "todo")
+        self.assertTrue(any("POST" in g for g in gaps), gaps)
+        self.assertTrue(any(("400" in g or "404" in g) for g in gaps), gaps)
+
     def test_complete_crud_test_has_no_gaps(self):
-        app = self._app("GET /api/tasks 200; POST create 201; "
-                        "POST invalid 400; DELETE missing 404")
+        app = self._app(
+            "it('creates and validates', async () => {\n"
+            "  const c = await app.inject({ method: 'POST', url: '/api/tasks',"
+            " payload: { title: 'x' } });\n"
+            "  expect(c.statusCode).toBe(201);\n"
+            "  const bad = await app.inject({ method: 'POST', url: '/api/tasks',"
+            " payload: {} });\n"
+            "  expect(bad.statusCode).toBe(400);\n"
+            "  const del = await app.inject({ method: 'DELETE',"
+            " url: '/api/tasks/999' });\n"
+            "  expect(del.statusCode).toBe(404);\n"
+            "});")
         self.assertEqual(
             ar.audit_completion(app, ar.STACK_REACT, self.CRUD_CTX, "todo"), [])
 

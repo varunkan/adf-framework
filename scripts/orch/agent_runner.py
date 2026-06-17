@@ -1368,24 +1368,43 @@ def assemble_edit(app_dir, fid, files, instruction, stack=None):
                                file_summary=outline, components=components)
 
 
-# Per-shape REQUIRED test signals for the completion audit (5.9). Lenient by design
-# (presence of the verb/status anywhere in the test text), so it catches a VACUOUS
-# test — one that only asserts GET→200 — without false-flagging a real test suite.
+# Per-shape REQUIRED test signals for the completion audit (5.9), STRUCTURAL (not
+# bare presence): a real `app.inject({ method: 'POST' })` request and a status code
+# inside an assertion matcher — so a number mentioned in a COMMENT, or the verb in
+# prose, no longer counts as coverage (SOLID-1). Still lenient enough not to
+# false-flag a genuine test suite (the template mandates app.inject + statusCode).
+def _method_signal(method):
+    """A real request for `method` — `method: 'POST'` in an app.inject — not the
+    verb mentioned in prose/a comment."""
+    return re.compile(r"method\s*:\s*['\"]" + method + r"['\"]", re.I)
+
+
+def _status_asserted(*codes):
+    """A status code asserted: inside a matcher call (`toBe(400)`/`toEqual(404)`) or
+    compared against `statusCode` on the same line — NOT a bare number in a comment."""
+    alt = "|".join(codes)
+    return re.compile(
+        r"(?:to(?:be|equal|strictequal))\s*\(\s*(?:" + alt + r")\b"
+        r"|statuscode[^\n]{0,20}\b(?:" + alt + r")\b"
+        r"|\b(?:" + alt + r")\b[^\n]{0,20}statuscode", re.I)
+
+
 _AUDIT_REQUIRED = {
     "crud-list": [
-        ("a POST/create test", re.compile(r"\bpost\b", re.I)),
-        ("an error-case test (400/404)", re.compile(r"\b(?:400|404)\b")),
+        ("a POST/create test", _method_signal("POST")),
+        ("an error-case test (400/404)", _status_asserted("400", "404")),
     ],
     "form": [
-        ("a POST/submit test", re.compile(r"\bpost\b", re.I)),
-        ("a validation test (400)", re.compile(r"\b400\b")),
+        ("a POST/submit test", _method_signal("POST")),
+        ("a validation test (400)", _status_asserted("400")),
     ],
     "single-record": [
-        ("a PUT/update test", re.compile(r"\bput\b", re.I)),
-        ("a validation test (400)", re.compile(r"\b400\b")),
+        ("a PUT/update test", _method_signal("PUT")),
+        ("a validation test (400)", _status_asserted("400")),
     ],
     "dashboard": [
-        ("a GET/summary test", re.compile(r"\bget\b", re.I)),
+        ("a GET/summary test", _method_signal("GET")),
+        ("a 200 assertion", _status_asserted("200")),
     ],
 }
 
