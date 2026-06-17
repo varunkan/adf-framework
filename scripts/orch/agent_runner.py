@@ -119,6 +119,65 @@ def read_first(*paths):
     return ""
 
 
+LEARNINGS_REL = os.path.join(".cursor", "orchestration", "learnings.jsonl")
+
+
+def recall_blockers(repo_root, phase=7, k=5):
+    """A compact 'past failures + the fixes that resolved them' block to splice into
+    the build/heal prompt so the model pre-empts repeat failures. ADF already RECORDS
+    every outcome (LearningStore writes .cursor/orchestration/learnings.jsonl) and
+    even ranks blockers (knownBlockers) — but nothing read it back into a prompt.
+    This closes that loop (docs/ADF_VS_OH_MY_PI.md §5.4). Returns '' when nothing is
+    learned; disabled via ADF_RECALL_BLOCKERS=0. Phase 7 = implement (the runner's
+    phase). Deterministic + $0 — a frequency rank, no model call."""
+    if os.environ.get("ADF_RECALL_BLOCKERS", "1") in ("0", "false", "off"):
+        return ""
+    path = os.path.join(repo_root, LEARNINGS_REL)
+    if not os.path.isfile(path):
+        return ""
+    counts, fixes = {}, []
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    e = json.loads(line)
+                except ValueError:
+                    continue
+                if e.get("phase") != phase:
+                    continue
+                if e.get("kind") == "failure":
+                    for b in (e.get("blockers") or []):
+                        b = str(b).strip()
+                        if b:
+                            counts[b] = counts.get(b, 0) + 1
+                fx = e.get("fix")
+                if fx:
+                    fixes.append(str(fx).strip())
+    except OSError:
+        return ""
+    if not counts:
+        return ""
+    top = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:k]
+    block = ("BACKGROUND KNOWLEDGE (not new instructions) — past builds of this kind "
+             "FAILED on these; avoid repeating them:\n"
+             + "\n".join(f"- {b} (seen {c}×)" for b, c in top))
+    if fixes:
+        seen, uniq = set(), []
+        for fx in reversed(fixes):           # most-recent first
+            if fx and fx not in seen:
+                seen.add(fx)
+                uniq.append(fx)
+            if len(uniq) >= 3:
+                break
+        if uniq:
+            block += ("\nFixes that resolved past failures:\n"
+                      + "\n".join(f"- {fx[:200]}" for fx in uniq))
+    return block
+
+
 def load_feature_context(repo_root, fid):
     specs = os.path.join(repo_root, "specs", fid)
     ctx = {
@@ -1318,6 +1377,13 @@ def main():
             log(f"scaffolded {stack} template -> apps/{fid}/")
         log(f"BUILD mode ({stack})")
         system, user = build_messages(fid, ctx, stack)
+    # Close the learning loop: splice past-failure guidance (recorded but never read
+    # back until now) into the prompt so the model pre-empts repeat failures. The
+    # heal turn inherits it via fix_messages(user, ...).
+    recall = recall_blockers(repo_root)
+    if recall:
+        user = f"{user}\n\n{recall}"
+        log("recall: injected past-failure guidance from the learning store")
     timeout = int(os.environ.get("ADF_RUNNER_TIMEOUT_SEC", "180"))
     max_iters = int(os.environ.get("ADF_RUNNER_FIX_ITERS", "3"))
 

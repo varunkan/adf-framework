@@ -4,6 +4,7 @@ PORT-aware generation prompt. Pure-function tests (no model calls):
 
     python3 scripts/orch/test_agent_runner.py
 """
+import json
 import os
 import shutil
 import sys
@@ -451,6 +452,48 @@ class OutputSinkSpill(unittest.TestCase):
         self.assertLess(len(s), len(full))
         with open(os.path.join(app, ".adf-logs", "test.log")) as f:
             self.assertEqual(f.read(), full)  # complete log preserved, nothing lost
+
+
+class RecallBlockers(unittest.TestCase):
+    """5.4 — past failures recorded in learnings.jsonl are read back into the build
+    prompt (the loop ADF collected signal for but never closed)."""
+
+    def _repo(self, entries):
+        d = tempfile.mkdtemp(prefix="adf-recall-")
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        p = os.path.join(d, ".cursor", "orchestration")
+        os.makedirs(p)
+        with open(os.path.join(p, "learnings.jsonl"), "w") as f:
+            for e in entries:
+                f.write(json.dumps(e) + "\n")
+        return d
+
+    def test_empty_when_no_learnings(self):
+        d = tempfile.mkdtemp(prefix="adf-recall-")
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        self.assertEqual(ar.recall_blockers(d), "")
+
+    def test_ranks_phase_failures_and_includes_fix(self):
+        repo = self._repo([
+            {"phase": 7, "kind": "failure", "blockers": ["tsc: missing type X"]},
+            {"phase": 7, "kind": "failure",
+             "blockers": ["tsc: missing type X", "vitest red"]},
+            {"phase": 7, "kind": "heal", "fix": "add the X interface to types.ts"},
+            {"phase": 6, "kind": "failure", "blockers": ["wrong-phase blocker"]},
+        ])
+        block = ar.recall_blockers(repo, phase=7)
+        self.assertIn("tsc: missing type X (seen 2×)", block)  # ranked first
+        self.assertIn("vitest red", block)
+        self.assertIn("add the X interface", block)            # fix surfaced
+        self.assertNotIn("wrong-phase blocker", block)         # other phase excluded
+
+    def test_disabled_by_env(self):
+        repo = self._repo([{"phase": 7, "kind": "failure", "blockers": ["x"]}])
+        os.environ["ADF_RECALL_BLOCKERS"] = "0"
+        try:
+            self.assertEqual(ar.recall_blockers(repo, phase=7), "")
+        finally:
+            os.environ.pop("ADF_RECALL_BLOCKERS", None)
 
 
 class FileWriteEvents(unittest.TestCase):
