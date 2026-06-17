@@ -182,8 +182,14 @@ class ScaffoldThenDiff(unittest.TestCase):
         # the sample feature is stripped so the generated one is clean.
         self.assertFalse(os.path.isfile(os.path.join(self.app, "server/api/items.mjs")))
         self.assertFalse(os.path.isfile(os.path.join(self.app, "test/api.test.mjs")))
-        # heavy dirs never copied.
-        self.assertFalse(os.path.isdir(os.path.join(self.app, "node_modules")))
+        # node_modules is WARM-CLONED from the template (PERF: npm ci is skipped).
+        # The template carries one in normal use; tolerate its absence in a bare
+        # test checkout (then it's simply not cloned — both are valid).
+        tpl_has_nm = os.path.isdir(os.path.join(
+            ar.template_dir(REPO_ROOT, REPO_ROOT, ar.STACK_REACT), "node_modules"))
+        self.assertEqual(
+            os.path.isdir(os.path.join(self.app, "node_modules")), tpl_has_nm,
+            "node_modules should be cloned iff the template has one")
         # schema is reset (no leftover sample `items` table).
         schema = open(os.path.join(self.app, "schema.sql")).read().lower()
         self.assertNotIn("create table", schema)
