@@ -446,6 +446,17 @@ Future<void> main(List<String> args) async {
     if (summary['stop_reason'] != 'implementation_handoff') return;
     final state = store.readState(id);
     if (autoApproveFor(state)) {
+      // Phase boundary (spec → implement): auto-compact the app's accumulated
+      // context if it's over budget, before the implement run. Best-effort + a
+      // no-op when under budget or ADF_AUTO_COMPACT is off.
+      try {
+        final c = await compaction.autoCompactIfNeeded(id);
+        if (c['did'] == true) {
+          store.appendSystemMessage(
+            id, '🗜 Auto-compacted context at the implement boundary.',
+            source: 'compaction');
+        }
+      } catch (_) {/* never block the build on compaction */}
       // Proceed straight to writing code.
       if (!autoRunner) return;
       try {
