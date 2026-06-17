@@ -629,6 +629,27 @@ class CompletionAudit(unittest.TestCase):
             f.write(test_body)
         return d
 
+    AUTH_CTX = {"requirement": "A login and signup page with user sessions."}
+
+    def test_auth_requires_a_401_test(self):
+        # SOLID-3: an auth feature whose tests never assert the 401 failure path
+        # is flagged (a login that only tests the happy path is a security gap).
+        vacuous = self._app(
+            "const r = await app.inject({ method: 'POST', url: '/api/login',"
+            " payload: { email: 'a', password: 'b' } });\n"
+            "expect(r.statusCode).toBe(200);")
+        gaps = ar.audit_completion(vacuous, ar.STACK_REACT, self.AUTH_CTX, "auth")
+        self.assertTrue(any("401" in g for g in gaps), gaps)
+        full = self._app(
+            "const ok = await app.inject({ method: 'POST', url: '/api/login',"
+            " payload: { email: 'a', password: 'b' } });\n"
+            "expect(ok.statusCode).toBe(200);\n"
+            "const bad = await app.inject({ method: 'POST', url: '/api/login',"
+            " payload: { email: 'a', password: 'wrong' } });\n"
+            "expect(bad.statusCode).toBe(401);")
+        self.assertEqual(
+            ar.audit_completion(full, ar.STACK_REACT, self.AUTH_CTX, "auth"), [])
+
     def test_single_record_requires_a_validation_test(self):
         # bug#8 + SOLID-1: a PUT-200-only single-record test is flagged (its shape
         # contract demands PUT-invalid → 400); a real PUT + 400 assertion passes.

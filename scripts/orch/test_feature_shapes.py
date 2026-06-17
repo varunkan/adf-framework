@@ -48,6 +48,14 @@ class Classify(unittest.TestCase):
                         "preferences."),
             "single-record")
 
+    def test_auth(self):
+        self.assertEqual(
+            fs.classify("A login and signup page with user sessions."), "auth")
+        self.assertEqual(
+            fs.classify("Sign in / sign out with authentication."), "auth")
+        # a plain contact/registration form is still a form, not auth
+        self.assertEqual(fs.classify("A contact form to submit feedback."), "form")
+
     def test_generic_fallback_when_no_signal(self):
         self.assertEqual(fs.classify("Something entirely undescribed here."),
                          "generic")
@@ -95,6 +103,15 @@ class Contract(unittest.TestCase):
         self.assertIn("/summary", fs.skeleton_contract("dashboard"))
         self.assertIn("single fixed row", fs.skeleton_contract("single-record"))
         self.assertIn("not edited", fs.skeleton_contract("form"))
+
+    def test_auth_contract_uses_shipped_primitives(self):
+        c = fs.skeleton_contract("auth")
+        self.assertIn("auth.mjs", c)         # use the shipped primitives
+        self.assertIn("hashPassword", c)     # never plaintext
+        self.assertIn("401", c)              # the auth-failure case
+        e = fs.expected_dom("auth")
+        self.assertGreaterEqual(e.get("inputs", 0), 1)
+        self.assertGreaterEqual(e.get("buttons", 0), 1)
 
     def test_contract_for_reads_ctx_and_fid(self):
         shape, text = fs.contract_for(

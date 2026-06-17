@@ -1406,6 +1406,10 @@ _AUDIT_REQUIRED = {
         ("a GET/summary test", _method_signal("GET")),
         ("a 200 assertion", _status_asserted("200")),
     ],
+    "auth": [
+        ("a signup/login POST test", _method_signal("POST")),
+        ("an auth-failure test (401)", _status_asserted("401")),
+    ],
 }
 
 

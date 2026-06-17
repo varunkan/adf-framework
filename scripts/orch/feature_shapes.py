@@ -22,7 +22,7 @@ import sys
 # Priority order is also the tie-break order: when two shapes score equally, the
 # earlier one wins. crud-list is first because it is the most common app shape and
 # the safest default skeleton.
-SHAPES = ("crud-list", "form", "dashboard", "single-record")
+SHAPES = ("crud-list", "auth", "form", "dashboard", "single-record")
 
 # Per-shape keyword signals: (keyword, weight). Distinctive nouns weigh more than
 # generic CRUD verbs (which can appear in any feature). Matched case-insensitively
@@ -54,6 +54,12 @@ _KEYWORDS = {
         ("settings", 3), ("preferences", 3), ("configuration", 3),
         ("profile", 3), ("single record", 3), ("counter", 3), ("toggle", 2),
         ("config", 2), ("account", 2), ("the current value", 2),
+    ],
+    "auth": [
+        ("authentication", 3), ("authenticate", 3), ("login", 3), ("log in", 3),
+        ("sign in", 3), ("sign-in", 3), ("signin", 3), ("logout", 2),
+        ("log out", 2), ("sign out", 2), ("session", 2), ("sessions", 2),
+        ("credentials", 2), ("logged in", 2), ("jwt", 2), ("oauth", 2),
     ],
 }
 
@@ -155,6 +161,30 @@ _CONTRACTS = {
         "- test: seed rows then GET summary asserts the computed aggregate; empty "
         "DB returns zeros."
     ),
+    "auth": (
+        "DETECTED FEATURE SHAPE: auth — users sign up and log in; sessions gate "
+        "protected actions. Use the SHIPPED auth primitives — do NOT roll your own "
+        "crypto. Implement this EXACT skeleton:\n"
+        "- schema.sql: a `users` table with `id INTEGER PRIMARY KEY AUTOINCREMENT`, "
+        "a UNIQUE email (or username), a `password_hash` column (NEVER store a "
+        "plaintext password — the policy gate fails the build if you do), and "
+        "`created_at TEXT`.\n"
+        "- server/api/<feature>.mjs (routes relative to /api), importing "
+        "`{ hashPassword, verifyPassword, signToken, verifyToken } from '../auth.mjs'`:\n"
+        "    POST '/signup' -> 201 { token } (400 missing/invalid; 409 if the email "
+        "exists); store hashPassword(password).\n"
+        "    POST '/login'  -> 200 { token } when verifyPassword passes, else 401.\n"
+        "    GET  '/me'     -> 200 the current user when the Bearer token "
+        "verifyToken()s, else 401.\n"
+        "- src/hooks/use<Feature>.ts: returns "
+        "`{ user, loading, error, signup, login, logout }`; persists the token and "
+        "sends it as an `Authorization: Bearer` header.\n"
+        "- src/components: a `<LoginForm>` and a `<SignupForm>` (controlled email + "
+        "password Inputs + a Button); App.tsx shows the authed view once `user` is set.\n"
+        "- test: signup -> 201, duplicate signup -> 409, login wrong password -> 401, "
+        "login correct -> 200 with a token, and GET /me with no token -> 401. NEVER "
+        "assert a plaintext password is stored."
+    ),
     "single-record": (
         "DETECTED FEATURE SHAPE: single-record — ONE persistent record the user "
         "views and updates in place (settings/profile/counter). Implement this "
@@ -189,6 +219,7 @@ _EXPECTED_DOM = {
     "crud-list": {"inputs": 1, "buttons": 1},
     "form": {"inputs": 1, "buttons": 1},
     "single-record": {"inputs": 1, "buttons": 1},
+    "auth": {"inputs": 1, "buttons": 1},
 }
 
 
