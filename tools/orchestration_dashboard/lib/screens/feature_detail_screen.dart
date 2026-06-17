@@ -12,6 +12,7 @@ import '../widgets/live_preview_panel.dart';
 import '../widgets/studio_shell.dart';
 import '../theme/studio_theme.dart';
 import '../utils/message_classifier.dart';
+import '../utils/status_banner.dart';
 import '../widgets/pipeline_rail.dart';
 
 class FeatureDetailScreen extends StatefulWidget {
@@ -97,19 +98,32 @@ class _FeatureDetailScreenState extends State<FeatureDetailScreen> {
 
   Future<void> _maybeAutoAutopilot() async {
     if (_autoAutopilotOnEnter) return;
+    bool shouldRun;
     try {
       final d = await widget.api.getFeature(widget.featureId);
       final state = d['state'] as Map<String, dynamic>? ?? {};
       final phase = (state['current_phase'] as num?)?.toInt() ?? 0;
       final crew = await widget.api.getCrewLog(widget.featureId);
-      if (phase <= 1 && crew.isEmpty && state['status'] == 'active') {
-        _autoAutopilotOnEnter = true;
-        _autopilotStartedAt = DateTime.now().toUtc();
-        _wakePolling();
-        await widget.api.runAutopilot(widget.featureId);
-        if (mounted) await _load(silent: true);
+      shouldRun = phase <= 1 && crew.isEmpty && state['status'] == 'active';
+    } catch (_) {
+      // Couldn't read state — stay quiet; the status bar reflects reality on load.
+      return;
+    }
+    if (!shouldRun) return;
+    _autoAutopilotOnEnter = true;
+    _autopilotStartedAt = DateTime.now().toUtc();
+    _wakePolling();
+    try {
+      final summary = await widget.api.runAutopilot(widget.featureId);
+      final blockers = blockersOf(summary);
+      if (mounted && blockers.isNotEmpty) {
+        // Don't let an auto-started run fail invisibly.
+        showMessage(context, 'Autopilot blocked: ${blockers.first}');
       }
-    } catch (_) {}
+      if (mounted) await _load(silent: true);
+    } catch (e) {
+      if (mounted) showMessage(context, 'Auto-start failed: $e');
+    }
   }
 
   Future<void> _loadChatHealth() async {
@@ -619,8 +633,24 @@ $clarification
           await _load(silent: true);
         }
         return;
-      } catch (_) {
-        // No built app yet (409) or transient error — fall through to chat.
+      } on ApiException catch (e) {
+        // 409 = no built app yet → treat the message as chat (fall through).
+        // Any other status is a real failure: surface it instead of silently
+        // turning the user's edit into a chat message.
+        if (e.statusCode != 409) {
+          if (mounted) {
+            _dropOptimisticUser();
+            showMessage(context, 'Could not apply your change: ${e.message}');
+          }
+          return;
+        }
+      } catch (e) {
+        // Network/timeout — also a real failure, not a reason to fall through.
+        if (mounted) {
+          _dropOptimisticUser();
+          showMessage(context, 'Could not apply your change: $e');
+        }
+        return;
       }
     }
     try {
@@ -678,16 +708,23 @@ $clarification
       }
     } catch (e) {
       if (mounted) {
-        setState(() {
-          if (_optimisticMessages.isNotEmpty &&
-              _optimisticMessages.last['role'] == 'user') {
-            _optimisticMessages.removeLast();
-          }
-        });
+        _dropOptimisticUser();
         showMessage(context, e.toString());
       }
     }
   }
+
+  /// Remove the optimistic user bubble added before a send that then failed, so a
+  /// failed action never leaves a phantom message in the transcript.
+  void _dropOptimisticUser() {
+    setState(() {
+      if (_optimisticMessages.isNotEmpty &&
+          _optimisticMessages.last['role'] == 'user') {
+        _optimisticMessages.removeLast();
+      }
+    });
+  }
+
 
   // Review dialog: list the spec/plan/tests and built code (tap to read), plus
   // the live build log — so the user can see what was created and what the
@@ -910,17 +947,8 @@ $clarification
     try {
       final summary = await widget.api.runAutopilot(widget.featureId);
       if (!mounted) return;
-      final phases = (summary['phases_completed'] as List?)?.join(', ') ?? '';
-      final reason = summary['stop_reason'] as String? ?? '';
-      final agents = (summary['agents'] as List?)?.length ?? 0;
-      final ms = summary['duration_ms'] ?? '?';
-      showMessage(
-        context,
-        phases.isEmpty
-            ? 'Autopilot: nothing to do ($reason)'
-            : 'Crew of $agents subagents completed phases $phases in ${ms}ms '
-                '(zero tokens) — $reason',
-      );
+      // A blocked run is NOT a success — autopilotOutcomeMessage names the blocker.
+      showMessage(context, autopilotOutcomeMessage(summary));
       await _load(silent: true);
     } catch (e) {
       if (mounted) showMessage(context, 'Autopilot failed: $e');
@@ -945,74 +973,44 @@ $clarification
     final state = _detail?['state'] as Map<String, dynamic>? ?? {};
     final awaiting = _showApprovalGate;
     final error = run?['error'] as String?;
+    final done = _pipeline?['pipeline_complete'] == true ||
+        (state['status'] as String?) == 'completed' ||
+        (_detail?['summary'] as Map<String, dynamic>?)?['pipeline_complete'] ==
+            true;
     // A run that has been going >45s gets a "still building" treatment so the
     // user isn't staring at a dead spinner — with Cancel + Reset & retry.
     final elapsed = _elapsedSeconds(run?['started_at'] as String?);
     final longRun = _isRunning && !awaiting && elapsed != null && elapsed >= 45;
 
-    Color bg;
-    String title;
-    String body;
-
-    if (awaiting && _agentActive) {
-      bg = status.runningBg;
-      title = 'Applying your message';
-      body =
-          'Your note is saved in requirement.md. Agent is updating specs — send again to replace, or Cancel run.';
-    } else if (_isRunning) {
-      bg = status.runningBg;
-      title = 'Running';
-      body = 'Step: ${run?['step_id'] ?? _currentStepId ?? 'phase ${run?['phase']}'}';
-    } else if (awaiting) {
-      final v = (state['last_judge_verdict'] as String? ?? 'revise').toLowerCase();
-      if (v == 'pass') {
-        bg = status.awaitingBg;
-        title = 'Ready to approve';
-        body = 'Judge verdict: PASS — review and approve to continue';
-      } else {
-        bg = status.errorBg;
-        title = 'Revision required';
-        body = 'Verdict: ${v.toUpperCase()} — clarify requirement and redo specs';
-      }
-    } else if (runSt == 'needs_login' || runSt == 'error') {
-      bg = status.errorBg;
-      title = runSt == 'needs_login' ? 'Login required' : 'Error';
-      body = error ?? 'Check runner setup';
-    } else if (runSt == 'blocked') {
-      bg = status.errorBg;
-      title = 'Build stopped';
-      body = 'The builder could not finish after several tries. '
-          'Tap "Reset & retry" to start the build over.';
-    } else if (run?['resume_mode'] == 'cursor_ide' ||
-        run?['headless_unavailable'] == true) {
-      bg = status.awaitingBg;
-      title = 'IDE mode';
-      body = (run?['hint'] as String?) ??
-          'Run `@orch-orchestrator resume ${widget.featureId}` in Cursor IDE, then Sync.';
-    } else if (runSt == 'running' || runSt == 'queued') {
-      // A build is in progress. Without this branch the status bar rendered
-      // nothing during phase 7 — the user stared at a blank "running" with no
-      // feedback. Show what's actually happening.
-      bg = status.runningBg;
-      if (longRun) {
-        title = _phase >= 7
-            ? 'Still building — ${elapsed}s elapsed'
-            : 'Still working — ${elapsed}s elapsed';
-        body = 'This is taking longer than usual. You can keep waiting, or '
-            'Cancel and tap Reset & retry to start over.';
-      } else {
-        title = _phase >= 7 ? 'Building your app…' : 'Working… (step $_phase of 9)';
-        body = _phase >= 7
-            ? 'Writing the code and running the tests. This usually takes about a minute.'
-            : 'Generating the spec, plan, and tests (a few seconds).';
-      }
-    } else if (_phase == 0) {
-      bg = status.runningBg;
-      title = 'Ready';
-      body = 'Start the pipeline when agent is ready';
-    } else {
-      return const SizedBox.shrink();
-    }
+    // Delegate the decision to the pure, unit-tested statusBanner(): it
+    // guarantees a blocked/failed run never reads as success and that there is
+    // never a blank bar. The widget only maps the semantic kind to a colour.
+    final banner = statusBanner(
+      runSt: runSt,
+      awaiting: awaiting,
+      agentActive: _agentActive,
+      isRunning: _isRunning,
+      done: done,
+      longRun: longRun,
+      phase: _phase,
+      elapsed: elapsed,
+      error: error,
+      judgeVerdict: state['last_judge_verdict'] as String? ?? 'revise',
+      stepLabel:
+          '${run?['step_id'] ?? _currentStepId ?? 'phase ${run?['phase']}'}',
+      ideMode: run?['resume_mode'] == 'cursor_ide' ||
+          run?['headless_unavailable'] == true,
+      ideHint: run?['hint'] as String?,
+      featureId: widget.featureId,
+    );
+    final bg = switch (banner.kind) {
+      BannerKind.running => status.runningBg,
+      BannerKind.awaiting => status.awaitingBg,
+      BannerKind.error => status.errorBg,
+      BannerKind.success => status.successBg,
+    };
+    final title = banner.title;
+    final body = banner.body;
 
     return Material(
       color: bg,

@@ -2,6 +2,17 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+/// An API error that carries the HTTP status so callers can branch on it (e.g.
+/// distinguish a 409 "no built app yet" from a real failure) instead of treating
+/// every thrown error the same and silently swallowing it.
+class ApiException implements Exception {
+  ApiException(this.statusCode, this.message);
+  final int statusCode;
+  final String message;
+  @override
+  String toString() => message;
+}
+
 class ApiClient {
   ApiClient({
     this.baseUrl = 'http://127.0.0.1:3847',
@@ -437,7 +448,9 @@ class ApiClient {
   /// Throws on 409 when there is no built app yet (caller falls back to chat).
   Future<Map<String, dynamic>> editApp(String id, String instruction) async {
     final r = await _post('/features/$id/edit', {'instruction': instruction});
-    if (r.statusCode != 200) throw Exception(_formatError(r));
+    // Typed so the caller can tell a 409 (no built app yet → fall through to chat)
+    // from a real failure that must be surfaced, not silently swallowed.
+    if (r.statusCode != 200) throw ApiException(r.statusCode, _formatError(r));
     return jsonDecode(r.body) as Map<String, dynamic>;
   }
 
