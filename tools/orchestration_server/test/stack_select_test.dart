@@ -60,10 +60,14 @@ void main() {
       track: 'M',
       stack: 'react-vite-sqlite',
     );
-    final runner = PhaseRunner(store, env: {'PATH': '/usr/bin'});
+    final runner = PhaseRunner(store, env: {'PATH': '/usr/bin', 'PAGER': 'less'});
     final env = runner.childEnvFor('board');
     expect(env['ADF_STACK'], 'react-vite-sqlite');
     expect(env['PATH'], '/usr/bin'); // base env preserved
+    // Non-interactive hardening forces interactive settings off (PAGER less→cat).
+    expect(env['PAGER'], 'cat');
+    expect(env['GIT_TERMINAL_PROMPT'], '0');
+    expect(env['CI'], '1');
     // A legacy/stdlib feature yields stdlib.
     store.createFeature(id: 'plain', requirement: 'y', track: 'S');
     expect(runner.childEnvFor('plain')['ADF_STACK'], 'stdlib');

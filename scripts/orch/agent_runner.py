@@ -751,13 +751,45 @@ _SECRET_ENV_RE = re.compile(r"(API_KEY|_TOKEN|SECRET|PASSWORD|CREDENTIAL)", re.I
 _SECRET_ENV_EXACT = {"ANTHROPIC_API_KEY", "NVIDIA_API_KEY", "ORCH_NVIDIA_API_KEY",
                      "OPENAI_API_KEY", "CURSOR_API_KEY", "HF_TOKEN", "GITHUB_TOKEN"}
 
+# Force every child tool (npm, git, pip, node, the built app) into NON-INTERACTIVE
+# mode. Without this an npm/git/pip step can open a pager or block on a credential
+# prompt and only die at the build timeout — a silent multi-minute hang. (Adopted
+# from oh-my-pi's NON_INTERACTIVE_ENV / buildNonInteractiveEnv; see
+# docs/ADF_VS_OH_MY_PI.md §5.2.) Real env values (a user-set PAGER, etc.) are
+# overridden because a build child must never wait on a human.
+NON_INTERACTIVE_ENV = {
+    "CI": "1",
+    "NO_COLOR": "1",
+    "TERM": "dumb",
+    "PAGER": "cat",
+    "GIT_PAGER": "cat",
+    "MANPAGER": "cat",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_EDITOR": "true",
+    "GCM_INTERACTIVE": "never",
+    "DEBIAN_FRONTEND": "noninteractive",
+    "PYTHONUNBUFFERED": "1",
+    "PIP_NO_INPUT": "1",
+    "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+    "PIP_PROGRESS_BAR": "off",
+    "npm_config_yes": "true",
+    "npm_config_audit": "false",
+    "npm_config_fund": "false",
+    "npm_config_progress": "false",
+    "npm_config_update_notifier": "false",
+    "ADBLOCK": "1",
+    "HOMEBREW_NO_AUTO_UPDATE": "1",
+}
+
 
 def scrubbed_env(**extra):
-    """A child environment with the operator's secrets removed — for running
-    model-generated code, npm, and the built app (none of which should ever see
-    ADF's model API keys)."""
+    """A child environment with the operator's secrets removed AND non-interactive
+    hardening applied — for running model-generated code, npm, and the built app
+    (none of which should ever see ADF's model API keys, or block on a pager/prompt).
+    Precedence: scrubbed base → non-interactive table → caller `extra` (wins)."""
     env = {k: v for k, v in os.environ.items()
            if k not in _SECRET_ENV_EXACT and not _SECRET_ENV_RE.search(k)}
+    env.update(NON_INTERACTIVE_ENV)
     env.update(extra)
     return env
 

@@ -335,16 +335,22 @@ class ScrubbedEnv(unittest.TestCase):
     def test_secrets_are_removed_but_normal_vars_kept(self):
         keys = ["ANTHROPIC_API_KEY", "NVIDIA_API_KEY", "OPENAI_API_KEY",
                 "SOME_TOKEN", "DB_PASSWORD", "MY_SECRET"]
-        saved = {k: os.environ.get(k) for k in keys}
+        saved = {k: os.environ.get(k) for k in keys + ["PAGER"]}
         try:
             for k in keys:
                 os.environ[k] = "sensitive"
             os.environ["PATH"] = os.environ.get("PATH", "/usr/bin")
+            os.environ["PAGER"] = "less"  # an interactive setting that must be forced off
             env = ar.scrubbed_env(PORT="8000")
             for k in keys:
                 self.assertNotIn(k, env, f"{k} must be scrubbed")
             self.assertIn("PATH", env)            # normal vars kept
             self.assertEqual(env["PORT"], "8000")  # extras applied
+            # Non-interactive hardening is applied so no child blocks on a pager.
+            self.assertEqual(env["GIT_TERMINAL_PROMPT"], "0")
+            self.assertEqual(env["PAGER"], "cat")
+            self.assertEqual(env["CI"], "1")
+            self.assertEqual(env["npm_config_yes"], "true")
         finally:
             for k, v in saved.items():
                 if v is None:
