@@ -20,8 +20,9 @@ import sys
 _COMPONENT_EXPORT = re.compile(
     r'export\s+(?:default\s+)?(?:async\s+)?(?:function|const|class)\s+'
     r'([A-Z][a-z]\w*)')
-# A props type: `interface FooProps { ... }` or `type FooProps = { ... }`.
-_PROPS_TYPE = re.compile(r'(?:interface|type)\s+(\w+Props)\s*=?\s*\{([^}]*)\}', re.S)
+# A props type: `interface FooProps [extends X] { ... }` or `type FooProps = { ... }`.
+_PROPS_TYPE = re.compile(
+    r'(?:interface|type)\s+(\w+Props)(?:\s+extends[^{]+)?\s*=?\s*\{([^}]*)\}', re.S)
 # One prop within the body (props may be `;`- or newline-separated on one line).
 _PROP_SEG = re.compile(r'^\s*(\w+)(\?)?\s*:\s*(.+)$')
 
