@@ -359,6 +359,71 @@ class ScrubbedEnv(unittest.TestCase):
                     os.environ[k] = v
 
 
+class RetryAndClassify(unittest.TestCase):
+    """5.3 — a transient provider status retries the SAME backend before
+    generate() falls over to a weaker one (no silent 529→NVIDIA downgrade)."""
+
+    def test_classify(self):
+        self.assertEqual(ar.classify_http_status(429), "rate_limit")
+        self.assertEqual(ar.classify_http_status(529), "capacity")
+        self.assertEqual(ar.classify_http_status(503), "server_error")
+        self.assertEqual(ar.classify_http_status(402), "quota")
+        self.assertEqual(ar.classify_http_status(400), "client")
+
+    def test_retries_transient_then_succeeds(self):
+        n = {"c": 0}
+
+        def call(messages, timeout):
+            n["c"] += 1
+            if n["c"] < 3:
+                raise ar.HttpError(529)
+            return ("ok", {})
+
+        res = ar.call_with_retry(call, [], 10, attempts=5, sleeper=lambda s: None)
+        self.assertEqual(res, ("ok", {}))
+        self.assertEqual(n["c"], 3)
+
+    def test_no_retry_on_client_error(self):
+        n = {"c": 0}
+
+        def call(m, t):
+            n["c"] += 1
+            raise ar.HttpError(400)
+
+        self.assertIsNone(
+            ar.call_with_retry(call, [], 10, attempts=5, sleeper=lambda s: None))
+        self.assertEqual(n["c"], 1, "a 400 must not be retried")
+
+    def test_exhausts_on_persistent_transient(self):
+        n = {"c": 0}
+
+        def call(m, t):
+            n["c"] += 1
+            raise ar.HttpError(529)
+
+        self.assertIsNone(
+            ar.call_with_retry(call, [], 10, attempts=3, sleeper=lambda s: None))
+        self.assertEqual(n["c"], 3, "tries exactly `attempts` times then gives up")
+
+    def test_missing_key_returns_none_without_retry(self):
+        n = {"c": 0}
+
+        def call(m, t):
+            n["c"] += 1
+            return None  # e.g. no API key configured
+
+        self.assertIsNone(
+            ar.call_with_retry(call, [], 10, attempts=3, sleeper=lambda s: None))
+        self.assertEqual(n["c"], 1)
+
+    def test_backoff_honors_retry_after_within_cap(self):
+        self.assertEqual(
+            ar._retry_backoff_seconds("rate_limit", 0, retry_after="5"), 5.0)
+        cap = float(os.environ.get("ADF_RUNNER_RETRY_CAP_SEC", "20"))
+        self.assertEqual(
+            ar._retry_backoff_seconds("rate_limit", 0, retry_after="9999"), cap)
+
+
 class FileWriteEvents(unittest.TestCase):
     """N21 — the runner narrates each file as it writes it, so a 1-3 min build
     doesn't go dark. Each write emits a structured `file_write` progress line the

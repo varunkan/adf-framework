@@ -29,10 +29,12 @@ so the phase fails loudly instead of "succeeding" with no code written.
 import argparse
 import json
 import os
+import random
 import re
 import ssl
 import subprocess
 import sys
+import time
 import urllib.request
 import urllib.error
 
@@ -500,12 +502,93 @@ def ssl_context():
     return ctx
 
 
+class HttpError(OSError):
+    """A non-2xx HTTP response from a provider, carrying the status so the retry
+    layer can classify it: a transient 429/5xx/529 is retried on the SAME backend;
+    anything else fails over. (Adopted from oh-my-pi's rate-limit classification;
+    see docs/ADF_VS_OH_MY_PI.md §5.3.)"""
+
+    def __init__(self, status, body="", retry_after=None):
+        super().__init__(f"HTTP {status}")
+        self.status = status
+        self.body = body
+        self.retry_after = retry_after
+
+
+# Transient statuses worth retrying the SAME backend before failing over to a
+# weaker one. 529 = Anthropic "overloaded"; 429 = rate limit; 5xx = server hiccup.
+_RETRYABLE_STATUS = {429, 500, 502, 503, 529}
+
+
+def classify_http_status(status):
+    """Coarse retry reason for an HTTP status (oh-my-pi parseRateLimitReason)."""
+    if status == 429:
+        return "rate_limit"
+    if status == 529:
+        return "capacity"            # Anthropic overloaded — usually clears fast
+    if status in (500, 502, 503):
+        return "server_error"
+    if status == 402:
+        return "quota"               # out of credit — retrying the same model is futile
+    if status in (401, 403):
+        return "auth"
+    return "client" if 400 <= status < 500 else "unknown"
+
+
+def _retry_backoff_seconds(reason, attempt, retry_after=None):
+    """Bounded exponential backoff with jitter, tuned for a TIME-BOXED build — NOT
+    oh-my-pi's 45–75s interactive waits (a build self-heal can't sleep a minute).
+    Honors a server `Retry-After` when present and within the cap."""
+    cap = float(os.environ.get("ADF_RUNNER_RETRY_CAP_SEC", "20"))
+    if retry_after is not None:
+        try:
+            return min(float(retry_after), cap)
+        except (TypeError, ValueError):
+            pass
+    base = {"capacity": 1.5, "rate_limit": 2.0, "server_error": 1.0}.get(reason, 1.5)
+    delay = min(base * (2 ** attempt), cap)
+    return delay + random.uniform(0, 0.5 * delay)
+
+
+def call_with_retry(call, messages, timeout, *, attempts=None, sleeper=None):
+    """Run a backend, retrying the SAME backend on a transient HTTP status with
+    bounded backoff BEFORE `generate()` falls through to a weaker backend — so a
+    transient Anthropic 529 no longer silently demotes a Claude build to free
+    NVIDIA mid-run. A non-retryable status, a missing key (the call returns None),
+    or exhausted attempts returns None (then `generate()` tries the next backend)."""
+    attempts = attempts or int(os.environ.get("ADF_RUNNER_RETRIES", "3"))
+    sleeper = sleeper or time.sleep
+    for i in range(attempts):
+        try:
+            return call(messages, timeout)
+        except HttpError as e:
+            reason = classify_http_status(e.status)
+            if e.status not in _RETRYABLE_STATUS or i == attempts - 1:
+                log(f"backend HTTP {e.status} ({reason}) — not retrying "
+                    f"(attempt {i + 1}/{attempts})")
+                return None
+            delay = _retry_backoff_seconds(reason, i, e.retry_after)
+            log(f"backend HTTP {e.status} ({reason}) — retry "
+                f"{i + 1}/{attempts} in {delay:.1f}s")
+            sleeper(delay)
+    return None
+
+
 def http_post_json(url, headers, payload, timeout):
     data = json.dumps(payload).encode()
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
     ctx = ssl_context() if url.startswith("https") else None
-    with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-        return json.loads(resp.read().decode())
+    try:
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+            return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode("utf-8", "replace")[:500]
+        except Exception:
+            pass
+        retry_after = e.headers.get("retry-after") if e.headers else None
+        raise HttpError(e.code, body, retry_after) from None
 
 
 def _max_tokens():
@@ -533,6 +616,8 @@ def call_nvidia(messages, timeout):
         choice = (out.get("choices") or [{}])[0]
         text = (choice.get("message") or {}).get("content") or ""
         return text, out.get("usage") or {}
+    except HttpError:
+        raise                       # let call_with_retry classify + retry the status
     except (OSError, ValueError, KeyError) as e:
         log(f"NVIDIA call failed: {e}")
         return None
@@ -566,6 +651,8 @@ def call_anthropic(messages, timeout):
         text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
         u = out.get("usage") or {}
         return text, {"prompt_tokens": u.get("input_tokens", 0), "completion_tokens": u.get("output_tokens", 0)}
+    except HttpError:
+        raise                       # let call_with_retry classify + retry the status
     except (OSError, ValueError, KeyError) as e:
         log(f"Anthropic call failed: {e}")
         return None
@@ -583,6 +670,8 @@ def call_ollama(messages, timeout):
             timeout,
         )
         return (out.get("message") or {}).get("content") or "", {}
+    except HttpError:
+        raise                       # let call_with_retry classify + retry the status
     except (OSError, ValueError, KeyError) as e:
         log(f"Ollama call failed: {e}")
         return None
@@ -632,7 +721,9 @@ def generate(messages, timeout):
     else:
         order = [call_nvidia, call_anthropic, call_ollama]
     for backend in order:
-        res = backend(messages, timeout)
+        # Retry THIS backend on a transient status before failing over to the next
+        # (weaker) one — a 529 overloaded shouldn't demote a Claude build to NVIDIA.
+        res = call_with_retry(backend, messages, timeout)
         if res and res[0] and res[0].strip():
             return res
     return None
