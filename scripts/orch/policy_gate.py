@@ -66,6 +66,14 @@ _CDN_TAG = re.compile(
 _PII_COLUMNS = re.compile(
     r"(?i)\b(password|passwd|ssn|social_security|credit_card|card_number|cardnumber|cvv|cvc)\b")
 _HASHED_OK = re.compile(r"(?i)(password|passwd)_(hash|digest)")
+# A SQL column-type keyword — used to recognize a SCHEMA line inside SOURCE code
+# (inline expo-sqlite `CREATE TABLE … password TEXT`) so the PII rule catches mobile
+# code without false-flagging UI state like `const [password] = useState()`.
+_SQL_COLTYPE = re.compile(
+    r"(?i)\b(?:text|integer|int|varchar|char|blob|real|numeric|boolean|bool|"
+    r"date|datetime|timestamp)\b")
+# Source files that may carry an inline SQL schema (no dedicated .sql file).
+_INLINE_SQL_EXTS = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py")
 
 
 def _norm(path):
@@ -143,16 +151,28 @@ def _check_offline_capable(files):
 
 
 def _check_no_plaintext_pii(files):
+    """Flag a sensitive column stored in plaintext. Scans `.sql` files fully; in
+    SOURCE files (inline expo-sqlite / sqlite3 `CREATE TABLE …`) only flags a
+    sensitive column NAME that sits next to a SQL column-type keyword, so a schema
+    line (`password TEXT`) is caught but a UI state var (`const [password]`) is not.
+    (X1 — closes the vacuous pass on non-web/mobile code.)"""
     out = []
     for path, content in files:
-        if not _norm(path).endswith(".sql"):
+        n = _norm(path)
+        is_sql = n.endswith(".sql")
+        is_source = n.endswith(_INLINE_SQL_EXTS)
+        if not (is_sql or is_source):
             continue
         for line_i, line in enumerate(content.splitlines(), 1):
             if _HASHED_OK.search(line):
                 continue
             m = _PII_COLUMNS.search(line)
-            if m:
-                out.append({"file": _norm(path), "line": line_i,
+            if not m:
+                continue
+            # In a .sql file every line is schema; in source, require a SQL type on
+            # the line so we only flag a real column definition.
+            if is_sql or _SQL_COLTYPE.search(line):
+                out.append({"file": n, "line": line_i,
                             "detail": f"sensitive column '{m.group(1)}' suggests "
                                       f"plaintext PII — store hashed/encrypted or remove"})
     return out

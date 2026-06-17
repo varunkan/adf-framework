@@ -109,6 +109,35 @@ class Violations(unittest.TestCase):
         detail = " ".join(v["detail"].lower() for v in r["violations"])
         self.assertIn("password", detail)
 
+    def test_inline_sql_plaintext_pii_in_source_is_flagged(self):
+        # X1: an Expo/mobile .ts CREATE TABLE with a plaintext password column must
+        # be caught — the rule used to scan only .sql, so mobile code sailed through
+        # and sealed a false "policy: compliant".
+        _write(self.app, "src/db.ts",
+               "export const init = (db) => db.execSync(`CREATE TABLE users (\n"
+               "  id INTEGER PRIMARY KEY,\n  email TEXT,\n  password TEXT\n)`);")
+        res = pg.check_policy(self.app)
+        r = self._rule(res, "no_plaintext_pii")
+        self.assertFalse(r["ok"])
+        self.assertTrue(
+            any("password" in v["detail"].lower() for v in r["violations"]))
+
+    def test_ui_state_named_password_is_not_flagged(self):
+        # must NOT false-flag a React/RN state variable that merely mentions password
+        # (no SQL column type on the line).
+        _write(self.app, "src/LoginForm.tsx",
+               "const [password, setPassword] = useState('');\n"
+               "<TextInput value={password} onChangeText={setPassword} />")
+        res = pg.check_policy(self.app)
+        r = self._rule(res, "no_plaintext_pii")
+        self.assertTrue(r["ok"], [v["detail"] for v in r["violations"]])
+
+    def test_hashed_column_in_source_is_ok(self):
+        _write(self.app, "src/db.ts",
+               "db.execSync('CREATE TABLE users (id INTEGER, password_hash TEXT)');")
+        res = pg.check_policy(self.app)
+        self.assertTrue(self._rule(res, "no_plaintext_pii")["ok"])
+
     def test_non_allowlisted_dependency_is_flagged(self):
         _write(self.app, "package.json", json.dumps({
             "dependencies": {"react": "^18", "left-pad": "^1.3.0"},
