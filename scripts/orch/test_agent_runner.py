@@ -198,6 +198,36 @@ class ScaffoldThenDiff(unittest.TestCase):
         # detect_stack now sees a react app.
         self.assertEqual(ar.detect_stack(self.app), ar.STACK_REACT)
 
+    def test_expo_template_resolves_and_is_a_working_scaffold(self):
+        # M2: the expo-rn template exists with the wiring a mobile app needs.
+        tpl = ar.template_dir(REPO_ROOT, REPO_ROOT, ar.STACK_EXPO)
+        self.assertTrue(tpl and os.path.isdir(tpl), f"expo template not found: {tpl}")
+        for rel in ("package.json", "app.json", ".adf-stack.json", "tsconfig.json",
+                    "babel.config.js", "App.tsx", "src/db.ts", "serve-web.mjs",
+                    "src/components/ui/Button.tsx", "src/components/ui/index.ts"):
+            self.assertTrue(os.path.isfile(os.path.join(tpl, rel)), rel)
+        manifest = json.load(open(os.path.join(tpl, ".adf-stack.json")))
+        self.assertEqual(manifest["stack"], "expo-rn")
+        self.assertEqual(manifest["port_env"], "PORT")
+
+    def test_scaffold_expo_strips_sample_and_resets_app(self):
+        # M3/M5: scaffolding an expo app strips the sample feature, resets App.tsx,
+        # and (the bug fix) creates NO spurious schema.sql.
+        tpl = ar.template_dir(REPO_ROOT, REPO_ROOT, ar.STACK_EXPO)
+        ar.scaffold_app(self.app, tpl)
+        for rel in ("package.json", "app.json", ".adf-stack.json", "App.tsx",
+                    "src/db.ts", "serve-web.mjs", "src/components/ui/Button.tsx"):
+            self.assertTrue(os.path.isfile(os.path.join(self.app, rel)), rel)
+        # sample feature stripped
+        for rel in ("src/components/ItemList.tsx", "src/hooks/useItems.ts",
+                    "__tests__/sample.test.tsx"):
+            self.assertFalse(os.path.isfile(os.path.join(self.app, rel)), rel)
+        # App.tsx reset (no dangling import of the stripped sample)
+        self.assertNotIn("ItemList", open(os.path.join(self.app, "App.tsx")).read())
+        # no spurious schema.sql for a mobile app
+        self.assertFalse(os.path.isfile(os.path.join(self.app, "schema.sql")))
+        self.assertEqual(ar.detect_stack(self.app), ar.STACK_EXPO)
+
     def test_react_prompt_matches_template_shape(self):
         ctx = {"requirement": "A kanban board", "problem": "",
                "spec": "", "plan": "", "tasks": ""}

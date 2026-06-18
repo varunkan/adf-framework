@@ -522,7 +522,28 @@ def _expo_build_messages(fid, ctx):
 _STACK_TEMPLATES = {STACK_REACT: "react-vite-sqlite", STACK_EXPO: "expo-rn"}
 # Sample-feature files the scaffold ships to prove itself; removed before the
 # generated feature is written so a stale `/api/items` + its test can't interfere.
-_SCAFFOLD_SAMPLE_REMOVE = ("server/api/items.mjs", "test/api.test.mjs")
+# Per-stack sample-feature files the scaffold strips so the generated feature is
+# clean (the template itself is a complete, passing app before scaffold).
+_SCAFFOLD_SAMPLE_REMOVE = {
+    STACK_REACT: ("server/api/items.mjs", "test/api.test.mjs"),
+    STACK_EXPO: ("src/components/ItemList.tsx", "src/hooks/useItems.ts",
+                 "__tests__/sample.test.tsx"),
+}
+
+# The Expo App.tsx is reset to a placeholder on scaffold (so it doesn't import the
+# stripped sample component); the generated feature's App.tsx replaces it.
+_EXPO_APP_PLACEHOLDER = (
+    "import React from 'react';\n"
+    "import { Text, View } from 'react-native';\n\n"
+    "// Replaced by the generated feature's App.tsx.\n"
+    "export default function App() {\n"
+    "  return (\n"
+    "    <View>\n"
+    "      <Text>Generated app will render here.</Text>\n"
+    "    </View>\n"
+    "  );\n"
+    "}\n"
+)
 
 
 def template_dir(repo_root, workspace, stack):
@@ -557,14 +578,21 @@ def scaffold_app(app_dir, tpl_dir):
             dest = os.path.join(app_dir, rel)
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             shutil.copy2(src, dest)
-    for rel in _SCAFFOLD_SAMPLE_REMOVE:
+    stack = detect_stack(app_dir)
+    for rel in _SCAFFOLD_SAMPLE_REMOVE.get(stack, ()):
         p = os.path.join(app_dir, rel)
         if os.path.isfile(p):
             os.remove(p)
-    # Reset schema to a placeholder; the generated schema.sql replaces it (so no
-    # leftover sample `items` table lingers in a fresh app's database).
-    with open(os.path.join(app_dir, "schema.sql"), "w", encoding="utf-8") as f:
-        f.write("-- schema for this app (generated at build time)\n")
+    if stack == STACK_REACT:
+        # Reset schema to a placeholder; the generated schema.sql replaces it (so no
+        # leftover sample `items` table lingers in a fresh app's database).
+        with open(os.path.join(app_dir, "schema.sql"), "w", encoding="utf-8") as f:
+            f.write("-- schema for this app (generated at build time)\n")
+    elif stack == STACK_EXPO:
+        # Reset the root to a placeholder (no dangling import of the stripped sample
+        # component); the generated App.tsx replaces it. Mobile has no schema.sql.
+        with open(os.path.join(app_dir, "App.tsx"), "w", encoding="utf-8") as f:
+            f.write(_EXPO_APP_PLACEHOLDER)
     # Per-app auth secret: every app that ships the auth primitives signs sessions
     # with its OWN random secret instead of a world-known dev default (auth.mjs
     # reads ADF_AUTH_SECRET → this file → a fail-loud ephemeral fallback).

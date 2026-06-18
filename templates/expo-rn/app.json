@@ -1,0 +1,13 @@
+{
+  "expo": {
+    "name": "adf-expo-app",
+    "slug": "adf-expo-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "platforms": ["ios", "android", "web"],
+    "web": { "bundler": "metro", "output": "static" },
+    "ios": { "supportsTablet": true },
+    "android": {}
+  }
+}

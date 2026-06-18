@@ -1,0 +1,8 @@
+{
+  "stack": "expo-rn",
+  "build_cmd": ["npm", "ci", "--no-audit", "--no-fund"],
+  "post_build": ["npm", "run", "web:export"],
+  "run_cmd": ["node", "serve-web.mjs"],
+  "port_env": "PORT",
+  "health_path": "/"
+}
