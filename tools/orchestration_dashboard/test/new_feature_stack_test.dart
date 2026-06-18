@@ -19,8 +19,20 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: NewFeatureScreen(api: api)));
 
     expect(find.byKey(const Key('stack-picker')), findsOneWidget);
-    // The default selection is the modern stack, not the single-file fallback.
-    expect(find.text('React + Vite + Tailwind + SQLite'), findsOneWidget);
+    // The default selection is the modern web stack, not the single-file fallback.
+    expect(find.text('Web (React + Vite + SQLite)'), findsOneWidget);
+  });
+
+  testWidgets('New-feature picker offers the mobile (Expo/React Native) stack',
+      (tester) async {
+    final api = ApiClient(
+      baseUrl: 'http://test',
+      client: MockClient((_) async => http.Response('{}', 200)),
+    );
+    await tester.pumpWidget(MaterialApp(home: NewFeatureScreen(api: api)));
+    await tester.tap(find.byKey(const Key('stack-picker')));
+    await tester.pumpAndSettle();
+    expect(find.text('Mobile (Expo / React Native)'), findsWidgets);
   });
 
   testWidgets('Creating a feature sends the selected stack in the request body',

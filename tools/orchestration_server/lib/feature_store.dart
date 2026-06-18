@@ -675,7 +675,11 @@ $t
   /// single-file Python app; `react-vite-sqlite` = a real React+Vite+Tailwind
   /// front + Fastify/better-sqlite3 server. The runner's StackProfile mirrors
   /// these names; an unknown stack falls back to stdlib there.
-  static const Set<String> knownStacks = {'stdlib', 'react-vite-sqlite'};
+  static const Set<String> knownStacks = {
+    'stdlib',
+    'react-vite-sqlite',
+    'expo-rn', // cross-platform mobile (Expo / React Native: iOS + Android + web)
+  };
 
   static bool isKnownStack(String stack) => knownStacks.contains(stack);
 

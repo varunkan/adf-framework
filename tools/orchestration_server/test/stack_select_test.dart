@@ -50,7 +50,14 @@ void main() {
   test('isKnownStack validates the allowlist', () {
     expect(FeatureStore.isKnownStack('stdlib'), isTrue);
     expect(FeatureStore.isKnownStack('react-vite-sqlite'), isTrue);
+    expect(FeatureStore.isKnownStack('expo-rn'), isTrue); // mobile stack accepted
     expect(FeatureStore.isKnownStack('php-laravel'), isFalse);
+  });
+
+  test('a feature can be created with the mobile stack and it persists', () {
+    store.createFeature(id: 'mob', requirement: 'a notes app', track: 'M',
+        stack: 'expo-rn');
+    expect(store.stackFor('mob'), 'expo-rn');
   });
 
   test('PhaseRunner.childEnvFor threads ADF_STACK from the feature state', () {

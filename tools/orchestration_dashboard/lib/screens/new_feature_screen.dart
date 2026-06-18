@@ -105,11 +105,15 @@ class _NewFeatureScreenState extends State<NewFeatureScreen> {
               items: const [
                 DropdownMenuItem(
                   value: 'react-vite-sqlite',
-                  child: Text('React + Vite + Tailwind + SQLite'),
+                  child: Text('Web (React + Vite + SQLite)'),
+                ),
+                DropdownMenuItem(
+                  value: 'expo-rn',
+                  child: Text('Mobile (Expo / React Native)'),
                 ),
                 DropdownMenuItem(
                   value: 'stdlib',
-                  child: Text('Single-file (Python stdlib)'),
+                  child: Text('Single-file (Python)'),
                 ),
               ],
               onChanged: (v) =>
