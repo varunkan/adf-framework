@@ -1259,13 +1259,68 @@ def _expo_native_stage(app_root):
     return (True, f"native toolchain present ({tool}); full device build is a later node")
 
 
+def _expo_web_render(app_root, timeout):
+    """The MOAT on mobile (M6): render-prove an Expo app via its WEB export
+    (react-native-web emits real DOM) through the SAME headless render gate as the
+    web stack. Builds `dist/` (expo export -p web), serves it on a free port, and
+    asserts the app actually mounted. Degrades gracefully — skipped (ok) if the
+    browser is unavailable, unless ADF_VISUAL_VERIFY=strict."""
+    import socket
+    import time
+    mode = os.environ.get("ADF_VISUAL_VERIFY", "1").lower()
+    if mode in ("0", "false", "off"):
+        return True, "web render verify disabled (ADF_VISUAL_VERIFY=0)"
+    ok, out = _npm(app_root, ["run", "web:export"], timeout)
+    if not ok:
+        return False, ("WEB EXPORT FAILED (expo export -p web):\n"
+                       + _spill_and_bound(app_root, "expo-web-export", out))
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as _s:
+        _s.bind(("127.0.0.1", 0))
+        port = _s.getsockname()[1]
+    proc = subprocess.Popen(
+        ["node", "serve-web.mjs"], cwd=app_root, env=scrubbed_env(PORT=str(port)),
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    try:
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            if proc.poll() is not None:
+                tail = proc.stdout.read() if proc.stdout else ""
+                return False, ("expo-web server exited on launch:\n"
+                               + _spill_and_bound(app_root, "expo-web-serve", tail))
+            try:
+                with socket.create_connection(("127.0.0.1", port), 0.5):
+                    break
+            except OSError:
+                time.sleep(0.4)
+        else:
+            return False, "expo-web server did not start in time"
+        try:
+            import visual_verify
+            v_ok, v_msg, _shot = visual_verify.visual_verify(
+                f"http://127.0.0.1:{port}/", app_root=app_root)
+        except Exception as e:
+            if mode == "strict":
+                return False, f"visual verify error: {e}"
+            return True, f"web render skipped: {e}"
+        if not v_ok:
+            return False, ("the Expo app EXPORTED but DID NOT RENDER on web "
+                           "(white screen / runtime crash):\n" + v_msg)
+        return True, f"expo-web render OK; {v_msg}"
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
 def _expo_verify(app_root, timeout=None):
-    """Verify an Expo / React Native app: typecheck (`tsc --noEmit`) + jest, then the
-    gated native stage. Mirrors `_react_verify`'s attributed-failure contract. The
-    deterministic tsc/jest stages run when the template's deps are warm-cloned; the
-    native device build degrades gracefully off the offline path. Honest scope:
-    'verified' means typechecks + tests (+ later: renders on expo-web), NOT a signed
-    binary."""
+    """Verify an Expo / React Native app: typecheck (`tsc --noEmit`) + jest + a render
+    proof on the WEB export (the moat), then the gated native stage. Mirrors
+    `_react_verify`'s attributed-failure contract. The deterministic stages run when
+    the template's deps are warm-cloned; the native device build degrades gracefully
+    off the offline path. Honest scope: 'verified' means typechecks + tests + renders
+    on web, NOT a signed binary."""
     timeout = timeout or int(os.environ.get("ADF_EXPO_VERIFY_TIMEOUT_SEC", "600"))
     has_app = os.path.isfile(os.path.join(app_root, "app.json"))
     has_pkg = os.path.isfile(os.path.join(app_root, "package.json"))
@@ -1284,10 +1339,13 @@ def _expo_verify(app_root, timeout=None):
     if not ok:
         return False, ("TESTS FAILED (jest):\n"
                        + _spill_and_bound(app_root, "expo-test", out))
+    render_ok, render_msg = _expo_web_render(app_root, timeout)
+    if not render_ok:
+        return False, render_msg
     native_ok, native_msg = _expo_native_stage(app_root)
     if not native_ok:
         return False, native_msg
-    return True, f"typecheck + jest passed; {native_msg}"
+    return True, f"typecheck + jest + web render passed; {native_msg}"
 
 
 def verify_app(app_root, stack=None, timeout=None):

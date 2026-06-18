@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "platforms": ["ios", "android", "web"],
-    "web": { "bundler": "metro", "output": "static" },
+    "web": { "bundler": "metro", "output": "single" },
     "ios": { "supportsTablet": true },
     "android": {}
   }
