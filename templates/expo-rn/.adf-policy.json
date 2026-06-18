@@ -1,5 +1,13 @@
 {
   "id": "adf-expo-secure",
+  "rules": {
+    "no_secrets": true,
+    "no_network_egress": true,
+    "offline_capable": true,
+    "no_plaintext_pii": true,
+    "dependency_allowlist": true,
+    "no_raw_hex": true
+  },
   "allowlist": [
     "@expo/metro-runtime",
     "expo",

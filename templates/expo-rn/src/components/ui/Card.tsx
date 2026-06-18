@@ -1,29 +1,36 @@
 import React from 'react';
-import { View, Text, StyleSheet, ViewProps } from 'react-native';
+import { View, Text, ViewProps } from 'react-native';
+import { useTheme } from '../../theme';
 
 export interface CardProps extends ViewProps {
   title?: string;
   children?: React.ReactNode;
 }
 
-/** A bordered surface that groups related content. */
+/** A themed, bordered surface that groups related content. */
 export function Card({ title, children, style, ...rest }: CardProps) {
+  const t = useTheme();
   return (
-    <View style={[styles.card, style]} {...rest}>
-      {title ? <Text style={styles.title}>{title}</Text> : null}
+    <View
+      style={[
+        {
+          backgroundColor: t.colors.surface,
+          borderRadius: t.radius.lg,
+          padding: t.spacing.lg,
+          marginBottom: t.spacing.md,
+          borderWidth: 1,
+          borderColor: t.colors.border,
+        },
+        style,
+      ]}
+      {...rest}
+    >
+      {title ? (
+        <Text style={{ fontSize: t.type.h2.fontSize, fontWeight: t.type.h2.fontWeight, color: t.colors.text, marginBottom: t.spacing.sm }}>
+          {title}
+        </Text>
+      ) : null}
       {children}
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  card: {
-    backgroundColor: '#ffffff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  title: { fontSize: 16, fontWeight: '700', marginBottom: 8 },
-});

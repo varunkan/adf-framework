@@ -1,5 +1,6 @@
 import React from 'react';
-import { Pressable, Text, StyleSheet, PressableProps } from 'react-native';
+import { Pressable, Text, PressableProps } from 'react-native';
+import { useTheme } from '../../theme';
 
 export interface ButtonProps extends PressableProps {
   /** Visible label. */
@@ -7,31 +8,35 @@ export interface ButtonProps extends PressableProps {
   variant?: 'primary' | 'secondary' | 'danger';
 }
 
-/** A pressable button. `accessibilityRole="button"` makes it a real, detectable
- *  control on every platform (and react-native-web renders it as role="button"). */
+/** A themed pressable button. `accessibilityRole="button"` makes it a real,
+ *  detectable control on every platform (react-native-web renders role="button"). */
 export function Button({ title, variant = 'primary', style, ...rest }: ButtonProps) {
+  const t = useTheme();
+  const bg =
+    variant === 'danger' ? t.colors.danger
+      : variant === 'secondary' ? t.colors.surfaceAlt
+        : t.colors.primary;
+  const fg =
+    variant === 'danger' ? t.colors.onDanger
+      : variant === 'secondary' ? t.colors.text
+        : t.colors.onPrimary;
   return (
     <Pressable
       accessibilityRole="button"
       style={({ pressed }) => [
-        styles.base,
-        styles[variant],
-        pressed && styles.pressed,
+        {
+          backgroundColor: bg,
+          paddingVertical: t.spacing.md,
+          paddingHorizontal: t.spacing.lg,
+          borderRadius: t.radius.md,
+          alignItems: 'center',
+        },
+        pressed && { opacity: 0.85 },
         style as object,
       ]}
       {...rest}
     >
-      <Text style={[styles.label, variant === 'secondary' && styles.labelDark]}>{title}</Text>
+      <Text style={{ color: fg, fontWeight: '600' }}>{title}</Text>
     </Pressable>
   );
 }
-
-const styles = StyleSheet.create({
-  base: { paddingVertical: 12, paddingHorizontal: 16, borderRadius: 8, alignItems: 'center' },
-  primary: { backgroundColor: '#2563eb' },
-  secondary: { backgroundColor: '#e5e7eb' },
-  danger: { backgroundColor: '#dc2626' },
-  pressed: { opacity: 0.8 },
-  label: { color: '#ffffff', fontWeight: '600' },
-  labelDark: { color: '#111827' },
-});

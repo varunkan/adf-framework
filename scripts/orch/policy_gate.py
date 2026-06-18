@@ -74,6 +74,9 @@ _SQL_COLTYPE = re.compile(
     r"date|datetime|timestamp)\b")
 # Source files that may carry an inline SQL schema (no dedicated .sql file).
 _INLINE_SQL_EXTS = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py")
+# A raw hex color literal — banned in mobile components (use theme tokens) so every
+# generated app is on-theme + light/dark-correct by construction.
+_RAW_HEX = re.compile(r"#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?(?:[0-9a-fA-F]{2})?\b")
 
 
 def _norm(path):
@@ -198,8 +201,26 @@ def _check_dependency_allowlist(files, allowlist):
     return out
 
 
+def _check_no_raw_hex(files):
+    """Design-system enforcement (mobile): a raw hex color in a COMPONENT (.tsx) means
+    the app bypassed the theme tokens, breaking on-theme + light/dark correctness. The
+    token source (src/theme/) legitimately defines hex and is exempt. Only runs on the
+    mobile stack (its .adf-policy.json enables it); web uses Tailwind classes."""
+    out = []
+    for path, content in files:
+        n = _norm(path)
+        if not n.endswith(".tsx") or "src/theme/" in n:
+            continue
+        for m in _RAW_HEX.finditer(content):
+            out.append({"file": n, "line": _lineno(content, m.start()),
+                        "detail": f"raw hex color '{m.group(0)}' — use a theme token "
+                                  f"(`const t = useTheme()`) instead of a literal color"})
+    return out
+
+
 _CHECKS = {
     "no_secrets": lambda files, pol: _check_no_secrets(files),
+    "no_raw_hex": lambda files, pol: _check_no_raw_hex(files),
     "no_network_egress": lambda files, pol: _check_no_network_egress(files),
     "offline_capable": lambda files, pol: _check_offline_capable(files),
     "no_plaintext_pii": lambda files, pol: _check_no_plaintext_pii(files),

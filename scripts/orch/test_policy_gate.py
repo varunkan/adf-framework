@@ -197,6 +197,21 @@ class MobilePolicy(unittest.TestCase):
         # the dependency rule actually ran (not vacuously skipped) and passed.
         dep = next(r for r in res["rules"] if r["rule"] == "dependency_allowlist")
         self.assertTrue(dep["ok"])
+        # MM1: the no_raw_hex design-system rule is enabled on mobile and passes
+        # (the template's components use theme tokens, not literal colors).
+        hexr = next((r for r in res["rules"] if r["rule"] == "no_raw_hex"), None)
+        self.assertIsNotNone(hexr)
+        self.assertTrue(hexr["ok"], hexr)
+
+    def test_no_raw_hex_flags_component_color_but_not_theme(self):
+        # MM1: a raw hex in a mobile component is flagged (use a token); the theme
+        # token source and non-.tsx files are exempt.
+        v = pg._check_no_raw_hex(
+            [("src/components/Foo.tsx", "const c = { color: '#2563eb' };")])
+        self.assertTrue(any("#2563eb" in x["detail"] for x in v))
+        self.assertEqual(
+            pg._check_no_raw_hex([("src/theme/tokens.tsx", "x='#ffffff'")]), [])
+        self.assertEqual(pg._check_no_raw_hex([("src/x.ts", "'#abcdef'")]), [])
 
 
 if __name__ == "__main__":
