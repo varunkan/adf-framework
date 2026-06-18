@@ -1576,6 +1576,21 @@ _AUDIT_REQUIRED = {
     ],
 }
 
+# MOBILE (expo) test signals — RN apps are tested with @testing-library/react-native
+# (render + fireEvent + getBy*), NOT app.inject/statusCode. A vacuous mobile test is
+# one that renders but never drives an interaction or asserts. (M8.)
+_M_RENDER = ("a component render", re.compile(r"\brender\s*\(", re.I))
+_M_INTERACT = ("a user interaction (fireEvent)", re.compile(r"\bfireEvent\b"))
+_M_QUERY = ("an assertion query (getBy/findBy)",
+            re.compile(r"\b(?:get|find|query)(?:All)?By\w+"))
+_AUDIT_REQUIRED_MOBILE = {
+    "crud-list": [_M_RENDER, _M_INTERACT, _M_QUERY],
+    "form": [_M_RENDER, _M_INTERACT, _M_QUERY],
+    "single-record": [_M_RENDER, _M_INTERACT, _M_QUERY],
+    "auth": [_M_RENDER, _M_INTERACT, _M_QUERY],
+    "dashboard": [_M_RENDER, _M_QUERY],   # read-mostly — no interaction required
+}
+
 
 def audit_completion(app_root, stack, ctx, fid):
     """Deterministic completion audit BEFORE sealing (oh-my-pi §5.9). A green
@@ -1587,33 +1602,47 @@ def audit_completion(app_root, stack, ctx, fid):
     uses it to trigger one more heal, never to fail an already-verified build."""
     if os.environ.get("ADF_COMPLETION_AUDIT", "1") in ("0", "false", "off"):
         return []
-    if (stack or DEFAULT_STACK) != STACK_REACT:
+    stack = stack or DEFAULT_STACK
+    if stack not in (STACK_REACT, STACK_EXPO):
         return []
     try:
         import feature_shapes
         shape, _ = feature_shapes.contract_for(ctx, fid)
     except Exception:
         return []
-    return _audit_tests(app_root, shape) + _audit_render(app_root, shape)
+    return _audit_tests(app_root, shape, stack) + _audit_render(app_root, shape)
 
 
-def _audit_tests(app_root, shape):
+def _read_test_sources(app_root):
+    """Concatenate the app's test files: anything under a test/ or __tests__/ dir, or
+    a co-located `*.test.*` / `*.spec.*` file — web (`.mjs`/`.ts`) and mobile
+    (`.tsx`) alike."""
+    exts = (".mjs", ".ts", ".tsx", ".js", ".jsx")
+    out = []
+    for root, dirs, files in os.walk(app_root):
+        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS and not d.startswith(".")]
+        in_test_dir = os.path.basename(root) in ("test", "tests", "__tests__")
+        for fn in files:
+            if not fn.endswith(exts):
+                continue
+            if in_test_dir or ".test." in fn or ".spec." in fn:
+                try:
+                    with open(os.path.join(root, fn), encoding="utf-8") as f:
+                        out.append(f.read())
+                except (OSError, UnicodeDecodeError):
+                    pass
+    return "\n".join(out)
+
+
+def _audit_tests(app_root, shape, stack=STACK_REACT):
     """Test-coverage half of the audit: do the generated tests assert the shape's
-    required behavior (structural — see _AUDIT_REQUIRED)?"""
-    required = _AUDIT_REQUIRED.get(shape)
+    required behavior? Web uses app.inject/statusCode signals (_AUDIT_REQUIRED);
+    mobile uses @testing-library/react-native signals (_AUDIT_REQUIRED_MOBILE)."""
+    table = _AUDIT_REQUIRED_MOBILE if stack == STACK_EXPO else _AUDIT_REQUIRED
+    required = table.get(shape)
     if not required:
         return []                       # generic shape — no deterministic checklist
-    test_text = ""
-    test_dir = os.path.join(app_root, "test")
-    if os.path.isdir(test_dir):
-        for root, _d, files in os.walk(test_dir):
-            for fn in files:
-                if fn.endswith((".mjs", ".ts", ".js")):
-                    try:
-                        with open(os.path.join(root, fn), encoding="utf-8") as f:
-                            test_text += f.read() + "\n"
-                    except (OSError, UnicodeDecodeError):
-                        pass
+    test_text = _read_test_sources(app_root)
     if not test_text.strip():
         return [f"no test file found for a {shape} feature"]
     return [label for label, pat in required if not pat.search(test_text)]

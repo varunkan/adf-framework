@@ -819,6 +819,48 @@ class FileWriteEvents(unittest.TestCase):
         self.assertEqual(fw[1]["index"], 2)
 
 
+class MobileCompletionAudit(unittest.TestCase):
+    """M8 — the completion audit runs for mobile too, with @testing-library/
+    react-native signals (render/fireEvent/getBy*), not app.inject."""
+
+    CTX = {"requirement": "A to-do list to add and delete tasks."}  # crud-list
+
+    def _app(self, body):
+        d = tempfile.mkdtemp(prefix="adf-maudit-")
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        os.makedirs(os.path.join(d, "__tests__"))
+        with open(os.path.join(d, "__tests__", "feature.test.tsx"), "w") as f:
+            f.write(body)
+        return d
+
+    def test_flags_render_only_mobile_test(self):
+        # renders but never drives an interaction or asserts → flagged
+        app = self._app("it('renders', () => { render(<App />); });")
+        gaps = ar.audit_completion(app, ar.STACK_EXPO, self.CTX, "todo")
+        self.assertTrue(
+            any("fireEvent" in g or "getBy" in g for g in gaps), gaps)
+
+    def test_complete_mobile_test_passes(self):
+        app = self._app(
+            "it('adds an item', () => {\n"
+            "  const { getByText, getByPlaceholderText } = render(<App />);\n"
+            "  fireEvent.changeText(getByPlaceholderText('Enter a title'), 'Milk');\n"
+            "  fireEvent.press(getByText('Add'));\n"
+            "  expect(getByText('Milk')).toBeTruthy();\n"
+            "});")
+        self.assertEqual(
+            ar.audit_completion(app, ar.STACK_EXPO, self.CTX, "todo"), [])
+
+    def test_mobile_test_found_in_co_located_file(self):
+        d = tempfile.mkdtemp(prefix="adf-maudit-")
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        os.makedirs(os.path.join(d, "src"))
+        with open(os.path.join(d, "src", "Todo.test.tsx"), "w") as f:
+            f.write("render(<App />); fireEvent.press(getByText('Add'));")
+        gaps = ar.audit_completion(d, ar.STACK_EXPO, self.CTX, "todo")
+        self.assertFalse(any("no test file" in g for g in gaps), gaps)
+
+
 class MobileStackProfile(unittest.TestCase):
     """M1 — the cross-platform mobile (Expo / React Native) StackProfile: the
     generation + verify CONTRACT + dispatch that lets ADF build iOS/Android apps via
