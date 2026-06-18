@@ -1,0 +1,21 @@
+{
+  "id": "adf-expo-secure",
+  "allowlist": [
+    "@expo/metro-runtime",
+    "expo",
+    "expo-sqlite",
+    "expo-status-bar",
+    "react",
+    "react-dom",
+    "react-native",
+    "react-native-web",
+    "@babel/core",
+    "@testing-library/react-native",
+    "@types/jest",
+    "@types/react",
+    "jest",
+    "jest-expo",
+    "react-test-renderer",
+    "typescript"
+  ]
+}

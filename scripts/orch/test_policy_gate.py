@@ -182,5 +182,22 @@ class PolicyResolution(unittest.TestCase):
         json.dumps(summ, sort_keys=True)
 
 
+class MobilePolicy(unittest.TestCase):
+    """MM6 — the policy gate must be HONEST on a mobile app. The dependency
+    allowlist used to mirror only the web deps, so the Expo template FAILED
+    (dependency_allowlist ok=False) — a dishonest seal. Its own .adf-policy.json
+    fixes that."""
+
+    def test_expo_template_is_compliant(self):
+        repo_root = os.path.abspath(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+        res = pg.check_policy(os.path.join(repo_root, "templates", "expo-rn"))
+        self.assertTrue(res["ok"],
+                        [r["rule"] for r in res["rules"] if not r["ok"]])
+        # the dependency rule actually ran (not vacuously skipped) and passed.
+        dep = next(r for r in res["rules"] if r["rule"] == "dependency_allowlist")
+        self.assertTrue(dep["ok"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
