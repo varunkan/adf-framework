@@ -48,6 +48,11 @@ class _BodyStats(HTMLParser):
     _INTERACTIVE = {"button", "input", "select", "textarea", "a", "form",
                     "label", "h1", "h2", "h3", "table", "ul", "ol", "img",
                     "svg", "canvas", "nav", "main"}
+    # ARIA roles react-native-web emits on plain <div>s for RN primitives, so a
+    # mobile app render-verifies the same as web (Pressable/Button → role="button",
+    # TextInput → <input>, an editable → role="textbox").
+    _INTERACTIVE_ROLES = {"button", "link", "textbox", "searchbox", "checkbox",
+                          "switch", "tab", "menuitem", "heading"}
 
     def __init__(self):
         super().__init__()
@@ -70,19 +75,21 @@ class _BodyStats(HTMLParser):
             self._skip += 1
             return
         self.elements += 1
-        if tag in self._INTERACTIVE:
+        a = {k.lower(): (v or "") for k, v in attrs}
+        role = a.get("role", "").lower()
+        if tag in self._INTERACTIVE or role in self._INTERACTIVE_ROLES:
             self.interactive += 1
         # Per-control counts so the render gate can assert a shape's core controls
-        # actually rendered (SOLID-2).
-        if tag == "button":
+        # actually rendered (SOLID-2), web AND react-native-web (M6 — role-aware).
+        if tag == "button" or role == "button":
             self.buttons += 1
         elif tag in ("input", "select", "textarea"):
             self.inputs += 1
-            if tag == "input":
-                kind = dict(attrs).get("type", "").lower()
-                if kind in ("submit", "button"):
-                    self.buttons += 1   # <input type=submit> is also a button
-        elif tag in ("h1", "h2", "h3"):
+            if tag == "input" and a.get("type", "").lower() in ("submit", "button"):
+                self.buttons += 1   # <input type=submit> is also a button
+        elif role in ("textbox", "searchbox") or "contenteditable" in a:
+            self.inputs += 1        # an editable / RN TextInput rendered as a div
+        elif tag in ("h1", "h2", "h3") or role == "heading":
             self.headings += 1
 
     def handle_endtag(self, tag):

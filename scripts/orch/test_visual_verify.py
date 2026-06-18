@@ -127,6 +127,24 @@ class DomControlCounts(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(missing, [])
 
+    def test_react_native_web_role_button_counts(self):
+        # M6: react-native-web renders <Pressable accessibilityRole="button"> as a
+        # <div role="button"> and <TextInput> as <input> — the render gate must
+        # detect these so a mobile app render-verifies like a web app.
+        html = ('<body><div id="root">'
+                '<input type="text" placeholder="Title">'
+                '<div role="button" tabindex="0"><div>Add</div></div>'
+                '</div></body>')
+        s = vv.assess_dom(html)
+        self.assertGreaterEqual(s["buttons"], 1)   # role="button" counted
+        self.assertGreaterEqual(s["inputs"], 1)
+        self.assertGreaterEqual(s["interactive"], 1)
+
+    def test_role_textbox_counts_as_input(self):
+        s = vv.assess_dom(
+            '<body><div role="textbox" contenteditable="true"></div></body>')
+        self.assertGreaterEqual(s["inputs"], 1)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
