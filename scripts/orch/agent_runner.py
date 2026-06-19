@@ -1644,6 +1644,76 @@ def read_render_facts(app_root):
         return None
 
 
+def mobile_native_delivery(app_root, fid):
+    """The mobile "download + run on a device" deliverable ADF now owns end to end:
+    build a standalone, signed APK (mobile_build — smart-strips unused native modules,
+    single-ABI, prebuild+gradle) and preview it on a CLEAN, dedicated emulator
+    (mobile_emulator — never the user's dev device). Writes .adf-mobile/facts.json and
+    returns the sealable facts (apk path + sha256 + package + screenshot) so the
+    downloadable binary is ATTESTED in the Proof of Build.
+
+    Gated + best-effort: a no-toolchain box (or ADF_MOBILE_NATIVE=0) skips gracefully,
+    exactly like the iOS render — it never fails an otherwise-good build. Returns the
+    facts dict or None."""
+    if os.environ.get("ADF_MOBILE_NATIVE", "").strip().lower() in ("0", "false", "off"):
+        return None
+    try:
+        import mobile_build
+    except Exception as e:
+        log(f"mobile: build module unavailable ({e})")
+        return None
+    if not mobile_build.native_toolchain_ready():
+        log("mobile: Android toolchain absent — APK + emulator preview skipped "
+            "(install the Android SDK + a JDK to enable)")
+        return None
+
+    narrate("building_apk")
+    ok, detail, apk = mobile_build.build_apk(app_root, fid, log=log)
+    if not ok or not apk:
+        narrate("apk_failed", reason=detail[:140])
+        log(f"mobile: APK build skipped/failed — {detail}")
+        return None
+    narrate("apk_built", detail=detail)
+    log(f"mobile: {detail}")
+
+    import hashlib
+    try:
+        with open(apk, "rb") as f:
+            sha = hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        sha = None
+    facts = {
+        "apk": os.path.relpath(apk, app_root),
+        "package": mobile_build.package_id(fid),
+        "size_bytes": os.path.getsize(apk),
+        "sha256": sha,
+        "screenshot": None,
+        "preview": None,
+    }
+
+    try:
+        import mobile_emulator
+        narrate("emulator_preview")
+        _ok, p_detail, shot = mobile_emulator.preview(
+            apk, fid, app_root=app_root, log=log)
+        facts["preview"] = p_detail
+        if shot:
+            facts["screenshot"] = os.path.relpath(shot, app_root)
+            narrate("emulator_running", detail=p_detail)
+        log(f"mobile: preview — {p_detail}")
+    except Exception as e:
+        log(f"mobile: emulator preview skipped: {e}")
+
+    try:
+        fp = os.path.join(app_root, ".adf-mobile", "facts.json")
+        os.makedirs(os.path.dirname(fp), exist_ok=True)
+        with open(fp, "w", encoding="utf-8") as f:
+            json.dump(facts, f, indent=2, sort_keys=True)
+    except OSError:
+        pass
+    return facts
+
+
 def _expo_verify(app_root, timeout=None):
     """Verify an Expo / React Native app: typecheck (`tsc --noEmit`) + jest + a render
     proof on the WEB export (the moat), then the gated native stage. Mirrors
@@ -2500,6 +2570,11 @@ def main():
                 # A blocked build is never sealed — a sealed proof is a POSITIVE
                 # attestation that the enforced security rules passed.
                 raise _PolicyBlocked()
+            # Native mobile deliverable (gated, best-effort): a standalone, signed
+            # APK + a clean-emulator preview — the "download + run on a device"
+            # artifact, its hash sealed below so the downloadable binary is attested.
+            mobile_facts = (mobile_native_delivery(app_root, fid)
+                            if stack == STACK_EXPO else None)
             import proof_of_build
             from datetime import datetime, timezone
             narrate("sealing")
@@ -2515,6 +2590,7 @@ def main():
                     "prompt": args.prompt,
                     "policy": policy_summary_obj,
                     "render": read_render_facts(app_root),  # MM11: web/iOS render facts
+                    "mobile": mobile_facts,  # APK download + emulator preview facts
                 },
                 created_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
             )

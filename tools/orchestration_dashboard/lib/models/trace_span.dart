@@ -94,6 +94,14 @@ class TraceSpan {
         return 'AUDIT';
       case 'build_complete':
         return runnerOk == true ? 'DONE_OK' : 'DONE_FAIL';
+      case 'building_apk':
+      case 'emulator_preview':
+        return 'MOBILE_RUN';
+      case 'apk_built':
+      case 'emulator_running':
+        return 'MOBILE_OK';
+      case 'apk_failed':
+        return 'MOBILE_FAIL';
       case 'feature_resolved':
       case 'planning':
       case 'reading_files':

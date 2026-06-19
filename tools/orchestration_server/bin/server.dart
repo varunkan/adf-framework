@@ -1074,6 +1074,54 @@ Future<void> main(List<String> args) async {
     }
   });
 
+  // Mobile delivery: download the built APK (the "download + run on a device"
+  // artifact ADF now produces for Expo features), its facts, and the emulator
+  // preview screenshot — all written by the runner into apps/<id>/.adf-mobile/.
+  router.get('/features/<id>/apk', (Request request, String id) {
+    if (!store.featureExists(id)) {
+      return _json({'error': 'not found'}, status: 404);
+    }
+    final apk = File('$repoRoot/apps/$id/.adf-mobile/$id.apk');
+    if (!apk.existsSync()) {
+      return _json({'error': 'no APK built for this feature'}, status: 404);
+    }
+    return Response.ok(
+      apk.openRead(),
+      headers: {
+        'Content-Type': 'application/vnd.android.package-archive',
+        'Content-Disposition': 'attachment; filename="$id.apk"',
+        'Content-Length': '${apk.lengthSync()}',
+        ..._corsHeaders,
+      },
+    );
+  });
+
+  router.get('/features/<id>/mobile', (Request request, String id) {
+    if (!store.featureExists(id)) {
+      return _json({'error': 'not found'}, status: 404);
+    }
+    final facts = File('$repoRoot/apps/$id/.adf-mobile/facts.json');
+    if (!facts.existsSync()) return _json({'available': false});
+    try {
+      final m = jsonDecode(facts.readAsStringSync()) as Map<String, dynamic>;
+      m['available'] = true;
+      m['apk_url'] = '/features/$id/apk';
+      if (m['screenshot'] != null) {
+        m['screenshot_url'] = '/features/$id/mobile-shot';
+      }
+      return _json(m);
+    } catch (e) {
+      return _json({'available': false, 'error': e.toString()});
+    }
+  });
+
+  router.get('/features/<id>/mobile-shot', (Request request, String id) {
+    final shot = File('$repoRoot/apps/$id/.adf-mobile/android-preview.png');
+    if (!shot.existsSync()) return _json({'error': 'no preview'}, status: 404);
+    return Response.ok(shot.openRead(),
+        headers: {'Content-Type': 'image/png', ..._corsHeaders});
+  });
+
   // Context budget for the app's `/compact` chip: tokens now vs the budget.
   router.get('/features/<id>/context', (Request request, String id) async {
     try {

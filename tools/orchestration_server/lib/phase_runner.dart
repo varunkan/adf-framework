@@ -1236,6 +1236,16 @@ Instructions:
             '${s(obj['files'])} file(s)';
       case 'build_complete':
         return s(obj['status']);
+      case 'building_apk':
+        return 'Building the Android app (APK)…';
+      case 'apk_built':
+        return 'APK built ✓ — ${s(obj['detail'])}';
+      case 'apk_failed':
+        return 'APK skipped: ${s(obj['reason'])}';
+      case 'emulator_preview':
+        return 'Launching on a clean emulator…';
+      case 'emulator_running':
+        return 'Running in the emulator ✓';
       default:
         return null;
     }

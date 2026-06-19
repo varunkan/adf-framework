@@ -18,6 +18,7 @@ ActivityTone activityTone(String cardKind) {
     case 'VERIFY_OK':
     case 'POLICY_OK':
     case 'DONE_OK':
+    case 'MOBILE_OK':
       return ActivityTone.positive;
     case 'SEAL':
       return ActivityTone.sealed;
@@ -26,6 +27,7 @@ ActivityTone activityTone(String cardKind) {
     case 'BLOCKED':
       return ActivityTone.negative;
     case 'POLICY_WARN':
+    case 'MOBILE_FAIL':
       return ActivityTone.warn;
     case 'VERIFY_RUN':
     case 'GENERATE':
@@ -33,6 +35,7 @@ ActivityTone activityTone(String cardKind) {
     case 'DEPS':
     case 'SEALING':
     case 'HEAL':
+    case 'MOBILE_RUN':
       return ActivityTone.active;
     default:
       return ActivityTone.neutral;
@@ -73,6 +76,12 @@ IconData activityIcon(String cardKind) {
       return Icons.task_alt;
     case 'DONE_FAIL':
       return Icons.report;
+    case 'MOBILE_RUN':
+      return Icons.adb;
+    case 'MOBILE_OK':
+      return Icons.phone_android;
+    case 'MOBILE_FAIL':
+      return Icons.mobile_off;
     default:
       return Icons.chevron_right;
   }
