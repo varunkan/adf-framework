@@ -203,27 +203,31 @@ class ScaffoldThenDiff(unittest.TestCase):
         tpl = ar.template_dir(REPO_ROOT, REPO_ROOT, ar.STACK_EXPO)
         self.assertTrue(tpl and os.path.isdir(tpl), f"expo template not found: {tpl}")
         for rel in ("package.json", "app.json", ".adf-stack.json", "tsconfig.json",
-                    "babel.config.js", "App.tsx", "src/db.ts", "serve-web.mjs",
+                    "babel.config.js", "app/_layout.tsx", "app/index.tsx",
+                    "src/db.ts", "serve-web.mjs",
                     "src/components/ui/Button.tsx", "src/components/ui/index.ts"):
             self.assertTrue(os.path.isfile(os.path.join(tpl, rel)), rel)
         manifest = json.load(open(os.path.join(tpl, ".adf-stack.json")))
         self.assertEqual(manifest["stack"], "expo-rn")
         self.assertEqual(manifest["port_env"], "PORT")
 
-    def test_scaffold_expo_strips_sample_and_resets_app(self):
-        # M3/M5: scaffolding an expo app strips the sample feature, resets App.tsx,
-        # and (the bug fix) creates NO spurious schema.sql.
+    def test_scaffold_expo_strips_sample_and_resets_layout(self):
+        # M3/M5 + MM3: scaffolding strips the sample app/ routes + data layer, resets
+        # app/_layout.tsx to a bare Stack, and creates NO spurious schema.sql.
         tpl = ar.template_dir(REPO_ROOT, REPO_ROOT, ar.STACK_EXPO)
         ar.scaffold_app(self.app, tpl)
-        for rel in ("package.json", "app.json", ".adf-stack.json", "App.tsx",
-                    "src/db.ts", "serve-web.mjs", "src/components/ui/Button.tsx"):
+        for rel in ("package.json", "app.json", ".adf-stack.json", "app/_layout.tsx",
+                    "serve-web.mjs", "src/components/ui/Button.tsx",
+                    "src/theme/tokens.ts"):
             self.assertTrue(os.path.isfile(os.path.join(self.app, rel)), rel)
-        # sample feature stripped
-        for rel in ("src/components/ItemList.tsx", "src/hooks/useItems.ts",
-                    "__tests__/sample.test.tsx"):
+        # sample feature (routes + data layer + test) stripped
+        for rel in ("app/index.tsx", "app/[id].tsx", "src/db.ts",
+                    "src/hooks/useItems.ts", "__tests__/sample.test.tsx"):
             self.assertFalse(os.path.isfile(os.path.join(self.app, rel)), rel)
-        # App.tsx reset (no dangling import of the stripped sample)
-        self.assertNotIn("ItemList", open(os.path.join(self.app, "App.tsx")).read())
+        # _layout reset to a bare Stack (no reference to a stripped screen)
+        layout = open(os.path.join(self.app, "app", "_layout.tsx")).read()
+        self.assertIn("Stack", layout)
+        self.assertNotIn("Stack.Screen", layout)
         # no spurious schema.sql for a mobile app
         self.assertFalse(os.path.isfile(os.path.join(self.app, "schema.sql")))
         self.assertEqual(ar.detect_stack(self.app), ar.STACK_EXPO)

@@ -1,21 +1,24 @@
 // SAMPLE test — stripped on scaffold. Mobile features are tested with jest +
 // @testing-library/react-native (render + fireEvent + getBy*), the way ADF's
-// completion audit expects.
+// completion audit expects. expo-router's navigation hooks are mocked so a screen
+// renders in isolation.
 import React from 'react';
 import { render, fireEvent } from '@testing-library/react-native';
-import { ItemList } from '../src/components/ItemList';
 
-describe('ItemList', () => {
-  it('renders the add form with an input and a button', () => {
-    const { getByPlaceholderText, getByText } = render(<ItemList />);
-    expect(getByPlaceholderText('Enter a title')).toBeTruthy();
-    expect(getByText('Add')).toBeTruthy();
-  });
+jest.mock('expo-router', () => ({
+  useRouter: () => ({ push: jest.fn(), back: jest.fn() }),
+  useLocalSearchParams: () => ({ id: '1' }),
+}));
 
-  it('lets the user type a title', () => {
-    const { getByPlaceholderText } = render(<ItemList />);
+import ItemsScreen from '../app/index';
+
+describe('items list screen', () => {
+  it('renders the add form + empty state and accepts input', () => {
+    const { getByText, getByPlaceholderText } = render(<ItemsScreen />);
+    expect(getByText('Add item')).toBeTruthy();
+    expect(getByText('No items yet')).toBeTruthy();
     const input = getByPlaceholderText('Enter a title');
-    fireEvent.changeText(input, 'Milk');
-    expect(input.props.value).toBe('Milk');
+    fireEvent.changeText(input, 'Buy milk');
+    expect(input.props.value).toBe('Buy milk');
   });
 });

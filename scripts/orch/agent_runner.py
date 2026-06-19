@@ -465,8 +465,14 @@ def _expo_build_messages(fid, ctx):
         "placeholders, never '...', never TODO stubs.\n\n"
         "TARGET STACK (a checked-in Expo scaffold already provides ALL the wiring — "
         "you write ONLY the app-specific files):\n"
-        "- Expo (managed) + React Native + TypeScript. Only `src/**` + `App.tsx` are "
+        "- Expo (managed) + React Native + TypeScript + EXPO ROUTER (file-based "
+        "navigation: every file under `app/` is a screen). `app/**` + `src/**` are "
         "TypeScript and `tsc --noEmit` typechecks them, so they MUST be type-correct.\n"
+        "- NAVIGATION is MULTI-SCREEN via Expo Router: `app/_layout.tsx` defines the "
+        "root `<Stack>` (or `<Tabs>`); each route is `app/<name>.tsx`; a list→detail "
+        "uses a dynamic route `app/[id].tsx` with `useLocalSearchParams`. Navigate "
+        "with `useRouter().push('/path')` or `<Link href>` from 'expo-router' — a real "
+        "app has screens + back/tabs, not one screen.\n"
         "- UI: COMPOSE the SHIPPED, THEMED kit — `import { Screen, Header, Text, Card, "
         "Input, Button, Icon, ListItem, Badge, EmptyState } from './components/ui'` "
         "(Screen wraps every screen; Header shows the title + optional back/action; "
@@ -514,13 +520,17 @@ def _expo_build_messages(fid, ctx):
         "- `src/components/<Name>.tsx` — MULTIPLE small, SELF-CONTAINED, REUSABLE, "
         "props-driven React Native components (each exports the component AND a typed "
         "`interface <Name>Props`; receives data + callbacks via props; owns no global "
-        "state). Use `TextInput` for inputs and `Pressable`/`Button` for actions so "
-        "the app has real interactive controls.\n"
-        "- `App.tsx` — the composition ROOT only (default export): import and arrange "
-        "the feature components inside a `SafeAreaView`/`View`. Keep it thin.\n"
+        "state); COMPOSE the shipped kit. Use `TextInput`/`Input` for inputs and "
+        "`Pressable`/`Button` for actions so the app has real interactive controls.\n"
+        "- `app/_layout.tsx` — the root `<Stack>`/`<Tabs>` (themed via `useTheme`), and "
+        "`app/<screen>.tsx` route files (e.g. `app/index.tsx` for the main screen, "
+        "`app/[id].tsx` for a detail) — each a default-export screen that wraps its "
+        "content in `<Screen>` and composes the feature components. Navigate between "
+        "them with `useRouter`/`<Link>`.\n"
         "- `__tests__/<feature>.test.tsx` — jest + @testing-library/react-native: "
-        "`render(<App/>)` (or a component), assert the main success path AND at least "
-        "one validation/empty/error case via `fireEvent` + `findByText`/`getByPlaceholderText`.\n\n"
+        "`render(<Screen/>)` for a route (mock 'expo-router' useRouter/"
+        "useLocalSearchParams), assert the main success path AND at least one "
+        "validation/empty/error case via `fireEvent` + `findByText`/`getByPlaceholderText`.\n\n"
         "CRITICAL: `npm run typecheck` (`tsc --noEmit`) and `npm test` (jest) MUST "
         "pass. Use ONLY the dependencies in package.json (expo, react-native, "
         "expo-sqlite, @testing-library/react-native). No placeholders. Emit all files now."
@@ -538,21 +548,30 @@ _STACK_TEMPLATES = {STACK_REACT: "react-vite-sqlite", STACK_EXPO: "expo-rn"}
 # clean (the template itself is a complete, passing app before scaffold).
 _SCAFFOLD_SAMPLE_REMOVE = {
     STACK_REACT: ("server/api/items.mjs", "test/api.test.mjs"),
-    STACK_EXPO: ("src/components/ItemList.tsx", "src/hooks/useItems.ts",
-                 "__tests__/sample.test.tsx"),
+    # Expo uses file-based routing (Expo Router): the sample feature is the app/
+    # screens + its data layer + test. The generated feature emits its own app/
+    # routes, src/db.ts, src/hooks/*, and __tests__.
+    STACK_EXPO: ("app/index.tsx", "app/[id].tsx", "src/db.ts",
+                 "src/hooks/useItems.ts", "__tests__/sample.test.tsx"),
 }
 
-# The Expo App.tsx is reset to a placeholder on scaffold (so it doesn't import the
-# stripped sample component); the generated feature's App.tsx replaces it.
-_EXPO_APP_PLACEHOLDER = (
+# The Expo root layout (app/_layout.tsx) is reset to a themed BARE Stack on scaffold
+# (so it doesn't reference the stripped sample screens); expo-router auto-discovers
+# the generated feature's routes, and the generated _layout.tsx replaces this.
+_EXPO_LAYOUT_PLACEHOLDER = (
     "import React from 'react';\n"
-    "import { Text, View } from 'react-native';\n\n"
-    "// Replaced by the generated feature's App.tsx.\n"
-    "export default function App() {\n"
+    "import { Stack } from 'expo-router';\n"
+    "import { useTheme } from '../src/theme';\n\n"
+    "export default function RootLayout() {\n"
+    "  const t = useTheme();\n"
     "  return (\n"
-    "    <View>\n"
-    "      <Text>Generated app will render here.</Text>\n"
-    "    </View>\n"
+    "    <Stack\n"
+    "      screenOptions={{\n"
+    "        headerStyle: { backgroundColor: t.colors.surface },\n"
+    "        headerTintColor: t.colors.text,\n"
+    "        contentStyle: { backgroundColor: t.colors.bg },\n"
+    "      }}\n"
+    "    />\n"
     "  );\n"
     "}\n"
 )
@@ -601,10 +620,13 @@ def scaffold_app(app_dir, tpl_dir):
         with open(os.path.join(app_dir, "schema.sql"), "w", encoding="utf-8") as f:
             f.write("-- schema for this app (generated at build time)\n")
     elif stack == STACK_EXPO:
-        # Reset the root to a placeholder (no dangling import of the stripped sample
-        # component); the generated App.tsx replaces it. Mobile has no schema.sql.
-        with open(os.path.join(app_dir, "App.tsx"), "w", encoding="utf-8") as f:
-            f.write(_EXPO_APP_PLACEHOLDER)
+        # Reset the root layout to a bare themed Stack (no dangling reference to the
+        # stripped sample screens); the generated app/_layout.tsx replaces it. Mobile
+        # has no schema.sql (the schema lives in src/db.ts via expo-sqlite).
+        layout = os.path.join(app_dir, "app", "_layout.tsx")
+        os.makedirs(os.path.dirname(layout), exist_ok=True)
+        with open(layout, "w", encoding="utf-8") as f:
+            f.write(_EXPO_LAYOUT_PLACEHOLDER)
     # Per-app auth secret: every app that ships the auth primitives signs sessions
     # with its OWN random secret instead of a world-known dev default (auth.mjs
     # reads ADF_AUTH_SECRET → this file → a fail-loud ephemeral fallback).
