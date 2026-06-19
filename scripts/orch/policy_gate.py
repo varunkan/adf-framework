@@ -41,6 +41,12 @@ DEFAULT_POLICY = {
         "no_plaintext_pii": True,
         "dependency_allowlist": True,
     },
+    # FAIL-CLOSED: these security-critical rules BLOCK the build when they fail, so a
+    # sealed Proof of Build MEANS "passed the enforced security rules" — not merely
+    # "we labeled the violations". The remaining rules stay advisory (recorded in the
+    # seal, never block). Data-driven + overridable: a custom policy may set its own
+    # `enforce`, and ADF_POLICY=advisory downgrades enforcement at the call site.
+    "enforce": ["no_secrets", "no_plaintext_pii", "no_network_egress"],
     "allowlist": _DEFAULT_ALLOWLIST,
 }
 
@@ -122,6 +128,9 @@ def load_policy(app_dir, repo_root=None):
                     p = json.load(f)
                 p.setdefault("rules", DEFAULT_POLICY["rules"])
                 p.setdefault("allowlist", DEFAULT_POLICY["allowlist"])
+                # Default-secure: a custom policy that omits `enforce` still hard-gates
+                # the critical security rules (opt OUT explicitly with "enforce": []).
+                p.setdefault("enforce", DEFAULT_POLICY["enforce"])
                 p.setdefault("id", os.path.basename(path))
                 return p
             except (OSError, ValueError):
@@ -274,17 +283,36 @@ def check_policy(app_dir, policy=None, files=None):
         "rules": rules_out,
         "n_violations": total,
         "n_files": len(files),
+        # The enforced (fail-closed) rule names, carried so blocking_violations() and
+        # the sealed summary are self-contained.
+        "enforce": sorted(policy.get("enforce") or []),
     }
+
+
+def blocking_violations(result):
+    """The ENFORCED rules that FAILED — the hard-gate signal. A non-empty list means
+    the build must be BLOCKED (fail-closed) so a sealed proof always means "passed the
+    enforced security rules". Empty `enforce` => advisory (nothing blocks; violations
+    are still recorded in the seal). Self-contained: reads the enforce list that
+    check_policy folded into the result."""
+    enforce = set(result.get("enforce") or [])
+    return sorted(r["rule"] for r in result.get("rules", [])
+                  if r.get("rule") in enforce and not r.get("ok"))
 
 
 def policy_summary(result):
     """The canonical, sealable subset of the verdict (goes into the Proof of
-    Build): outcome + which rules passed, no file bodies. Stable key order."""
+    Build): outcome + which rules passed/were enforced, no file bodies. Stable key
+    order. `blocked` lists enforced rules that failed — for a SEALED proof it is
+    always empty (a blocked build is never sealed), making the seal a positive
+    attestation that the enforced security rules passed."""
     return {
         "checked": True,
         "ok": bool(result["ok"]),
         "policy_id": result.get("policy_id"),
         "n_violations": result.get("n_violations", 0),
+        "enforced": sorted(result.get("enforce") or []),
+        "blocked": blocking_violations(result),
         "rules": sorted(
             f"{r['rule']}:{'pass' if r['ok'] else 'FAIL'}"
             for r in result.get("rules", []) if r.get("enabled")),

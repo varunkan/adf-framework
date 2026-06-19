@@ -2014,6 +2014,11 @@ def apply_edit_guards(app_dir, files, read_hashes, outlined):
     return safe, notes
 
 
+class _PolicyBlocked(Exception):
+    """Sentinel: the enforced policy gate blocked the build, so the proof is
+    intentionally NOT sealed (distinct from a sealing error)."""
+
+
 def should_scaffold(stack, app_dir):
     """Decide whether a fresh build scaffolds from the checked-in template.
 
@@ -2198,6 +2203,7 @@ def main():
     # Best-effort: never let sealing fail an otherwise-good build.
     proof_seal = None
     policy_ok = None
+    policy_blocked = None   # enforced security rules that FAILED → fail-closed
     n_components = None
     if verified and (stack or DEFAULT_STACK) in (STACK_REACT, STACK_EXPO):
         # Project-specific artifact: catalog the app's reusable, props-driven
@@ -2228,9 +2234,28 @@ def main():
             n = pol_res["n_violations"]
             log(f"policy gate ({pol_res['policy_id']}): "
                 f"{'PASS' if policy_ok else f'{n} violation(s)'}")
+            # FAIL-CLOSED: when an ENFORCED security rule fails, BLOCK the build —
+            # do not seal a "compliant" proof and exit non-zero — so a sealed Proof
+            # of Build always means "passed the enforced security rules", not merely
+            # "we labeled the violations". ADF_POLICY=advisory downgrades to the old
+            # record-but-ship behavior (dev escape hatch).
+            blocking = policy_gate.blocking_violations(pol_res)
+            advisory = os.environ.get("ADF_POLICY", "strict").strip().lower() in (
+                "advisory", "warn", "off")
+            if blocking and not advisory:
+                policy_blocked = blocking
+                log(f"🚫 policy gate ENFORCED — build BLOCKED on: "
+                    f"{', '.join(blocking)} (set ADF_POLICY=advisory to override)")
+                record_build_outcome(
+                    repo_root, fid, False,
+                    f"policy enforced-rule violation: {', '.join(blocking)}")
         except Exception as e:
             log(f"policy gate skipped: {e}")
         try:
+            if policy_blocked:
+                # A blocked build is never sealed — a sealed proof is a POSITIVE
+                # attestation that the enforced security rules passed.
+                raise _PolicyBlocked()
             import proof_of_build
             from datetime import datetime, timezone
             proof = proof_of_build.seal_app(
@@ -2250,6 +2275,8 @@ def main():
             )
             proof_seal = proof["seal"]
             log(f"sealed Proof of Build {proof_seal} over {len(proof['files'])} files")
+        except _PolicyBlocked:
+            pass   # already logged the block above; intentionally unsealed
         except Exception as e:
             log(f"proof-of-build sealing skipped: {e}")
 
@@ -2258,7 +2285,14 @@ def main():
         clear_pending_edit(app_dir)
 
     rel_root = os.path.relpath(app_root, workspace)
-    status = "✅ tests PASS" if verified else "⚠️ tests still failing after retries"
+    build_ok = verified and not policy_blocked
+    if policy_blocked:
+        status = ("🚫 BLOCKED by policy gate (enforced security rule(s) failed: "
+                  + ", ".join(policy_blocked) + ")")
+    elif verified:
+        status = "✅ tests PASS"
+    else:
+        status = "⚠️ tests still failing after retries"
     verb = "Updated" if is_edit else "Implemented"
     if stack == STACK_REACT:
         run_hint = (f"Run:  cd {rel_root} && npm ci && npm run build && "
@@ -2283,6 +2317,14 @@ def main():
             f"\n\n🔏 Proof of Build sealed: {proof_seal}{pol}\n"
             f"Verify (offline): python3 scripts/orch/verify_proof.py {rel_root}"
         )
+    elif policy_blocked:
+        summary += (
+            f"\n\n🚫 No Proof of Build sealed — the enforced policy gate BLOCKED this "
+            f"build ({', '.join(policy_blocked)}). A sealed proof means the security "
+            f"rules passed; this build did not. See {rel_root}/.adf-policy-report.json "
+            f"for the located violations. (ADF_POLICY=advisory ships anyway, recording "
+            f"the violations in the seal instead of blocking.)"
+        )
     if os.path.isdir(os.path.join(app_root, ".adf-context")):
         summary += ("\n\n🗜 Context compacted to fit the model budget "
                     "(durable card in .adf-context/ — the fold is reviewable, "
@@ -2291,9 +2333,10 @@ def main():
         summary += f"\n\nLast test output:\n{last_failure[:1500]}"
     log(f"done: {status}")
     emit_result(summary, {"input_tokens": in_tok, "output_tokens": out_tok})
-    # Honest exit code: non-zero when verification never passed, so the ADF
-    # phase runner records the implement phase as failed (and can self-heal).
-    sys.exit(0 if verified else 6)
+    # Honest exit code: non-zero when verification never passed OR an enforced
+    # policy rule blocked the build, so the ADF phase runner records the implement
+    # phase as failed (and can self-heal / surface the security block).
+    sys.exit(0 if build_ok else 6)
 
 
 if __name__ == "__main__":

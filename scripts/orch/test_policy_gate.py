@@ -191,6 +191,40 @@ class Violations(unittest.TestCase):
         self.assertFalse(r["ok"])
         self.assertTrue(any("left-pad" in v["detail"] for v in r["violations"]))
 
+    def test_enforced_critical_rule_blocks_the_build(self):
+        # fail-closed: a leaked secret is an ENFORCED rule → blocking_violations names
+        # it, so agent_runner refuses to seal a "compliant" proof.
+        _write(self.app, "server/api/keys.mjs",
+               "const KEY = 'sk-abcdEFGH1234567890ZXCVbnmQWERtyui'\nexport default 1")
+        res = pg.check_policy(self.app)
+        blocking = pg.blocking_violations(res)
+        self.assertIn("no_secrets", blocking)
+        self.assertTrue(pg.policy_summary(res)["blocked"])  # sealed shape records it
+
+    def test_advisory_rule_does_not_block(self):
+        # offline_capable is NOT in the enforced set → a CDN tag is recorded but does
+        # not fail-close the build (still a violation, just advisory).
+        _write(self.app, "index.html",
+               '<script src="https://cdn.tailwindcss.com"></script><div id="root"></div>')
+        res = pg.check_policy(self.app)
+        self.assertFalse(res["ok"])                       # still a violation
+        self.assertEqual(pg.blocking_violations(res), [])  # but does not block
+
+    def test_compliant_app_is_not_blocked(self):
+        res = pg.check_policy(self.app)   # the clean setUp app
+        self.assertEqual(pg.blocking_violations(res), [])
+        self.assertEqual(pg.policy_summary(res)["blocked"], [])
+        self.assertIn("no_secrets", pg.policy_summary(res)["enforced"])
+
+    def test_loaded_policy_inherits_enforce_by_default(self):
+        # a custom .adf-policy.json that omits `enforce` still hard-gates the critical
+        # security rules (default-secure); opting out is explicit ("enforce": []).
+        app = tempfile.mkdtemp()
+        _write(app, ".adf-policy.json", json.dumps({
+            "schema": "adf-policy/1", "rules": {"no_secrets": True}, "allowlist": [],
+        }))
+        self.assertEqual(pg.load_policy(app)["enforce"], pg.DEFAULT_POLICY["enforce"])
+
     def test_disabled_rule_is_not_enforced(self):
         _write(self.app, "server/api/phone.mjs",
                "export default async function(app){ fetch('https://evil.example.com') }")
