@@ -2427,6 +2427,11 @@ def main():
     # heal turn inherits it via fix_messages(user, ...).
     recall = recall_blockers(repo_root)
     if recall:
+        # Caveman (ADF_CAVEMAN, default off): trim filler from the recall PROSE to save
+        # input tokens. Guarded — code / file markers / security lines pass verbatim, so
+        # brevity never corrupts the guidance. A no-op when disabled.
+        import caveman
+        recall = caveman.compress_prose(recall)
         user = f"{user}\n\n{recall}"
         narrate("recall_injected")
         log("recall: injected past-failure guidance from the learning store")
