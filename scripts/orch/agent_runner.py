@@ -67,6 +67,21 @@ def emit_event(obj):
     print(json.dumps(obj), flush=True)
 
 
+def narrate(kind, **fields):
+    """Emit ONE live progress event for the dashboard to narrate in real time —
+    'literally every action, written down', so the Studio shows running commentary
+    instead of a dark multi-minute pause. Must travel over stdout (the phase runner
+    drains stdout live but only reads stderr after exit, so a log() never narrates).
+
+    HONESTY CONTRACT (the moat): a narration is a UI signal, NEVER an authoritative
+    claim. Announce-events (verifying, sealing, verify_stage) say 'doing X now';
+    verdict-events (verify_result, verify_stage_result, policy_gate, policy_blocked,
+    sealed, build_complete) carry truth and are emitted ONLY after the real return
+    value is in hand — so the live stream can never say 'tests passed' before they
+    passed, or render a seal for an unsealed/blocked build."""
+    emit_event({"type": kind, **fields})
+
+
 # --- .env loading (NVIDIA_API_KEY / ANTHROPIC_API_KEY live here) ------------
 def load_env(repo_root):
     for rel in (".env", "../.env"):
@@ -726,6 +741,7 @@ def _ensure_template_node_modules(tpl_dir, timeout=600):
         build = os.path.join(work, "tpl")
         shutil.copytree(tpl_dir, build,
                         ignore=shutil.ignore_patterns("node_modules", "dist", "*.db"))
+        narrate("warming_deps")   # cold checkout: a real one-time npm ci is about to run
         try:
             r = subprocess.run(["npm", "ci", "--no-audit", "--no-fund"], cwd=build,
                                capture_output=True, text=True, timeout=timeout,
@@ -765,6 +781,7 @@ def warm_node_modules(tpl_dir, app_dir):
             if subprocess.run(cmd, capture_output=True).returncode == 0 \
                     and os.path.isdir(dst):
                 log("warm node_modules cloned from template — npm ci skipped")
+                narrate("deps_warm", method="clone")
                 return True
         except Exception:
             pass
@@ -773,6 +790,7 @@ def warm_node_modules(tpl_dir, app_dir):
     try:
         shutil.copytree(src, dst, symlinks=True)
         log("warm node_modules copied from template — npm ci skipped")
+        narrate("deps_warm", method="copy")
         return True
     except Exception as e:
         log(f"warm node_modules skipped ({e}); will run npm ci")
@@ -1320,6 +1338,16 @@ def _node_smoke_boot(app_root, secs=20, visual=True):
             proc.kill()
 
 
+def _run_stage(stage, fn):
+    """Run one verify stage with HONEST live narration: announce the stage is running,
+    call fn(), then emit a result event bound to fn()'s REAL (ok, msg) return — the
+    green/red pill can never precede the actual outcome. Returns fn()'s (ok, msg)."""
+    narrate("verify_stage", stage=stage)
+    ok, msg = fn()
+    narrate("verify_stage_result", stage=stage, ok=bool(ok))
+    return ok, msg
+
+
 def _react_verify(app_root, timeout=None):
     """Verify a React+Vite+Tailwind+SQLite app: install (once) → typecheck+build
     (`tsc --noEmit && vite build`) → vitest → boot → RENDER (headless browser).
@@ -1331,19 +1359,20 @@ def _react_verify(app_root, timeout=None):
         return False, "package.json missing — react scaffold was not applied"
     # Install once (npm ci needs the committed lockfile); reuse on re-verify.
     if not os.path.isdir(os.path.join(app_root, "node_modules")):
-        ok, out = _npm(app_root, ["ci", "--no-audit", "--no-fund"], timeout)
+        ok, out = _run_stage("npm-ci", lambda: _npm(
+            app_root, ["ci", "--no-audit", "--no-fund"], timeout))
         if not ok:
             return False, ("DEPENDENCY INSTALL FAILED (npm ci):\n"
                            + _spill_and_bound(app_root, "npm-ci", out))
-    ok, out = _npm(app_root, ["run", "build"], timeout)
+    ok, out = _run_stage("build", lambda: _npm(app_root, ["run", "build"], timeout))
     if not ok:
         return False, ("BUILD FAILED (tsc --noEmit && vite build):\n"
                        + _spill_and_bound(app_root, "build", out))
-    ok, out = _npm(app_root, ["test"], timeout)
+    ok, out = _run_stage("vitest", lambda: _npm(app_root, ["test"], timeout))
     if not ok:
         return False, ("TESTS FAILED (vitest):\n"
                        + _spill_and_bound(app_root, "test", out))
-    boot_ok, boot_msg = _node_smoke_boot(app_root)
+    boot_ok, boot_msg = _run_stage("boot", lambda: _node_smoke_boot(app_root))
     if not boot_ok:
         return False, f"BUILD + TESTS PASSED but SERVER BOOT FAILED:\n{boot_msg}"
     return True, f"build + vitest passed; {boot_msg}"
@@ -1498,19 +1527,22 @@ def _expo_verify(app_root, timeout=None):
     # Install once if node_modules is absent (mirror _react_verify) — the warm clone
     # usually provides it, but never hard-fail when it didn't (e.g. a cleaned app).
     if not os.path.isdir(os.path.join(app_root, "node_modules")):
-        ok, out = _npm(app_root, ["ci", "--no-audit", "--no-fund"], timeout)
+        ok, out = _run_stage("npm-ci", lambda: _npm(
+            app_root, ["ci", "--no-audit", "--no-fund"], timeout))
         if not ok:
             return False, ("DEPENDENCY INSTALL FAILED (npm ci):\n"
                            + _spill_and_bound(app_root, "expo-npm-ci", out))
-    ok, out = _npm(app_root, ["run", "typecheck"], timeout)
+    ok, out = _run_stage("typecheck", lambda: _npm(app_root, ["run", "typecheck"], timeout))
     if not ok:
         return False, ("TYPECHECK FAILED (tsc --noEmit):\n"
                        + _spill_and_bound(app_root, "expo-typecheck", out))
-    ok, out = _npm(app_root, ["test"], timeout)
+    ok, out = _run_stage("jest", lambda: _npm(app_root, ["test"], timeout))
     if not ok:
         return False, ("TESTS FAILED (jest):\n"
                        + _spill_and_bound(app_root, "expo-test", out))
+    narrate("verify_stage", stage="web-render")
     render_ok, render_msg, web_rendered = _expo_web_render(app_root, timeout)
+    narrate("verify_stage_result", stage="web-render", ok=bool(render_ok))
     if not render_ok:
         return False, render_msg
     # MM10: opportunistically render on a REAL booted iOS Simulator and seal the
@@ -2123,6 +2155,8 @@ def main():
 
     edit_instruction = read_pending_edit(app_dir)
     is_edit = bool(edit_instruction) and app_built
+    narrate("feature_resolved", fid=fid,
+            mode=("edit" if is_edit else "build"), stack=stack)
 
     if not is_edit and not any(ctx.values()):
         log(f"no spec/requirement found for {fid} under {repo_root}")
@@ -2131,8 +2165,11 @@ def main():
     edit_read_hashes, edit_outlined = {}, set()
     if is_edit:
         log(f"EDIT mode ({stack}): applying change -> {edit_instruction[:100]}")
+        narrate("reading_files", mode="edit", instruction=edit_instruction[:140])
         read_files = current_app_files(app_dir)
+        narrate("files_read", count=len(read_files))
         edit_read_hashes, edit_outlined = edit_read_guard(read_files, edit_instruction)
+        narrate("planning", mode="edit")
         system, user = assemble_edit(
             app_dir, fid, read_files, edit_instruction, stack)
     else:
@@ -2147,9 +2184,12 @@ def main():
                 log(f"stack {stack} selected but no template found under templates/")
                 sys.exit(7)
             os.makedirs(app_dir, exist_ok=True)
+            narrate("scaffolding", stack=stack)
             scaffold_app(app_dir, tpl)
+            narrate("scaffolded", stack=stack)
             log(f"scaffolded {stack} template -> apps/{fid}/")
         log(f"BUILD mode ({stack})")
+        narrate("planning", mode="build")
         system, user = build_messages(fid, ctx, stack)
     # Close the learning loop: splice past-failure guidance (recorded but never read
     # back until now) into the prompt so the model pre-empts repeat failures. The
@@ -2157,6 +2197,7 @@ def main():
     recall = recall_blockers(repo_root)
     if recall:
         user = f"{user}\n\n{recall}"
+        narrate("recall_injected")
         log("recall: injected past-failure guidance from the learning store")
     timeout = int(os.environ.get("ADF_RUNNER_TIMEOUT_SEC", "180"))
     max_iters = int(os.environ.get("ADF_RUNNER_FIX_ITERS", "3"))
@@ -2169,6 +2210,7 @@ def main():
     verify_summary = ""
 
     for attempt in range(1, max_iters + 1):
+        narrate("generating", attempt=attempt)
         gen = generate(messages, timeout)
         if not gen:
             log("no model backend produced output (set NVIDIA_API_KEY / ANTHROPIC_API_KEY, or run Ollama)")
@@ -2177,6 +2219,7 @@ def main():
         in_tok += usage.get("prompt_tokens", 0)
         out_tok += usage.get("completion_tokens", 0)
         files = parse_files(text)
+        narrate("generated", attempt=attempt, files=len(files))
         if not files:
             log(f"attempt {attempt}: no parseable <<<FILE:>>> blocks; first 400 chars:\n{text[:400]}")
             if attempt == max_iters:
@@ -2209,7 +2252,9 @@ def main():
                                         last_failure, stack)
                 continue
 
+        narrate("writing_files", total=len(files))
         app_root, written = write_files(workspace, fid, files)
+        narrate("files_written", count=len(written))
         # Refresh the staleness baseline to what we just wrote: a later self-heal
         # attempt re-reads these files and must compare against the runner's OWN last
         # write, not the pre-loop original (else attempt 2+ self-flags as "stale").
@@ -2218,7 +2263,9 @@ def main():
                 norm = rel.lstrip("/")
                 edit_read_hashes[norm] = _content_hash(
                     content if content.endswith("\n") else content + "\n")
+        narrate("verifying", stack=stack, attempt=attempt)
         ok, output = verify_app(app_root, stack)
+        narrate("verify_result", ok=bool(ok), attempt=attempt)
         last_failure = output
         log(f"attempt {attempt}: wrote {len(written)} files; verify {'PASSED' if ok else 'FAILED'}")
         if ok:
@@ -2229,6 +2276,7 @@ def main():
             # already-verified build: the last attempt always seals.
             gaps = [] if is_edit else audit_completion(app_root, stack, ctx, fid)
             if gaps and attempt < max_iters:
+                narrate("completion_audit", gaps=gaps)
                 log(f"attempt {attempt}: verify passed but completion audit found "
                     f"uncovered deliverables: {gaps}")
                 last_failure = (
@@ -2246,6 +2294,7 @@ def main():
                                    + "; ".join(gaps))
             break
         if attempt < max_iters:
+            narrate("self_heal", attempt=attempt, reason=output[:200])
             log(f"attempt {attempt}: feeding failure back to the model to self-correct")
             messages = fix_messages(system, user, files, output, stack)
 
@@ -2273,6 +2322,7 @@ def main():
             import component_manifest
             manifest = component_manifest.generate(app_root)
             n_components = manifest["count"]
+            narrate("component_manifest", count=n_components)
             log(f"component manifest: {n_components} reusable component(s) cataloged")
         except Exception as e:
             log(f"component manifest skipped: {e}")
@@ -2291,6 +2341,7 @@ def main():
                       "w", encoding="utf-8") as f:
                 json.dump(pol_res, f, indent=2, sort_keys=True)
             n = pol_res["n_violations"]
+            narrate("policy_gate", ok=bool(policy_ok), n_violations=n)
             log(f"policy gate ({pol_res['policy_id']}): "
                 f"{'PASS' if policy_ok else f'{n} violation(s)'}")
             # FAIL-CLOSED: when an ENFORCED security rule fails, BLOCK the build —
@@ -2303,6 +2354,7 @@ def main():
                 "advisory", "warn", "off")
             if blocking and not advisory:
                 policy_blocked = blocking
+                narrate("policy_blocked", rules=blocking)
                 log(f"🚫 policy gate ENFORCED — build BLOCKED on: "
                     f"{', '.join(blocking)} (set ADF_POLICY=advisory to override)")
                 record_build_outcome(
@@ -2317,6 +2369,7 @@ def main():
                 raise _PolicyBlocked()
             import proof_of_build
             from datetime import datetime, timezone
+            narrate("sealing")
             proof = proof_of_build.seal_app(
                 app_root, fid, stack,
                 _spec_block(ctx) or ctx.get("requirement", ""),
@@ -2333,6 +2386,7 @@ def main():
                 created_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
             )
             proof_seal = proof["seal"]
+            narrate("sealed", seal=proof_seal, files=len(proof["files"]))
             log(f"sealed Proof of Build {proof_seal} over {len(proof['files'])} files")
         except _PolicyBlocked:
             pass   # already logged the block above; intentionally unsealed
@@ -2391,6 +2445,7 @@ def main():
     if not verified:
         summary += f"\n\nLast test output:\n{last_failure[:1500]}"
     log(f"done: {status}")
+    narrate("build_complete", ok=bool(build_ok), status=status)
     emit_result(summary, {"input_tokens": in_tok, "output_tokens": out_tok})
     # Honest exit code: non-zero when verification never passed OR an enforced
     # policy rule blocked the build, so the ADF phase runner records the implement

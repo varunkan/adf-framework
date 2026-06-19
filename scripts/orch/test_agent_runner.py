@@ -4,6 +4,8 @@ PORT-aware generation prompt. Pure-function tests (no model calls):
 
     python3 scripts/orch/test_agent_runner.py
 """
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -1195,6 +1197,56 @@ class WarmNodeModulesBootstrap(unittest.TestCase):
         with mock.patch.object(ar.subprocess, "run") as m:
             self.assertFalse(ar.warm_node_modules(self.tpl, self.app))
             m.assert_not_called()   # app already warmed → never bootstraps/clones
+
+
+class LiveNarration(unittest.TestCase):
+    """Live progress narration ('every action in words') must travel over stdout AND
+    be HONEST: verdict events bind to the real return value, never optimism."""
+
+    def _events(self, fn):
+        """Run fn() capturing stdout; return the emitted JSON progress events."""
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            fn()
+        return [json.loads(line) for line in buf.getvalue().splitlines()
+                if line.strip()]
+
+    def test_narrate_emits_one_typed_json_line(self):
+        evs = self._events(lambda: ar.narrate("generating", attempt=2))
+        self.assertEqual(evs, [{"type": "generating", "attempt": 2}])
+
+    def test_run_stage_pass_binds_result_to_real_ok(self):
+        evs = self._events(lambda: ar._run_stage("vitest", lambda: (True, "ok")))
+        self.assertEqual(evs, [
+            {"type": "verify_stage", "stage": "vitest"},
+            {"type": "verify_stage_result", "stage": "vitest", "ok": True},
+        ])
+
+    def test_run_stage_fail_reports_failure_not_optimism(self):
+        evs = self._events(lambda: ar._run_stage("build", lambda: (False, "boom")))
+        self.assertEqual(
+            evs[-1], {"type": "verify_stage_result", "stage": "build", "ok": False})
+
+    def test_run_stage_announces_before_running_and_passes_value_through(self):
+        order = []
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            ok, msg = ar._run_stage("boot", lambda: (order.append("ran") or (True, "m")))
+        evs = [json.loads(l) for l in buf.getvalue().splitlines() if l.strip()]
+        # the 'running' announce is emitted; the result is bound to fn()'s return
+        self.assertEqual(evs[0]["type"], "verify_stage")
+        self.assertEqual(evs[1], {"type": "verify_stage_result", "stage": "boot",
+                                  "ok": True})
+        self.assertEqual((ok, msg), (True, "m"))   # return value unchanged
+        self.assertEqual(order, ["ran"])           # fn actually ran
+
+    def test_react_verify_missing_pkg_emits_no_false_stage_result(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        evs = self._events(lambda: ar._react_verify(tmp))
+        kinds = [e["type"] for e in evs]
+        # returns early on missing package.json — must never claim a stage PASSED
+        self.assertNotIn("verify_stage_result", kinds)
 
 
 if __name__ == "__main__":

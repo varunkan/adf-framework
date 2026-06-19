@@ -1166,6 +1166,81 @@ Instructions:
         : 'Writing $path';
   }
 
+  /// Human-readable narration for the ADF runner's phase events. agent_runner.py
+  /// emits these typed progress lines ('every action in words') so the Studio can
+  /// show running commentary instead of a dark multi-minute pause. Returns null for
+  /// an unrecognized type (the caller leaves the line for other handlers). Pure +
+  /// static so it is unit-testable. HONESTY: verdict events (verify_stage_result /
+  /// verify_result / policy_gate / policy_blocked / sealed / build_complete) carry
+  /// the runner's REAL outcome — this only FORMATS what the runner reported; it
+  /// never infers or asserts success on its own.
+  static String? runnerNarration(Map<String, dynamic> obj, String type) {
+    String s(Object? v) => '$v';
+    final attempt = obj['attempt'];
+    final stage = obj['stage'];
+    switch (type) {
+      case 'feature_resolved':
+        return 'Resolved ${s(obj['fid'])} — ${s(obj['mode'])} mode '
+            '(${s(obj['stack'])})';
+      case 'reading_files':
+        return 'Reading the current files to apply your edit…';
+      case 'files_read':
+        return 'Read ${s(obj['count'])} file(s)';
+      case 'planning':
+        return 'Planning the ${s(obj['mode'])}…';
+      case 'scaffolding':
+        return 'Scaffolding the ${s(obj['stack'])} template…';
+      case 'scaffolded':
+        return 'Scaffold ready (${s(obj['stack'])})';
+      case 'warming_deps':
+        return 'Installing dependencies (one-time)…';
+      case 'deps_warm':
+        return 'Dependencies ready (${s(obj['method'])})';
+      case 'recall_injected':
+        return 'Recalled past-failure guidance from the learning store';
+      case 'generating':
+        return 'Generating code (attempt ${s(attempt)})…';
+      case 'generated':
+        return 'Generated ${s(obj['files'])} file(s) (attempt ${s(attempt)})';
+      case 'writing_files':
+        return 'Writing ${s(obj['total'])} file(s)…';
+      case 'files_written':
+        return 'Wrote ${s(obj['count'])} file(s)';
+      case 'verifying':
+        return 'Verifying the ${s(obj['stack'])} app (attempt ${s(attempt)})…';
+      case 'verify_stage':
+        return 'Running ${s(stage)}…';
+      case 'verify_stage_result':
+        return obj['ok'] == true ? '${s(stage)} passed ✓' : '${s(stage)} failed ✗';
+      case 'verify_result':
+        return obj['ok'] == true
+            ? 'Verification passed ✓'
+            : 'Verification failed — self-healing…';
+      case 'completion_audit':
+        return 'Completion audit: closing test-coverage gaps…';
+      case 'self_heal':
+        return 'Self-healing (attempt ${s(attempt)}): ${s(obj['reason'])}';
+      case 'component_manifest':
+        return 'Cataloged ${s(obj['count'])} reusable component(s)';
+      case 'policy_gate':
+        return obj['ok'] == true
+            ? 'Policy gate passed ✓'
+            : 'Policy gate: ${s(obj['n_violations'])} violation(s)';
+      case 'policy_blocked':
+        return '🚫 Blocked by policy: '
+            '${(obj['rules'] as List?)?.join(', ') ?? ''}';
+      case 'sealing':
+        return 'Sealing the Proof of Build…';
+      case 'sealed':
+        return '🔏 Sealed Proof of Build ${s(obj['seal'])} over '
+            '${s(obj['files'])} file(s)';
+      case 'build_complete':
+        return s(obj['status']);
+      default:
+        return null;
+    }
+  }
+
   /// Exposed for tests: feed one runner-stdout line through the live-narration
   /// path (in production this is driven by the spawned runner's stdout stream).
   void ingestAgentLine(String featureId, int phase, String line) =>
@@ -1214,6 +1289,24 @@ Instructions:
           event: 'runner',
           phase: phase,
           message: fileWriteNarration(obj),
+        );
+        return;
+      }
+
+      // ADF runner phase narration — 'every action in words'. agent_runner.py emits
+      // typed progress events (feature_resolved, scaffolding, generating, verifying,
+      // verify_stage(_result), policy_gate, sealing/sealed, build_complete, …); each
+      // becomes a live span so the Studio shows running commentary, not dead air.
+      // Without this branch these valid-JSON lines fall through and are dropped.
+      final narration = type == null ? null : runnerNarration(obj, type);
+      if (narration != null) {
+        _flushReasoningBuffer(featureId, phase);
+        _traces.append(
+          featureId: featureId,
+          name: 'runner.$type',
+          event: 'runner',
+          phase: phase,
+          message: narration,
         );
         return;
       }
