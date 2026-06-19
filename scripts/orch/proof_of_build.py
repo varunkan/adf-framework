@@ -27,6 +27,9 @@ PROOF_MD = "PROOF.md"
 PROOF_DIR = ".adf-proof"
 SPEC_LEAF = "@spec"
 BUILD_LEAF = "@build"
+# Domain separator for the OPTIONAL provenance signature (so an ADF signature can
+# never be replayed as a signature over a different protocol's message).
+SIG_DOMAIN = "adf-proof-v1:"
 
 
 def _h(b: bytes) -> str:
@@ -75,7 +78,124 @@ def _verdict_bytes(stack: str, build: dict) -> bytes:
     return json.dumps(verdict, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
-def compute_proof(feature_id, stack, files, spec_text, build, created_at=None):
+# --- OPTIONAL provenance signing (additive; the keyless seal is unchanged) -------
+# The keyless Merkle root proves INTEGRITY (these bytes => this root), recomputable
+# by anyone offline with no key. An optional detached Ed25519 signature over that
+# root adds PROVENANCE (a specific key-holder vouches "I produced this"), for the
+# regulated buyer who needs authenticity too. Signing is OFF by default (no key =>
+# the pure keyless seal) and degrades gracefully where the crypto lib is absent.
+
+def _ed25519():
+    """Lazy, optional. Returns (ed25519_module, serialization) or (None, None) when
+    the vetted `cryptography` lib is unavailable — signing then no-ops (keyless
+    still works). We use a vetted library, never homemade crypto."""
+    try:
+        from cryptography.hazmat.primitives.asymmetric import ed25519
+        from cryptography.hazmat.primitives import serialization
+        return ed25519, serialization
+    except Exception:
+        return None, None
+
+
+def signing_available():
+    return _ed25519()[0] is not None
+
+
+def resolve_signing_seed(env=None):
+    """The Ed25519 signing seed (32 bytes) from the environment, or None (keyless,
+    the default). ADF_SIGNING_KEY = 64-hex seed, OR a path to a file holding it.
+    Signing is OPT-IN — absence keeps the pure keyless seal."""
+    env = env if env is not None else os.environ
+    val = (env.get("ADF_SIGNING_KEY") or "").strip()
+    if not val:
+        return None
+    if os.path.isfile(val):
+        try:
+            with open(val, encoding="utf-8") as f:
+                val = f.read().strip()
+        except (OSError, ValueError):
+            # OSError (unreadable) or UnicodeDecodeError (binary/corrupt key file):
+            # degrade to keyless rather than aborting the whole seal with a traceback.
+            return None
+    try:
+        seed = bytes.fromhex(val)
+    except ValueError:
+        return None
+    return seed if len(seed) == 32 else None
+
+
+def generate_keypair():
+    """A fresh Ed25519 keypair as (seed_hex, public_hex), or (None, None) if the
+    crypto lib is absent. The seed is the 32-byte private key (keep secret); the
+    public hex is publishable and pins provenance."""
+    ed25519, serialization = _ed25519()
+    if ed25519 is None:
+        return None, None
+    priv = ed25519.Ed25519PrivateKey.generate()
+    seed = priv.private_bytes(
+        serialization.Encoding.Raw, serialization.PrivateFormat.Raw,
+        serialization.NoEncryption())
+    pub = priv.public_key().public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    return seed.hex(), pub.hex()
+
+
+def _seed_bytes(seed):
+    """Normalize a seed given as 32 raw bytes OR 64 hex chars to bytes, else None."""
+    if not seed:
+        return None
+    if isinstance(seed, str):
+        try:
+            seed = bytes.fromhex(seed.strip())
+        except ValueError:
+            return None
+    return seed if isinstance(seed, (bytes, bytearray)) and len(seed) == 32 else None
+
+
+def sign_root(merkle_root, seed):
+    """Detached, deterministic (RFC 8032) Ed25519 signature over the Merkle root.
+    `seed` may be 32 raw bytes or 64 hex chars. Returns the signature dict, or None
+    when there is no usable seed / no crypto lib (so a re-seal stays byte-identical
+    and the keyless path is never disturbed)."""
+    seed = _seed_bytes(seed)
+    if not seed:
+        return None
+    ed25519, serialization = _ed25519()
+    if ed25519 is None:
+        return None
+    priv = ed25519.Ed25519PrivateKey.from_private_bytes(seed)
+    pub = priv.public_key().public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    sig = priv.sign((SIG_DOMAIN + merkle_root).encode())
+    return {"alg": "ed25519", "domain": SIG_DOMAIN, "signed": "merkle_root",
+            "public_key": pub.hex(), "sig": sig.hex()}
+
+
+def verify_signature(signature, merkle_root):
+    """Verify a proof's detached signature over its Merkle root. Returns one of:
+    'unsigned' (no signature) | 'valid' | 'invalid' | 'unverifiable' (lib absent)."""
+    if not signature:
+        return "unsigned"
+    ed25519, _ = _ed25519()
+    if ed25519 is None:
+        return "unverifiable"
+    try:
+        # PIN the domain to our constant — never trust the proof-supplied `domain`,
+        # or an Ed25519 signature made under a foreign protocol's domain could be
+        # replayed as ADF provenance. The carried field is documentation only.
+        if signature.get("domain", SIG_DOMAIN) != SIG_DOMAIN:
+            return "invalid"
+        pub = ed25519.Ed25519PublicKey.from_public_bytes(
+            bytes.fromhex(signature["public_key"]))
+        msg = (SIG_DOMAIN + merkle_root).encode()
+        pub.verify(bytes.fromhex(signature["sig"]), msg)
+        return "valid"
+    except Exception:
+        return "invalid"
+
+
+def compute_proof(feature_id, stack, files, spec_text, build, created_at=None,
+                  signing_seed=None):
     """Pure: compute the proof dict from in-memory inputs.
 
     files: iterable of (relpath, content) where content is str or bytes.
@@ -94,7 +214,7 @@ def compute_proof(feature_id, stack, files, spec_text, build, created_at=None):
     leaves.append(_leaf(BUILD_LEAF, verdict_b))
 
     root = _merkle_root(leaves)
-    return {
+    proof = {
         "schema": PROOF_SCHEMA,
         "feature_id": feature_id,
         "stack": stack,
@@ -112,6 +232,12 @@ def compute_proof(feature_id, stack, files, spec_text, build, created_at=None):
         "merkle_root": root,
         "seal": "adf1:" + root[:12],
     }
+    # OPTIONAL provenance: a detached signature over the root (NOT folded into the
+    # root — it signs it). Absent => the unchanged keyless proof.
+    sig = sign_root(root, signing_seed)
+    if sig:
+        proof["signature"] = sig
+    return proof
 
 
 def _walk_source(app_dir):
@@ -133,6 +259,15 @@ def _render_line(proof):
     return f"**Render-proven on:** {plats}{extra}  "
 
 
+def _signature_line(proof):
+    """The human line attesting an optional provenance signature, or ''."""
+    sig = proof.get("signature")
+    if not sig:
+        return ""
+    return (f"**Signed (provenance):** Ed25519 by `{sig.get('public_key', '')[:16]}…` "
+            f"— verify with `--trust <pubkey>`  ")
+
+
 def render_proof_md(proof):
     b = proof["build"]
     lines = [
@@ -146,6 +281,7 @@ def render_proof_md(proof):
         f"**Model:** {b.get('model') or 'n/a'}  ",
         f"**Verified:** {'✅ ' + (b.get('verify_summary') or 'yes') if b.get('verified') else '❌ no'}",
         *([_render_line(proof)] if _render_line(proof) else []),
+        *([_signature_line(proof)] if _signature_line(proof) else []),
         "",
         "This app ships a tamper-evident certificate. The Merkle root above seals "
         "every source file below, the spec it was built from "
@@ -177,13 +313,17 @@ def render_proof_md(proof):
 
 
 def seal_app(app_dir, feature_id, stack, spec_text, build,
-             created_at=None, files=None):
+             created_at=None, files=None, signing_seed=None):
     """Seal a built app: walk its source, compute the proof, and write
     `.adf-proof.json` + `PROOF.md` + a sealed copy of the spec under
-    `.adf-proof/spec.md`. Returns the proof dict."""
+    `.adf-proof/spec.md`. Returns the proof dict. If a signing seed is configured
+    (param or ADF_SIGNING_KEY), an Ed25519 provenance signature rides along."""
     if files is None:
         files = _walk_source(app_dir)
-    proof = compute_proof(feature_id, stack, files, spec_text, build, created_at)
+    if signing_seed is None:
+        signing_seed = resolve_signing_seed()
+    proof = compute_proof(feature_id, stack, files, spec_text, build, created_at,
+                          signing_seed=signing_seed)
 
     pdir = os.path.join(app_dir, PROOF_DIR)
     os.makedirs(pdir, exist_ok=True)
@@ -197,11 +337,18 @@ def seal_app(app_dir, feature_id, stack, spec_text, build,
     return proof
 
 
-def verify_proof(app_dir):
+def verify_proof(app_dir, trusted_pubkeys=None):
     """Recompute the seal from the files on disk and compare to the recorded
     proof — fully offline. Returns (ok, report) where report names every file's
     status (ok | modified | missing) and whether the sealed spec and Merkle root
-    still hold."""
+    still hold.
+
+    INTEGRITY (the keyless tamper-evidence) is `ok` and unchanged. PROVENANCE is
+    additive + optional: if the proof carries a signature, the report adds
+    `signature` (unsigned|valid|invalid|unverifiable), `signer` (public key), and —
+    when `trusted_pubkeys` is given — `signer_trusted`. `ok` stays purely about
+    integrity so an unsigned proof still VERIFIES; provenance is reported alongside,
+    not conflated."""
     pj = os.path.join(app_dir, PROOF_JSON)
     if not os.path.isfile(pj):
         return False, {"status": "NO_PROOF",
@@ -246,6 +393,22 @@ def verify_proof(app_dir):
     root = _merkle_root(leaves)
     root_ok = root == proof.get("merkle_root")
     ok = all_ok and spec_ok and root_ok
+
+    # Provenance (additive, optional). Verify the signature against the RECOMPUTED
+    # root (not the recorded one) so a programmatic caller keying off provenance
+    # alone can never trust bytes no longer on disk — a tampered file flips the
+    # signature to 'invalid' too.
+    sig = proof.get("signature")
+    sig_status = verify_signature(sig, root)
+    signer = sig.get("public_key") if sig else None
+    signer_trusted = None
+    # Trust requires a CRYPTOGRAPHICALLY VALID signature: the trusted pubkey is
+    # public (it's published to pin provenance), so membership ALONE — without a
+    # valid signature over the recomputed root — must never read as trusted.
+    if sig_status == "valid" and signer and trusted_pubkeys is not None:
+        signer_trusted = (signer.strip().lower()
+                          in {k.strip().lower() for k in trusted_pubkeys})
+
     return ok, {
         "status": "VERIFIED" if ok else "TAMPERED",
         "seal": proof.get("seal"),
@@ -258,4 +421,7 @@ def verify_proof(app_dir):
         "files": file_reports,
         "n_files": len(file_reports),
         "n_ok": sum(1 for f in file_reports if f["status"] == "ok"),
+        "signature": sig_status,        # unsigned | valid | invalid | unverifiable
+        "signer": signer,               # the signing public key (hex), or None
+        "signer_trusted": signer_trusted,  # True/False when trusted_pubkeys given
     }

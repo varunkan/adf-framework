@@ -126,5 +126,137 @@ class SealAndVerify(unittest.TestCase):
         self.assertFalse(report["spec_ok"])
 
 
+@unittest.skipUnless(pob.signing_available(),
+                     "cryptography lib required for Ed25519 provenance")
+class Provenance(unittest.TestCase):
+    """OPTIONAL Ed25519 provenance signing — ADDITIVE to (never replacing) the
+    keyless integrity seal. The steelman: keyless proves INTEGRITY (no key needed);
+    a signature adds AUTHENTICITY for the buyer who needs it. Both must compose
+    correctly and the keyless default must be untouched."""
+
+    def setUp(self):
+        self.app = tempfile.mkdtemp()
+        with open(os.path.join(self.app, "main.ts"), "w") as f:
+            f.write("export const main = () => 7\n")
+        self.seed, self.pub = pob.generate_keypair()
+
+    def _seal(self, seed=None):
+        return pob.seal_app(self.app, "demo", "react-vite-sqlite", "spec", BUILD,
+                            signing_seed=seed)
+
+    def test_unsigned_proof_still_verifies_keyless(self):
+        # the default path is unchanged: no key => no signature => still VERIFIED.
+        self._seal(seed=None)
+        ok, r = pob.verify_proof(self.app)
+        self.assertTrue(ok)
+        self.assertEqual(r["signature"], "unsigned")
+        self.assertIsNone(r["signer"])
+
+    def test_signed_proof_round_trips_and_reports_signer(self):
+        proof = self._seal(seed=self.seed)
+        self.assertEqual(proof["signature"]["alg"], "ed25519")
+        ok, r = pob.verify_proof(self.app, trusted_pubkeys=[self.pub])
+        self.assertTrue(ok)                         # integrity
+        self.assertEqual(r["signature"], "valid")   # provenance
+        self.assertEqual(r["signer"], self.pub)
+        self.assertTrue(r["signer_trusted"])
+
+    def test_signature_is_deterministic_reseal_is_stable(self):
+        a = self._seal(seed=self.seed)
+        b = self._seal(seed=self.seed)
+        # same app + same key => identical root AND identical signature.
+        self.assertEqual(a["merkle_root"], b["merkle_root"])
+        self.assertEqual(a["signature"]["sig"], b["signature"]["sig"])
+
+    def test_signature_is_not_folded_into_the_root(self):
+        # signing must not change the keyless root (it signs it).
+        unsigned = pob.compute_proof("demo", "s", [("a.ts", "x")], "spec", BUILD)
+        signed = pob.compute_proof("demo", "s", [("a.ts", "x")], "spec", BUILD,
+                                   signing_seed=self.seed)
+        self.assertEqual(unsigned["merkle_root"], signed["merkle_root"])
+
+    def test_tampered_file_is_TAMPERED_even_when_signed(self):
+        self._seal(seed=self.seed)
+        with open(os.path.join(self.app, "main.ts"), "a") as f:
+            f.write("// evil\n")
+        ok, r = pob.verify_proof(self.app, trusted_pubkeys=[self.pub])
+        self.assertFalse(ok)                          # integrity fails
+        self.assertEqual(r["status"], "TAMPERED")
+        # the signature is over the OLD root, so it can't rescue a content change:
+        # the recomputed root no longer equals the signed root.
+        self.assertFalse(r["root_ok"])
+
+    def test_forged_signature_is_rejected(self):
+        proof = self._seal(seed=self.seed)
+        # flip the signature in the on-disk proof.
+        import json
+        pj = os.path.join(self.app, ".adf-proof.json")
+        with open(pj) as f:
+            d = json.load(f)
+        d["signature"]["sig"] = ("00" * 64)
+        with open(pj, "w") as f:
+            json.dump(d, f)
+        _ok, r = pob.verify_proof(self.app, trusted_pubkeys=[self.pub])
+        self.assertEqual(r["signature"], "invalid")
+
+    def test_signer_with_different_key_is_untrusted(self):
+        self._seal(seed=self.seed)
+        other_seed, other_pub = pob.generate_keypair()
+        ok, r = pob.verify_proof(self.app, trusted_pubkeys=[other_pub])
+        self.assertTrue(ok)                       # integrity still fine
+        self.assertEqual(r["signature"], "valid")  # signature is mathematically valid
+        self.assertFalse(r["signer_trusted"])     # ...but NOT your trusted key
+        self.assertNotEqual(other_pub, self.pub)
+
+    def test_resolve_signing_seed_from_env(self):
+        self.assertIsNone(pob.resolve_signing_seed({}))
+        self.assertEqual(pob.resolve_signing_seed({"ADF_SIGNING_KEY": self.seed}),
+                         bytes.fromhex(self.seed))
+        self.assertIsNone(pob.resolve_signing_seed({"ADF_SIGNING_KEY": "nothex"}))
+
+    # --- adversarial-review fixes (provenance must not be able to LIE) ---
+    def test_forged_signature_is_never_trusted(self):
+        # must-fix: trust requires a VALID signature, not mere membership of the
+        # (public) trusted key. Inject the trusted pubkey with a garbage sig.
+        self._seal(seed=self.seed)
+        import json
+        pj = os.path.join(self.app, ".adf-proof.json")
+        with open(pj) as f:
+            d = json.load(f)
+        d["signature"]["sig"] = "00" * 64
+        with open(pj, "w") as f:
+            json.dump(d, f)
+        _ok, r = pob.verify_proof(self.app, trusted_pubkeys=[self.pub])
+        self.assertEqual(r["signature"], "invalid")
+        self.assertIsNot(r["signer_trusted"], True)   # NOT trusted on a bad sig
+
+    def test_attacker_supplied_domain_is_rejected(self):
+        # must-fix: the verifier pins SIG_DOMAIN; a signature carrying a foreign
+        # domain must not verify (defeats cross-protocol replay).
+        proof = self._seal(seed=self.seed)
+        sig = dict(proof["signature"])
+        sig["domain"] = "some-other-protocol-v9:"
+        self.assertEqual(
+            pob.verify_signature(sig, proof["merkle_root"]), "invalid")
+
+    def test_signature_invalidated_by_tamper_via_recomputed_root(self):
+        # must-fix: the signature is checked against the RECOMPUTED root, so a
+        # tampered file flips provenance to invalid too (not just integrity).
+        self._seal(seed=self.seed)
+        with open(os.path.join(self.app, "main.ts"), "a") as f:
+            f.write("// evil\n")
+        _ok, r = pob.verify_proof(self.app, trusted_pubkeys=[self.pub])
+        self.assertEqual(r["signature"], "invalid")
+        self.assertIsNot(r["signer_trusted"], True)
+
+    def test_binary_key_file_degrades_to_keyless(self):
+        # must-fix: a non-UTF-8/corrupt ADF_SIGNING_KEY file must degrade to keyless,
+        # not crash the seal.
+        kf = os.path.join(self.app, "badkey.bin")
+        with open(kf, "wb") as f:
+            f.write(b"\xff\xfe\x00\x01")
+        self.assertIsNone(pob.resolve_signing_seed({"ADF_SIGNING_KEY": kf}))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

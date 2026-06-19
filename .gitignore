@@ -48,3 +48,8 @@ apps/*/*.db
 # Bench/export run artifacts (not source)
 .adf-bench-workspace/
 .adf-exports/
+
+# ADF signing keys — NEVER commit the private seed (provenance signing)
+.adf-keys/
+*.adf-signing.key
+adf-signing.key
