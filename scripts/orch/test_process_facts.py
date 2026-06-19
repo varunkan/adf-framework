@@ -95,6 +95,36 @@ class Enforcement(unittest.TestCase):
         self.assertEqual(pf.enforcement_block(obj), [])
 
 
+class ReviewAndDesign(unittest.TestCase):
+    def setUp(self):
+        self.app = tempfile.mkdtemp()
+
+    def test_review_proven_when_both_stages_pass(self):
+        pf.record_review(self.app, spec_ok=True, quality_ok=True)
+        f = pf.read_process_facts(self.app)["facts"]["review_passed"]
+        self.assertEqual(f["status"], "proven")
+        self.assertEqual(f["stages"], ["spec_compliance", "code_quality"])
+
+    def test_review_skipped_when_a_stage_fails(self):
+        pf.record_review(self.app, spec_ok=True, quality_ok=False)
+        self.assertEqual(
+            pf.read_process_facts(self.app)["facts"]["review_passed"]["status"],
+            "skipped")
+
+    def test_design_proven_needs_two_real_options(self):
+        pf.record_design_options(self.app, ["mvp-first", "risk-first"],
+                                 chosen="mvp-first", rationale="ship fast")
+        f = pf.read_process_facts(self.app)["facts"]["design_options_considered"]
+        self.assertEqual(f["status"], "proven")
+        self.assertEqual(f["n_options"], 2)
+
+    def test_design_one_option_is_skipped(self):
+        pf.record_design_options(self.app, ["only-idea"])
+        self.assertEqual(
+            pf.read_process_facts(self.app)["facts"]
+            ["design_options_considered"]["status"], "skipped")
+
+
 class Surfacing(unittest.TestCase):
     def _verdict(self, facts):
         return {"process": {"schema": "adf-process/1", "facts": facts,

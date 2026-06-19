@@ -2635,6 +2635,17 @@ def main():
             try:
                 import process_facts
                 process_facts.record_verification(app_root, stack, verify_summary)
+                # Two-stage review (Phase 4): compose from real verdicts ADF already
+                # computes — spec-compliance (completion audit finds no uncovered
+                # deliverable) + code-quality (the policy gate passed). Deterministic;
+                # honest (no "an LLM reviewed it" claim).
+                try:
+                    spec_gaps = [] if is_edit else audit_completion(
+                        app_root, stack, ctx, fid)
+                    process_facts.record_review(
+                        app_root, spec_ok=not spec_gaps, quality_ok=bool(policy_ok))
+                except Exception as e:
+                    log(f"review fact skipped: {e}")
                 process_obj = process_facts.read_process_facts(app_root)
                 process_block = process_facts.enforcement_block(process_obj)
             except Exception as e:

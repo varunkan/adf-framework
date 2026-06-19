@@ -114,6 +114,33 @@ def record_verification(app_root, stack, summary=""):
                   {"gates": gates, "summary": summary or "", "proven": True})
 
 
+def record_review(app_root, spec_ok, quality_ok):
+    """Two-stage review (Phase 4) — composed from gates ADF already runs, not a new
+    "an LLM said it reviewed it" claim: spec-compliance (the completion audit found no
+    uncovered deliverables) + code-quality (the policy verdict passed). Both inputs are
+    real, recomputable verdicts, so the fact is honest. `proven` only when both held."""
+    return _write(app_root, "review.json", {
+        "spec_compliance": bool(spec_ok),
+        "code_quality": bool(quality_ok),
+        "proven": bool(spec_ok and quality_ok),
+    })
+
+
+def record_design_options(app_root, options, chosen=None, rationale=""):
+    """Design divergence (Phase 4, advisory) — ONLY honest when `options` is a real
+    captured model output from a divergence step, never the model self-asserting "I
+    considered 3 options" in its file output. Records the count + the chosen design;
+    process_facts never fabricates this. `proven` requires ≥2 real options."""
+    opts = list(options or [])
+    return _write(app_root, "design.json", {
+        "n_options": len(opts),
+        "options": opts,
+        "chosen": chosen,
+        "rationale": rationale or "",
+        "proven": len(opts) >= 2,
+    })
+
+
 # --- the sealable summary (read back from disk at seal time) --------------------
 
 def read_process_facts(app_root, env=None):
@@ -160,6 +187,20 @@ def read_process_facts(app_root, env=None):
         causes = sorted({h.get("cause") for h in heal["heals"] if h.get("cause")})
         facts["root_cause_documented"] = {
             "status": "proven", "heals": len(heal["heals"]), "causes": causes}
+
+    # Two-stage review (Phase 4) — composed from real verdicts. Advisory.
+    review = _read(app_root, "review.json")
+    if review is not None:
+        facts["review_passed"] = {
+            "status": "proven" if review.get("proven") else "skipped",
+            "stages": ["spec_compliance", "code_quality"]}
+
+    # Design divergence (Phase 4, advisory) — honest only from a real divergence step.
+    design = _read(app_root, "design.json")
+    if design is not None:
+        facts["design_options_considered"] = {
+            "status": "proven" if design.get("proven") else "skipped",
+            "n_options": design.get("n_options", 0)}
 
     if not facts:
         return None
