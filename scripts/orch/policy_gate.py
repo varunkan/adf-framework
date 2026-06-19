@@ -36,6 +36,7 @@ DEFAULT_POLICY = {
     "id": "adf-default-secure",
     "rules": {
         "no_secrets": True,
+        "no_weak_crypto": True,
         "no_network_egress": True,
         "offline_capable": True,
         "no_plaintext_pii": True,
@@ -46,7 +47,8 @@ DEFAULT_POLICY = {
     # "we labeled the violations". The remaining rules stay advisory (recorded in the
     # seal, never block). Data-driven + overridable: a custom policy may set its own
     # `enforce`, and ADF_POLICY=advisory downgrades enforcement at the call site.
-    "enforce": ["no_secrets", "no_plaintext_pii", "no_network_egress"],
+    "enforce": ["no_secrets", "no_weak_crypto", "no_plaintext_pii",
+                "no_network_egress"],
     "allowlist": _DEFAULT_ALLOWLIST,
 }
 
@@ -89,6 +91,28 @@ _INLINE_SQL_EXTS = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py")
 # A raw hex color literal — banned in mobile components (use theme tokens) so every
 # generated app is on-theme + light/dark-correct by construction.
 _RAW_HEX = re.compile(r"#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?(?:[0-9a-fA-F]{2})?\b")
+# --- weak/fake crypto (security theatre) ---
+# Math.random() is NOT a CSPRNG — predictable, so it must never produce a security
+# value (salt/token/key/nonce/iv/secret/otp/session id).
+_MATH_RANDOM = re.compile(r"\bMath\.random\s*\(")
+# Identifiers that mark a file as doing real crypto/randomness-for-security (so a
+# Math.random() in it is a salt/token/key, not a UI jitter).
+_CRYPTO_CONTEXT = re.compile(
+    r"(?i)\b(hash_?password|verify_?password|generate_?salt|generate_?token|"
+    r"derive_?key|random_?(?:hex|bytes|string|token)|\bsalt\b|\bnonce\b|sessiontoken)\b")
+# A function DEFINED with a name that claims to be a cryptographic primitive — the
+# homemade-crypto smell (e.g. `sha256ish` = FNV-1a).
+_CRYPTO_FN_DEF = re.compile(
+    r"(?i)\b(?:function\s+|const\s+|let\s+|var\s+|async\s+function\s+)"
+    r"(sha(?:1|224|256|384|512)(?:ish|like|_?ish)?|md5|bcrypt|scrypt|pbkdf2|hmac)\b"
+    r"\s*[=(]")
+# Markers that a file uses a REAL crypto implementation (WebCrypto / expo-crypto /
+# node:crypto). If present, the homemade-name check is suppressed.
+_REAL_CRYPTO = re.compile(
+    r"(?i)(crypto\.subtle|digeststringasync|getrandombytesasync|getrandomvalues|"
+    r"expo-crypto|node:crypto|require\(\s*['\"]crypto['\"]|from\s+['\"]crypto['\"]|"
+    r"createhash|createhmac|randombytes|webcrypto)")
+_WEAK_CRYPTO_EXTS = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
 
 
 def _norm(path):
@@ -250,9 +274,42 @@ def _check_no_raw_hex(files):
     return out
 
 
+def _check_no_weak_crypto(files):
+    """Catch security THEATRE — code that looks like crypto but isn't. Two high-signal
+    patterns (found by the judge deep-dive, which caught a shipped mobile auth using
+    FNV-1a under a `sha256ish()` name with Math.random() salts):
+      (1) Math.random() producing a security value (salt/token/key) — it is NOT a
+          CSPRNG, so its output is predictable.
+      (2) a function named like a real cryptographic primitive (sha256/md5/bcrypt/…)
+          in a file that calls NO real crypto API — i.e. a homemade digest.
+    A file that uses a real crypto API (expo-crypto / WebCrypto / node:crypto) passes."""
+    out = []
+    for path, content in files:
+        n = _norm(path)
+        if not n.endswith(_WEAK_CRYPTO_EXTS):
+            continue
+        crypto_context = bool(_CRYPTO_CONTEXT.search(content))
+        has_real = bool(_REAL_CRYPTO.search(content))
+        for line_i, line in enumerate(content.splitlines(), 1):
+            if crypto_context and _MATH_RANDOM.search(line):
+                out.append({"file": n, "line": line_i,
+                            "detail": "Math.random() in security/crypto code is not a "
+                                      "CSPRNG — use expo-crypto getRandomBytesAsync (or "
+                                      "WebCrypto getRandomValues) for salts/tokens"})
+            if not has_real:
+                m = _CRYPTO_FN_DEF.search(line)
+                if m:
+                    out.append({"file": n, "line": line_i,
+                                "detail": f"'{m.group(1)}' is a homemade hash named like "
+                                          f"real crypto but the file calls no crypto API "
+                                          f"— use expo-crypto digestStringAsync(SHA256)"})
+    return out
+
+
 _CHECKS = {
     "no_secrets": lambda files, pol: _check_no_secrets(files),
     "no_raw_hex": lambda files, pol: _check_no_raw_hex(files),
+    "no_weak_crypto": lambda files, pol: _check_no_weak_crypto(files),
     "no_network_egress": lambda files, pol: _check_no_network_egress(files),
     "offline_capable": lambda files, pol: _check_offline_capable(files),
     "no_plaintext_pii": lambda files, pol: _check_no_plaintext_pii(files),

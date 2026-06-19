@@ -2,15 +2,18 @@
   "id": "adf-expo-secure",
   "rules": {
     "no_secrets": true,
+    "no_weak_crypto": true,
     "no_network_egress": true,
     "offline_capable": true,
     "no_plaintext_pii": true,
     "dependency_allowlist": true,
     "no_raw_hex": true
   },
+  "enforce": ["no_secrets", "no_weak_crypto", "no_plaintext_pii", "no_network_egress"],
   "allowlist": [
     "@expo/metro-runtime",
     "expo",
+    "expo-crypto",
     "expo-sqlite",
     "expo-status-bar",
     "expo-router",

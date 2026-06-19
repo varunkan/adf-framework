@@ -191,6 +191,58 @@ class Violations(unittest.TestCase):
         self.assertFalse(r["ok"])
         self.assertTrue(any("left-pad" in v["detail"] for v in r["violations"]))
 
+    def test_math_random_for_security_is_flagged(self):
+        # security theatre (found by the judge deep-dive): a salt from Math.random is
+        # predictable, not a CSPRNG.
+        _write(self.app, "src/auth.ts",
+               "export async function generateSalt() {\n"
+               "  let out = '';\n"
+               "  for (let i = 0; i < 16; i++) out += Math.floor(Math.random()*256);\n"
+               "  return out;\n}")
+        res = pg.check_policy(self.app)
+        r = self._rule(res, "no_weak_crypto")
+        self.assertFalse(r["ok"])
+        self.assertTrue(any("CSPRNG" in v["detail"] for v in r["violations"]))
+
+    def test_homemade_crypto_named_like_real_is_flagged(self):
+        # FNV-1a mislabeled sha256ish with no real crypto API = fake crypto.
+        _write(self.app, "src/auth.ts",
+               "function sha256ish(s: string) { let h = 0x811c9dc5;\n"
+               "  for (const c of s) h = (h ^ c.charCodeAt(0)) * 0x01000193;\n"
+               "  return h.toString(16); }\n"
+               "export const hashPassword = (p: string) => sha256ish(p);")
+        res = pg.check_policy(self.app)
+        r = self._rule(res, "no_weak_crypto")
+        self.assertFalse(r["ok"])
+        self.assertTrue(any("homemade" in v["detail"] for v in r["violations"]))
+
+    def test_real_expo_crypto_primitive_passes(self):
+        # the SHIPPED primitive uses expo-crypto (getRandomBytesAsync + SHA-256) — a
+        # crypto-named wrapper is fine when the file calls a real crypto API.
+        _write(self.app, "src/auth.ts",
+               "import * as Crypto from 'expo-crypto';\n"
+               "export async function generateSalt() {\n"
+               "  const b = await Crypto.getRandomBytesAsync(16); return b.join(''); }\n"
+               "async function sha256(s: string) {\n"
+               "  return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, s); }")
+        res = pg.check_policy(self.app)
+        self.assertTrue(self._rule(res, "no_weak_crypto")["ok"],
+                        [v["detail"] for v in self._rule(res, "no_weak_crypto")["violations"]])
+
+    def test_math_random_outside_crypto_context_is_not_flagged(self):
+        # no false positive: Math.random for UI jitter / sampling (no salt/token/hash
+        # context in the file) is fine.
+        _write(self.app, "src/Sparkle.tsx",
+               "export const jitter = () => Math.random() * 10;")
+        res = pg.check_policy(self.app)
+        self.assertTrue(self._rule(res, "no_weak_crypto")["ok"])
+
+    def test_no_weak_crypto_is_enforced(self):
+        _write(self.app, "src/auth.ts",
+               "export const salt = () => String(Math.random());")
+        res = pg.check_policy(self.app)
+        self.assertIn("no_weak_crypto", pg.blocking_violations(res))
+
     def test_enforced_critical_rule_blocks_the_build(self):
         # fail-closed: a leaked secret is an ENFORCED rule → blocking_violations names
         # it, so agent_runner refuses to seal a "compliant" proof.

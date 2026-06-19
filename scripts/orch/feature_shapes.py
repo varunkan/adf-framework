@@ -215,11 +215,15 @@ _MOBILE_CONTRACTS = {
         "- src/db.ts: a `users` table — id INTEGER PRIMARY KEY AUTOINCREMENT, a UNIQUE "
         "`email`, a `password_hash` column (NEVER a plaintext password — the policy "
         "gate fails the build), `created_at TEXT`.\n"
-        "- src/auth.ts: `hashPassword`/`verifyPassword` using a SALTED hash (e.g. "
-        "expo-crypto's SHA-256 over salt+password) and a simple on-device session "
-        "token; store ONLY the hash. Never store or log a plaintext password.\n"
+        "- CRYPTO: IMPORT the SHIPPED, TESTED primitive — "
+        "`import { hashPassword, verifyPassword, generateToken } from '../auth'` (it "
+        "lives at src/auth.ts). It uses REAL crypto (expo-crypto CSPRNG salts + SHA-256). "
+        "Do NOT hand-roll hashing or randomness — Math.random() and homemade digests "
+        "FAIL the no_weak_crypto policy gate (the build is BLOCKED). Store ONLY "
+        "`await hashPassword(password)`; verify with `await verifyPassword(input, stored)`; "
+        "mint sessions with `await generateToken()`.\n"
         "- src/hooks/useAuth.ts: returns `{ user, loading, error, signup, login, "
-        "logout }`; persists the session locally (AsyncStorage / expo-secure-store).\n"
+        "logout }`; calls src/db.ts + the auth primitive; persists the session locally.\n"
         "- app/ screens (Expo Router): a login screen + a signup screen, and a "
         "protected screen shown only when `user` is set (redirect to login otherwise); "
         "compose <LoginForm>/<SignupForm> from the themed kit (email + password Inputs "
@@ -227,7 +231,7 @@ _MOBILE_CONTRACTS = {
         "- __tests__ (jest, mock 'expo-router'): signup stores a HASHED password "
         "(assert the stored value is NOT the plaintext), login with the wrong password "
         "fails, login with the correct password succeeds. NEVER assert a plaintext "
-        "password is stored."
+        "password is stored. (The crypto primitive is already tested — don't retest it.)"
     ),
 }
 
