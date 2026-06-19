@@ -30,12 +30,18 @@ lose `query_graph` / `semantic_search_nodes` / `get_impact_radius` / `detect_cha
 
 ## The failure (2026-06-19) and the fix
 
-`code-review-graph serve` crashed at startup —
-`ImportError: FastMCP server support is not installed` — because the venv had the
-FastMCP *client* but not *server* support. The MCP tools never attached this session.
+`code-review-graph serve` crashed at startup under a **misleading** message —
+`ImportError: FastMCP server support is not installed`. The real cause was deeper: the
+venv ran **Python 3.15**, too new for a transitive dependency — `beartype` imports
+`typing.no_type_check_decorator`, which was **removed in Python 3.15** — so importing
+`fastmcp.server` failed and FastMCP re-raised it as the generic "server support" hint.
+(Installing `fastmcp-slim[server]` does NOT fix it; the deps were already present.)
+
+The fix is to build the venv on a supported Python (3.13/3.12). The graph DATA lives in
+`.code-review-graph/` (outside the venv), so rebuilding preserves it.
 
 ```bash
-bash scripts/codereview/setup.sh     # installs the server extra + verifies, then RESTART
+bash scripts/codereview/setup.sh     # rebuilds the venv on Python 3.13 + verifies, then RESTART
 ```
 
 ## Verify (anytime, no MCP needed to run the check)

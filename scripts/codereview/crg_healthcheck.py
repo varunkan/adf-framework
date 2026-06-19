@@ -22,6 +22,8 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
+import threading
 
 # The tools an AI assistant relies on (per CLAUDE.md "use the graph BEFORE Grep").
 CORE_TOOLS = [
@@ -32,9 +34,12 @@ CORE_TOOLS = [
     "get_review_context",
 ]
 FIX_HINT = (
-    "FIX: the code-review-graph MCP server needs FastMCP *server* support in its venv.\n"
-    "     <venv>/bin/pip install 'fastmcp-slim[server]'   (or 'fastmcp')\n"
-    "     then restart the session so Claude Code re-attaches the MCP server."
+    "FIX: rebuild .venv-codereview on a Python the stack supports, then restart:\n"
+    "       bash scripts/codereview/setup.sh\n"
+    "     (Root cause seen 2026-06-19: the venv ran Python 3.15, too new for a deep\n"
+    "      dep — beartype imports typing.no_type_check_decorator, removed in 3.15 —\n"
+    "      so `serve` crashed under a generic 'FastMCP server support' message. The\n"
+    "      setup script rebuilds the venv on Python 3.13.)"
 )
 
 
@@ -55,9 +60,13 @@ def _default_bin(repo):
     return p if os.path.isfile(p) else "code-review-graph"
 
 
-def handshake_tools(binary, repo, timeout=25):
+def handshake_tools(binary, repo, timeout=20):
     """Start `serve`, do the MCP initialize + tools/list handshake, return
-    (tool_names, stderr). Raises on a startup crash / no response."""
+    (tool_names, stderr). The MCP stdio server is LONG-LIVED — it does not exit
+    after replying — so we keep stdin open, read stdout on a thread until the
+    tools/list reply arrives (or `timeout`), then terminate. (subprocess.run is
+    wrong here: it closes stdin immediately, and the server shuts down before it
+    answers.)"""
     msgs = [
         {"jsonrpc": "2.0", "id": 1, "method": "initialize",
          "params": {"protocolVersion": "2024-11-05", "capabilities": {},
@@ -65,26 +74,42 @@ def handshake_tools(binary, repo, timeout=25):
         {"jsonrpc": "2.0", "method": "notifications/initialized"},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
     ]
-    stdin = "".join(json.dumps(m) + "\n" for m in msgs)
-    try:
-        proc = subprocess.run(
-            [binary, "serve", "--repo", repo],
-            input=stdin, capture_output=True, text=True, timeout=timeout)
-        out, err = proc.stdout, proc.stderr
-    except subprocess.TimeoutExpired as e:
-        out = e.stdout.decode() if isinstance(e.stdout, bytes) else (e.stdout or "")
-        err = e.stderr.decode() if isinstance(e.stderr, bytes) else (e.stderr or "")
+    errf = tempfile.TemporaryFile(mode="w+")
+    proc = subprocess.Popen(
+        [binary, "serve", "--repo", repo],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errf,
+        text=True, bufsize=1)
     tools = []
-    for line in out.splitlines():
-        line = line.strip()
-        if not line.startswith("{"):
-            continue
-        try:
-            m = json.loads(line)
-        except ValueError:
-            continue
-        if m.get("id") == 2 and isinstance(m.get("result"), dict):
-            tools = [t.get("name") for t in m["result"].get("tools", [])]
+
+    def _read_tools():
+        for line in proc.stdout:
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                m = json.loads(line)
+            except ValueError:
+                continue
+            if m.get("id") == 2 and isinstance(m.get("result"), dict):
+                tools.extend(t.get("name") for t in m["result"].get("tools", []))
+                return
+
+    reader = threading.Thread(target=_read_tools, daemon=True)
+    reader.start()
+    try:
+        proc.stdin.write("".join(json.dumps(m) + "\n" for m in msgs))
+        proc.stdin.flush()
+    except (BrokenPipeError, OSError):
+        pass
+    reader.join(timeout)
+    try:
+        proc.terminate()
+        proc.wait(timeout=5)
+    except Exception:  # noqa: BLE001
+        proc.kill()
+    errf.seek(0)
+    err = errf.read()
+    errf.close()
     return tools, err
 
 
@@ -107,7 +132,10 @@ def main(argv):
         print(f"✘ MCP server failed to start: {e}\n{FIX_HINT}", file=sys.stderr)
         return 1
 
-    missing = [t for t in CORE_TOOLS if t not in tools]
+    # The server exposes tools with a `_tool` suffix (query_graph_tool, ...);
+    # normalize so the core-tool assertion matches.
+    exposed = {(t[:-5] if t and t.endswith("_tool") else t) for t in tools}
+    missing = [t for t in CORE_TOOLS if t not in exposed]
     if not tools:
         tail = "\n".join(err.strip().splitlines()[-4:])
         print(f"✘ MCP server exposed NO tools (it likely crashed at startup).\n"

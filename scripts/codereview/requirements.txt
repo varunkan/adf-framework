@@ -1,14 +1,10 @@
-# Dependencies for the code-review-graph MCP server's virtualenv (.venv-codereview).
+# The code-review-graph engine + its MCP server. Installing this pulls fastmcp and the
+# server deps that expose the query tools (query_graph, semantic_search_nodes,
+# get_impact_radius, detect_changes, get_review_context, ...).
 #
-# The graph has two surfaces: the plain CLI (update/status/detect-changes — used by
-# the editor hooks) and the MCP server (`code-review-graph serve` — exposes the query
-# tools query_graph / semantic_search_nodes / get_impact_radius / ... to the AI
-# assistant). The MCP server requires FastMCP *server* support; the venv shipped with
-# only the *client*, so `serve` crashed at startup with
-#   ImportError: FastMCP server support is not installed
-# and the assistant silently lost the graph (the CLI/hooks kept working, hiding it).
-#
-# Install (or repair) with:
-#   .venv-codereview/bin/pip install -r scripts/codereview/requirements.txt
-# then run scripts/codereview/crg_healthcheck.py and restart the session.
-fastmcp-slim[server]
+# Build its venv (.venv-codereview) on Python 3.11–3.13 — NOT 3.15: a deep dependency
+# (beartype) imports `typing.no_type_check_decorator`, REMOVED in Python 3.15, which
+# crashes `code-review-graph serve` at startup under a misleading "FastMCP server
+# support is not installed" message. Rebuild + verify with:
+#   bash scripts/codereview/setup.sh
+code-review-graph==2.3.6
