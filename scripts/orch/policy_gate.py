@@ -66,12 +66,18 @@ _CDN_TAG = re.compile(
 _PII_COLUMNS = re.compile(
     r"(?i)\b(password|passwd|ssn|social_security|credit_card|card_number|cardnumber|cvv|cvc)\b")
 _HASHED_OK = re.compile(r"(?i)(password|passwd)_(hash|digest)")
-# A SQL column-type keyword — used to recognize a SCHEMA line inside SOURCE code
-# (inline expo-sqlite `CREATE TABLE … password TEXT`) so the PII rule catches mobile
-# code without false-flagging UI state like `const [password] = useState()`.
-_SQL_COLTYPE = re.compile(
-    r"(?i)\b(?:text|integer|int|varchar|char|blob|real|numeric|boolean|bool|"
-    r"date|datetime|timestamp)\b")
+# A SENSITIVE COLUMN *DEFINITION*: the column name DIRECTLY followed by a SQL column
+# type (`password TEXT`, `ssn VARCHAR(11)`). Adjacency is what makes this a storage
+# decision — it catches inline expo-sqlite `CREATE TABLE … password TEXT` while NOT
+# false-flagging a TypeScript param/type signature (`password: string` on a line that
+# happens to also contain `Promise<boolean>` — `boolean` is a SQL type keyword too)
+# or a UI state var (`const [password] = useState()`). (Found by a real secure
+# mobile-auth build that the old "type keyword ANYWHERE on the line" heuristic
+# false-flagged 4×.) The SQL types intentionally EXCLUDE `boolean`/`bool` (collides
+# with TS `Promise<boolean>`); a password is never a boolean column anyway.
+_PII_PLAINTEXT_COL = re.compile(
+    r"(?i)\b(password|passwd|ssn|social_security|credit_card|card_number|cardnumber|cvv|cvc)\b"
+    r"\s+(?:text|varchar|nvarchar|nchar|char|clob|blob|integer|int|numeric|decimal|real)\b")
 # Source files that may carry an inline SQL schema (no dedicated .sql file).
 _INLINE_SQL_EXTS = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py")
 # A raw hex color literal — banned in mobile components (use theme tokens) so every
@@ -81,6 +87,18 @@ _RAW_HEX = re.compile(r"#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?(?:[0-9a-fA-F]{2})?\b"
 
 def _norm(path):
     return path.replace(os.sep, "/")
+
+
+# A test/spec file — its literal "passwords"/"tokens" are fixtures, not leaked
+# secrets (e.g. `const password = 'superSecret123'` asserting a hash never returns
+# it). The generic_secret heuristic is skipped here; real provider keys (sk-/AKIA/…)
+# are STILL flagged everywhere.
+_TEST_FILE = re.compile(
+    r"(?i)(^|/)(__tests__|tests?)/|(\.test|\.spec)\.(?:tsx?|jsx?|mjs|cjs)$")
+
+
+def _is_test_file(path):
+    return bool(_TEST_FILE.search(_norm(path)))
 
 
 def _source_files(app_dir, files=None):
@@ -118,7 +136,12 @@ def _lineno(content, idx):
 def _check_no_secrets(files):
     out = []
     for path, content in files:
+        is_test = _is_test_file(path)
         for name, pat in _SECRET_PATTERNS:
+            # In test/spec files a literal password/token is a fixture, not a leak —
+            # skip the generic heuristic there; real provider keys still get flagged.
+            if name == "generic_secret" and is_test:
+                continue
             for m in pat.finditer(content):
                 out.append({"file": _norm(path), "line": _lineno(content, m.start()),
                             "detail": f"possible {name} literal in source"})
@@ -169,15 +192,15 @@ def _check_no_plaintext_pii(files):
         for line_i, line in enumerate(content.splitlines(), 1):
             if _HASHED_OK.search(line):
                 continue
-            m = _PII_COLUMNS.search(line)
+            # A plaintext column is a column DEFINITION: the sensitive name DIRECTLY
+            # followed by a SQL type (`password TEXT`). Adjacency holds in both .sql
+            # and inline-SQL source, and is precise enough not to flag TS signatures.
+            m = _PII_PLAINTEXT_COL.search(line)
             if not m:
                 continue
-            # In a .sql file every line is schema; in source, require a SQL type on
-            # the line so we only flag a real column definition.
-            if is_sql or _SQL_COLTYPE.search(line):
-                out.append({"file": n, "line": line_i,
-                            "detail": f"sensitive column '{m.group(1)}' suggests "
-                                      f"plaintext PII — store hashed/encrypted or remove"})
+            out.append({"file": n, "line": line_i,
+                        "detail": f"sensitive column '{m.group(1)}' suggests "
+                                  f"plaintext PII — store hashed/encrypted or remove"})
     return out
 
 

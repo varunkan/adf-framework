@@ -138,6 +138,50 @@ class Violations(unittest.TestCase):
         res = pg.check_policy(self.app)
         self.assertTrue(self._rule(res, "no_plaintext_pii")["ok"])
 
+    def test_typescript_param_named_password_is_not_flagged(self):
+        # FALSE-POSITIVE fix (found by a real secure mobile-auth build): the rule
+        # flagged `password: string` because the SAME line carried `Promise<boolean>`
+        # and `boolean` is a SQL coltype keyword. Only a real column DEFINITION
+        # (`password TEXT`) is plaintext PII — a TS param/type signature is not.
+        _write(self.app, "src/hooks/useAuth.ts",
+               "export interface Auth {\n"
+               "  signup: (email: string, password: string) => Promise<boolean>;\n"
+               "  login: (email: string, password: string) => Promise<boolean>;\n"
+               "}\n"
+               "const login = async (email: string, password: string): Promise<boolean>"
+               " => { await hashPassword(password); return true; };")
+        res = pg.check_policy(self.app)
+        r = self._rule(res, "no_plaintext_pii")
+        self.assertTrue(r["ok"], [v["detail"] for v in r["violations"]])
+
+    def test_test_fixture_password_literal_is_not_a_secret(self):
+        # FALSE-POSITIVE fix: a dummy password in a TEST file is a fixture, not a
+        # leaked secret. The real auth build flagged `const password = 'superSecret123'`
+        # inside __tests__/auth.test.tsx (which asserts hashing never returns it).
+        _write(self.app, "__tests__/auth.test.tsx",
+               "it('hashes', async () => {\n"
+               "  const password = 'superSecret123';\n"
+               "  expect(await hashPassword(password)).not.toContain(password);\n"
+               "});")
+        res = pg.check_policy(self.app)
+        r = self._rule(res, "no_secrets")
+        self.assertTrue(r["ok"], [v["file"] for v in r["violations"]])
+
+    def test_real_provider_key_in_test_is_still_flagged(self):
+        # the test-file exemption applies ONLY to the generic password/token heuristic;
+        # a real provider key (sk-…) is a leak ANYWHERE, including a test.
+        _write(self.app, "__tests__/leak.test.ts",
+               "const k = 'sk-abcdEFGH1234567890ZXCVbnmQWERtyui';")
+        res = pg.check_policy(self.app)
+        self.assertFalse(self._rule(res, "no_secrets")["ok"])
+
+    def test_hardcoded_password_in_app_source_is_still_flagged(self):
+        # exemption is test-files-only — a hardcoded credential in shipped app source
+        # is still a real smell.
+        _write(self.app, "src/config.ts", "const password = 'superSecret123hunter2';")
+        res = pg.check_policy(self.app)
+        self.assertFalse(self._rule(res, "no_secrets")["ok"])
+
     def test_non_allowlisted_dependency_is_flagged(self):
         _write(self.app, "package.json", json.dumps({
             "dependencies": {"react": "^18", "left-pad": "^1.3.0"},
