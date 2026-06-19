@@ -691,16 +691,75 @@ def ensure_auth_secret(app_dir):
     return p
 
 
+def _ensure_template_node_modules(tpl_dir, timeout=600):
+    """Populate the TEMPLATE's node_modules ONCE so warm_node_modules can clone it
+    into every app — instead of each app paying a full `npm ci`. The COW clone only
+    engages when the template is already installed; on a cold checkout / CI / a
+    buyer's machine the template ships without node_modules, so without this the
+    optimization silently never fires and every build pays the slow path.
+
+    Mirrors offline_build.live_offline_build: copy the template (minus the heavy
+    generated dirs) into a temp dir on the SAME filesystem, `npm ci` against its
+    pinned lockfile there, then publish node_modules into the template with an atomic
+    rename. Concurrency-safe — a racing builder that loses the rename just discards
+    its copy and reuses the winner's. The install env is scrubbed of ADF's secrets +
+    made non-interactive, like every other build child. Best-effort: returns True iff
+    the template has node_modules afterward; on any failure the caller falls back to a
+    per-app `npm ci` (no regression)."""
+    import shutil
+    import tempfile
+    dst = os.path.join(tpl_dir, "node_modules")
+    if os.path.isdir(dst):
+        return True
+    if not os.path.isfile(os.path.join(tpl_dir, "package.json")):
+        return False
+    if not shutil.which("npm"):
+        return False
+    # Temp dir under the template's PARENT: same filesystem (atomic rename + APFS COW)
+    # without leaving a stray dir inside the template that scaffold would copy.
+    parent = os.path.dirname(os.path.abspath(tpl_dir)) or tpl_dir
+    try:
+        work = tempfile.mkdtemp(prefix=".adf-tpl-deps-", dir=parent)
+    except OSError:
+        return False
+    try:
+        build = os.path.join(work, "tpl")
+        shutil.copytree(tpl_dir, build,
+                        ignore=shutil.ignore_patterns("node_modules", "dist", "*.db"))
+        try:
+            r = subprocess.run(["npm", "ci", "--no-audit", "--no-fund"], cwd=build,
+                               capture_output=True, text=True, timeout=timeout,
+                               env=scrubbed_env())
+        except (OSError, subprocess.TimeoutExpired) as e:
+            log(f"template node_modules bootstrap failed ({e}); will run npm ci per-app")
+            return os.path.isdir(dst)   # a concurrent builder may have published it
+        nm = os.path.join(build, "node_modules")
+        if r.returncode != 0 or not os.path.isdir(nm):
+            return os.path.isdir(dst)
+        try:
+            os.rename(nm, dst)          # same filesystem → atomic publish
+            log("template node_modules bootstrapped — apps now clone instead of npm ci")
+        except OSError:
+            pass                        # lost the publish race (dst already there) — fine
+        return os.path.isdir(dst)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def warm_node_modules(tpl_dir, app_dir):
     """Clone the template's node_modules into the app (no per-app `npm ci`). Tries,
     fastest-first: APFS clonefile (`cp -c`, instant + zero extra disk) → hardlink
-    (`cp -al`, Linux) → plain copy. No-op if the template has none or the app
-    already has one. Returns True on success."""
+    (`cp -al`, Linux) → plain copy. On a cold checkout the template has no
+    node_modules yet, so it is bootstrapped ONCE here (deps are pinned + identical
+    for every app) — otherwise every app falls back to a full `npm ci` and the COW
+    clone never engages. No-op if the app already has one. Returns True on success."""
     import shutil
     src = os.path.join(tpl_dir, "node_modules")
     dst = os.path.join(app_dir, "node_modules")
-    if not os.path.isdir(src) or os.path.isdir(dst):
+    if os.path.isdir(dst):              # app already warmed (e.g. a prior verify)
         return False
+    if not os.path.isdir(src) and not _ensure_template_node_modules(tpl_dir):
+        return False                    # cold + couldn't bootstrap → caller's npm ci
     for cmd in (["cp", "-c", "-R", src, dst], ["cp", "-al", src, dst]):
         try:
             if subprocess.run(cmd, capture_output=True).returncode == 0 \

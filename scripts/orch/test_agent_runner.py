@@ -7,9 +7,11 @@ PORT-aware generation prompt. Pure-function tests (no model calls):
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import agent_runner as ar  # noqa: E402
@@ -1105,6 +1107,94 @@ class RtlMissingTextHeal(unittest.TestCase):
         self.assertIn("ACTIONABLE FIX (assertion vs. component mismatch)", fixer)
         self.assertLess(fixer.index("VERIFICATION FAILURE OUTPUT"),
                         fixer.index("ACTIONABLE FIX (assertion vs. component mismatch)"))
+
+
+class WarmNodeModulesBootstrap(unittest.TestCase):
+    """Win #1 cold-start: warm_node_modules clones the template's node_modules into
+    each app, but on a cold checkout the template ships without one — so it must
+    bootstrap the template ONCE, else every app silently falls back to a full
+    `npm ci` and the COW clone never engages."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        # a fake template: manifest + lockfile, but NO node_modules (cold checkout)
+        self.tpl = os.path.join(self.tmp, "templates", "react-vite-sqlite")
+        os.makedirs(self.tpl)
+        with open(os.path.join(self.tpl, "package.json"), "w") as f:
+            f.write('{"name":"tpl","version":"1.0.0"}\n')
+        with open(os.path.join(self.tpl, "package-lock.json"), "w") as f:
+            f.write('{"name":"tpl","lockfileVersion":3}\n')
+        self.app = os.path.join(self.tmp, "apps", "demo")
+        os.makedirs(self.app)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _fake_npm_ci(self, install_ok=True):
+        """A subprocess.run stand-in: `npm ci` materializes a node_modules/ (with a
+        marker package) in the call's cwd; any other command "fails" so warm's clone
+        falls through to the real shutil.copytree."""
+        def run(cmd, *a, **kw):
+            cwd = kw.get("cwd")
+            if install_ok and list(cmd[:2]) == ["npm", "ci"] and cwd:
+                pkg = os.path.join(cwd, "node_modules", "marker-pkg")
+                os.makedirs(pkg, exist_ok=True)
+                with open(os.path.join(pkg, "index.js"), "w") as f:
+                    f.write("module.exports = 1\n")
+                rc = 0
+            else:
+                rc = 1
+            return subprocess.CompletedProcess(cmd, rc, stdout="", stderr="")
+        return run
+
+    def test_ensure_noop_when_template_already_installed(self):
+        os.makedirs(os.path.join(self.tpl, "node_modules"))
+        with mock.patch.object(ar.subprocess, "run") as m:
+            self.assertTrue(ar._ensure_template_node_modules(self.tpl))
+            m.assert_not_called()   # already present → never shells npm
+
+    def test_ensure_missing_manifest_returns_false(self):
+        os.remove(os.path.join(self.tpl, "package.json"))
+        with mock.patch("shutil.which", return_value="/usr/bin/npm"):
+            self.assertFalse(ar._ensure_template_node_modules(self.tpl))
+
+    def test_ensure_installs_and_publishes_atomically(self):
+        with mock.patch.object(ar.subprocess, "run", self._fake_npm_ci()), \
+                mock.patch("shutil.which", return_value="/usr/bin/npm"):
+            ok = ar._ensure_template_node_modules(self.tpl)
+        self.assertTrue(ok)
+        # published into the TEMPLATE, with the install's contents intact
+        self.assertTrue(os.path.isdir(
+            os.path.join(self.tpl, "node_modules", "marker-pkg")))
+        # the temp build dir is cleaned up — nothing leaks beside the template
+        leftover = [d for d in os.listdir(os.path.dirname(self.tpl))
+                    if d.startswith(".adf-tpl-deps-")]
+        self.assertEqual(leftover, [], f"temp build dir leaked: {leftover}")
+
+    def test_ensure_install_failure_leaves_no_partial_publish(self):
+        with mock.patch.object(ar.subprocess, "run", self._fake_npm_ci(install_ok=False)), \
+                mock.patch("shutil.which", return_value="/usr/bin/npm"):
+            ok = ar._ensure_template_node_modules(self.tpl)
+        self.assertFalse(ok)
+        self.assertFalse(os.path.isdir(os.path.join(self.tpl, "node_modules")))
+
+    def test_ensure_returns_false_when_npm_absent(self):
+        with mock.patch("shutil.which", return_value=None):
+            self.assertFalse(ar._ensure_template_node_modules(self.tpl))
+
+    def test_warm_bootstraps_then_clones_into_app(self):
+        with mock.patch.object(ar.subprocess, "run", self._fake_npm_ci()), \
+                mock.patch("shutil.which", return_value="/usr/bin/npm"):
+            ok = ar.warm_node_modules(self.tpl, self.app)
+        self.assertTrue(ok)
+        self.assertTrue(os.path.isdir(os.path.join(self.app, "node_modules")))
+        self.assertTrue(os.path.isdir(os.path.join(self.tpl, "node_modules")))
+
+    def test_warm_noop_when_app_already_has_node_modules(self):
+        os.makedirs(os.path.join(self.app, "node_modules"))
+        with mock.patch.object(ar.subprocess, "run") as m:
+            self.assertFalse(ar.warm_node_modules(self.tpl, self.app))
+            m.assert_not_called()   # app already warmed → never bootstraps/clones
 
 
 if __name__ == "__main__":
