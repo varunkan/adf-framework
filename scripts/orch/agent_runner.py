@@ -535,7 +535,19 @@ def _expo_build_messages(fid, ctx):
         "- `__tests__/<feature>.test.tsx` — jest + @testing-library/react-native: "
         "`render(<Screen/>)` for a route (mock 'expo-router' useRouter/"
         "useLocalSearchParams), assert the main success path AND at least one "
-        "validation/empty/error case via `fireEvent` + `findByText`/`getByPlaceholderText`.\n\n"
+        "validation/empty/error case via `fireEvent` + `findByText`/`getByPlaceholderText`.\n"
+        "  MOCK THE DATA LAYER STATEFULLY by copying `__tests__/data.test.tsx` "
+        "(the canonical few-shot): `jest.mock('../src/db', () => { ... })` with an "
+        "IN-FACTORY store. CRITICAL jest rule — `jest.mock()` is hoisted ABOVE every "
+        "import and `let`/`const`, so its factory CANNOT reference any variable "
+        "declared outside it (you'll get \"module factory ... not allowed to reference "
+        "any out-of-scope variables. Invalid variable access: store\"). The ONLY "
+        "escape hatch: names prefixed with `mock` (case-insensitive) are allowed. So "
+        "declare the store INSIDE the factory (`let mockStore = []; let mockNextId = "
+        "1;`) and expose `mock`-prefixed test handles from it (e.g. `__getStore`, "
+        "`__reset`) — NEVER write `let store = []` outside and reference `store` inside "
+        "the factory. Match `src/db`'s shape (async helpers → `async () => ...`). Test "
+        "a hook with `renderHook` + `waitFor`/`act` as data.test.tsx shows.\n\n"
         "CRITICAL: `npm run typecheck` (`tsc --noEmit`) and `npm test` (jest) MUST "
         "pass. Use ONLY the dependencies in package.json (expo, react-native, "
         "expo-sqlite, @testing-library/react-native). No placeholders. Emit all files now."
@@ -557,7 +569,8 @@ _SCAFFOLD_SAMPLE_REMOVE = {
     # screens + its data layer + test. The generated feature emits its own app/
     # routes, src/db.ts, src/hooks/*, and __tests__.
     STACK_EXPO: ("app/index.tsx", "app/[id].tsx", "src/db.ts",
-                 "src/hooks/useItems.ts", "__tests__/sample.test.tsx"),
+                 "src/hooks/useItems.ts", "__tests__/sample.test.tsx",
+                 "__tests__/data.test.tsx"),
 }
 
 # The Expo root layout (app/_layout.tsx) is reset to a themed BARE Stack on scaffold
@@ -1511,6 +1524,37 @@ def headroom_compress_log(text):
         return text
 
 
+_JEST_HOIST_RE = re.compile(
+    r"module factory of .*jest\.mock\(\).* is not allowed to "
+    r"reference any out-of-scope variables", re.I)
+_JEST_VAR_RE = re.compile(r"Invalid variable access:\s*([A-Za-z_$][\w$]*)")
+
+
+def jest_hoist_hint(failure):
+    """Deterministic heal hint for the jest.mock() hoisting failure class.
+
+    A real mobile build failed verify three times on the SAME error because the
+    cure was buried in generic prose far above the pasted failure — the model
+    never connected them. When the failure IS this class, name the ACTUAL
+    offending variable and the exact fix, so the next heal attempt converges.
+    Returns "" for every other failure (the trigger string is jest-specific and
+    cannot false-positive on react/stdlib output)."""
+    if not failure or not _JEST_HOIST_RE.search(failure):
+        return ""
+    m = _JEST_VAR_RE.search(failure)
+    var = m.group(1) if m else "the store"
+    mockname = ("mock" + var[0].upper() + var[1:]) if m else "mockStore"
+    return (
+        "ACTIONABLE FIX (jest.mock hoisting) — THIS is the blocker, fix it first:\n"
+        f"jest hoists `jest.mock(...)` ABOVE every import and `let`/`const`, so its "
+        f"factory runs before `{var}` exists; jest then rejects EVERY reference to "
+        f"`{var}` inside the factory (reads included). The only names a factory may "
+        f"reference are prefixed with `mock` (case-insensitive). Fix: move that state "
+        f"INSIDE the factory and rename it `{mockname}` (e.g. `let {mockname} = []`), "
+        f"exposing `mock`-prefixed handles (`__getStore`, `__reset`) the test calls in "
+        f"beforeEach. See `__tests__/data.test.tsx` for the exact pattern.")
+
+
 def fix_messages(system, user, files, failure, stack=None):
     """Build the follow-up turn asking the model to fix the failing files. The
     hint about WHICH files may be wrong is stack-aware so the model fixes the
@@ -1526,6 +1570,12 @@ def fix_messages(system, user, files, failure, stack=None):
         current += ("\n\n=== OTHER FILES (outline only — unchanged, not central to "
                     "this failure) ===\n" + file_outline)
     failure = headroom_compress_log(failure)
+    # Prepend a precise, variable-named hint for known-and-stuck failure classes so
+    # the cure rides at the TOP of the failure block (survives the [:4000] truncation)
+    # instead of being buried in generic prose the model skips.
+    _hoist = jest_hoist_hint(failure)
+    if _hoist:
+        failure = _hoist + "\n\n" + failure
     if (stack or DEFAULT_STACK) == STACK_REACT:
         where = ("whichever files are wrong (schema.sql, server/api/*.mjs, src/**.tsx, "
                  "and/or test/*.test.mjs). Common causes: a tsc type error in src, a "
@@ -1538,7 +1588,10 @@ def fix_messages(system, user, files, failure, stack=None):
                  "__tests__/*.test.tsx). Common causes: a tsc type error in app/ or "
                  "src/, an Expo Router route/param mismatch, a raw hex color (use theme "
                  "tokens), a missing expo-sqlite query, or a "
-                 "@testing-library/react-native assertion mismatch (mock 'expo-router')")
+                 "@testing-library/react-native assertion mismatch (mock 'expo-router'; "
+                 "for a jest.mock hoisting 'out-of-scope variable' error, see the "
+                 "ACTIONABLE FIX prepended to the failure output below and "
+                 "`__tests__/data.test.tsx`)")
     else:
         where = "whichever files are wrong (server.py and/or test_app.py and/or index.html)"
     fixer = (
@@ -1635,7 +1688,10 @@ def build_edit_messages(fid, files, instruction, stack=None, file_summary=None,
         )
         keep_tests = ("Keep the jest suite (`__tests__/*.test.tsx`, "
                       "@testing-library/react-native, mock 'expo-router') passing; "
-                      "update it only if the change requires it.")
+                      "update it only if the change requires it. When a test mocks "
+                      "`src/db`, keep its store INSIDE the `jest.mock()` factory and "
+                      "`mock`-prefixed (jest hoists the factory above all decls, so "
+                      "only `mock*`-named vars are reachable from it).")
     else:
         arch = (
             "a Python stdlib http.server app + a single static index.html. Keep the "

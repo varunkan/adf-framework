@@ -1025,5 +1025,46 @@ class MobileHealAndSummaryPaths(unittest.TestCase):
         self.assertNotIn("Fastify", system)
 
 
+class JestHoistHeal(unittest.TestCase):
+    """The deterministic self-heal hint for the jest.mock() hoisting failure class.
+    A real mobile build failed verify 3x on this exact error and never converged
+    because the cure was buried; the hint now names the offending variable and rides
+    at the TOP of the failure block fed back to the model."""
+
+    # The REAL jest output captured from the failed mobile-habit-tracker build.
+    REAL = ("TESTS FAILED (jest):\nFAIL __tests__/habits.test.tsx\n  ● Test suite "
+            "failed to run\n\n    ReferenceError: The module factory of `jest.mock()` "
+            "is not allowed to reference any out-of-scope variables.\n    Invalid "
+            "variable access: store\n    Allowed objects: Array, ArrayBuffer, ...")
+
+    def test_fires_and_names_the_offending_variable(self):
+        hint = ar.jest_hoist_hint(self.REAL)
+        self.assertTrue(hint)
+        self.assertIn("store", hint)          # the ACTUAL offending var
+        self.assertIn("mockStore", hint)      # the rename it should use
+        self.assertIn("data.test.tsx", hint)  # points at the canonical few-shot
+
+    def test_silent_on_unrelated_failures(self):
+        # must not false-positive on react/stdlib/other failures (it prepends to ALL stacks)
+        for other in ("", "TS2304: Cannot find name 'foo'.",
+                      "AssertionError: expected 200 to equal 404 (vitest)",
+                      "SyntaxError: Unexpected token", "boom"):
+            self.assertEqual(ar.jest_hoist_hint(other), "", repr(other))
+
+    def test_fix_messages_prepends_hint_above_the_failure(self):
+        # integration: the hint rides at the top of the failure block, before truncation.
+        msgs = ar.fix_messages(
+            "sys", "usr", [("__tests__/habits.test.tsx", "x")], self.REAL, ar.STACK_EXPO)
+        fixer = msgs[-1]["content"]
+        self.assertIn("ACTIONABLE FIX (jest.mock hoisting)", fixer)
+        # it appears INSIDE the failure-output block (i.e. after that header).
+        self.assertIn("VERIFICATION FAILURE OUTPUT", fixer)
+        self.assertLess(fixer.index("VERIFICATION FAILURE OUTPUT"),
+                        fixer.index("ACTIONABLE FIX (jest.mock hoisting)"))
+        # a non-jest failure adds no hint.
+        clean = ar.fix_messages("sys", "usr", [("a.tsx", "x")], "TS2304", ar.STACK_EXPO)
+        self.assertNotIn("ACTIONABLE FIX (jest.mock hoisting)", clean[-1]["content"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
