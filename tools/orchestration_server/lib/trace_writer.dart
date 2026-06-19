@@ -27,10 +27,15 @@ class TraceWriter {
   static int sseClientsActive = 0;
   static int sseConnectionsTotal = 0;
 
-  /// Format one span record as a Server-Sent-Events frame (id + data lines). The
-  /// span_id doubles as the SSE Last-Event-ID so a reconnecting client can resume.
+  /// Format one span record as a Server-Sent-Events frame (id + data lines). The id
+  /// doubles as the SSE Last-Event-ID, which the browser EventSource re-sends on
+  /// auto-reconnect and the /events route feeds into the `since` backfill cursor —
+  /// and readTraces compares `since` as an ISO TIMESTAMP. So the id MUST be the
+  /// timestamp, NOT span_id: a hex span_id sorts outside timestamp space and makes
+  /// reconnect backfill either replay everything or return nothing (the live window
+  /// silently loses the spans appended during the drop). See layer-4 adversarial.
   static List<int> sseEvent(Map<String, dynamic> record) {
-    final id = record['span_id'] ?? '';
+    final id = record['timestamp'] ?? '';
     return utf8.encode('id: $id\ndata: ${jsonEncode(record)}\n\n');
   }
 

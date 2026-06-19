@@ -6,26 +6,31 @@ import 'package:test/test.dart';
 
 void main() {
   group('TraceWriter.sseEvent (pure framing)', () {
-    test('formats id + data lines terminated by a blank line', () {
+    test('the SSE id is the TIMESTAMP (one cursor space with `since`)', () {
       final frame = utf8.decode(TraceWriter.sseEvent({
         'span_id': 'abc123',
+        'timestamp': '2026-06-19T12:00:00.000Z',
         'name': 'runner.verify_stage',
         'attributes': {
           'orch.feature_id': 'demo',
           'orch.message': 'Running vitest…',
         },
       }));
-      expect(frame, startsWith('id: abc123\n'));
+      // MUST be the timestamp, NOT span_id: Last-Event-ID is re-sent on reconnect
+      // and fed into the `since` backfill cursor, which readTraces compares as an
+      // ISO timestamp. A hex span_id here breaks reconnect backfill. (layer-4 major)
+      expect(frame, startsWith('id: 2026-06-19T12:00:00.000Z\n'));
+      expect(frame, isNot(contains('id: abc123')));
       expect(frame, contains('data: '));
       expect(frame, endsWith('\n\n'));
       final dataLine =
           frame.split('\n').firstWhere((l) => l.startsWith('data: '));
       final rec = jsonDecode(dataLine.substring('data: '.length)) as Map;
-      expect(rec['span_id'], 'abc123');
+      expect(rec['span_id'], 'abc123'); // span_id is still in the payload
       expect((rec['attributes'] as Map)['orch.message'], 'Running vitest…');
     });
 
-    test('missing span_id yields an empty id line (no crash)', () {
+    test('missing timestamp yields an empty id line (no crash)', () {
       final frame =
           utf8.decode(TraceWriter.sseEvent({'name': 'x', 'attributes': {}}));
       expect(frame, startsWith('id: \n'));

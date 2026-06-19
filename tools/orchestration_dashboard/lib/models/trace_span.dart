@@ -101,6 +101,7 @@ class TraceSpan {
       case 'writing_files':
       case 'files_written':
       case 'recall_injected':
+      case 'component_manifest':
         return 'STEP';
       default:
         // Unknown runner control event (e.g. runner.superseded / cancel) — HIDDEN,

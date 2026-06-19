@@ -78,6 +78,8 @@ void main() {
     test('step events fall to STEP; non-runner spans keep displayKind', () {
       expect(runner('feature_resolved').cardKind, 'STEP');
       expect(runner('planning').cardKind, 'STEP');
+      // legit narration that was wrongly HIDDEN before the layer-4 fix
+      expect(runner('component_manifest').cardKind, 'STEP');
       final reasoning = TraceSpan.fromJson({
         'timestamp': 't',
         'name': 'agent.thought',
