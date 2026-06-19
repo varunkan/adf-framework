@@ -1354,10 +1354,24 @@ def _expo_verify(app_root, timeout=None):
     render_ok, render_msg = _expo_web_render(app_root, timeout)
     if not render_ok:
         return False, render_msg
+    # MM10: opportunistically render on a REAL booted iOS Simulator and seal the
+    # device screenshot into the proof. Skips gracefully when no simulator is booted
+    # (never fails the build unless ADF_IOS_RENDER=strict) — dist/ was just built.
+    ios_msg = ""
+    try:
+        import native_render
+        i_ok, i_msg, _shot = native_render.ios_render(
+            os.path.join(app_root, "dist"), app_root=app_root)
+        if not i_ok:
+            return False, f"iOS Simulator render failed: {i_msg}"
+        ios_msg = f" + {i_msg}" if "rendered on the iOS" in i_msg else ""
+    except Exception as e:
+        ios_msg = ""
+        log(f"iOS render skipped: {e}")
     native_ok, native_msg = _expo_native_stage(app_root)
     if not native_ok:
         return False, native_msg
-    return True, f"typecheck + jest + web render passed; {native_msg}"
+    return True, f"typecheck + jest + web render{ios_msg} passed; {native_msg}"
 
 
 def verify_app(app_root, stack=None, timeout=None):
