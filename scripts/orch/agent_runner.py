@@ -1348,6 +1348,49 @@ def _expo_web_render(app_root, timeout):
             proc.kill()
 
 
+def _dist_js_bytes(app_root):
+    """Total JavaScript bundle bytes of the web export — a perf-budget signal sealed
+    into the proof (MM11)."""
+    total, dist = 0, os.path.join(app_root, "dist")
+    for root, _d, files in os.walk(dist):
+        for fn in files:
+            if fn.endswith(".js"):
+                try:
+                    total += os.path.getsize(os.path.join(root, fn))
+                except OSError:
+                    pass
+    return total
+
+
+def _write_render_facts(app_root, platforms):
+    """Persist the structured render proof (which platforms render-verified, the
+    proven flag, the JS bundle bytes) so the seal can fold it into the Proof of
+    Build's verdict (MM11). Best-effort."""
+    facts = {"platforms": platforms, "proven": True,
+             "js_bytes": _dist_js_bytes(app_root)}
+    try:
+        vdir = os.path.join(app_root, ".adf-visual")
+        os.makedirs(vdir, exist_ok=True)
+        with open(os.path.join(vdir, "render-facts.json"), "w", encoding="utf-8") as f:
+            json.dump(facts, f)
+    except OSError:
+        pass
+    return facts
+
+
+def read_render_facts(app_root):
+    """The structured render facts written during verify, or None — folded into the
+    sealed verdict at build time (MM11)."""
+    p = os.path.join(app_root, ".adf-visual", "render-facts.json")
+    if not os.path.isfile(p):
+        return None
+    try:
+        with open(p, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
 def _expo_verify(app_root, timeout=None):
     """Verify an Expo / React Native app: typecheck (`tsc --noEmit`) + jest + a render
     proof on the WEB export (the moat), then the gated native stage. Mirrors
@@ -1390,6 +1433,8 @@ def _expo_verify(app_root, timeout=None):
     except Exception as e:
         ios_msg = ""
         log(f"iOS render skipped: {e}")
+    # MM11: record which platforms render-verified, to seal into the Proof of Build.
+    _write_render_facts(app_root, ["web"] + (["ios"] if ios_msg else []))
     native_ok, native_msg = _expo_native_stage(app_root)
     if not native_ok:
         return False, native_msg
@@ -2061,6 +2106,7 @@ def main():
                     "verify_summary": verify_summary,
                     "prompt": args.prompt,
                     "policy": policy_summary_obj,
+                    "render": read_render_facts(app_root),  # MM11: web/iOS render facts
                 },
                 created_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
             )

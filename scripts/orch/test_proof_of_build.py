@@ -56,6 +56,24 @@ class Merkle(unittest.TestCase):
         r2 = pob.compute_proof("d", "s", files, "spec", BUILD, created_at="2030-12-31")
         self.assertEqual(r1["merkle_root"], r2["merkle_root"])
 
+    def test_render_facts_are_sealed_and_tamper_evident(self):
+        # MM11: the render platforms (web/iOS) fold into the SEALED verdict, so
+        # "renders on iOS" is cryptographically attested + tamper-evident.
+        files = [("a.ts", "x")]
+        with_render = {**BUILD, "render": {"platforms": ["web", "ios"],
+                                           "proven": True, "js_bytes": 1234}}
+        proof = pob.compute_proof("d", "expo-rn", files, "spec", with_render)
+        self.assertEqual(proof["verdict"]["render"]["platforms"], ["web", "ios"])
+        # changing a sealed render platform breaks the Merkle root
+        tampered = {**BUILD, "render": {"platforms": ["web"],
+                                        "proven": True, "js_bytes": 1234}}
+        self.assertNotEqual(
+            proof["merkle_root"],
+            pob.compute_proof("d", "expo-rn", files, "spec", tampered)["merkle_root"])
+        # backward compatible: a build without render facts has no render field
+        plain = pob.compute_proof("d", "react-vite-sqlite", files, "spec", BUILD)
+        self.assertNotIn("render", plain["verdict"])
+
 
 class SealAndVerify(unittest.TestCase):
     def setUp(self):

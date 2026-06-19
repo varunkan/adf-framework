@@ -67,6 +67,11 @@ def _verdict_bytes(stack: str, build: dict) -> bytes:
     }
     if build.get("policy") is not None:
         verdict["policy"] = build["policy"]
+    # MM11: seal WHAT render-verified — the platforms the app actually rendered on
+    # (web and/or a real iOS device), the proven flag, and the JS bundle size — so
+    # "renders on iOS" becomes a cryptographically attested, tamper-evident property.
+    if build.get("render") is not None:
+        verdict["render"] = build["render"]
     return json.dumps(verdict, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
@@ -117,6 +122,17 @@ def _walk_source(app_dir):
     return agent_runner.current_app_files(app_dir)
 
 
+def _render_line(proof):
+    """The human line attesting which platforms render-verified (MM11), or ''."""
+    render = (proof.get("verdict") or {}).get("render")
+    if not (render and render.get("platforms")):
+        return ""
+    plats = ", ".join(render["platforms"])
+    kb = (render.get("js_bytes") or 0) // 1024
+    extra = f"  ·  **JS bundle:** {kb} KB" if kb else ""
+    return f"**Render-proven on:** {plats}{extra}  "
+
+
 def render_proof_md(proof):
     b = proof["build"]
     lines = [
@@ -129,6 +145,7 @@ def render_proof_md(proof):
         f"**Backend:** {b.get('backend') or 'n/a'}  ·  "
         f"**Model:** {b.get('model') or 'n/a'}  ",
         f"**Verified:** {'✅ ' + (b.get('verify_summary') or 'yes') if b.get('verified') else '❌ no'}",
+        *([_render_line(proof)] if _render_line(proof) else []),
         "",
         "This app ships a tamper-evident certificate. The Merkle root above seals "
         "every source file below, the spec it was built from "
