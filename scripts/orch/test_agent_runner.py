@@ -5,6 +5,7 @@ PORT-aware generation prompt. Pure-function tests (no model calls):
     python3 scripts/orch/test_agent_runner.py
 """
 import contextlib
+import http.client as http_client
 import io
 import json
 import os
@@ -1247,6 +1248,116 @@ class LiveNarration(unittest.TestCase):
         kinds = [e["type"] for e in evs]
         # returns early on missing package.json — must never claim a stage PASSED
         self.assertNotIn("verify_stage_result", kinds)
+
+
+class StreamingBackends(unittest.TestCase):
+    """Token streaming (ADF_RUNNER_STREAM=1): each backend streams deltas live but
+    MUST return the full text byte-identical to the blocking path — parse_files /
+    verify / seal see the same bytes, so the moat is untouched."""
+
+    def _capture(self, fn):
+        """Run fn() capturing stdout; return (fn_result, [emitted delta texts])."""
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            out = fn()
+        deltas = []
+        for line in buf.getvalue().splitlines():
+            if not line.strip():
+                continue
+            ev = json.loads(line)
+            if ev.get("type") == "text":
+                deltas.append(ev["text"])
+        return out, deltas
+
+    def test_streaming_off_by_default(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("ADF_RUNNER_STREAM", None)
+            self.assertFalse(ar._streaming())
+
+    def test_streaming_flag_on(self):
+        for val in ("1", "true", "on", "yes"):
+            with mock.patch.dict(os.environ, {"ADF_RUNNER_STREAM": val}):
+                self.assertTrue(ar._streaming())
+
+    def test_nvidia_stream_assembles_text_usage_and_deltas(self):
+        lines = [
+            'data: ' + json.dumps({"choices": [{"delta": {"content": "Hello"}}]}),
+            'data: ' + json.dumps({"choices": [{"delta": {"content": " world"}}]}),
+            'data: ' + json.dumps(
+                {"choices": [], "usage": {"prompt_tokens": 3, "completion_tokens": 2}}),
+            'data: [DONE]',
+        ]
+        with mock.patch.object(ar, "http_post_stream", lambda *a, **k: iter(lines)):
+            (text, usage), deltas = self._capture(
+                lambda: ar._nvidia_stream("u", {}, {}, 1))
+        self.assertEqual(text, "Hello world")
+        self.assertEqual(usage, {"prompt_tokens": 3, "completion_tokens": 2})
+        self.assertEqual(deltas, ["Hello", " world"])
+
+    def test_anthropic_stream_assembles_text_usage_and_deltas(self):
+        lines = [
+            'data: ' + json.dumps(
+                {"type": "message_start", "message": {"usage": {"input_tokens": 10}}}),
+            'data: ' + json.dumps(
+                {"type": "content_block_delta", "delta": {"text": "foo"}}),
+            'data: ' + json.dumps(
+                {"type": "content_block_delta", "delta": {"text": "bar"}}),
+            'data: ' + json.dumps({"type": "message_delta", "usage": {"output_tokens": 5}}),
+            'data: ' + json.dumps({"type": "message_stop"}),
+        ]
+        with mock.patch.object(ar, "http_post_stream", lambda *a, **k: iter(lines)):
+            (text, usage), deltas = self._capture(
+                lambda: ar._anthropic_stream("u", {}, {}, 1))
+        self.assertEqual(text, "foobar")
+        self.assertEqual(usage, {"prompt_tokens": 10, "completion_tokens": 5})
+        self.assertEqual(deltas, ["foo", "bar"])
+
+    def test_ollama_stream_assembles_text_and_deltas(self):
+        lines = [
+            json.dumps({"message": {"content": "abc"}, "done": False}),
+            json.dumps({"message": {"content": "def"}, "done": True}),
+        ]
+        with mock.patch.object(ar, "http_post_stream", lambda *a, **k: iter(lines)):
+            (text, _usage), deltas = self._capture(
+                lambda: ar._ollama_stream("u", {}, {}, 1))
+        self.assertEqual(text, "abcdef")
+        self.assertEqual(deltas, ["abc", "def"])
+
+    def test_streamed_text_equals_blocking_text_the_moat(self):
+        # The exact bytes parse_files would receive must be identical streamed vs not.
+        full = "<<<FILE: a.py>>>\nprint(1)\n<<<END>>>"
+        chunks = [full[i:i + 7] for i in range(0, len(full), 7)]
+        sse = ['data: ' + json.dumps({"choices": [{"delta": {"content": c}}]})
+               for c in chunks] + ['data: [DONE]']
+        blocking = {"choices": [{"message": {"content": full}}]}
+
+        with mock.patch.dict(os.environ,
+                             {"NVIDIA_API_KEY": "k", "ADF_RUNNER_STREAM": "1"}), \
+                mock.patch.object(ar, "http_post_stream", lambda *a, **k: iter(sse)):
+            (stream_text, _u), _d = self._capture(lambda: ar.call_nvidia([], 5))
+
+        with mock.patch.dict(os.environ, {"NVIDIA_API_KEY": "k"}, clear=False):
+            os.environ.pop("ADF_RUNNER_STREAM", None)
+            with mock.patch.object(ar, "http_post_json", lambda *a, **k: blocking):
+                block_text, _ = ar.call_nvidia([], 5)
+
+        self.assertEqual(stream_text, full)
+        self.assertEqual(stream_text, block_text)   # byte-identical → moat intact
+
+    def test_mid_stream_disconnect_fails_over_never_partial(self):
+        # A connection that drops AFTER 200 raises http.client.IncompleteRead (NOT an
+        # OSError). The backend must catch it and return None so generate() fails over
+        # to a backend that produces COMPLETE output — never return partial text (a
+        # moat breach) and never crash the build.
+        def boom(*a, **k):
+            yield 'data: ' + json.dumps({"choices": [{"delta": {"content": "par"}}]})
+            raise http_client.IncompleteRead(b"par")
+        with mock.patch.dict(os.environ,
+                             {"NVIDIA_API_KEY": "k", "ADF_RUNNER_STREAM": "1"}), \
+                mock.patch.object(ar, "http_post_stream", boom):
+            with contextlib.redirect_stdout(io.StringIO()):
+                res = ar.call_nvidia([{"role": "user", "content": "x"}], 5)
+        self.assertIsNone(res)   # failover, not ("par", …) and not a traceback
 
 
 if __name__ == "__main__":

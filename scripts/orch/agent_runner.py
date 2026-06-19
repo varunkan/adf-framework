@@ -35,6 +35,7 @@ import os
 import random
 import re
 import ssl
+import http.client
 import subprocess
 import sys
 import time
@@ -932,8 +933,82 @@ def http_post_json(url, headers, payload, timeout):
         raise HttpError(e.code, body, retry_after) from None
 
 
+def _streaming():
+    """Token streaming is OPT-IN (ADF_RUNNER_STREAM=1) so the safe, well-tested
+    blocking path stays the default. When on, each backend streams the model output
+    and emits live deltas while still returning the FULL (text, usage) — so
+    parse_files / verify / seal see byte-identical content (the moat is untouched)."""
+    return os.environ.get("ADF_RUNNER_STREAM", "").strip().lower() in (
+        "1", "true", "on", "yes")
+
+
+def http_post_stream(url, headers, payload, timeout):
+    """Open a streaming POST and return an iterator of decoded response lines (SSE /
+    NDJSON). Raises HttpError on the initial non-2xx — IDENTICAL classification to
+    http_post_json — before any line is read, so call_with_retry / generate failover
+    is unchanged. Closes the connection when the iterator is exhausted."""
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    ctx = ssl_context() if url.startswith("https") else None
+    try:
+        resp = urllib.request.urlopen(req, timeout=timeout, context=ctx)
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode("utf-8", "replace")[:500]
+        except Exception:
+            pass
+        retry_after = e.headers.get("retry-after") if e.headers else None
+        raise HttpError(e.code, body, retry_after) from None
+
+    def _iter():
+        try:
+            for raw in resp:
+                yield raw.decode("utf-8", "replace")
+        finally:
+            resp.close()
+    return _iter()
+
+
+def _stream_delta(text):
+    """Emit one streamed model-output delta as a live event so the Studio shows the
+    code typing out. DISPLAY-ONLY (raw model text) — never an authoritative claim;
+    the verify/seal events stay the only source of truth. Rides the runner's existing
+    reasoning-coalescing path (type 'text')."""
+    if text:
+        emit_event({"type": "text", "text": text})
+
+
 def _max_tokens():
     return int(os.environ.get("ADF_RUNNER_MAX_TOKENS", "8000"))
+
+
+def _nvidia_stream(url, headers, payload, timeout):
+    """Parse an OpenAI-compatible SSE stream (NVIDIA NIM): 'data: {json}' chunks with
+    choices[0].delta.content, a trailing usage chunk (stream_options.include_usage),
+    and a 'data: [DONE]' sentinel. Emits each delta live; returns the FULL assembled
+    (text, usage) — identical to what the blocking path would have parsed."""
+    parts, usage = [], {}
+    for line in http_post_stream(url, headers, payload, timeout):
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        data = line[len("data:"):].strip()
+        if data == "[DONE]":
+            break
+        try:
+            obj = json.loads(data)
+        except ValueError:
+            continue
+        choices = obj.get("choices") or []
+        if choices:
+            delta = (choices[0].get("delta") or {}).get("content") or ""
+            if delta:
+                parts.append(delta)
+                _stream_delta(delta)
+        if obj.get("usage"):
+            usage = obj["usage"]
+    return "".join(parts), usage
 
 
 def call_nvidia(messages, timeout):
@@ -946,22 +1021,55 @@ def call_nvidia(messages, timeout):
     # backend instead of hanging the whole build for minutes.
     nv_timeout = min(timeout, int(os.environ.get("ADF_NVIDIA_TIMEOUT_SEC", "75")))
     log(f"using NVIDIA NIM model {model} (timeout {nv_timeout}s)")
+    url = f"{base}/chat/completions"
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    payload = {"model": model, "max_tokens": _max_tokens(), "temperature": 0.2,
+               "messages": messages}
     try:
-        out = http_post_json(
-            f"{base}/chat/completions",
-            {"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            {"model": model, "max_tokens": _max_tokens(), "temperature": 0.2,
-             "messages": messages},
-            nv_timeout,
-        )
+        if _streaming():
+            payload["stream"] = True
+            payload["stream_options"] = {"include_usage": True}
+            return _nvidia_stream(url, headers, payload, nv_timeout)
+        out = http_post_json(url, headers, payload, nv_timeout)
         choice = (out.get("choices") or [{}])[0]
         text = (choice.get("message") or {}).get("content") or ""
         return text, out.get("usage") or {}
     except HttpError:
         raise                       # let call_with_retry classify + retry the status
-    except (OSError, ValueError, KeyError) as e:
+    except (OSError, ValueError, KeyError, http.client.HTTPException) as e:
         log(f"NVIDIA call failed: {e}")
         return None
+
+
+def _anthropic_stream(url, headers, payload, timeout):
+    """Parse an Anthropic SSE stream: message_start (usage.input_tokens),
+    content_block_delta (delta.text), message_delta (usage.output_tokens),
+    message_stop. Emits each delta live; returns the FULL assembled
+    (text, {prompt_tokens, completion_tokens}) — identical to the blocking parse."""
+    parts, in_tok, out_tok = [], 0, 0
+    for line in http_post_stream(url, headers, payload, timeout):
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        data = line[len("data:"):].strip()
+        if not data:
+            continue
+        try:
+            obj = json.loads(data)
+        except ValueError:
+            continue
+        t = obj.get("type")
+        if t == "message_start":
+            in_tok = ((obj.get("message") or {}).get("usage") or {}).get(
+                "input_tokens", in_tok)
+        elif t == "content_block_delta":
+            delta = (obj.get("delta") or {}).get("text") or ""
+            if delta:
+                parts.append(delta)
+                _stream_delta(delta)
+        elif t == "message_delta":
+            out_tok = (obj.get("usage") or {}).get("output_tokens", out_tok)
+    return "".join(parts), {"prompt_tokens": in_tok, "completion_tokens": out_tok}
 
 
 def call_anthropic(messages, timeout):
@@ -979,41 +1087,66 @@ def call_anthropic(messages, timeout):
                 "cache_control": {"type": "ephemeral"}}]
               if system_text else system_text)
     log(f"using Anthropic model {model}")
+    url = f"{base}/v1/messages"
+    headers = {"x-api-key": key, "anthropic-version": "2023-06-01",
+               "anthropic-beta": "prompt-caching-2024-07-31",
+               "Content-Type": "application/json"}
+    payload = {"model": model, "max_tokens": _max_tokens(), "system": system,
+               "messages": turns}
     try:
-        out = http_post_json(
-            f"{base}/v1/messages",
-            {"x-api-key": key, "anthropic-version": "2023-06-01",
-             "anthropic-beta": "prompt-caching-2024-07-31",
-             "Content-Type": "application/json"},
-            {"model": model, "max_tokens": _max_tokens(), "system": system, "messages": turns},
-            timeout,
-        )
+        if _streaming():
+            payload["stream"] = True
+            return _anthropic_stream(url, headers, payload, timeout)
+        out = http_post_json(url, headers, payload, timeout)
         blocks = out.get("content") or []
         text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
         u = out.get("usage") or {}
         return text, {"prompt_tokens": u.get("input_tokens", 0), "completion_tokens": u.get("output_tokens", 0)}
     except HttpError:
         raise                       # let call_with_retry classify + retry the status
-    except (OSError, ValueError, KeyError) as e:
+    except (OSError, ValueError, KeyError, http.client.HTTPException) as e:
         log(f"Anthropic call failed: {e}")
         return None
+
+
+def _ollama_stream(url, headers, payload, timeout):
+    """Parse an Ollama NDJSON stream: newline-delimited {"message":{"content":…},
+    "done":bool} objects. Emits each delta live; returns the FULL assembled
+    (text, {}) — identical to the blocking path's message.content."""
+    parts = []
+    for line in http_post_stream(url, headers, payload, timeout):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        delta = (obj.get("message") or {}).get("content") or ""
+        if delta:
+            parts.append(delta)
+            _stream_delta(delta)
+        if obj.get("done"):
+            break
+    return "".join(parts), {}
 
 
 def call_ollama(messages, timeout):
     host = (os.environ.get("ORCH_OLLAMA_HOST") or os.environ.get("OLLAMA_HOST") or "http://127.0.0.1:11434").rstrip("/")
     model = os.environ.get("ORCH_OLLAMA_MODEL", "llama3.2")
     log(f"using local Ollama model {model}")
+    url = f"{host}/api/chat"
+    headers = {"Content-Type": "application/json"}
+    stream_on = _streaming()
+    payload = {"model": model, "stream": stream_on, "messages": messages}
     try:
-        out = http_post_json(
-            f"{host}/api/chat",
-            {"Content-Type": "application/json"},
-            {"model": model, "stream": False, "messages": messages},
-            timeout,
-        )
+        if stream_on:
+            return _ollama_stream(url, headers, payload, timeout)
+        out = http_post_json(url, headers, payload, timeout)
         return (out.get("message") or {}).get("content") or "", {}
     except HttpError:
         raise                       # let call_with_retry classify + retry the status
-    except (OSError, ValueError, KeyError) as e:
+    except (OSError, ValueError, KeyError, http.client.HTTPException) as e:
         log(f"Ollama call failed: {e}")
         return None
 
