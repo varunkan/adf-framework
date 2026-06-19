@@ -59,6 +59,42 @@ class RecordAndRead(unittest.TestCase):
         self.assertEqual(again["facts"]["verification_evidence"]["status"], "proven")
 
 
+class Enforcement(unittest.TestCase):
+    def setUp(self):
+        self.app = tempfile.mkdtemp()
+
+    def test_verification_evidence_is_enforced_and_proven(self):
+        pf.record_verification(self.app, "react")
+        obj = pf.read_process_facts(self.app)
+        # proven → nothing blocks
+        self.assertEqual(pf.enforcement_block(obj), [])
+
+    def test_strict_tdd_skipped_blocks(self):
+        # a vacuous-TDD build under strict mode must be blocked (no seal)
+        pf.record_verification(self.app, "react")
+        pf._write(self.app, "tdd.json",
+                  {"red": False, "vacuous": True, "proven": False})
+        obj = pf.read_process_facts(self.app, env={"ADF_TDD": "strict"})
+        self.assertIn("tdd_followed", obj["enforced"])
+        self.assertEqual(pf.enforcement_block(obj), ["tdd_followed"])
+
+    def test_non_strict_tdd_skipped_does_not_block(self):
+        pf.record_verification(self.app, "react")
+        pf._write(self.app, "tdd.json",
+                  {"red": False, "vacuous": True, "proven": False})
+        obj = pf.read_process_facts(self.app, env={})
+        self.assertNotIn("tdd_followed", obj["enforced"])
+        self.assertEqual(pf.enforcement_block(obj), [])
+
+    def test_strict_tdd_proven_does_not_block(self):
+        pf.record_verification(self.app, "react")
+        pf._write(self.app, "tdd.json",
+                  {"red": True, "green": True, "proven": True})
+        obj = pf.read_process_facts(self.app, env={"ADF_PROCESS": "strict"})
+        self.assertEqual(obj["facts"]["tdd_followed"]["status"], "proven")
+        self.assertEqual(pf.enforcement_block(obj), [])
+
+
 class Surfacing(unittest.TestCase):
     def _verdict(self, facts):
         return {"process": {"schema": "adf-process/1", "facts": facts,

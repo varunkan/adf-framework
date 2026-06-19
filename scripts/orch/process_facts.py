@@ -50,6 +50,27 @@ _FACT_LABELS = {
 }
 
 
+def _strict(env=None):
+    """Strict process mode: ADF_PROCESS=strict (all artifact-backed disciplines
+    fail-closed) or ADF_TDD=strict (TDD specifically). Default off."""
+    env = env if env is not None else os.environ
+    return (env.get("ADF_PROCESS", "").strip().lower() == "strict"
+            or env.get("ADF_TDD", "").strip().lower() == "strict")
+
+
+def enforcement_block(process_obj):
+    """The enforced disciplines that are NOT `proven` — the fail-closed signal,
+    mirroring policy_gate.blocking_violations. A non-empty list means the build must
+    be BLOCKED (no seal) so a sealed proof always means the enforced disciplines held.
+    Empty/absent => nothing blocks (advisory)."""
+    if not process_obj:
+        return []
+    facts = process_obj.get("facts") or {}
+    return sorted(
+        name for name in (process_obj.get("enforced") or [])
+        if (facts.get(name) or {}).get("status") != "proven")
+
+
 def _evidence_dir(app_root):
     return os.path.join(app_root, PROCESS_DIR)
 
@@ -95,7 +116,7 @@ def record_verification(app_root, stack, summary=""):
 
 # --- the sealable summary (read back from disk at seal time) --------------------
 
-def read_process_facts(app_root):
+def read_process_facts(app_root, env=None):
     """Assemble the canonical, sealable process summary from the durable evidence
     under `.adf-process/`, or None when no discipline was recorded. Read from disk
     (never from live flags) so the seal can only attest what truly happened — the
@@ -105,6 +126,7 @@ def read_process_facts(app_root):
     `enforced` names the artifact-backed disciplines treated as fail-closed; `blocked`
     is always empty in a returned (about-to-seal) summary, because a build that
     skipped an enforced discipline is blocked BEFORE sealing (the policy-gate path)."""
+    env = env if env is not None else os.environ
     facts = {}
     enforced = []
 
@@ -116,8 +138,28 @@ def read_process_facts(app_root):
         # build never reaches the seal. Naming it `enforced` makes that explicit.
         enforced.append("verification_evidence")
 
-    # Phase 1+ facts (tdd_followed, root_cause_documented, review_passed,
-    # design_options_considered) are read here as their recorders land.
+    # TDD red→green (Phase 1, ADF_TDD). `proven` ONLY when a real RED preceded a real
+    # GREEN; a vacuous/absent RED seals honestly as `skipped`. Enforced (fail-closed)
+    # only under strict mode, so the default path is unaffected.
+    tdd = _read(app_root, "tdd.json")
+    if tdd is not None:
+        if tdd.get("proven"):
+            facts["tdd_followed"] = {
+                "status": "proven",
+                "evidence": sha256_text(json.dumps(tdd, sort_keys=True))}
+        else:
+            reason = "vacuous tests" if tdd.get("vacuous") else (tdd.get("reason") or "")
+            facts["tdd_followed"] = {"status": "skipped", "reason": reason}
+        if _strict(env):
+            enforced.append("tdd_followed")
+
+    # Root cause documented before each self-heal fix (Phase 1, ADF_HEAL_DIAGNOSE).
+    # Advisory: documenting a cause is hygiene; never block a green build for it.
+    heal = _read(app_root, "heal.json")
+    if heal and heal.get("heals"):
+        causes = sorted({h.get("cause") for h in heal["heals"] if h.get("cause")})
+        facts["root_cause_documented"] = {
+            "status": "proven", "heals": len(heal["heals"]), "causes": causes}
 
     if not facts:
         return None

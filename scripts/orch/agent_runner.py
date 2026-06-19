@@ -1952,6 +1952,34 @@ def fix_messages(system, user, files, failure, stack=None):
     ]
 
 
+def _tdd_red_baseline(workspace, fid, stack, files, timeout):
+    """RED baseline for a test-first build (ADF_TDD): write the model's TEST files onto
+    the scaffold ALONE and run the test stage — it must FAIL because no implementation
+    exists yet. Honest only when deps are already present (so the failure reflects
+    missing IMPLEMENTATION, not missing node_modules); otherwise the verdict is
+    inconclusive (never a fake RED). Returns (verdict, test_paths) for the test-bearing
+    stacks, or (None, []) when TDD does not apply (e.g. stdlib). The full file set is
+    still written + verified by the caller — this never replaces verify_app."""
+    import tdd_loop
+    if (stack or DEFAULT_STACK) not in (STACK_REACT, STACK_EXPO):
+        return None, []
+    tests, impl = tdd_loop.split_tests(files)
+    test_paths = [p for p, _ in tests]
+    if not tests or not impl:
+        return {"red": False, "vacuous": False,
+                "reason": "no test or no implementation files emitted"}, test_paths
+    app_root, _ = write_files(workspace, fid, tests)
+    if not os.path.isdir(os.path.join(app_root, "node_modules")):
+        return {"red": False, "vacuous": False,
+                "reason": "deps absent — RED baseline inconclusive"}, test_paths
+    narrate("tdd_red_check", tests=len(tests))
+    verdict = tdd_loop.red_baseline(
+        tests, impl, lambda: _npm(app_root, ["test"], timeout))
+    narrate("tdd_red", red=bool(verdict.get("red")), vacuous=bool(verdict.get("vacuous")))
+    log(f"TDD red baseline: {verdict.get('reason')}")
+    return verdict, test_paths
+
+
 # --- one-box iteration: edit an existing app ------------------------------
 EDIT_REQUEST_FILE = ".adf-edit-request.txt"
 
@@ -2411,6 +2439,11 @@ def main():
     verified = False
     last_failure = ""
     verify_summary = ""
+    # Phase 1 process disciplines (both gated, default-off): TDD red→green + a
+    # systematic-debugging self-heal. Imported once; stdlib-only siblings.
+    import tdd_loop
+    import heal
+    tdd_verdict, tdd_test_paths = None, []
 
     for attempt in range(1, max_iters + 1):
         narrate("generating", attempt=attempt)
@@ -2455,6 +2488,13 @@ def main():
                                         last_failure, stack)
                 continue
 
+        # TDD red→green (ADF_TDD): prove the tests FAIL before the implementation
+        # exists, then let the normal write+verify drive them GREEN. Attempt 1 only;
+        # gated; never replaces verify_app. The full set is (re)written just below.
+        if attempt == 1 and not is_edit and tdd_loop.is_enabled():
+            tdd_verdict, tdd_test_paths = _tdd_red_baseline(
+                workspace, fid, stack, files, timeout)
+
         narrate("writing_files", total=len(files))
         app_root, written = write_files(workspace, fid, files)
         narrate("files_written", count=len(written))
@@ -2489,6 +2529,10 @@ def main():
                     "green) and re-emit all files.")
                 messages = fix_messages(system, user, files, last_failure, stack)
                 continue
+            # TDD: record the real RED→GREEN transition so process_facts seals
+            # `tdd_followed` (proven only when a real RED preceded this GREEN).
+            if tdd_verdict is not None:
+                tdd_loop.record(app_root, tdd_verdict, True, tdd_test_paths)
             verified = True
             verify_summary = output
             if gaps:
@@ -2499,7 +2543,14 @@ def main():
         if attempt < max_iters:
             narrate("self_heal", attempt=attempt, reason=output[:200])
             log(f"attempt {attempt}: feeding failure back to the model to self-correct")
-            messages = fix_messages(system, user, files, output, stack)
+            # Systematic debugging (ADF_HEAL_DIAGNOSE): record the root cause from the
+            # REAL failure (→ seals root_cause_documented) and demand a one-line ROOT
+            # CAUSE before the patch, instead of a blind regenerate. Gated.
+            fail_text = output
+            if heal.is_enabled() and app_root:
+                heal.record_root_cause(app_root, attempt, output)
+                fail_text = heal.diagnose_preamble(output) + "\n\n" + output
+            messages = fix_messages(system, user, files, fail_text, stack)
 
     # Record this implement-phase outcome so recall_blockers can surface it on a
     # FUTURE build (the loop is otherwise inert — nothing else writes phase 7).
@@ -2575,12 +2626,27 @@ def main():
             # root-cause / review). read_process_facts re-reads the durable evidence
             # from disk so the verdict can only attest what truly happened. Best-effort.
             process_obj = None
+            process_block = []
             try:
                 import process_facts
                 process_facts.record_verification(app_root, stack, verify_summary)
                 process_obj = process_facts.read_process_facts(app_root)
+                process_block = process_facts.enforcement_block(process_obj)
             except Exception as e:
                 log(f"process facts skipped: {e}")
+            # Fail-closed process gate (opt-in, ADF_PROCESS=strict / ADF_TDD=strict):
+            # a build that SKIPPED an enforced discipline does not seal — a sealed
+            # proof then means the enforced disciplines held. Raised OUTSIDE the try
+            # above so it is not swallowed; caught by the outer `except _PolicyBlocked`.
+            if process_block:
+                narrate("process_blocked", disciplines=process_block)
+                log(f"🚫 process gate ENFORCED — build BLOCKED on: "
+                    f"{', '.join(process_block)} (discipline not attested; set "
+                    f"ADF_PROCESS=advisory to override)")
+                record_build_outcome(
+                    repo_root, fid, False,
+                    f"process discipline not met: {', '.join(process_block)}")
+                raise _PolicyBlocked()
             # Native mobile deliverable (gated, best-effort): a standalone, signed
             # APK + a clean-emulator preview — the "download + run on a device"
             # artifact, its hash sealed below so the downloadable binary is attested.
