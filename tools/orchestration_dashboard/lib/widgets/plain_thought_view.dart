@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'typewriter_text.dart';
+
 /// Cursor-style plain chain-of-thought (muted prose, no per-step cards).
 class PlainThoughtView extends StatelessWidget {
   const PlainThoughtView({
@@ -36,20 +38,23 @@ class PlainThoughtView extends StatelessWidget {
               ),
             )
           else
-            ...lines.map(
-              (line) => Padding(
+            ...List.generate(lines.length, (i) {
+              final style = TextStyle(
+                fontSize: 14,
+                height: 1.55,
+                color: thoughtColor,
+                fontWeight: FontWeight.w400,
+              );
+              // The live, actively-streaming line types out (the "watch it type"
+              // feel); already-finalized lines render statically.
+              final typeIt = isLive && i == lines.length - 1;
+              return Padding(
                 padding: const EdgeInsets.only(bottom: 14),
-                child: Text(
-                  line,
-                  style: TextStyle(
-                    fontSize: 14,
-                    height: 1.55,
-                    color: thoughtColor,
-                    fontWeight: FontWeight.w400,
-                  ),
-                ),
-              ),
-            ),
+                child: typeIt
+                    ? TypewriterText(lines[i], style: style)
+                    : Text(lines[i], style: style),
+              );
+            }),
           if (isLive && lines.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 6),
