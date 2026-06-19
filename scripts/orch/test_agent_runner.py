@@ -952,5 +952,28 @@ class MobileStackProfile(unittest.TestCase):
         self.assertIn("native build", msg.lower())
 
 
+class MobileHealAndSummaryPaths(unittest.TestCase):
+    """Bug fix: the self-heal hint, the edit-mode architecture description, and the
+    build summary must NOT route an Expo (mobile) build into the stdlib-Python branch
+    — a mobile failure was getting `server.py`/`test_app.py`/`schema.sql` guidance."""
+
+    def test_fix_messages_expo_is_mobile_aware_not_python(self):
+        msgs = ar.fix_messages(
+            "sys", "usr", [("app/index.tsx", "x")], "boom", ar.STACK_EXPO)
+        fixer = msgs[-1]["content"]
+        self.assertIn("app/", fixer)              # mobile route guidance
+        self.assertNotIn("server.py", fixer)
+        self.assertNotIn("test_app.py", fixer)
+        self.assertNotIn("schema.sql", fixer)
+
+    def test_build_edit_messages_expo_arch_is_mobile(self):
+        system, _user = ar.build_edit_messages(
+            "kb", [("app/index.tsx", "x")], "make the button green", ar.STACK_EXPO)
+        self.assertIn("Expo", system)
+        self.assertIn("mobile app", system)
+        self.assertNotIn("Python stdlib", system)
+        self.assertNotIn("Fastify", system)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

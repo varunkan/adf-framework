@@ -1469,6 +1469,13 @@ def fix_messages(system, user, files, failure, stack=None):
                  "missing/renamed SQLite table or column, a route registered with the "
                  "wrong path (routes are relative to `/api`), or a vitest assertion "
                  "mismatch")
+    elif (stack or DEFAULT_STACK) == STACK_EXPO:
+        where = ("whichever files are wrong (app/**.tsx routes incl. app/_layout.tsx, "
+                 "src/components/**.tsx, src/db.ts, src/hooks/*, and/or "
+                 "__tests__/*.test.tsx). Common causes: a tsc type error in app/ or "
+                 "src/, an Expo Router route/param mismatch, a raw hex color (use theme "
+                 "tokens), a missing expo-sqlite query, or a "
+                 "@testing-library/react-native assertion mismatch (mock 'expo-router')")
     else:
         where = "whichever files are wrong (server.py and/or test_app.py and/or index.html)"
     fixer = (
@@ -1554,6 +1561,18 @@ def build_edit_messages(fid, files, instruction, stack=None, file_summary=None,
         )
         keep_tests = ("Keep the vitest suite (`test/*.test.mjs`) passing; update it "
                       "only if the change requires it.")
+    elif (stack or DEFAULT_STACK) == STACK_EXPO:
+        arch = (
+            "a cross-platform Expo + React Native app with Expo Router (file-based "
+            "`app/` routes incl. `app/_layout.tsx`), themed components in "
+            "`src/components` that COMPOSE the shipped `./components/ui` kit + the "
+            "`useTheme()` tokens (NEVER raw hex), and expo-sqlite local data in "
+            "`src/db.ts`. Keep `app/**` + `src/**` type-correct (tsc checks it); there "
+            "is NO server/DOM"
+        )
+        keep_tests = ("Keep the jest suite (`__tests__/*.test.tsx`, "
+                      "@testing-library/react-native, mock 'expo-router') passing; "
+                      "update it only if the change requires it.")
     else:
         arch = (
             "a Python stdlib http.server app + a single static index.html. Keep the "
@@ -1562,8 +1581,9 @@ def build_edit_messages(fid, files, instruction, stack=None, file_summary=None,
         )
         keep_tests = ("Keep test_app.py passing; update it only if the change "
                       "requires it.")
+    app_kind = "mobile app" if (stack or DEFAULT_STACK) == STACK_EXPO else "web app"
     system = (
-        f"You are editing an EXISTING, working web app: {arch}. Apply the user's "
+        f"You are editing an EXISTING, working {app_kind}: {arch}. Apply the user's "
         "requested change with the SMALLEST edit that fully satisfies it — preserve "
         "all other behavior and styling exactly. Re-emit the COMPLETE content of "
         "every file you change (and ONLY those), as:\n"
@@ -1996,10 +2016,11 @@ def main():
     proof_seal = None
     policy_ok = None
     n_components = None
-    if verified and (stack or DEFAULT_STACK) == STACK_REACT:
+    if verified and (stack or DEFAULT_STACK) in (STACK_REACT, STACK_EXPO):
         # Project-specific artifact: catalog the app's reusable, props-driven
         # components (.adf-components.json + COMPONENTS.md) so future features can
-        # discover and REUSE them instead of duplicating. Best-effort.
+        # discover and REUSE them instead of duplicating — for web AND mobile (both
+        # have src/components/**.tsx). Best-effort.
         try:
             import component_manifest
             manifest = component_manifest.generate(app_root)
@@ -2059,6 +2080,10 @@ def main():
         run_hint = (f"Run:  cd {rel_root} && npm ci && npm run build && "
                     f"PORT=8000 node server/index.mjs")
         test_hint = f"Test: cd {rel_root} && npm test"
+    elif stack == STACK_EXPO:
+        run_hint = (f"Run:  cd {rel_root} && npx expo start   "
+                    f"(or web: npm run web:export && PORT=8000 npm run web:serve)")
+        test_hint = f"Test: cd {rel_root} && npm run typecheck && npm test"
     else:
         run_hint = f"Run:  cd {rel_root} && python3 server.py"
         test_hint = f"Test: cd {rel_root} && python3 test_app.py"
