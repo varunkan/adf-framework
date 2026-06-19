@@ -102,6 +102,14 @@ class TraceSpan {
         return 'MOBILE_OK';
       case 'apk_failed':
         return 'MOBILE_FAIL';
+      case 'tdd_red_check':
+        return 'PROCESS_RUN';
+      case 'tdd_red':
+        // HONESTY: green only on a REAL red baseline (tests fail with no impl);
+        // a vacuous suite (ok != true) is a warning, never a positive card.
+        return runnerOk == true ? 'PROCESS_OK' : 'PROCESS_WARN';
+      case 'process_blocked':
+        return 'BLOCKED';
       case 'feature_resolved':
       case 'planning':
       case 'reading_files':

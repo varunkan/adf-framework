@@ -1975,7 +1975,11 @@ def _tdd_red_baseline(workspace, fid, stack, files, timeout):
     narrate("tdd_red_check", tests=len(tests))
     verdict = tdd_loop.red_baseline(
         tests, impl, lambda: _npm(app_root, ["test"], timeout))
-    narrate("tdd_red", red=bool(verdict.get("red")), vacuous=bool(verdict.get("vacuous")))
+    # ok = the RED baseline did its job (tests FAIL with no impl). Carried on the
+    # honesty seam so the Studio shows PROCESS_OK only on a real RED, PROCESS_WARN on a
+    # vacuous suite — never a green claim on a build that didn't earn it.
+    narrate("tdd_red", ok=bool(verdict.get("red")),
+            vacuous=bool(verdict.get("vacuous")))
     log(f"TDD red baseline: {verdict.get('reason')}")
     return verdict, test_paths
 

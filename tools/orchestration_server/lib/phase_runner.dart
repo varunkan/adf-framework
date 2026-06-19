@@ -1246,6 +1246,15 @@ Instructions:
         return 'Launching on a clean emulator…';
       case 'emulator_running':
         return 'Running in the emulator ✓';
+      case 'tdd_red_check':
+        return 'TDD: running tests against the scaffold (RED baseline)…';
+      case 'tdd_red':
+        return obj['ok'] == true
+            ? 'TDD: tests fail before implementation ✓ (RED)'
+            : 'TDD: tests pass with no implementation ⚠ (vacuous)';
+      case 'process_blocked':
+        return '🚫 Process gate BLOCKED: '
+            '${(obj['disciplines'] as List?)?.join(', ') ?? ''} not attested';
       default:
         return null;
     }
