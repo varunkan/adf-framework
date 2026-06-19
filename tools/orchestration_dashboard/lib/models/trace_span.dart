@@ -38,6 +38,67 @@ class TraceSpan {
 
   bool get isRunnerControlEvent => name.startsWith('runner.');
 
+  // --- typed runner-event accessors (Layer 4) -------------------------------
+  // Bind the live UI to the runner's STRUCTURED truth, never a string match.
+
+  /// The runner event subtype, e.g. 'verify_stage_result' from
+  /// 'runner.verify_stage_result'. Null for non-runner spans.
+  String? get runnerType =>
+      isRunnerControlEvent ? name.substring('runner.'.length) : null;
+
+  /// The runner's real ok flag for a verdict event; null when absent/not a verdict.
+  bool? get runnerOk =>
+      attributes['runner.ok'] is bool ? attributes['runner.ok'] as bool : null;
+
+  String? get runnerStage => attributes['runner.stage'] as String?;
+  String? get runnerSeal => attributes['runner.seal'] as String?;
+  String? get runnerPath => attributes['runner.path'] as String?;
+
+  /// Typed kind for the Studio's live cards/pills. Additive — distinct from the
+  /// legacy [displayKind] (kept intact for existing views). HONESTY: verdict kinds
+  /// bind to [runnerOk] — a result is VERIFY_OK / POLICY_OK / DONE_OK only when
+  /// runnerOk == true, so a missing or false flag can NEVER render as positive
+  /// (green / sealed). A `sealed` span (SEAL) is only ever emitted by the runner
+  /// after a real seal, and is never reachable on a policy-blocked build.
+  String get cardKind {
+    if (name == 'file.write') return 'FILE_WRITE';
+    final t = runnerType;
+    if (t == null) return displayKind;
+    switch (t) {
+      case 'verifying':
+      case 'verify_stage':
+        return 'VERIFY_RUN';
+      case 'verify_stage_result':
+      case 'verify_result':
+        return runnerOk == true ? 'VERIFY_OK' : 'VERIFY_FAIL';
+      case 'policy_gate':
+        return runnerOk == true ? 'POLICY_OK' : 'POLICY_WARN';
+      case 'policy_blocked':
+        return 'BLOCKED';
+      case 'sealing':
+        return 'SEALING';
+      case 'sealed':
+        return 'SEAL';
+      case 'generating':
+      case 'generated':
+        return 'GENERATE';
+      case 'scaffolding':
+      case 'scaffolded':
+        return 'SCAFFOLD';
+      case 'warming_deps':
+      case 'deps_warm':
+        return 'DEPS';
+      case 'self_heal':
+        return 'HEAL';
+      case 'completion_audit':
+        return 'AUDIT';
+      case 'build_complete':
+        return runnerOk == true ? 'DONE_OK' : 'DONE_FAIL';
+      default:
+        return 'STEP';
+    }
+  }
+
   String get displayKind {
     if (reasoning != null && reasoning!.isNotEmpty) return 'REASONING';
     if (response != null && response!.isNotEmpty) return 'RESPONSE';

@@ -1283,12 +1283,17 @@ Instructions:
         // The runner narrates each file as it writes it, so a 1-3 min build
         // doesn't go dark. Surface it as a live span.
         _flushReasoningBuffer(featureId, phase);
+        final fw = <String, dynamic>{};
+        if (obj['path'] != null) fw['runner.path'] = '${obj['path']}';
+        if (obj['index'] != null) fw['runner.index'] = obj['index'];
+        if (obj['total'] != null) fw['runner.total'] = obj['total'];
         _traces.append(
           featureId: featureId,
           name: 'file.write',
           event: 'runner',
           phase: phase,
           message: fileWriteNarration(obj),
+          extra: fw.isEmpty ? null : fw,
         );
         return;
       }
@@ -1301,12 +1306,21 @@ Instructions:
       final narration = type == null ? null : runnerNarration(obj, type);
       if (narration != null) {
         _flushReasoningBuffer(featureId, phase);
+        // Carry the runner's STRUCTURED truth alongside the prose so the Studio's
+        // verdict pills bind to the real ok flag / seal — never a string match on
+        // the message. This is the honesty seam: a green pill requires runner.ok==true.
+        final extra = <String, dynamic>{};
+        if (obj['ok'] is bool) extra['runner.ok'] = obj['ok'];
+        if (obj['stage'] != null) extra['runner.stage'] = '${obj['stage']}';
+        if (obj['seal'] != null) extra['runner.seal'] = '${obj['seal']}';
+        if (obj['status'] != null) extra['runner.status'] = '${obj['status']}';
         _traces.append(
           featureId: featureId,
           name: 'runner.$type',
           event: 'runner',
           phase: phase,
           message: narration,
+          extra: extra.isEmpty ? null : extra,
         );
         return;
       }
