@@ -6,6 +6,7 @@
     python3 scripts/orch/verify_proof.py --trust <pubhex> <app-dir>   # check provenance
     python3 scripts/orch/verify_proof.py --trust <pubhex> --require-trusted <app-dir>
     python3 scripts/orch/verify_proof.py --require-signed <app-dir>   # fail if unsigned
+    python3 scripts/orch/verify_proof.py --require-discipline tdd_followed <app-dir>
     python3 scripts/orch/verify_proof.py --keygen [dir]        # make a signing keypair
 
 Recomputes the Merkle seal from the files on disk and reports VERIFIED or
@@ -58,6 +59,7 @@ def main(argv):
         return _keygen(args[1:])
     as_json = require_signed = require_trusted = False
     trusted = None
+    require_discipline = []
     rest = []
     i = 0
     while i < len(args):
@@ -70,6 +72,10 @@ def main(argv):
             require_trusted = True
         elif a == "--trust" and i + 1 < len(args):
             trusted = [args[i + 1]]
+            i += 1
+        elif a == "--require-discipline" and i + 1 < len(args):
+            # Repeatable, or comma-separated: --require-discipline tdd_followed,review_passed
+            require_discipline += [d for d in args[i + 1].split(",") if d.strip()]
             i += 1
         else:
             rest.append(a)
@@ -85,12 +91,20 @@ def main(argv):
     # integrity-only — so the keyless path is unaffected).
     prov_ok = (not require_signed or r.get("signature") == "valid") and (
         not require_trusted or r.get("signer_trusted") is True)
+    # Opt-in PROCESS requirement: a buyer can demand the build was made WITH a given
+    # discipline (e.g. tdd_followed), failing the check when the sealed proof doesn't
+    # attest it. Default empty => integrity-only, so the keyless path is unaffected.
+    import process_facts
+    disc_ok, disc_missing = process_facts.required_disciplines_met(
+        {"process": r.get("process")}, require_discipline)
 
     if as_json:
-        print(json.dumps({"ok": ok, "provenance_ok": prov_ok, **r}))
+        print(json.dumps({"ok": ok, "provenance_ok": prov_ok,
+                          "discipline_ok": disc_ok, "discipline_missing": disc_missing,
+                          **r}))
         if r.get("status") == "NO_PROOF":
             return 2
-        return 0 if (ok and prov_ok) else 1
+        return 0 if (ok and prov_ok and disc_ok) else 1
     if r.get("status") == "NO_PROOF":
         print(f"NO PROOF: {r['reason']}", file=sys.stderr)
         return 2
@@ -133,7 +147,16 @@ def main(argv):
     if not prov_ok:
         need = "trusted-signed" if require_trusted else "signed"
         print(f"   {_CROSS} required provenance NOT met (--require: {need})")
-    return 0 if (ok and prov_ok) else 1
+
+    # Process discipline (additive — never changes the VERIFIED/TAMPERED verdict).
+    # The sealed `process` block is inside the verdict, so it is already covered by
+    # the Merkle integrity check above; this just surfaces it for a human auditor.
+    disc_line = process_facts.process_summary_line({"process": r.get("process")})
+    if disc_line:
+        print("   " + disc_line.replace("**", ""))
+    if not disc_ok:
+        print(f"   {_CROSS} required discipline NOT attested: {', '.join(disc_missing)}")
+    return 0 if (ok and prov_ok and disc_ok) else 1
 
 
 if __name__ == "__main__":

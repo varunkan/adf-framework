@@ -74,6 +74,29 @@ class Merkle(unittest.TestCase):
         plain = pob.compute_proof("d", "react-vite-sqlite", files, "spec", BUILD)
         self.assertNotIn("render", plain["verdict"])
 
+    def test_process_facts_are_sealed_and_tamper_evident(self):
+        # The engineering discipline (verify gates / TDD / root-cause) folds into the
+        # SEALED verdict, so "built WITH discipline X" is attested + tamper-evident.
+        files = [("a.ts", "x")]
+        proc = {"schema": "adf-process/1", "enforced": ["verification_evidence"],
+                "blocked": [], "facts": {"verification_evidence": {
+                    "status": "proven", "gates": ["build", "test", "boot", "render"]}}}
+        proof = pob.compute_proof("d", "react-vite-sqlite", files, "spec",
+                                  {**BUILD, "process": proc})
+        self.assertEqual(proof["verdict"]["process"]["facts"]
+                         ["verification_evidence"]["status"], "proven")
+        # changing a sealed process fact breaks the Merkle root
+        tampered = {**proc, "facts": {"verification_evidence": {
+            "status": "proven", "gates": ["build"]}}}
+        self.assertNotEqual(
+            proof["merkle_root"],
+            pob.compute_proof("d", "react-vite-sqlite", files, "spec",
+                              {**BUILD, "process": tampered})["merkle_root"])
+        # backward compatible: a build without process facts has no process field, so
+        # every historical seal re-seals to the byte-identical root
+        plain = pob.compute_proof("d", "react-vite-sqlite", files, "spec", BUILD)
+        self.assertNotIn("process", plain["verdict"])
+
 
 class SealAndVerify(unittest.TestCase):
     def setUp(self):

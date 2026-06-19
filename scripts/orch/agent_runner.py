@@ -2570,6 +2570,17 @@ def main():
                 # A blocked build is never sealed — a sealed proof is a POSITIVE
                 # attestation that the enforced security rules passed.
                 raise _PolicyBlocked()
+            # Process discipline: record + seal HOW the app was built, not just that
+            # it was — the verify gates that passed (and, as later phases land, TDD /
+            # root-cause / review). read_process_facts re-reads the durable evidence
+            # from disk so the verdict can only attest what truly happened. Best-effort.
+            process_obj = None
+            try:
+                import process_facts
+                process_facts.record_verification(app_root, stack, verify_summary)
+                process_obj = process_facts.read_process_facts(app_root)
+            except Exception as e:
+                log(f"process facts skipped: {e}")
             # Native mobile deliverable (gated, best-effort): a standalone, signed
             # APK + a clean-emulator preview — the "download + run on a device"
             # artifact, its hash sealed below so the downloadable binary is attested.
@@ -2591,6 +2602,7 @@ def main():
                     "policy": policy_summary_obj,
                     "render": read_render_facts(app_root),  # MM11: web/iOS render facts
                     "mobile": mobile_facts,  # APK download + emulator preview facts
+                    "process": process_obj,  # discipline the build was made with
                 },
                 created_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
             )

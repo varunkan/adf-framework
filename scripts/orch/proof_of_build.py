@@ -75,6 +75,12 @@ def _verdict_bytes(stack: str, build: dict) -> bytes:
     # "renders on iOS" becomes a cryptographically attested, tamper-evident property.
     if build.get("render") is not None:
         verdict["render"] = build["render"]
+    # The engineering DISCIPLINE the app was built with (verify gates, and — when
+    # enabled — TDD RED→GREEN, root-cause, review): sealed so "built WITH discipline
+    # X" is a recomputable attestation, not a prose claim. Conditional, so any older
+    # build (no `process`) re-seals to the byte-identical root.
+    if build.get("process") is not None:
+        verdict["process"] = build["process"]
     return json.dumps(verdict, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
@@ -259,6 +265,17 @@ def _render_line(proof):
     return f"**Render-proven on:** {plats}{extra}  "
 
 
+def _process_line(proof):
+    """The human line attesting the disciplines a build was made with (verify gates,
+    TDD, root-cause, review), or ''. Lazy import keeps proof_of_build self-contained
+    and avoids any load-time cycle (process_facts imports only stdlib)."""
+    try:
+        import process_facts
+        return process_facts.process_summary_line(proof.get("verdict") or {})
+    except Exception:
+        return ""
+
+
 def _signature_line(proof):
     """The human line attesting an optional provenance signature, or ''."""
     sig = proof.get("signature")
@@ -281,6 +298,7 @@ def render_proof_md(proof):
         f"**Model:** {b.get('model') or 'n/a'}  ",
         f"**Verified:** {'✅ ' + (b.get('verify_summary') or 'yes') if b.get('verified') else '❌ no'}",
         *([_render_line(proof)] if _render_line(proof) else []),
+        *([_process_line(proof)] if _process_line(proof) else []),
         *([_signature_line(proof)] if _signature_line(proof) else []),
         "",
         "This app ships a tamper-evident certificate. The Merkle root above seals "
@@ -424,4 +442,5 @@ def verify_proof(app_dir, trusted_pubkeys=None):
         "signature": sig_status,        # unsigned | valid | invalid | unverifiable
         "signer": signer,               # the signing public key (hex), or None
         "signer_trusted": signer_trusted,  # True/False when trusted_pubkeys given
+        "process": verdict.get("process"),  # sealed process-discipline facts, or None
     }
