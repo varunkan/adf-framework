@@ -74,4 +74,15 @@ void main() {
 
     expect(demoOnly.map((r) => r['name']), ['b']);
   });
+
+  test('append() increments the spansPushed metric (observability)', () {
+    final repo = Directory.systemTemp.createTempSync('adf-metric');
+    addTearDown(() => repo.existsSync() ? repo.deleteSync(recursive: true) : null);
+    final before = TraceWriter.spansPushed;
+    TraceWriter(repo.path)
+        .append(featureId: 'demo', name: 'runner.x', event: 'runner');
+    TraceWriter(repo.path)
+        .append(featureId: 'demo', name: 'runner.y', event: 'runner');
+    expect(TraceWriter.spansPushed, before + 2);
+  });
 }

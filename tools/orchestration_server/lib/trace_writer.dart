@@ -20,6 +20,13 @@ class TraceWriter {
       StreamController<Map<String, dynamic>>.broadcast();
   static Stream<Map<String, dynamic>> get events => _events.stream;
 
+  /// Streaming observability counters, surfaced on /metrics so SSE health is
+  /// monitorable: how many spans have been pushed live, how many SSE clients are
+  /// connected now, and how many connections have been opened in total.
+  static int spansPushed = 0;
+  static int sseClientsActive = 0;
+  static int sseConnectionsTotal = 0;
+
   /// Format one span record as a Server-Sent-Events frame (id + data lines). The
   /// span_id doubles as the SSE Last-Event-ID so a reconnecting client can resume.
   static List<int> sseEvent(Map<String, dynamic> record) {
@@ -69,6 +76,7 @@ class TraceWriter {
     );
     // Push the span live to any SSE subscriber (broadcast → dropped if none).
     _events.add(record);
+    spansPushed++;
   }
 
   void _appendLine(String path, String line) {

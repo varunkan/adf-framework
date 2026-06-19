@@ -997,6 +997,11 @@ Future<void> main(List<String> args) async {
       },
       'routes': byRoute,
       'learnings': learnings.stats(),
+      'streaming': {
+        'sse_clients_active': TraceWriter.sseClientsActive,
+        'sse_connections_total': TraceWriter.sseConnectionsTotal,
+        'spans_pushed': TraceWriter.spansPushed,
+      },
     });
   });
 
@@ -1398,6 +1403,8 @@ Future<void> main(List<String> args) async {
     final since = request.url.queryParameters['since'] ??
         request.headers['last-event-id'];
     final controller = StreamController<List<int>>();
+    TraceWriter.sseConnectionsTotal++;
+    TraceWriter.sseClientsActive++;
     void emit(Map<String, dynamic> rec) {
       if (!controller.isClosed) controller.add(TraceWriter.sseEvent(rec));
     }
@@ -1428,6 +1435,7 @@ Future<void> main(List<String> args) async {
     controller.onCancel = () {
       sub.cancel();
       hb.cancel();
+      if (TraceWriter.sseClientsActive > 0) TraceWriter.sseClientsActive--;
     };
 
     return Response.ok(
