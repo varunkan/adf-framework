@@ -1,4 +1,5 @@
 import 'orchestration_paths.dart';
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -9,6 +10,22 @@ class TraceWriter {
 
   final String repoRoot;
   static final _rnd = Random();
+
+  /// Live push channel: every appended span is broadcast here so an SSE endpoint
+  /// (GET /features/<id>/events) can tail spans in real time. The durable JSONL
+  /// stays the source of truth + reconnect backfill; this push is fire-and-forget
+  /// and process-wide (broadcast → any number of SSE clients, dropped if none).
+  /// Records carry attributes['orch.feature_id'] for per-feature filtering.
+  static final StreamController<Map<String, dynamic>> _events =
+      StreamController<Map<String, dynamic>>.broadcast();
+  static Stream<Map<String, dynamic>> get events => _events.stream;
+
+  /// Format one span record as a Server-Sent-Events frame (id + data lines). The
+  /// span_id doubles as the SSE Last-Event-ID so a reconnecting client can resume.
+  static List<int> sseEvent(Map<String, dynamic> record) {
+    final id = record['span_id'] ?? '';
+    return utf8.encode('id: $id\ndata: ${jsonEncode(record)}\n\n');
+  }
 
   void append({
     required String featureId,
@@ -50,6 +67,8 @@ class TraceWriter {
       OrchestrationPaths(repoRoot).featureOtelTracesFile(featureId),
       line,
     );
+    // Push the span live to any SSE subscriber (broadcast → dropped if none).
+    _events.add(record);
   }
 
   void _appendLine(String path, String line) {

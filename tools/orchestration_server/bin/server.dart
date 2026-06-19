@@ -1387,6 +1387,60 @@ Future<void> main(List<String> args) async {
     }
   });
 
+  // Live push of runner spans over Server-Sent-Events — the real-time companion to
+  // the /traces poll. Replays missed spans since the `since`/Last-Event-ID cursor,
+  // then tails the in-memory broadcast so the Studio renders narration + streamed
+  // tokens without a 400ms poll. Buffering is disabled so each frame flushes at once.
+  router.get('/features/<id>/events', (Request request, String id) {
+    if (!store.featureExists(id)) {
+      return _json({'error': 'not found'}, status: 404);
+    }
+    final since = request.url.queryParameters['since'] ??
+        request.headers['last-event-id'];
+    final controller = StreamController<List<int>>();
+    void emit(Map<String, dynamic> rec) {
+      if (!controller.isClosed) controller.add(TraceWriter.sseEvent(rec));
+    }
+
+    // shelf only sends the response HEADERS once the first body byte exists, so an
+    // initially-silent SSE stream (fresh feature, no backlog) would hang the client
+    // waiting for headers. Flush an SSE comment + reconnect hint immediately so the
+    // connection establishes (EventSource onopen fires) before the first span.
+    controller.add(utf8.encode('retry: 3000\n: connected\n\n'));
+
+    // 1) Backfill spans the client missed (same source as the poll endpoint).
+    try {
+      for (final t in store.readTraces(id, limit: 1000, since: since)) {
+        emit(t);
+      }
+    } catch (_) {/* a fresh feature may have no trace file yet */}
+
+    // 2) Tail the live broadcast for THIS feature.
+    final sub = TraceWriter.events
+        .where((r) =>
+            (r['attributes'] as Map?)?['orch.feature_id'] == id)
+        .listen(emit);
+
+    // Heartbeat keeps the socket alive and surfaces a dead client (onCancel fires).
+    final hb = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (!controller.isClosed) controller.add(utf8.encode(': ping\n\n'));
+    });
+    controller.onCancel = () {
+      sub.cancel();
+      hb.cancel();
+    };
+
+    return Response.ok(
+      controller.stream,
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        ..._corsHeaders,
+      },
+      context: const {'shelf.io.buffer_output': false},
+    );
+  });
+
   router.post('/features/<id>/request-phase', (Request request, String id) async {
     try {
       if (!store.featureExists(id)) {
