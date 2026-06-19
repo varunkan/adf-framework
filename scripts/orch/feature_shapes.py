@@ -204,9 +204,41 @@ _CONTRACTS = {
 }
 
 
-def skeleton_contract(shape):
+# Mobile (no-server) overrides: a contract that references server routes / shipped
+# server primitives is INCOHERENT on the Expo stack (there is no server, no auth.mjs).
+# These replace such contracts with an on-device, expo-sqlite version.
+_MOBILE_CONTRACTS = {
+    "auth": (
+        "DETECTED FEATURE SHAPE: auth (MOBILE, no server) — users sign up and log in; "
+        "the users table lives in expo-sqlite and the session is kept ON-DEVICE. There "
+        "is NO server and NO `auth.mjs` — do NOT import server crypto. Implement:\n"
+        "- src/db.ts: a `users` table — id INTEGER PRIMARY KEY AUTOINCREMENT, a UNIQUE "
+        "`email`, a `password_hash` column (NEVER a plaintext password — the policy "
+        "gate fails the build), `created_at TEXT`.\n"
+        "- src/auth.ts: `hashPassword`/`verifyPassword` using a SALTED hash (e.g. "
+        "expo-crypto's SHA-256 over salt+password) and a simple on-device session "
+        "token; store ONLY the hash. Never store or log a plaintext password.\n"
+        "- src/hooks/useAuth.ts: returns `{ user, loading, error, signup, login, "
+        "logout }`; persists the session locally (AsyncStorage / expo-secure-store).\n"
+        "- app/ screens (Expo Router): a login screen + a signup screen, and a "
+        "protected screen shown only when `user` is set (redirect to login otherwise); "
+        "compose <LoginForm>/<SignupForm> from the themed kit (email + password Inputs "
+        "+ a Button).\n"
+        "- __tests__ (jest, mock 'expo-router'): signup stores a HASHED password "
+        "(assert the stored value is NOT the plaintext), login with the wrong password "
+        "fails, login with the correct password succeeds. NEVER assert a plaintext "
+        "password is stored."
+    ),
+}
+
+
+def skeleton_contract(shape, mobile=False):
     """The prompt fragment for `shape`, or '' for the generic fallback (which keeps
-    the base deliverables rather than forcing a wrong skeleton)."""
+    the base deliverables rather than forcing a wrong skeleton). `mobile=True` swaps
+    in the no-server (Expo) variant for shapes whose web contract references a server
+    (e.g. auth → an expo-sqlite + on-device-session version, never auth.mjs)."""
+    if mobile and shape in _MOBILE_CONTRACTS:
+        return _MOBILE_CONTRACTS[shape]
     return _CONTRACTS.get(shape, "")
 
 
@@ -229,11 +261,12 @@ def expected_dom(shape):
     return dict(_EXPECTED_DOM.get(shape, {}))
 
 
-def contract_for(ctx, fid=""):
+def contract_for(ctx, fid="", mobile=False):
     """(shape, contract_text) for a feature context. The text is '' when the shape
-    is generic, so callers can inject unconditionally."""
+    is generic, so callers can inject unconditionally. `mobile=True` selects the
+    no-server (Expo) contract variant where one exists."""
     shape = classify(_ctx_text(ctx) + "\n" + (fid or "").replace("-", " "))
-    return shape, skeleton_contract(shape)
+    return shape, skeleton_contract(shape, mobile=mobile)
 
 
 def _main(argv=None):

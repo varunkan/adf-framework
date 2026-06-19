@@ -952,6 +952,37 @@ class MobileStackProfile(unittest.TestCase):
         self.assertIn("native build", msg.lower())
 
 
+class MobileReviewFixes(unittest.TestCase):
+    """Regression tests for the multi-pass review findings: scaffold must not copy
+    build artifacts (which would seal STALE render facts), and render facts seal only
+    platforms that ACTUALLY rendered."""
+
+    def _tmp(self):
+        d = tempfile.mkdtemp(prefix="adf-rev-")
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        return d
+
+    def test_scaffold_does_not_copy_build_artifacts(self):
+        repo_root = os.path.abspath(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+        tpl = ar.template_dir(repo_root, repo_root, ar.STACK_EXPO)
+        d = self._tmp()
+        ar.scaffold_app(d, tpl)
+        self.assertFalse(os.path.isdir(os.path.join(d, ".adf-visual")),
+                         "scaffold copied the template's .adf-visual artifacts")
+        self.assertFalse(os.path.isdir(os.path.join(d, ".adf-proof")))
+        self.assertIsNone(ar.read_render_facts(d))   # no STALE render facts inherited
+
+    def test_render_facts_seal_only_real_platforms(self):
+        d = self._tmp()
+        none = ar._write_render_facts(d, [])         # nothing rendered
+        self.assertEqual(none["platforms"], [])
+        self.assertFalse(none["proven"])             # never a false "proven" claim
+        web = ar._write_render_facts(d, ["web"])     # only web rendered
+        self.assertEqual(web["platforms"], ["web"])
+        self.assertTrue(web["proven"])
+
+
 class MobileHealAndSummaryPaths(unittest.TestCase):
     """Bug fix: the self-heal hint, the edit-mode architecture description, and the
     build summary must NOT route an Expo (mobile) build into the stdlib-Python branch

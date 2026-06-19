@@ -473,8 +473,11 @@ def _expo_build_messages(fid, ctx):
         "uses a dynamic route `app/[id].tsx` with `useLocalSearchParams`. Navigate "
         "with `useRouter().push('/path')` or `<Link href>` from 'expo-router' — a real "
         "app has screens + back/tabs, not one screen.\n"
-        "- UI: COMPOSE the SHIPPED, THEMED kit — `import { Screen, Header, Text, Card, "
-        "Input, Button, Icon, ListItem, Badge, EmptyState } from './components/ui'` "
+        "- UI: COMPOSE the SHIPPED, THEMED kit, which lives at `src/components/ui` "
+        "(import it with the path RELATIVE to the file you write — from an `app/` "
+        "screen it is `'../src/components/ui'`; from `src/components/<Name>.tsx` it is "
+        "`'./ui'`): `{ Screen, Header, Text, Card, Input, Button, Icon, ListItem, "
+        "Badge, EmptyState }` "
         "(Screen wraps every screen; Header shows the title + optional back/action; "
         "Text `variant` h1/h2/body/caption/label; Button `variant` "
         "primary/secondary/danger; ListItem for rows (showChevron to navigate); Icon "
@@ -484,7 +487,8 @@ def _expo_build_messages(fid, ctx):
         "is NO DOM — do NOT import `react-dom`, no `<div>`/`<button>`/HTML, no "
         "`index.html`.\n"
         "- COLORS + SPACING come from the THEME ONLY: `const t = useTheme()` "
-        "(`import { useTheme } from './theme'`) → `t.colors.*` / `t.spacing.*` / "
+        "(import from `src/theme` — from an `app/` screen `'../src/theme'`, from "
+        "`src/components/` `'../theme'`) → `t.colors.*` / `t.spacing.*` / "
         "`t.radius.*` / `t.type.*`. NEVER write a raw hex color (e.g. '#2563eb') or a "
         "magic number for color — the policy gate REJECTS raw hex so the app stays "
         "on-theme and light/dark-correct. Use `accessibilityRole`/`accessibilityLabel` "
@@ -501,10 +505,11 @@ def _expo_build_messages(fid, ctx):
         "files:\n<<<FILE: relative/path>>>\n<full file content>\n<<<END>>>\n"
         "No markdown fences, no commentary outside file blocks."
     )
-    # DET-2: the deterministic feature-shape contract is platform-agnostic — fill
-    # domain logic, not boilerplate.
+    # DET-2: the deterministic feature-shape contract — request the MOBILE variant so
+    # a server-referencing contract (e.g. auth → auth.mjs) is swapped for the
+    # no-server, expo-sqlite version (review fix).
     import feature_shapes
-    _shape, _contract = feature_shapes.contract_for(ctx, fid)
+    _shape, _contract = feature_shapes.contract_for(ctx, fid, mobile=True)
     shape_block = f"{_contract}\n\n" if _contract else ""
     user = (
         f"Implement the feature `{fid}` as a real cross-platform Expo / React Native "
@@ -600,7 +605,12 @@ def scaffold_app(app_dir, tpl_dir):
     clean. Idempotent for the parts it owns."""
     import shutil
     for root, dirs, files in os.walk(tpl_dir):
-        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
+        # Skip heavy/generated dirs AND any dotfile dir — the template may carry build
+        # artifacts (.adf-visual/, .adf-proof/, .expo/) from a prior verify; copying
+        # them would pollute the app AND seal STALE render facts into its proof. (The
+        # legit config dotfiles — .adf-stack.json, .adf-policy.json — are FILES, copied
+        # below.)
+        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS and not d.startswith(".")]
         for fn in files:
             if fn in (".adf-deps",) or fn.endswith(".db"):
                 continue
@@ -1303,11 +1313,11 @@ def _expo_web_render(app_root, timeout):
     import time
     mode = os.environ.get("ADF_VISUAL_VERIFY", "1").lower()
     if mode in ("0", "false", "off"):
-        return True, "web render verify disabled (ADF_VISUAL_VERIFY=0)"
+        return True, "web render verify disabled (ADF_VISUAL_VERIFY=0)", False
     ok, out = _npm(app_root, ["run", "web:export"], timeout)
     if not ok:
         return False, ("WEB EXPORT FAILED (expo export -p web):\n"
-                       + _spill_and_bound(app_root, "expo-web-export", out))
+                       + _spill_and_bound(app_root, "expo-web-export", out)), False
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as _s:
         _s.bind(("127.0.0.1", 0))
         port = _s.getsockname()[1]
@@ -1320,26 +1330,26 @@ def _expo_web_render(app_root, timeout):
             if proc.poll() is not None:
                 tail = proc.stdout.read() if proc.stdout else ""
                 return False, ("expo-web server exited on launch:\n"
-                               + _spill_and_bound(app_root, "expo-web-serve", tail))
+                               + _spill_and_bound(app_root, "expo-web-serve", tail)), False
             try:
                 with socket.create_connection(("127.0.0.1", port), 0.5):
                     break
             except OSError:
                 time.sleep(0.4)
         else:
-            return False, "expo-web server did not start in time"
+            return False, "expo-web server did not start in time", False
         try:
             import visual_verify
             v_ok, v_msg, _shot = visual_verify.visual_verify(
                 f"http://127.0.0.1:{port}/", app_root=app_root)
         except Exception as e:
             if mode == "strict":
-                return False, f"visual verify error: {e}"
-            return True, f"web render skipped: {e}"
+                return False, f"visual verify error: {e}", False
+            return True, f"web render skipped: {e}", False
         if not v_ok:
             return False, ("the Expo app EXPORTED but DID NOT RENDER on web "
-                           "(white screen / runtime crash):\n" + v_msg)
-        return True, f"expo-web render OK; {v_msg}"
+                           "(white screen / runtime crash):\n" + v_msg), False
+        return True, f"expo-web render OK; {v_msg}", True   # actually rendered
     finally:
         proc.terminate()
         try:
@@ -1363,10 +1373,12 @@ def _dist_js_bytes(app_root):
 
 
 def _write_render_facts(app_root, platforms):
-    """Persist the structured render proof (which platforms render-verified, the
-    proven flag, the JS bundle bytes) so the seal can fold it into the Proof of
-    Build's verdict (MM11). Best-effort."""
-    facts = {"platforms": platforms, "proven": True,
+    """Persist the structured render proof (which platforms ACTUALLY render-verified,
+    the proven flag, the JS bundle bytes) so the seal can fold it into the Proof of
+    Build's verdict (MM11). `platforms` lists ONLY platforms that truly rendered, so
+    `proven` is False (and the list empty) when the render was skipped/disabled — the
+    proof must never seal a render that didn't run. Best-effort."""
+    facts = {"platforms": list(platforms), "proven": bool(platforms),
              "js_bytes": _dist_js_bytes(app_root)}
     try:
         vdir = os.path.join(app_root, ".adf-visual")
@@ -1404,10 +1416,13 @@ def _expo_verify(app_root, timeout=None):
     if not (has_app or has_pkg):
         return False, ("app.json / package.json missing — the Expo scaffold was not "
                        "applied")
+    # Install once if node_modules is absent (mirror _react_verify) — the warm clone
+    # usually provides it, but never hard-fail when it didn't (e.g. a cleaned app).
     if not os.path.isdir(os.path.join(app_root, "node_modules")):
-        return False, ("Expo dependencies are not installed (no node_modules) — a "
-                       "verified mobile build needs the warm-cloned `expo-rn` "
-                       "template (M2/M3).")
+        ok, out = _npm(app_root, ["ci", "--no-audit", "--no-fund"], timeout)
+        if not ok:
+            return False, ("DEPENDENCY INSTALL FAILED (npm ci):\n"
+                           + _spill_and_bound(app_root, "expo-npm-ci", out))
     ok, out = _npm(app_root, ["run", "typecheck"], timeout)
     if not ok:
         return False, ("TYPECHECK FAILED (tsc --noEmit):\n"
@@ -1416,7 +1431,7 @@ def _expo_verify(app_root, timeout=None):
     if not ok:
         return False, ("TESTS FAILED (jest):\n"
                        + _spill_and_bound(app_root, "expo-test", out))
-    render_ok, render_msg = _expo_web_render(app_root, timeout)
+    render_ok, render_msg, web_rendered = _expo_web_render(app_root, timeout)
     if not render_ok:
         return False, render_msg
     # MM10: opportunistically render on a REAL booted iOS Simulator and seal the
@@ -1433,8 +1448,11 @@ def _expo_verify(app_root, timeout=None):
     except Exception as e:
         ios_msg = ""
         log(f"iOS render skipped: {e}")
-    # MM11: record which platforms render-verified, to seal into the Proof of Build.
-    _write_render_facts(app_root, ["web"] + (["ios"] if ios_msg else []))
+    # MM11 (+ honesty fix): seal ONLY the platforms that ACTUALLY rendered — never a
+    # render that was skipped/disabled. web_rendered is True only on a real web mount;
+    # ios_msg is set only on a real iOS-Simulator render.
+    platforms = (["web"] if web_rendered else []) + (["ios"] if ios_msg else [])
+    _write_render_facts(app_root, platforms)
     native_ok, native_msg = _expo_native_stage(app_root)
     if not native_ok:
         return False, native_msg
@@ -1936,9 +1954,12 @@ def main():
         system, user = assemble_edit(
             app_dir, fid, read_files, edit_instruction, stack)
     else:
-        # Scaffold-then-diff (N7): a fresh react build starts from the checked-in
-        # working template; the model then emits ONLY the feature's files.
-        if stack == STACK_REACT and not os.path.isfile(
+        # Scaffold-then-diff (N7): a fresh build from a template stack (react OR expo)
+        # starts from the checked-in working template; the model then emits ONLY the
+        # feature's files. (Bug: this was gated to STACK_REACT, so a fresh expo-rn
+        # build was NEVER scaffolded and always failed verify with "scaffold not
+        # applied" — mobile was broken end-to-end.)
+        if stack in (STACK_REACT, STACK_EXPO) and not os.path.isfile(
                 os.path.join(app_dir, "package.json")):
             tpl = template_dir(repo_root, workspace, stack)
             if not tpl:

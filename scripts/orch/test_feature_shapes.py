@@ -104,6 +104,22 @@ class Contract(unittest.TestCase):
         self.assertIn("single fixed row", fs.skeleton_contract("single-record"))
         self.assertIn("not edited", fs.skeleton_contract("form"))
 
+    def test_mobile_auth_contract_is_serverless(self):
+        # review fix: the mobile (Expo, no-server) auth contract must NOT reference
+        # the web server primitive auth.mjs — it must use expo-sqlite + on-device.
+        web = fs.skeleton_contract("auth", mobile=False)
+        mob = fs.skeleton_contract("auth", mobile=True)
+        # the web variant IMPORTS the server primitive; the mobile variant must NOT
+        # (it may mention auth.mjs to forbid it — what matters is no import statement).
+        self.assertIn("from '../auth.mjs'", web)
+        self.assertNotIn("from '../auth.mjs'", mob)
+        self.assertIn("expo-sqlite", mob)
+        self.assertIn("password_hash", mob)   # still hashed, never plaintext
+        shape, text = fs.contract_for(
+            {"requirement": "a login and signup screen"}, "auth", mobile=True)
+        self.assertEqual(shape, "auth")
+        self.assertNotIn("from '../auth.mjs'", text)
+
     def test_auth_contract_uses_shipped_primitives(self):
         c = fs.skeleton_contract("auth")
         self.assertIn("auth.mjs", c)         # use the shipped primitives
