@@ -1066,5 +1066,46 @@ class JestHoistHeal(unittest.TestCase):
         self.assertNotIn("ACTIONABLE FIX (jest.mock hoisting)", clean[-1]["content"])
 
 
+class RtlMissingTextHeal(unittest.TestCase):
+    """The deterministic self-heal hint for the most common RTL failure — a test
+    asserts on-screen text the component never renders. A real mobile auth build
+    failed 3x here (an invented email-validation message), so the hint names the
+    missing text and gives a BALANCED two-way fix (either side may be wrong)."""
+
+    # REAL jest/RTL output captured from the failed mobile-auth-login build.
+    REAL = ("FAIL __tests__/loginScreen.test.tsx\n  ● LoginScreen › shows a "
+            "validation error for an invalid email\n\n    Unable to find an element "
+            "with text: Please enter a valid email address.\n\n    <RCTSafeAreaView>")
+
+    def test_fires_and_names_the_missing_text(self):
+        hint = ar.rtl_text_hint(self.REAL)
+        self.assertTrue(hint)
+        self.assertIn("Please enter a valid email address", hint)
+        # balanced: both resolutions offered (implement it / fix the test).
+        self.assertIn("VERBATIM", hint)
+        self.assertIn("change the test", hint)
+
+    def test_silent_on_unrelated_failures(self):
+        for other in ("", "TS2304: Cannot find name 'foo'.",
+                      "module factory of `jest.mock()` is not allowed ...",
+                      "AssertionError: expected 200 to equal 404"):
+            self.assertEqual(ar.rtl_text_hint(other), "", repr(other))
+
+    def test_heal_hint_combines_and_is_silent_when_none_apply(self):
+        # both classes present → both hints; neither present → "".
+        both = ar.heal_hint(JestHoistHeal.REAL + "\n" + self.REAL)
+        self.assertIn("jest.mock hoisting", both)
+        self.assertIn("assertion vs. component mismatch", both)
+        self.assertEqual(ar.heal_hint("a plain tsc TS2345 error"), "")
+
+    def test_fix_messages_prepends_rtl_hint(self):
+        msgs = ar.fix_messages(
+            "sys", "usr", [("app/login.tsx", "x")], self.REAL, ar.STACK_EXPO)
+        fixer = msgs[-1]["content"]
+        self.assertIn("ACTIONABLE FIX (assertion vs. component mismatch)", fixer)
+        self.assertLess(fixer.index("VERIFICATION FAILURE OUTPUT"),
+                        fixer.index("ACTIONABLE FIX (assertion vs. component mismatch)"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

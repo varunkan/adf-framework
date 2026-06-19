@@ -536,6 +536,13 @@ def _expo_build_messages(fid, ctx):
         "`render(<Screen/>)` for a route (mock 'expo-router' useRouter/"
         "useLocalSearchParams), assert the main success path AND at least one "
         "validation/empty/error case via `fireEvent` + `findByText`/`getByPlaceholderText`.\n"
+        "  TEST↔COMPONENT CONSISTENCY: every string a test asserts with "
+        "`getByText`/`findByText` MUST be rendered VERBATIM by the component under "
+        "test. If you assert a validation/error message (e.g. 'Please enter a valid "
+        "email address.'), you MUST implement the exact code in that component that "
+        "renders that string — do NOT assert behavior the screen does not implement. "
+        "When in doubt, test the behavior the spec actually requires, not invented "
+        "extras.\n"
         "  MOCK THE DATA LAYER STATEFULLY by copying `__tests__/data.test.tsx` "
         "(the canonical few-shot): `jest.mock('../src/db', () => { ... })` with an "
         "IN-FACTORY store. CRITICAL jest rule — `jest.mock()` is hoisted ABOVE every "
@@ -1555,6 +1562,47 @@ def jest_hoist_hint(failure):
         f"beforeEach. See `__tests__/data.test.tsx` for the exact pattern.")
 
 
+_RTL_MISSING_TEXT_RE = re.compile(
+    r"Unable to find an element with (?:the )?text:\s*(.+)")
+
+
+def rtl_text_hint(failure):
+    """Deterministic heal hint for the most common RTL failure: a test asserts
+    on-screen text (getByText/findByText) the component never renders.
+
+    A real mobile auth build failed verify 3x here — the model INVENTED an
+    email-validation test ("Please enter a valid email address.") but never
+    implemented that validation in the screen, and the heal couldn't reconcile
+    test↔component. The cure is BALANCED: either side may be wrong, so name the
+    missing text and present both resolutions. Returns "" for other failures."""
+    if not failure:
+        return ""
+    m = _RTL_MISSING_TEXT_RE.search(failure)
+    if not m:
+        return ""
+    text = m.group(1).strip().splitlines()[0].rstrip(". ")[:80]
+    return (
+        "ACTIONABLE FIX (assertion vs. component mismatch) — likely the blocker:\n"
+        f"a test asserts the on-screen text {text} (getByText/findByText) but the "
+        "rendered component never produces it. Make the test and the component AGREE "
+        "— do exactly ONE:\n"
+        f"  (a) if the spec wants that behavior, render {text} VERBATIM in the "
+        "component under test (e.g. implement the validation/error/empty state that "
+        "shows it); or\n"
+        f"  (b) if it is not real behavior, change the test to assert text the "
+        "component ACTUALLY renders.\n"
+        "Never assert UI text the component does not render — check the rendered tree "
+        "pasted below for the text that IS present.")
+
+
+def heal_hint(failure):
+    """Combine the deterministic, prepend-to-the-top heal hints that apply to this
+    failure (jest hoisting, RTL missing-text). Each is surgical and stack-safe; the
+    triggers cannot false-positive on stdlib/react server output."""
+    return "\n\n".join(
+        h for h in (jest_hoist_hint(failure), rtl_text_hint(failure)) if h)
+
+
 def fix_messages(system, user, files, failure, stack=None):
     """Build the follow-up turn asking the model to fix the failing files. The
     hint about WHICH files may be wrong is stack-aware so the model fixes the
@@ -1570,12 +1618,12 @@ def fix_messages(system, user, files, failure, stack=None):
         current += ("\n\n=== OTHER FILES (outline only — unchanged, not central to "
                     "this failure) ===\n" + file_outline)
     failure = headroom_compress_log(failure)
-    # Prepend a precise, variable-named hint for known-and-stuck failure classes so
-    # the cure rides at the TOP of the failure block (survives the [:4000] truncation)
-    # instead of being buried in generic prose the model skips.
-    _hoist = jest_hoist_hint(failure)
-    if _hoist:
-        failure = _hoist + "\n\n" + failure
+    # Prepend a precise hint for known-and-stuck failure classes so the cure rides at
+    # the TOP of the failure block (survives the [:4000] truncation) instead of being
+    # buried in generic prose the model skips.
+    _hint = heal_hint(failure)
+    if _hint:
+        failure = _hint + "\n\n" + failure
     if (stack or DEFAULT_STACK) == STACK_REACT:
         where = ("whichever files are wrong (schema.sql, server/api/*.mjs, src/**.tsx, "
                  "and/or test/*.test.mjs). Common causes: a tsc type error in src, a "
