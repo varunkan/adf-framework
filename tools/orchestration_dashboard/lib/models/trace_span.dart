@@ -94,8 +94,18 @@ class TraceSpan {
         return 'AUDIT';
       case 'build_complete':
         return runnerOk == true ? 'DONE_OK' : 'DONE_FAIL';
-      default:
+      case 'feature_resolved':
+      case 'planning':
+      case 'reading_files':
+      case 'files_read':
+      case 'writing_files':
+      case 'files_written':
+      case 'recall_injected':
         return 'STEP';
+      default:
+        // Unknown runner control event (e.g. runner.superseded / cancel) — HIDDEN,
+        // matching what the prose formatter already filters out. Never shown.
+        return 'HIDDEN';
     }
   }
 

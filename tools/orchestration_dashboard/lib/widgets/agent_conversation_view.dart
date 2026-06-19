@@ -5,8 +5,12 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 
 import '../models/trace_span.dart';
 import '../services/api_client.dart';
+import '../services/live_trace_client.dart';
+import '../services/sse_connector_stub.dart'
+    if (dart.library.html) '../services/sse_connector_web.dart';
 import '../theme/orchestration_colors.dart';
 import '../utils/plain_thought_formatter.dart';
+import 'activity_card.dart';
 import 'plain_thought_view.dart';
 
 /// Chat + live chain-of-thought (polls traces while agent runs).
@@ -45,8 +49,12 @@ class AgentConversationView extends StatefulWidget {
 
 class _AgentConversationViewState extends State<AgentConversationView> {
   final List<TraceSpan> _liveSpans = [];
+  /// Runner-control spans (runner.* / file.write) — rendered as typed cards.
+  final List<TraceSpan> _activitySpans = [];
   final Set<String> _seenKeys = {};
-  Timer? _pollTimer;
+  LiveTraceClient? _live;
+  StreamSubscription<LiveState>? _connSub;
+  LiveState _connState = LiveState.idle;
   String? _since;
   bool _wasRunning = false;
 
@@ -68,7 +76,7 @@ class _AgentConversationViewState extends State<AgentConversationView> {
   @override
   void initState() {
     super.initState();
-    _startPolling();
+    _startLive();
   }
 
   @override
@@ -83,13 +91,13 @@ class _AgentConversationViewState extends State<AgentConversationView> {
     if (widget.isRunning != oldWidget.isRunning ||
         widget.needsRevision != oldWidget.needsRevision ||
         widget.sessionEnded != oldWidget.sessionEnded) {
-      _startPolling();
+      _startLive();
     }
   }
 
   @override
   void dispose() {
-    _pollTimer?.cancel();
+    _stopLive();
     if (widget.scrollController == null) {
       _internalScroll.dispose();
     }
@@ -99,52 +107,87 @@ class _AgentConversationViewState extends State<AgentConversationView> {
   void _resetLiveStream() {
     setState(() {
       _liveSpans.clear();
+      _activitySpans.clear();
       _seenKeys.clear();
       _since = widget.liveTraceSince;
     });
   }
 
-  void _startPolling() {
-    _pollTimer?.cancel();
-    if (!_canPoll) return;
-
+  void _startLive() {
+    _stopLive();
+    if (!_canPoll) {
+      _wasRunning = false;
+      return;
+    }
     if (_shouldPollLive) {
-      _pollTraces();
-      _pollTimer = Timer.periodic(
-        const Duration(milliseconds: 400),
-        (_) => _pollTraces(),
+      final api = widget.api!;
+      // SSE push first (self-healing client); degrades to the /traces poll on its
+      // own if SSE can't hold, so the conversation never goes dark.
+      _live = LiveTraceClient(
+        uri: Uri.parse('${api.baseUrl}/features/${widget.featureId}/events'),
+        since: _since,
+        connect: connectSse,
+        poll: ({since}) async {
+          final data = await api.fetchTraces(
+            widget.featureId!,
+            since: since,
+            limit: 300,
+          );
+          return (data['traces'] as List<dynamic>? ?? [])
+              .cast<Map<String, dynamic>>();
+        },
+        onSpan: _ingestSpan,
       );
-    } else {
-      if (_wasRunning) {
-        _pollTraces();
-      }
+      _connSub = _live!.state.listen((s) {
+        if (mounted) setState(() => _connState = s);
+      });
+      _live!.start();
+    } else if (_wasRunning) {
+      // The run just ended — one catch-up fetch so the final spans land.
+      _catchUpPoll();
     }
     _wasRunning = _shouldPollLive;
   }
 
-  Future<void> _pollTraces({bool initial = false}) async {
+  void _stopLive() {
+    _connSub?.cancel();
+    _connSub = null;
+    _live?.stop();
+    _live = null;
+    _connState = LiveState.idle;
+  }
+
+  /// Ingest ONE span (SSE push or poll fallback), de-duplicated, routing
+  /// runner-control events (runner.* / file.write) to the typed-card list and the
+  /// rest to the prose list — so the existing conversation rendering is preserved.
+  void _ingestSpan(Map<String, dynamic> raw) {
+    if (!mounted) return;
+    final span = TraceSpan.fromJson(raw);
+    final key = '${span.timestamp}|${span.name}|${span.body.hashCode}';
+    if (!_seenKeys.add(key)) return; // dedup (survives reconnect backfill)
+    setState(() {
+      if (span.isRunnerControlEvent || span.name == 'file.write') {
+        // Typed card — but drop control noise (cardKind HIDDEN), exactly as the
+        // prose formatter already filters out runner.superseded / cancel.
+        if (span.cardKind != 'HIDDEN') _activitySpans.add(span);
+      } else {
+        _liveSpans.add(span);
+      }
+      if (span.timestamp.isNotEmpty) _since = span.timestamp;
+    });
+    _scrollToBottom();
+  }
+
+  Future<void> _catchUpPoll() async {
     if (!_canPoll) return;
     try {
       final data = await widget.api!.fetchTraces(
         widget.featureId!,
-        since: initial ? null : _since,
-        limit: initial ? 80 : 300,
+        since: _since,
+        limit: 300,
       );
-      final raw = data['traces'] as List<dynamic>? ?? [];
-      final incoming =
-          raw.cast<Map<String, dynamic>>().map(TraceSpan.fromJson).toList();
-      final novel = <TraceSpan>[];
-      for (final span in incoming) {
-        if (span.isRunnerControlEvent) continue;
-        final key = '${span.timestamp}|${span.name}|${span.body.hashCode}';
-        if (_seenKeys.add(key)) novel.add(span);
-      }
-      if (novel.isNotEmpty && mounted) {
-        setState(() {
-          _liveSpans.addAll(novel);
-          _since = data['last_timestamp'] as String? ?? novel.last.timestamp;
-        });
-        _scrollToBottom();
+      for (final raw in (data['traces'] as List<dynamic>? ?? [])) {
+        _ingestSpan(raw as Map<String, dynamic>);
       }
     } catch (_) {}
   }
@@ -166,13 +209,24 @@ class _AgentConversationViewState extends State<AgentConversationView> {
     final status = context.orchStatus;
     final spacing = context.orchSpacing;
 
-    final showChain = widget.isRunning &&
-        !widget.needsRevision &&
-        _liveSpans.isNotEmpty;
+    final hasActivity = _liveSpans.isNotEmpty || _activitySpans.isNotEmpty;
+    final showChain =
+        widget.isRunning && !widget.needsRevision && hasActivity;
     final showWaiting = widget.isRunning &&
-        _liveSpans.isEmpty &&
+        !hasActivity &&
         _canPoll &&
         !widget.needsRevision;
+    // Transport health (monitoring): map the live connection state to the chip.
+    final connLabel = switch (_connState) {
+      LiveState.connecting => 'Connecting…',
+      LiveState.reconnecting => 'Reconnecting…',
+      LiveState.polling => 'Polling',
+      _ => 'Live',
+    };
+    final connLive =
+        _connState == LiveState.live || _connState == LiveState.idle;
+    final connColor = connLive ? status.running : status.awaiting;
+    final connBg = connLive ? status.runningBg : status.awaitingBg;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -197,10 +251,11 @@ class _AgentConversationViewState extends State<AgentConversationView> {
               const Spacer(),
               if (widget.isRunning && _canPoll && !widget.needsRevision)
                 _StatusChip(
-                  label: 'Live',
-                  color: status.running,
-                  bg: status.runningBg,
-                  pulse: true,
+                  label: connLabel,
+                  color: connColor,
+                  bg: connBg,
+                  pulse: _connState == LiveState.live ||
+                      _connState == LiveState.connecting,
                 )
               else if (widget.needsRevision)
                 _StatusChip(
@@ -269,10 +324,18 @@ class _AgentConversationViewState extends State<AgentConversationView> {
     var i = index - widget.messages.length;
 
     if (showChain && i == 0) {
-      return PlainThoughtView(
-        lines: _plainThoughtLines,
-        // During revision gates, avoid “infinite spinner” feel while agent works.
-        isLive: widget.isRunning && !widget.needsRevision,
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (_activitySpans.isNotEmpty)
+            LiveActivityList(spans: _activitySpans),
+          if (_liveSpans.isNotEmpty)
+            PlainThoughtView(
+              lines: _plainThoughtLines,
+              // During revision gates, avoid an “infinite spinner” feel.
+              isLive: widget.isRunning && !widget.needsRevision,
+            ),
+        ],
       );
     }
     if (showChain) i -= 1;

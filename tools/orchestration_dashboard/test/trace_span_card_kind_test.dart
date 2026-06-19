@@ -69,6 +69,12 @@ void main() {
       expect(fw.runnerPath, 'src/App.tsx');
     });
 
+    test('unknown runner control events are HIDDEN (never shown as cards)', () {
+      expect(runner('superseded').cardKind, 'HIDDEN');
+      expect(runner('cancel').cardKind, 'HIDDEN');
+      expect(runner('some_future_control').cardKind, 'HIDDEN');
+    });
+
     test('step events fall to STEP; non-runner spans keep displayKind', () {
       expect(runner('feature_resolved').cardKind, 'STEP');
       expect(runner('planning').cardKind, 'STEP');
