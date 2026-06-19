@@ -982,6 +982,25 @@ class MobileReviewFixes(unittest.TestCase):
         self.assertEqual(web["platforms"], ["web"])
         self.assertTrue(web["proven"])
 
+    def test_main_gate_scaffolds_expo_not_just_react(self):
+        # THE regression that the multi-pass review caught: the main() build gate was
+        # `stack == STACK_REACT`, so every fresh expo-rn build skipped the scaffold and
+        # then failed verify. No test exercised the gate (they call scaffold_app
+        # directly), so it slipped through. The predicate is now a pure helper — this
+        # asserts BOTH template stacks scaffold, and only when un-scaffolded.
+        empty = self._tmp()
+        self.assertTrue(ar.should_scaffold(ar.STACK_EXPO, empty),
+                        "fresh expo build must scaffold (the bug: it did not)")
+        self.assertTrue(ar.should_scaffold(ar.STACK_REACT, empty))
+        # stdlib has its own server.py scaffold, not the template path.
+        self.assertFalse(ar.should_scaffold(ar.STACK_STDLIB, empty))
+        # an already-scaffolded app (has package.json) is not re-scaffolded.
+        scaffolded = self._tmp()
+        with open(os.path.join(scaffolded, "package.json"), "w") as fh:
+            fh.write("{}")
+        self.assertFalse(ar.should_scaffold(ar.STACK_EXPO, scaffolded))
+        self.assertFalse(ar.should_scaffold(ar.STACK_REACT, scaffolded))
+
 
 class MobileHealAndSummaryPaths(unittest.TestCase):
     """Bug fix: the self-heal hint, the edit-mode architecture description, and the

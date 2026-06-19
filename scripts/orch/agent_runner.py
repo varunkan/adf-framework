@@ -1910,6 +1910,20 @@ def apply_edit_guards(app_dir, files, read_hashes, outlined):
     return safe, notes
 
 
+def should_scaffold(stack, app_dir):
+    """Decide whether a fresh build scaffolds from the checked-in template.
+
+    A template stack (react OR expo) scaffolds when no `package.json` exists yet;
+    the stdlib stack and already-scaffolded apps do not. Extracted as a pure
+    predicate so the gate is unit-testable WITHOUT a model call — the original bug
+    (this was gated to STACK_REACT only, so every fresh expo-rn build skipped the
+    scaffold and then failed verify with "scaffold not applied") slipped through
+    precisely because no test exercised the main() gate. This is that test's seam.
+    """
+    return (stack in (STACK_REACT, STACK_EXPO)
+            and not os.path.isfile(os.path.join(app_dir, "package.json")))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("prompt")
@@ -1959,8 +1973,7 @@ def main():
         # feature's files. (Bug: this was gated to STACK_REACT, so a fresh expo-rn
         # build was NEVER scaffolded and always failed verify with "scaffold not
         # applied" — mobile was broken end-to-end.)
-        if stack in (STACK_REACT, STACK_EXPO) and not os.path.isfile(
-                os.path.join(app_dir, "package.json")):
+        if should_scaffold(stack, app_dir):
             tpl = template_dir(repo_root, workspace, stack)
             if not tpl:
                 log(f"stack {stack} selected but no template found under templates/")
