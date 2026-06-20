@@ -113,4 +113,43 @@ void main() {
     expect(find.text('Live preview'), findsOneWidget);
     expect(find.textContaining('Sealed'), findsOneWidget);
   });
+
+  testWidgets('Spec quick-action selects the Spec tab, not Data (D12)', (tester) async {
+    final api = ApiClient(
+      baseUrl: 'http://test',
+      client: MockClient((_) async => http.Response(
+            jsonEncode({
+              'integrity': {'valid': true, 'sealed_files': 0, 'breaches': []},
+              'crew': {'agents': [], 'completed': 0, 'total': 0, 'running': false},
+              'artifacts': [],
+              'building': false,
+              'spec_excerpt': '## Spec\n\nBuild the login flow.',
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          )),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: StudioTheme.dark(),
+        home: Scaffold(
+          body: LivePreviewPanel(
+            api: api,
+            featureId: 'demo',
+            phase: 2,
+            status: 'active',
+            requirement: 'Build login',
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    // Tap the 'Spec' quick-action BUTTON (above the TabBar — `.first`), not the tab.
+    await tester.tap(find.text('Spec').first);
+    await tester.pump(const Duration(milliseconds: 400)); // tab animation
+    final tabBar = tester.widget<TabBar>(find.byType(TabBar));
+    expect(tabBar.controller!.index, 3,
+        reason: 'Spec is tab index 3; the action used to open Data (2)');
+  });
 }

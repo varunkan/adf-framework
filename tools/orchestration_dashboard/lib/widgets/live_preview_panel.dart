@@ -71,6 +71,12 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
   bool _buildInFlight = false;
   late TabController _tabs;
 
+  // Tab order: 0 App · 1 Overview · 2 Data · 3 Spec · 4 Crew · 5 Artifacts.
+  // Named constants for the indices used in animateTo() so a bare literal can't
+  // open the wrong tab again (a quick-action used to jump to 2/Data; see D12).
+  static const int _tabSpec = 3;
+  static const int _tabArtifacts = 5;
+
   @override
   void initState() {
     super.initState();
@@ -119,7 +125,7 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
     // artifacts are front-and-centre (StageArtifacts then focuses the stage).
     if (oldWidget.selectedPhase != widget.selectedPhase &&
         widget.selectedPhase != null) {
-      _tabs.animateTo(5); // Artifacts
+      _tabs.animateTo(_tabArtifacts);
     }
   }
 
@@ -315,7 +321,7 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
                   icon: Icons.description_outlined,
                   label: 'Spec',
                   enabled: specExcerpt != null,
-                  onTap: () => _tabs.animateTo(2),
+                  onTap: () => _tabs.animateTo(_tabSpec), // was 2 (Data) — D12
                 ),
               ],
             ),
