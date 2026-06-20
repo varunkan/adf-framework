@@ -1422,6 +1422,10 @@ Instructions:
       }
 
       if (type == 'assistant' || type == 'message') {
+        // NOTE: the default Python runner (agent_runner.py) emits neither
+        // 'assistant' nor 'message' — its live narration comes from the typed
+        // narrate() events + the result summary. This reasoning-buffer path is
+        // LIVE only on the cursor-agent runner (ADF_RUNNER=cursor) (D11).
         final text = _extractText(obj);
         if (text == null || text.isEmpty) return;
         _reasoningBuffers.putIfAbsent(featureId, () => StringBuffer());

@@ -149,6 +149,23 @@ void main() {
       expect((res.first['attributes'] as Map)['agent.reasoning'],
           contains('login flow'));
     });
+
+    test('the Python-runner event set narrates WITHOUT the reasoning buffer (D11)',
+        () {
+      // agent_runner.py emits only narrate-kinds / file_write / result / text —
+      // never assistant/message. That set must still produce live narration, and
+      // must NOT depend on the (cursor-only) agent.stream reasoning-buffer path.
+      final spans = ingest([
+        {'type': 'generating', 'attempt': 1},
+        {'type': 'file_write', 'path': 'lib/db.dart', 'index': 1, 'total': 2},
+        {'type': 'text', 'text': 'const x = 1;'}, // suppressed
+        {'type': 'result', 'result': 'I built the data layer.'},
+      ]);
+      expect(spans.any((s) => '${s['name']}'.startsWith('runner.')), isTrue);
+      expect(spans.any((s) => s['name'] == 'agent.result'), isTrue);
+      expect(spans.any((s) => s['name'] == 'agent.stream'), isFalse,
+          reason: 'the reasoning buffer is cursor-only; Python must not need it');
+    });
   });
 
   test('a long PROSE result keeps up to 8000 chars, not 2000 (D14)', () {

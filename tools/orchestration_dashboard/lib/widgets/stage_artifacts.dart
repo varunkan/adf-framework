@@ -102,7 +102,9 @@ class _StageArtifactsState extends State<StageArtifacts> {
     if (p == null || !mounted) return;
     try {
       _controllers[p]?.expand();
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('StageArtifacts: could not expand stage $p — $e'); // D13
+    }
     final ctx = _sectionKeys[p]?.currentContext;
     if (ctx != null) {
       Scrollable.ensureVisible(ctx,
