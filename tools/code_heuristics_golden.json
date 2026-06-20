@@ -33,6 +33,18 @@
 
     { "text": "UPDATE users SET active = 1 WHERE id = 5", "code": true },
     { "text": "DELETE FROM sessions WHERE expired = 1", "code": true },
-    { "text": "INSERT INTO logs (msg) VALUES ('x')", "code": true }
+    { "text": "INSERT INTO logs (msg) VALUES ('x')", "code": true },
+
+    { "text": "The request => response cycle now works.", "code": false },
+    { "text": "See ci.example.com::8080 for the dashboard.", "code": false },
+    { "text": "verify(); confirm the output is correct.", "code": false },
+    { "text": "I refactored the parser; it is faster now.", "code": false },
+    { "text": "Select the rows from the cache, limit to 10.", "code": false },
+    { "text": "delete from your mind any assumption about the schema.", "code": false },
+
+    { "text": "db.save(url);", "code": true },
+    { "text": "obj.foo()", "code": true },
+    { "text": "x => x + 1", "code": true },
+    { "text": "SELECT id, name FROM users", "code": true }
   ]
 }

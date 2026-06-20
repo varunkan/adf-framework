@@ -8,20 +8,23 @@
 /// prose→NL summarisation layer on top of it. Threshold 0.12 + a >40-char guard
 /// (the reconciled values — the server used 0.10, the client 0.12).
 class CodeHeuristics {
-  // Unambiguous SQL pairs — these word-pairs essentially never occur in prose, so
-  // they are safe even case-insensitive. (Bare SELECT/UPDATE are NOT here: they
-  // collide with "Select the format" / "Update the spec".)
+  // The target after FROM/INTO/DELETE-FROM in real SQL is an IDENTIFIER, not an
+  // English article — that separates "DELETE FROM sessions" from "delete from your
+  // mind", and "SELECT * FROM users" from "Select the rows from the cache".
+  static const String _notArticle =
+      r'(?!(?:the|a|an|all|any|each|some|every|both|one|your|my|our|his|her|'
+      r'their|its|this|that|these|those)\b)';
   static final RegExp _sqlStrong = RegExp(
-    r'\binsert\s+into\b|\bdelete\s+from\b|\bcreate\s+(table|index|view)\b'
-    r'|\balter\s+table\b|\bdrop\s+(table|index)\b|\bupdate\s+\w+\s+set\b',
+    r'\binsert\s+into\s+' + _notArticle + r'\w'
+        r'|\bdelete\s+from\s+' + _notArticle + r'\w'
+        r'|\bupdate\s+\w+\s+set\b'
+        r'|\bcreate\s+(table|index|view)\b'
+        r'|\balter\s+table\b|\bdrop\s+(table|index)\b',
     caseSensitive: false,
   );
-  // SELECT…FROM is ambiguous with prose ("Select the data from the cache"); only
-  // code when a SQL signal is also present (*, ;, =, comma, or a clause keyword).
-  static final RegExp _sqlSelect =
-      RegExp(r'\bselect\b.*\bfrom\b', caseSensitive: false);
-  static final RegExp _sqlSignal = RegExp(
-      r'[*;=,]|\b(where|join|group\s+by|order\s+by|limit)\b',
+  // SELECT…FROM only when the table after FROM is a non-article identifier.
+  static final RegExp _sqlSelect = RegExp(
+      r'\bselect\b.*\bfrom\s+' + _notArticle + r'\w',
       caseSensitive: false);
   // Shell/CLI + code keyword starts: case-SENSITIVE lowercase. Real code is
   // lowercase at line start; a prose sentence capitalises its first word, so
@@ -37,8 +40,15 @@ class CodeHeuristics {
     r'|for\s*\(|while\s*\(|switch\s*\(|@\w+|<\?php|#include|package )',
   );
   static final RegExp _symbols = RegExp(r'''[{}()\[\];=<>|&/\\`]''');
-  static final RegExp _callOrArrow =
-      RegExp(r'=>|::|\)\s*\{|\w+\([^)]*\)\s*[;{]|;\s*$');
+  // Line-anchored statement SHAPES — a bare `=>`/`::` ANYWHERE is prose-incidental
+  // ("The request => response", "ci.example.com::8080"), so we require: ends with
+  // ; or { (a statement terminator), an arrow at the line head, or a call that is
+  // the WHOLE line ("verify(); confirm…" has prose after → not code).
+  static final RegExp _codeShape = RegExp(
+    r'[;{]\s*$'
+    r'|^\s*\w+\s*=>'
+    r'|^\s*[\w.]+\([^)]*\)\s*[;{]?\s*$',
+  );
 
   /// True when [text] reads as code/SQL/shell/JSON rather than natural language.
   static bool isCodeLike(String text) {
@@ -54,10 +64,10 @@ class CodeHeuristics {
       return true;
     }
     if (_sqlStrong.hasMatch(t)) return true;
-    if (_sqlSelect.hasMatch(t) && _sqlSignal.hasMatch(t)) return true;
+    if (_sqlSelect.hasMatch(t)) return true;
     if (_shellStart.hasMatch(t) || _codeStart.hasMatch(t)) return true;
     if (RegExp(r'^"[\w.-]+"\s*:').hasMatch(t)) return true; // JSON "key": fragment
-    if (_callOrArrow.hasMatch(t)) return true;
+    if (_codeShape.hasMatch(t)) return true;
     final symbols = _symbols.allMatches(t).length;
     return t.length > 40 && symbols / t.length > 0.12;
   }
