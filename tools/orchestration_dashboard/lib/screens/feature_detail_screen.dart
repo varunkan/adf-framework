@@ -10,6 +10,7 @@ import '../utils/auto_unstick.dart';
 import '../utils/phase_selection.dart';
 import '../utils/step_label.dart';
 import '../widgets/agent_conversation_view.dart';
+import '../widgets/revision_dialog.dart';
 import '../widgets/approval_action_bar.dart';
 import '../widgets/chat_composer.dart';
 import '../widgets/live_preview_panel.dart';
@@ -1002,33 +1003,12 @@ $clarification
     }
   }
 
-  /// D5: the in-panel "Request changes" must capture WHAT to change (and not
-  /// bypass the confirm gate / discard typed notes). Prompt for a note, then run
-  /// the same confirmed-revise path the detailed bar uses.
+  /// D5: the in-panel "Request changes" captures WHAT to change (and never blind-
+  /// submits / bypasses the confirm gate). Prompt for a note, then run the same
+  /// confirmed-revise path the detailed bar uses. (Dialog extracted + tested.)
   Future<void> _promptRevise() async {
-    final controller = TextEditingController();
-    final note = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Request changes'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLines: 3,
-          decoration: const InputDecoration(
-            hintText: 'What should change? (the AI review is also used)',
-          ),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-              child: const Text('Request changes')),
-        ],
-      ),
-    );
-    if (note == null) return; // cancelled
+    final note = await promptRevisionNote(context);
+    if (note == null) return; // cancelled or empty
     await _clarifyAndRedo(note, clientConfirmed: true);
   }
 
