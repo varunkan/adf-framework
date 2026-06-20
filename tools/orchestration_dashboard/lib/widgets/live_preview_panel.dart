@@ -30,6 +30,8 @@ class LivePreviewPanel extends StatefulWidget {
     this.awaitingApproval = false,
     this.building = false,
     this.selectedPhase,
+    this.onApprove,
+    this.onRevise,
   });
 
   final ApiClient api;
@@ -46,6 +48,12 @@ class LivePreviewPanel extends StatefulWidget {
   /// A phase the user clicked in the pipeline rail — jumps to the Artifacts tab
   /// and focuses that stage. Null when nothing is explicitly selected.
   final int? selectedPhase;
+
+  /// Approve / request-changes for the phase awaiting review. Surfaced as a sticky
+  /// banner in THIS panel (where the user is reading artifacts), so the gate is
+  /// never off-screen at the bottom of the chat column.
+  final VoidCallback? onApprove;
+  final VoidCallback? onRevise;
 
   @override
   State<LivePreviewPanel> createState() => _LivePreviewPanelState();
@@ -312,6 +320,8 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
               ],
             ),
           ),
+        if (widget.awaitingApproval && widget.onApprove != null)
+          _approvalBanner(context),
         TabBar(
           controller: _tabs,
           labelColor: StudioTheme.accent,
@@ -615,6 +625,59 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
         featureId: widget.featureId,
         selectedPhase: widget.selectedPhase,
       );
+
+  /// Sticky review gate in the preview panel — Approve / Request changes, right
+  /// where the user is reading the artifacts (the full detailed form stays in chat).
+  Widget _approvalBanner(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 10, 12, 2),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: StudioTheme.accent.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: StudioTheme.accent.withValues(alpha: 0.5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.how_to_reg_outlined,
+                  color: StudioTheme.accent, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text('Phase ${widget.phase} ready for your review',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w600, fontSize: 13)),
+              ),
+            ],
+          ),
+          const Padding(
+            padding: EdgeInsets.only(left: 26, top: 2, bottom: 8),
+            child: Text('Read the artifacts, then approve or request changes.',
+                style: TextStyle(fontSize: 11.5, color: Colors.white70)),
+          ),
+          Wrap(
+            alignment: WrapAlignment.end,
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton(
+                onPressed: widget.onRevise,
+                child: const Text('Request changes'),
+              ),
+              FilledButton(
+                onPressed: widget.onApprove,
+                style:
+                    FilledButton.styleFrom(backgroundColor: StudioTheme.accent),
+                child: const Text('Approve'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _skeleton(BuildContext context) {
     return ListView(

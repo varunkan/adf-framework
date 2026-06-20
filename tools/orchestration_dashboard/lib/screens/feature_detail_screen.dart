@@ -153,7 +153,15 @@ class _FeatureDetailScreenState extends State<FeatureDetailScreen> {
       final stuck = run0?['agent_active'] == true &&
           (state0['awaiting_user'] == true ||
               run0?['status'] == 'awaiting_approval');
-      if (!_autoUnstuck && stuck) {
+      // Race guard: a phase that JUST finished and set awaiting_user can briefly
+      // look "stuck" while the agent process tears down. Auto-cancelling here would
+      // clear the approval gate before the human ever sees it — so within 30s of the
+      // run starting/finishing, skip the unstick and let polling resolve it.
+      final recentlyActive = (_elapsedSeconds((run0?['finished_at'] as String?) ??
+                  (run0?['started_at'] as String?)) ??
+              999) <
+          30;
+      if (!_autoUnstuck && stuck && !recentlyActive) {
         _autoUnstuck = true;
         try {
           final unstuck = await widget.api.unstickFeature(widget.featureId);
@@ -1258,6 +1266,10 @@ $clarification
           // Clicking a phase in the rail focuses that stage's artifacts (only on
           // an explicit tap, not the rail's default current-phase highlight).
           selectedPhase: _phaseClicked && _viewPhase > 0 ? _viewPhase : null,
+          // Sticky review gate in the panel: Approve, or one-click Request changes.
+          onApprove: awaiting ? () => _approve('approved') : null,
+          onRevise:
+              awaiting ? () => _clarifyAndRedo('', clientConfirmed: true) : null,
         ),
       ),
     );
