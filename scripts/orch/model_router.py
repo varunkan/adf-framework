@@ -49,9 +49,11 @@ _ROSTER = {
     "synthesis":  [("anthropic", _M["opus"]), ("nvidia", _M["deepseek"])],  # the HEAD
     "questions":  [("anthropic", _M["opus"]), ("nvidia", _M["deepseek"])],  # human-facing
     # The clarify-swarm HEADS — high-power + solid (split the requirement / converge the
-    # results). Opus when available, free DeepSeek fallback so the swarm still runs free.
-    "split":      [("anthropic", _M["opus"]), ("nvidia", _M["deepseek"])],
-    "converge":   [("anthropic", _M["opus"]), ("nvidia", _M["deepseek"])],
+    # results). Opus when available; the FREE fallback is Qwen→Super (validated to emit
+    # clean large-JSON reliably — DeepSeek rambles past the JSON on big structured output,
+    # so it is NOT used for the heads even though it's a strong reasoner).
+    "split":      [("anthropic", _M["opus"]), ("nvidia", _M["qwen"]), ("nvidia", _M["super"])],
+    "converge":   [("anthropic", _M["opus"]), ("nvidia", _M["qwen"]), ("nvidia", _M["super"])],
 }
 
 _DEFAULT = [("nvidia", _M["super"]), ("anthropic", _M["opus"]), ("ollama", None)]

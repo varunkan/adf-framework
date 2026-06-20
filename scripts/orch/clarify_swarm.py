@@ -19,8 +19,16 @@ use roles 'split'/'converge' (Opus, free DeepSeek fallback); workers use free ro
 import json
 import os
 import re
+import sys
+import time
 
 import build_crew
+
+
+def _log(msg):
+    """Live progress line (stderr so it never pollutes the JSON result on stdout)."""
+    sys.stderr.write(f"[swarm] {msg}\n")
+    sys.stderr.flush()
 
 
 # --- injectable defaults -------------------------------------------------------
@@ -112,6 +120,7 @@ def run(requirement, complete=None, gather=None, areas=None, tasks_per_area=None
         {"areas": []})
     area_list = (split.get("areas") or [])[:n_areas] or [
         {"area": "functional scope", "focus": requirement[:120]}]
+    _log(f"SPLIT → {len(_uniq(area_list))} areas (free heads + free workers, par={par})")
 
     # 2) EXPAND (free, one agent per area) → atomic tasks
     def run_expand(agent, prior):
@@ -130,8 +139,11 @@ def run(requirement, complete=None, gather=None, areas=None, tasks_per_area=None
                 tasks.append({"id": f"t{len(tasks)}", "area": area_name,
                               "task": t["task"], "type": t.get("type", "verify")})
 
+    _log(f"EXPAND → {len(tasks)} atomic tasks → spinning {len(tasks)} worker agents")
+
     # 3) WORK (free, ONE agent per task — the massive parallel layer)
     by_id = {t["id"]: t for t in tasks}
+    _work_t0 = time.time()
 
     def run_work(agent, prior):
         t = by_id[agent.name]
@@ -147,6 +159,9 @@ def run(requirement, complete=None, gather=None, areas=None, tasks_per_area=None
     work = build_crew.run_crew(
         [build_crew.BuildAgent(t["id"], t["id"]) for t in tasks], run_work,
         parallelism=par) if tasks else {"files": {}}
+
+    _log(f"WORK → {len(work['files'])}/{len(tasks)} workers returned "
+         f"in {time.time() - _work_t0:.0f}s")
 
     # 4) REDUCE (free, one agent per area) → area finding (collapses 1000s → ~N)
     def run_reduce(agent, prior):
