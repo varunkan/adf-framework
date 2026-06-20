@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 /// Turns a tool call (name + raw JSON input) into a Cursor/Claude-style line:
 /// "Reading lib/db.dart", "$ npm install", "Searching: bookmark table",
 /// "Fetching fda.gov" — never the raw JSON. Shared by PlainThoughtFormatter (the
@@ -48,12 +50,27 @@ class ToolNarration {
     return parts.length > 3 ? '…/${parts.sublist(parts.length - 3).join('/')}' : raw;
   }
 
-  /// First string value for any of [keys] in the JSON-ish [input].
+  /// First string value for any of [keys] in the [input] payload. Parses JSON
+  /// structurally first (handles escaped quotes that a naive regex truncates, and
+  /// is what the server now emits via jsonEncode); falls back to a regex for
+  /// already-quoted fragments, then to Dart Map.toString() form `{k: v}` (D9).
   static String? _key(String? input, List<String> keys) {
     if (input == null || input.isEmpty) return null;
+    try {
+      final obj = jsonDecode(input);
+      if (obj is Map) {
+        for (final k in keys) {
+          final v = obj[k];
+          if (v != null && '$v'.isNotEmpty) return '$v';
+        }
+      }
+    } catch (_) {/* not JSON — fall through */}
     for (final k in keys) {
       final m = RegExp('"$k"' r'\s*:\s*"([^"]+)"').firstMatch(input);
       if (m != null) return m.group(1);
+      // Map.toString() form: {file_path: lib/db.dart, ...}
+      final m2 = RegExp('[{,]\\s*$k:\\s*([^,}]+)').firstMatch(input);
+      if (m2 != null) return m2.group(1)!.trim();
     }
     return null;
   }

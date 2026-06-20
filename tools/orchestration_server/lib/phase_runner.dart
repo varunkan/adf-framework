@@ -1296,15 +1296,16 @@ Instructions:
         if (toolName != null) extra['tool.name'] = '$toolName';
         final input = obj['input'] ?? obj['arguments'];
         if (input != null) {
-          extra['tool.input'] = '$input'.length > 2000
-              ? '${'$input'.substring(0, 2000)}…'
-              : '$input';
+          // Serialize as JSON, not Dart Map.toString() — `{file_path: x}` (no
+          // quotes) is what the client's key parser could not read, degrading every
+          // tool to "Reading a file" (D9). jsonEncode → `{"file_path":"x"}`.
+          final s = input is String ? input : jsonEncode(input);
+          extra['tool.input'] = s.length > 2000 ? '${s.substring(0, 2000)}…' : s;
         }
         final output = obj['output'] ?? obj['result'];
         if (output != null && type == 'tool_result') {
-          extra['tool.output'] = '$output'.length > 2000
-              ? '${'$output'.substring(0, 2000)}…'
-              : '$output';
+          final s = output is String ? output : jsonEncode(output);
+          extra['tool.output'] = s.length > 2000 ? '${s.substring(0, 2000)}…' : s;
         }
         _traces.append(
           featureId: featureId,
