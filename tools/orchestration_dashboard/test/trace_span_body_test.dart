@@ -23,4 +23,12 @@ void main() {
     });
     expect(span.body, 'Running vitest…');
   });
+
+  test('generating_progress maps to the GENERATE card (D2 heartbeat, E11)', () {
+    final span = TraceSpan.fromJson({
+      'name': 'runner.generating_progress',
+      'attributes': {'orch.message': 'Generating code… (12s)'},
+    });
+    expect(span.cardKind, 'GENERATE');
+  });
 }
