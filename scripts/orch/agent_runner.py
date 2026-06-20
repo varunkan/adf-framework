@@ -39,6 +39,7 @@ import http.client
 import subprocess
 import sys
 import time
+import uuid
 import urllib.request
 import urllib.error
 
@@ -1232,6 +1233,13 @@ def write_files(workspace, fid, files):
         if not dest.startswith(os.path.normpath(app_root) + os.sep):
             log(f"skipping unsafe path: {rel}")
             continue
+        # ADF-RESERVED: the model must NEVER author ADF's own evidence/proof artifacts
+        # (.adf-process/, .adf-proof/, .adf-visual/, .adf-mobile/, .adf-policy-report.json).
+        # The build-nonce binding already rejects a planted fact at read time; this is
+        # defense-in-depth so only ADF's in-process recorders ever write these paths.
+        if os.path.normpath(rel).split(os.sep)[0].startswith(".adf"):
+            log(f"skipping ADF-reserved path (recorder-only): {rel}")
+            continue
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         if not content.endswith("\n"):
             content += "\n"
@@ -2023,7 +2031,17 @@ def _crew_generate(crew, system, user, stack, timeout, workspace, fid):
     narrate("build_crew_start", agents=len(crew))
     log(f"build crew: {len(crew)} subagents in dependency-ordered parallel waves")
     parallelism = int(os.environ.get("ADF_BUILD_CREW_PARALLELISM", "3"))
-    result = build_crew.run_crew(crew, run_agent, parallelism=parallelism)
+    try:
+        result = build_crew.run_crew(crew, run_agent, parallelism=parallelism)
+    except ValueError as e:
+        # A malformed decomposition (self-dep / unknown-dep / cycle) raised by
+        # build_execution_waves BEFORE any agent ran — honor the crew's "never strand a
+        # build" promise: degrade to monolithic unless ADF_BUILD_CREW=strict.
+        if build_crew.allows_fallback():
+            log(f"build crew DAG invalid ({e}); falling back to monolithic generation")
+            narrate("build_crew_fallback", blockers=[str(e)])
+            return None
+        raise
     if result["blockers"] and build_crew.allows_fallback():
         log(f"build crew blockers ({'; '.join(result['blockers'])}); "
             f"falling back to monolithic generation")
@@ -2429,6 +2447,20 @@ def main():
     ctx = load_feature_context(repo_root, fid)
     app_dir = os.path.join(workspace, "apps", fid)
 
+    # Process-evidence isolation (honesty contract). `.adf-process/` is per-app and
+    # survives a rebuild/edit untouched — should_scaffold() reuses an existing app dir
+    # (package.json present), so a PRIOR build's tdd.json / heal.json / review.json
+    # would otherwise be re-read at seal time and certified `proven` though THIS build
+    # never ran that discipline. Belt-and-braces, both before any generation/recorder:
+    #   (1) wipe the dir so each turn starts with zero process evidence;
+    #   (2) stamp a per-build nonce that process_facts reads back, treating any
+    #       artifact whose nonce differs as absent — so stale evidence can never seal
+    #       even if the wipe is skipped (best-effort) or the dir is repopulated later.
+    import shutil
+    import process_facts
+    shutil.rmtree(os.path.join(app_dir, process_facts.PROCESS_DIR), ignore_errors=True)
+    os.environ["ADF_BUILD_NONCE"] = uuid.uuid4().hex
+
     # Resolve the target stack (contract C5): an already-built app's manifest
     # wins (re-runs/edits keep their stack); a fresh build uses the env default
     # (ADF_STACK), which the server sets from the feature's chosen stack.
@@ -2711,17 +2743,25 @@ def main():
                 # computes — spec-compliance (completion audit finds no uncovered
                 # deliverable) + code-quality (the policy gate passed). Deterministic;
                 # honest (no "an LLM reviewed it" claim).
-                try:
-                    spec_gaps = [] if is_edit else audit_completion(
-                        app_root, stack, ctx, fid)
-                    process_facts.record_review(
-                        app_root, spec_ok=not spec_gaps, quality_ok=bool(policy_ok))
-                except Exception as e:
-                    log(f"review fact skipped: {e}")
+                # Edit builds run NO spec-compliance audit, so do not attest review on
+                # them — sealing spec_compliance=True would overstate what was checked.
+                if not is_edit:
+                    try:
+                        spec_gaps = audit_completion(app_root, stack, ctx, fid)
+                        process_facts.record_review(
+                            app_root, spec_ok=not spec_gaps, quality_ok=bool(policy_ok))
+                    except Exception as e:
+                        log(f"review fact skipped: {e}")
                 process_obj = process_facts.read_process_facts(app_root)
                 process_block = process_facts.enforcement_block(process_obj)
             except Exception as e:
                 log(f"process facts skipped: {e}")
+                # Fail CLOSED under strict: if the process verdict cannot be computed,
+                # a strict build must NOT seal (the enforced disciplines are unproven) —
+                # otherwise an error here would silently fail open and defeat the gate.
+                if (os.environ.get("ADF_PROCESS", "").strip().lower() == "strict"
+                        or os.environ.get("ADF_TDD", "").strip().lower() == "strict"):
+                    process_block = ["process_facts_error"]
             # Fail-closed process gate (opt-in, ADF_PROCESS=strict / ADF_TDD=strict):
             # a build that SKIPPED an enforced discipline does not seal — a sealed
             # proof then means the enforced disciplines held. Raised OUTSIDE the try
@@ -2729,8 +2769,8 @@ def main():
             if process_block:
                 narrate("process_blocked", disciplines=process_block)
                 log(f"🚫 process gate ENFORCED — build BLOCKED on: "
-                    f"{', '.join(process_block)} (discipline not attested; set "
-                    f"ADF_PROCESS=advisory to override)")
+                    f"{', '.join(process_block)} (discipline not attested; unset "
+                    f"ADF_PROCESS=strict / ADF_TDD=strict to override)")
                 record_build_outcome(
                     repo_root, fid, False,
                     f"process discipline not met: {', '.join(process_block)}")

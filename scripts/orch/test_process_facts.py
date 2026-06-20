@@ -8,6 +8,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import process_facts as pf  # noqa: E402
@@ -95,6 +96,56 @@ class Enforcement(unittest.TestCase):
         obj = pf.read_process_facts(self.app, env={"ADF_PROCESS": "strict"})
         self.assertEqual(obj["facts"]["tdd_followed"]["status"], "proven")
         self.assertEqual(pf.enforcement_block(obj), [])
+
+
+class StaleEvidenceIsolation(unittest.TestCase):
+    """`.adf-process/` is NOT cleared when a rebuild/edit reuses an existing app dir
+    (should_scaffold sees package.json and skips), so a prior build's evidence would
+    persist and read_process_facts would re-derive it into a `proven` fact for a build
+    that never ran that discipline. The per-build nonce binds each artifact to the
+    build that wrote it; a stale (prior-nonce) artifact reads back as absent."""
+
+    def setUp(self):
+        self.app = tempfile.mkdtemp()
+
+    def test_stale_proven_tdd_does_not_seal_on_fresh_build(self):
+        # A PRIOR build left a proven tdd.json behind, stamped with its own nonce.
+        pf._write(self.app, "tdd.json",
+                  {"red": True, "green": True, "proven": True},
+                  env={"ADF_BUILD_NONCE": "prior-build"})
+        # THIS build runs under a fresh nonce with TDD strict but never records TDD;
+        # it only records its own verification.
+        with mock.patch.dict(os.environ, {"ADF_BUILD_NONCE": "fresh-build"}):
+            pf.record_verification(self.app, "react")
+            obj = pf.read_process_facts(
+                self.app, env={"ADF_BUILD_NONCE": "fresh-build", "ADF_TDD": "strict"})
+        # The stale proven fact is invisible — the build seals only what it recorded.
+        self.assertNotIn("tdd_followed", obj["facts"])
+        # ...and the stale file cannot satisfy strict enforcement either.
+        self.assertNotIn("tdd_followed", obj["enforced"])
+        self.assertEqual(pf.enforcement_block(obj), [])
+
+    def test_missing_nonce_legacy_artifact_is_treated_as_absent(self):
+        # An artifact written before nonce stamping (no `_nonce`) must not seal under a
+        # real build's nonce — it predates this build and was not recorded by it.
+        d = pf._evidence_dir(self.app)
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "tdd.json"), "w", encoding="utf-8") as f:
+            f.write('{"red": true, "green": true, "proven": true}')
+        with mock.patch.dict(os.environ, {"ADF_BUILD_NONCE": "fresh-build"}):
+            pf.record_verification(self.app, "react")
+            obj = pf.read_process_facts(self.app, env={"ADF_BUILD_NONCE": "fresh-build"})
+        self.assertNotIn("tdd_followed", obj["facts"])
+
+    def test_same_nonce_tdd_still_seals_proven(self):
+        # Control: evidence written under the SAME nonce as the read seals normally —
+        # the guard rejects only stale evidence, not this build's own.
+        with mock.patch.dict(os.environ, {"ADF_BUILD_NONCE": "build-1"}):
+            pf.record_verification(self.app, "react")
+            pf._write(self.app, "tdd.json",
+                      {"red": True, "green": True, "proven": True})
+            obj = pf.read_process_facts(self.app, env={"ADF_BUILD_NONCE": "build-1"})
+        self.assertEqual(obj["facts"]["tdd_followed"]["status"], "proven")
 
 
 class ReviewAndDesign(unittest.TestCase):

@@ -77,28 +77,54 @@ def _evidence_dir(app_root):
     return os.path.join(app_root, PROCESS_DIR)
 
 
-def _write(app_root, name, obj):
-    """Persist one fact's durable evidence under `.adf-process/`. Best-effort — a
-    recording failure never fails an otherwise-good build."""
+def _current_nonce(env=None):
+    """The current build's nonce (ADF_BUILD_NONCE, set once per turn by
+    agent_runner.main). Stamped into every evidence file at write and checked at
+    read, so a fact can only seal when re-derived from an artifact THIS build wrote:
+    `.adf-process/` is per-app and is NOT cleared on a rebuild/edit of an existing
+    feature id, so a stale prior-build artifact carries a different nonce and is
+    treated as absent. Empty when unset (tests / non-runner callers) — write and read
+    then both see '' and agree, so the binding is a no-op rather than a false stale."""
+    env = env if env is not None else os.environ
+    return (env.get("ADF_BUILD_NONCE") or "").strip()
+
+
+def _write(app_root, name, obj, env=None):
+    """Persist one fact's durable evidence under `.adf-process/`, stamped with the
+    current build nonce so a later read can tell THIS build's evidence from a prior
+    build's leftover. Best-effort — a recording failure never fails an otherwise-good
+    build."""
     try:
         d = _evidence_dir(app_root)
         os.makedirs(d, exist_ok=True)
+        stamped = dict(obj)
+        stamped["_nonce"] = _current_nonce(env)
         with open(os.path.join(d, name), "w", encoding="utf-8") as f:
-            json.dump(obj, f, indent=2, sort_keys=True)
+            json.dump(stamped, f, indent=2, sort_keys=True)
     except OSError:
         pass
     return obj
 
 
-def _read(app_root, name):
+def _read(app_root, name, env=None):
+    """Read one fact's evidence, or None when absent — INCLUDING when the artifact's
+    nonce does not match the current build (a stale prior-build leftover), so every
+    caller gets nonce-binding for free without re-checking at each site."""
     p = os.path.join(_evidence_dir(app_root), name)
     if not os.path.isfile(p):
         return None
     try:
         with open(p, encoding="utf-8") as f:
-            return json.load(f)
+            obj = json.load(f)
     except (OSError, ValueError):
         return None
+    # Treat as absent (so it can NEVER be re-derived into a `proven` fact): anything
+    # that is not a dict (corrupt / tampered / non-dict JSON — also stops a callers'
+    # `.get()` crash), OR an artifact whose nonce does not match THIS build (a stale
+    # prior-build leftover, or a plant that cannot know the per-build nonce).
+    if not isinstance(obj, dict) or obj.get("_nonce", "") != _current_nonce(env):
+        return None
+    return obj
 
 
 def sha256_text(text):
@@ -159,7 +185,7 @@ def read_process_facts(app_root, env=None):
     facts = {}
     enforced = []
 
-    ver = _read(app_root, "verification.json")
+    ver = _read(app_root, "verification.json", env)
     if ver and ver.get("proven"):
         facts["verification_evidence"] = {
             "status": "proven", "gates": list(ver.get("gates") or [])}
@@ -170,7 +196,7 @@ def read_process_facts(app_root, env=None):
     # TDD red→green (Phase 1, ADF_TDD). `proven` ONLY when a real RED preceded a real
     # GREEN; a vacuous/absent RED seals honestly as `skipped`. Enforced (fail-closed)
     # only under strict mode, so the default path is unaffected.
-    tdd = _read(app_root, "tdd.json")
+    tdd = _read(app_root, "tdd.json", env)
     if tdd is not None:
         if tdd.get("proven"):
             facts["tdd_followed"] = {
@@ -184,21 +210,21 @@ def read_process_facts(app_root, env=None):
 
     # Root cause documented before each self-heal fix (Phase 1, ADF_HEAL_DIAGNOSE).
     # Advisory: documenting a cause is hygiene; never block a green build for it.
-    heal = _read(app_root, "heal.json")
+    heal = _read(app_root, "heal.json", env)
     if heal and heal.get("heals"):
         causes = sorted({h.get("cause") for h in heal["heals"] if h.get("cause")})
         facts["root_cause_documented"] = {
             "status": "proven", "heals": len(heal["heals"]), "causes": causes}
 
     # Two-stage review (Phase 4) — composed from real verdicts. Advisory.
-    review = _read(app_root, "review.json")
+    review = _read(app_root, "review.json", env)
     if review is not None:
         facts["review_passed"] = {
             "status": "proven" if review.get("proven") else "skipped",
             "stages": ["spec_compliance", "code_quality"]}
 
     # Design divergence (Phase 4, advisory) — honest only from a real divergence step.
-    design = _read(app_root, "design.json")
+    design = _read(app_root, "design.json", env)
     if design is not None:
         facts["design_options_considered"] = {
             "status": "proven" if design.get("proven") else "skipped",
@@ -231,13 +257,19 @@ def process_summary_line(verdict):
     """A one-line human attestation of the disciplines a build was made with, for
     PROOF.md / verify_proof, or '' when none were recorded. Skips print honestly (⚠),
     never omitted-as-implied-pass; `na` (genuinely not applicable) facts are dropped."""
+    # Tolerate a MALFORMED sealed proof (verify_proof feeds us whatever is on disk,
+    # which may be tampered): a non-dict process/facts/fact must degrade to '' or be
+    # skipped, never crash the verifier (which has already printed VERIFIED/TAMPERED).
     proc = (verdict or {}).get("process")
-    if not (proc and proc.get("facts")):
+    facts = proc.get("facts") if isinstance(proc, dict) else None
+    if not isinstance(facts, dict) or not facts:
         return ""
     parts = []
-    for key, fact in sorted(proc["facts"].items()):
+    for key, fact in sorted(facts.items()):
+        if not isinstance(fact, dict):
+            continue
         label = _FACT_LABELS.get(key, key)
-        status = (fact or {}).get("status")
+        status = fact.get("status")
         if status == "proven":
             parts.append(f"✅ {label}{_fact_extra(key, fact)}")
         elif status == "skipped":
@@ -252,7 +284,12 @@ def required_disciplines_met(verdict, required):
     required = list(required or [])
     if not required:
         return True, []
-    facts = ((verdict or {}).get("process") or {}).get("facts") or {}
-    missing = [r for r in required
-               if (facts.get(r) or {}).get("status") != "proven"]
+    proc = (verdict or {}).get("process")
+    facts = proc.get("facts") if isinstance(proc, dict) else None
+    facts = facts if isinstance(facts, dict) else {}
+
+    def _proven(r):
+        f = facts.get(r)
+        return isinstance(f, dict) and f.get("status") == "proven"
+    missing = [r for r in required if not _proven(r)]
     return (not missing), sorted(missing)
