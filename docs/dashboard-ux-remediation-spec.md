@@ -1,9 +1,10 @@
 # Dashboard UX Remediation — Specification
 
-**Status: COMPLETE** — all 12 tasks (T1–T12) landed via TDD, one commit each. Both blockers
-(D2 generation blackout, D7 ingest coverage) and the root-cause D3→D8 classifier chain are fixed;
-the two adjudicated-false lens claims were dropped. Suites green: dashboard, server
-narration/heuristics/ingest, python agent_runner.
+**Status: ROUND 2 IN PROGRESS** — Round 1 (T1–T12) landed real fixes (D4/D14/D12/D16/D9-core/D3
+direction) but a second adversarial review found the headline items NOT delivered as specified:
+D2 is still dark on the DEFAULT runner, the D8 classifier still eats some prose, and D1/D5/D6
+deviated from the spec. The Round-1 "COMPLETE" was premature — corrected here. See "ROUND 2" at
+the bottom for the grounded E1–E11 defects + DAG being worked now.
 
 Scope: defects in commits `35d1641..HEAD` (the NL-narration / phase-artifacts / approve-revise
 overhaul), found by a 4-lens adversarial review + architect adjudication (`needs-fixes-before-ship`)
@@ -259,3 +260,36 @@ U8 (E11 cardKind)           ─ dashboard + test
 ```
 All leaves are independent. Order by severity: U1 → U2 → U3 → U4 → U5 → U6 → U7 → U8.
 Each: failing test first, minimal fix, full suite, one commit.
+
+## ROUND 2 — outcomes & honesty corrections (E4 + claim corrections)
+
+Worked U1–U8 (TDD, one commit each). Decisions + corrections (so the record matches the code):
+
+- **D1 → DEFERRED (E4).** The Round-1 task said "add an ActivityCard disclosure"; T9 instead
+  REMOVED the dead `rawBody` and corrected the false comment. Hiding raw tool JSON is consistent
+  with the user's "less machine detail" goal, so D1 is re-classified **deferred** — a power-user
+  "Details" disclosure is a future opt-in (needs a span-routing change). It is NOT "landed".
+- **D5 dialog RATIFIED (E6).** The spec originally preferred "focus-the-bar"; the shipped design
+  is a note dialog. Ratified: the dialog captures fresh notes and never blind-submits; the
+  detailed ApprovalActionBar remains for the in-chat path. Now covered by `revision_dialog_test`.
+- **generating_progress → GENERATE RATIFIED (E11)** (over the original STEP) — active tone; pinned
+  by a `cardKind` test.
+
+### Overstated Round-1 commit claims — corrected
+- `55e47c6` "generation no longer goes dark": was FALSE on the default (non-streaming) runner.
+  **Now true** via the U1 blocking-path watchdog.
+- `b6b3759` "stop the classifier eating ordinary English": incomplete — `=>`/`::`/`word();` and
+  `select…from`+comma / `delete from <prose>` still leaked. **Now fixed** (U2), grounded by
+  running the classifier.
+- `a123d00` "remove the dead rawBody getter": framed a scope deferral as cleanup — see D1 above.
+- `b14bda0` "no more drifting classifiers": it is SOFT SSOT (two copies + a shared golden vector +
+  a manual re-sync), not structural. Drift is caught only for inputs in the golden vector. A true
+  structural SSOT (shared package / CI byte-diff) remains future work.
+- `3fdaeb2` "tool calls no longer all collapse": correct, but [LATENT, cursor] — inert on the
+  default Python runner (no tool_call events).
+- `8c9d32a` "COMPLETE": premature — corrected at the top of this doc.
+
+**Round-2 status:** the two blockers (E1 default blackout, E7 vacuous test) and the classifier
+correctness (E2/E3) are fixed and grounded; D5/D6 hardened with real tests; D1 honestly deferred.
+Remaining honest debt: structural SSOT for the classifier, and a full screen-level E2E for the
+approve/revise flow (the pieces are unit/widget-tested; the end-to-end wiring is not).
