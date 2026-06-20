@@ -87,5 +87,26 @@ class Complete(unittest.TestCase):
         self.assertEqual(roles, ["system", "user"])
 
 
+class RateLimitRetry(unittest.TestCase):
+    def test_429_is_retried_not_dropped(self):
+        # the free-tier resilience the swarm needs: a 429 must retry (via
+        # call_with_retry), not silently drop the worker.
+        import agent_runner
+        from unittest import mock
+        n = {"c": 0}
+
+        def flaky(messages, timeout, model=None):
+            n["c"] += 1
+            if n["c"] == 1:
+                raise agent_runner.HttpError(429, "rate limited", None)
+            return ("ok after retry", {})
+
+        with mock.patch.object(agent_runner, "call_nvidia", flaky), \
+                mock.patch.object(agent_runner.time, "sleep", lambda *_a, **_k: None):
+            out = mr.complete("hi", "extract", env={})   # extract → free NVIDIA
+        self.assertEqual(out[0], "ok after retry")
+        self.assertEqual(n["c"], 2)                        # 1 throttle + 1 retry
+
+
 if __name__ == "__main__":
     unittest.main()

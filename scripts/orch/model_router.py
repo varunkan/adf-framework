@@ -48,6 +48,10 @@ _ROSTER = {
     "vision":     [("anthropic", _M["sonnet"]), ("nvidia", _M["vision_nim"])],
     "synthesis":  [("anthropic", _M["opus"]), ("nvidia", _M["deepseek"])],  # the HEAD
     "questions":  [("anthropic", _M["opus"]), ("nvidia", _M["deepseek"])],  # human-facing
+    # The clarify-swarm HEADS — high-power + solid (split the requirement / converge the
+    # results). Opus when available, free DeepSeek fallback so the swarm still runs free.
+    "split":      [("anthropic", _M["opus"]), ("nvidia", _M["deepseek"])],
+    "converge":   [("anthropic", _M["opus"]), ("nvidia", _M["deepseek"])],
 }
 
 _DEFAULT = [("nvidia", _M["super"]), ("anthropic", _M["opus"]), ("ollama", None)]
@@ -77,13 +81,18 @@ def candidates(role, env=None):
 
 def _dispatch(provider, messages, timeout, model):
     import agent_runner
-    if provider == "nvidia":
-        return agent_runner.call_nvidia(messages, timeout, model=model)
-    if provider == "anthropic":
-        return agent_runner.call_anthropic(messages, timeout, model=model)
-    if provider == "ollama":
-        return agent_runner.call_ollama(messages, timeout, model=model)
-    return None
+    fn = {"nvidia": agent_runner.call_nvidia,
+          "anthropic": agent_runner.call_anthropic,
+          "ollama": agent_runner.call_ollama}.get(provider)
+    if fn is None:
+        return None
+    # Route through call_with_retry so a free-tier rate-limit (HTTP 429) or transient
+    # 5xx is retried with bounded backoff (honoring Retry-After) instead of silently
+    # dropping the agent — ESSENTIAL when the swarm fires hundreds/thousands of free
+    # NIM calls at once. A non-retryable status / exhausted attempts returns None
+    # (then complete() falls to the next provider candidate).
+    return agent_runner.call_with_retry(
+        lambda m, t: fn(m, t, model=model), messages, timeout)
 
 
 def complete(prompt, role, system=None, env=None, timeout=120, call=None):
