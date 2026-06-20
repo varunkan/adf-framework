@@ -1,5 +1,10 @@
 # Dashboard UX Remediation — Specification
 
+**Status: COMPLETE** — all 12 tasks (T1–T12) landed via TDD, one commit each. Both blockers
+(D2 generation blackout, D7 ingest coverage) and the root-cause D3→D8 classifier chain are fixed;
+the two adjudicated-false lens claims were dropped. Suites green: dashboard, server
+narration/heuristics/ingest, python agent_runner.
+
 Scope: defects in commits `35d1641..HEAD` (the NL-narration / phase-artifacts / approve-revise
 overhaul), found by a 4-lens adversarial review + architect adjudication (`needs-fixes-before-ship`)
 and independently fact-checked against the code.
