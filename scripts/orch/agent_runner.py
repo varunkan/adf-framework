@@ -38,6 +38,7 @@ import ssl
 import http.client
 import subprocess
 import sys
+import threading
 import time
 import uuid
 import urllib.request
@@ -998,6 +999,35 @@ def _stream_delta(text):
     if _stream_chars - _stream_emitted >= _STREAM_HEARTBEAT_CHARS:
         _stream_emitted = _stream_chars
         narrate("generating_progress", lines=max(1, _stream_chars // 50))
+
+
+class _GenerationHeartbeat:
+    """Emit a 'generating_progress' narration every `interval` seconds until
+    stopped. Covers the DEFAULT (non-streaming) path, where _stream_delta never
+    fires, so the live feed never goes dark during a long BLOCKING model call (E1).
+    Daemon thread; start() then stop() exactly once."""
+
+    def __init__(self, interval=6.0):
+        self.interval = interval
+        self._stop = threading.Event()
+        self._thread = None
+        self._ticks = 0
+
+    def start(self):
+        def _loop():
+            # wait() returns True only when stop() is signalled → tick on timeout.
+            while not self._stop.wait(self.interval):
+                self._ticks += 1
+                narrate("generating_progress",
+                        elapsed=int(self._ticks * self.interval))
+        self._thread = threading.Thread(target=_loop, daemon=True)
+        self._thread.start()
+        return self
+
+    def stop(self):
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=0.5)
 
 
 def _max_tokens():
@@ -2565,28 +2595,35 @@ def main():
     for attempt in range(1, max_iters + 1):
         narrate("generating", attempt=attempt)
         _reset_stream_progress()  # fresh heartbeat counter per generation attempt
-        # Parallel subagent crew (ADF_BUILD_CREW): generate the FIRST draft as
-        # dependency-ordered subagents (attempt 1 only; heal turns use whole-app
-        # context). Falls back to monolithic on any blocker. Never changes the
-        # authoritative verify/heal/seal tail below.
-        used_crew = False
-        files = None
-        if attempt == 1 and not is_edit and build_crew.is_enabled():
-            crew = build_crew.decomposition_for(stack)
-            if crew:
-                files = _crew_generate(
-                    crew, system, user, stack, timeout, workspace, fid)
-                used_crew = files is not None
-        if files is None:
-            gen = generate(messages, timeout)
-            if not gen:
-                log("no model backend produced output (set NVIDIA_API_KEY / "
-                    "ANTHROPIC_API_KEY, or run Ollama)")
-                sys.exit(4)
-            text, usage = gen
-            in_tok += usage.get("prompt_tokens", 0)
-            out_tok += usage.get("completion_tokens", 0)
-            files = parse_files(text)
+        # Heartbeat so the live feed never goes dark during the (possibly minutes-
+        # long) BLOCKING model call — the default, non-streaming path emits no
+        # token deltas (E1). Stopped in finally so an early exit can't leak it.
+        _hb = _GenerationHeartbeat().start()
+        try:
+            # Parallel subagent crew (ADF_BUILD_CREW): generate the FIRST draft as
+            # dependency-ordered subagents (attempt 1 only; heal turns use whole-app
+            # context). Falls back to monolithic on any blocker. Never changes the
+            # authoritative verify/heal/seal tail below.
+            used_crew = False
+            files = None
+            if attempt == 1 and not is_edit and build_crew.is_enabled():
+                crew = build_crew.decomposition_for(stack)
+                if crew:
+                    files = _crew_generate(
+                        crew, system, user, stack, timeout, workspace, fid)
+                    used_crew = files is not None
+            if files is None:
+                gen = generate(messages, timeout)
+                if not gen:
+                    log("no model backend produced output (set NVIDIA_API_KEY / "
+                        "ANTHROPIC_API_KEY, or run Ollama)")
+                    sys.exit(4)
+                text, usage = gen
+                in_tok += usage.get("prompt_tokens", 0)
+                out_tok += usage.get("completion_tokens", 0)
+                files = parse_files(text)
+        finally:
+            _hb.stop()
         narrate("generated", attempt=attempt, files=len(files))
         if not files:
             log(f"attempt {attempt}: no parseable <<<FILE:>>> blocks; first 400 chars:\n{text[:400]}")

@@ -1217,7 +1217,15 @@ Instructions:
       case 'generating':
         return 'Generating code (attempt ${s(attempt)})…';
       case 'generating_progress':
-        return 'Generating code… (~${s(obj['lines'])} lines so far)';
+        // 'lines' from the streaming path; 'elapsed' (seconds) from the blocking
+        // watchdog — either way a content-free liveness pulse.
+        if (obj['lines'] != null) {
+          return 'Generating code… (~${s(obj['lines'])} lines so far)';
+        }
+        if (obj['elapsed'] != null) {
+          return 'Generating code… (${s(obj['elapsed'])}s)';
+        }
+        return 'Generating code…';
       case 'generated':
         return 'Generated ${s(obj['files'])} file(s) (attempt ${s(attempt)})';
       case 'writing_files':

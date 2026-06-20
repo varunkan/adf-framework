@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -1387,6 +1388,21 @@ class GenerationHeartbeat(unittest.TestCase):
         events = self._run(200, chunk=50)
         progress = [e for e in events if e.get("type") == "generating_progress"]
         self.assertEqual(len(progress), 0)
+
+    def test_watchdog_emits_on_the_blocking_path_and_stops(self):
+        # E1: the DEFAULT (non-streaming) generate() is a blocking call with no
+        # deltas; a watchdog must keep the feed alive and stop cleanly.
+        events = []
+        with mock.patch.object(ar, "emit_event", events.append):
+            hb = ar._GenerationHeartbeat(interval=0.02).start()
+            time.sleep(0.07)          # ~3 ticks
+            hb.stop()
+            n = len([e for e in events if e["type"] == "generating_progress"])
+            time.sleep(0.05)          # nothing more after stop
+        progress = [e for e in events if e["type"] == "generating_progress"]
+        self.assertGreaterEqual(n, 1, "the blocking path must not go dark")
+        self.assertEqual(len(progress), n, "no heartbeat after stop()")
+        self.assertNotIn("<<<FILE", json.dumps(progress))
 
 
 if __name__ == "__main__":
