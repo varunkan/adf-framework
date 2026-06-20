@@ -124,6 +124,23 @@ void main() {
           reason: 'the raw per-token code stream must be suppressed');
     });
 
+    test('type:text is never BUFFERED — a following flush surfaces nothing (D7)', () {
+      // PROSE text (so the isCodeDump flush-guard can't mask the regression): if
+      // type:'text' were wrongly folded back into the buffer branch, the file_write
+      // flush would surface it as an agent.stream span. Verified to go RED on a full
+      // T7 revert — a genuinely non-vacuous guard (E7).
+      const token = 'I am drafting the data layer now and it should work soon.';
+      final spans = ingest([
+        {'type': 'text', 'text': token},
+        {'type': 'file_write', 'path': 'lib/db.dart', 'index': 1, 'total': 1},
+      ]);
+      expect(spans.any((s) => s['name'] == 'agent.stream'), isFalse,
+          reason: 'text must not be buffered; a flush would otherwise surface it');
+      expect(spans.where((s) => s['name'] == 'file.write'), hasLength(1));
+      expect(spans.any((s) => jsonEncode(s).contains('drafting the data layer')),
+          isFalse);
+    });
+
     test('a <<<FILE>>> result is summarized, never dumped', () {
       final spans = ingest([
         {
