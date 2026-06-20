@@ -73,17 +73,62 @@ def _scale(env):
             int(env.get("ADF_SWARM_TASKS_PER_AREA", t)))
 
 
-_SPLIT_SYS = ("You are a principal requirements strategist (HIGH POWER). Decompose the "
-              "request into distinct research/verification AREAS to cover it EXHAUSTIVELY "
+_SPLIT_SYS = ("You are a principal requirements strategist. List the distinct "
+              "research/verification AREAS needed to cover the request EXHAUSTIVELY "
               "before any code (functional scope, data model, user roles, security, "
-              "compliance, integrations, NFRs, edge cases, UX, deployment, …). Reply ONLY "
-              'JSON: {"areas":[{"area":"<short name>","focus":"<one line>"}]}')
+              "compliance, integrations, NFRs, edge cases, UX, deployment, …). Output ONE "
+              "area PER LINE as 'Area name — one-line focus'. No JSON, no numbering, no "
+              "preamble — just the lines. (Line format parses reliably even on free "
+              "models; a giant nested-JSON object does not.)")
 
 _EXPAND_SYS = ("Break this ONE area into small, ATOMIC tasks — each a single thing to "
                "RESEARCH (a fact/standard/constraint to find) or VERIFY (a claim/"
-               "requirement to check). Specific, answerable, non-overlapping. Reply ONLY "
-               'JSON: {"tasks":[{"task":"<one atomic task>","type":"research|verify",'
-               '"why":"<why it matters>"}]}')
+               "requirement to check). Specific, answerable, non-overlapping. Output ONE "
+               "task PER LINE as 'research: <task>' or 'verify: <task>'. No JSON, no "
+               "preamble — just the lines.")
+
+
+_LEAD = re.compile(r"^[\s\-\*••\d\.\)]+")
+_SKIP = ("here ", "below", "the following", "areas", "tasks", "sure", "okay", "###")
+
+
+def _parse_areas(text, n):
+    """Areas from the splitter — JSON if it returned JSON, else one-per-line
+    'Name — focus' (robust on free models). Returns [{area, focus}]."""
+    j = _json(text, None)
+    if isinstance(j, dict) and j.get("areas"):
+        return [{"area": str(a.get("area", "")).strip()[:60],
+                 "focus": str(a.get("focus", "")).strip()}
+                for a in j["areas"] if a.get("area")][:n]
+    out = []
+    for ln in (text or "").splitlines():
+        s = _LEAD.sub("", ln).strip()
+        if len(s) < 3 or s.lower().startswith(_SKIP) or s.startswith(("{", "}", "[")):
+            continue
+        parts = re.split(r"\s[—–:\-]\s", s, maxsplit=1)
+        name = parts[0].strip().strip('"').strip()[:60]
+        if len(name) > 2:
+            out.append({"area": name, "focus": (parts[1].strip() if len(parts) > 1 else "")})
+    return out[:n]
+
+
+def _parse_tasks(text, n):
+    """Tasks from an expand agent — 'research:/verify:' lines (JSON tolerated)."""
+    j = _json(text, None)
+    if isinstance(j, dict) and j.get("tasks"):
+        return [{"type": (t.get("type") or "verify").lower(), "task": str(t.get("task", "")).strip()}
+                for t in j["tasks"] if t.get("task")][:n]
+    out = []
+    for ln in (text or "").splitlines():
+        s = _LEAD.sub("", ln).strip()
+        if len(s) < 6 or s.lower().startswith(_SKIP) or s.startswith(("{", "}", "[")):
+            continue
+        m = re.match(r"(research|verify)\s*[:\-)]\s*(.+)", s, re.I)
+        if m:
+            out.append({"type": m.group(1).lower(), "task": m.group(2).strip().strip('"')})
+        elif len(s) > 10:
+            out.append({"type": "verify", "task": s.strip('"')})
+    return out[:n]
 
 _WORK_SYS = ("Do this ONE small task for a software requirement. Be terse + concrete. If "
              "you cannot answer confidently, say what must be CLARIFIED with the product "
@@ -114,11 +159,10 @@ def run(requirement, complete=None, gather=None, areas=None, tasks_per_area=None
         n_tasks = tasks_per_area
     par = int(parallelism or env.get("ADF_SWARM_PARALLELISM", "8"))
 
-    # 1) SPLIT (Opus head) → areas
-    split = _json(complete(
-        f"REQUEST:\n{requirement}\n\nProduce up to {n_areas} areas.", "split", _SPLIT_SYS),
-        {"areas": []})
-    area_list = (split.get("areas") or [])[:n_areas] or [
+    # 1) SPLIT (head) → areas (line-tolerant parse — robust on free models at scale)
+    split_txt = complete(
+        f"REQUEST:\n{requirement}\n\nList up to {n_areas} areas.", "split", _SPLIT_SYS)
+    area_list = _parse_areas(split_txt, n_areas) or [
         {"area": "functional scope", "focus": requirement[:120]}]
     _log(f"SPLIT → {len(_uniq(area_list))} areas (free heads + free workers, par={par})")
 
@@ -134,10 +178,9 @@ def run(requirement, complete=None, gather=None, areas=None, tasks_per_area=None
         run_expand, parallelism=par)
     tasks = []
     for area_name, out in exp["files"].items():
-        for t in (_json(out, {"tasks": []}).get("tasks") or [])[:n_tasks]:
-            if t.get("task"):
-                tasks.append({"id": f"t{len(tasks)}", "area": area_name,
-                              "task": t["task"], "type": t.get("type", "verify")})
+        for t in _parse_tasks(out, n_tasks):
+            tasks.append({"id": f"t{len(tasks)}", "area": area_name,
+                          "task": t["task"], "type": t.get("type", "verify")})
 
     _log(f"EXPAND → {len(tasks)} atomic tasks → spinning {len(tasks)} worker agents")
 
