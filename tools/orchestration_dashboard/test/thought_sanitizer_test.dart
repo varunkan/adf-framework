@@ -55,5 +55,18 @@ void main() {
       const s = 'The SQLite database stores each bookmark with its URL and title.';
       expect(ThoughtSanitizer.clean(s), s);
     });
+
+    test('keeps prose that opens with a SQL/code/shell keyword (D8)', () {
+      for (final s in const [
+        'Update the spec to add the validation rule.',
+        'Return the new bookmark id to the client.',
+        'From the spec, we derive the data schema.',
+        'Static analysis shows no leaks.',
+        'Flutter rebuilds the widget tree on setState.',
+        'Select the best export format for the user.',
+      ]) {
+        expect(ThoughtSanitizer.clean(s), s, reason: 'must stay prose: "$s"');
+      }
+    });
   });
 }

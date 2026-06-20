@@ -19,6 +19,20 @@
     { "text": "The SQLite database stores each bookmark with its URL and title.", "code": false },
     { "text": "Generating the data layer now.", "code": false },
     { "text": "Next, wire the API route that adds a bookmark.", "code": false },
-    { "text": "This validates the user input before saving.", "code": false }
+    { "text": "This validates the user input before saving.", "code": false },
+
+    { "text": "Update the spec to add the validation rule.", "code": false },
+    { "text": "Select the best export format for the user.", "code": false },
+    { "text": "Return the new bookmark id to the client.", "code": false },
+    { "text": "From the spec, derive the data schema.", "code": false },
+    { "text": "Static analysis shows no leaks.", "code": false },
+    { "text": "Flutter rebuilds the widget tree on setState.", "code": false },
+    { "text": "Create a new bookmark for the signed-in user.", "code": false },
+    { "text": "Delete the old record once it has been archived.", "code": false },
+    { "text": "Import the existing data before the first run.", "code": false },
+
+    { "text": "UPDATE users SET active = 1 WHERE id = 5", "code": true },
+    { "text": "DELETE FROM sessions WHERE expired = 1", "code": true },
+    { "text": "INSERT INTO logs (msg) VALUES ('x')", "code": true }
   ]
 }
