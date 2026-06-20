@@ -53,6 +53,22 @@ if [[ -f "$SPECS/spec.md" ]] && ! grep -qi 'problem statement' "$SPECS/spec.md";
   warn "spec.md may lack Problem statement heading"
 fi
 
+# Garbage floor (requirements-quality): a spec must not leak orchestrator command spam
+# or template the raw prompt verbatim into a "requirement". These are never legitimate
+# requirements — exactly the failure on the pharma feature, where the deterministic
+# engine chopped "@orch-orchestrator resume ..." into 'The system SHALL ...'.
+if [[ -f "$SPECS/spec.md" ]]; then
+  if grep -qiE '@orch-orchestrator|SHALL +(resume|start implementing @|@orch)' \
+       "$SPECS/spec.md"; then
+    fail "spec.md leaks orchestrator command spam into requirements (e.g. '@orch-orchestrator resume') — not a real spec"
+  fi
+  # A SHALL statement that is a bare 1–2 word fragment (e.g. 'SHALL guidelines from
+  # best website') is not a testable requirement — flag the templated-chop smell.
+  if grep -oiE 'SHALL +[a-z]+( +[a-z]+)?[.[:space:]]*$' "$SPECS/spec.md" | grep -q .; then
+    warn "spec.md has SHALL statements that are sentence fragments — likely templated prompt chops, not requirements"
+  fi
+fi
+
 # DAG validation when task-graph present
 GRAPH="$SPECS/task-graph.yaml"
 if [[ -f "$GRAPH" ]]; then

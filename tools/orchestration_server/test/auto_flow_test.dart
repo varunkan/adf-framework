@@ -35,9 +35,22 @@ void main() {
     test('per-feature flag wins', () {
       expect(FeatureStore.autoApprove({'auto_approve': true}, {}), isTrue);
     });
-    test('reads ORCH_AUTO_APPROVE env; default off', () {
-      expect(FeatureStore.autoApprove({}, {'ORCH_AUTO_APPROVE': 'true'}), isTrue);
-      expect(FeatureStore.autoApprove({}, {'ORCH_AUTO_APPROVE': '1'}), isTrue);
+    test('track-aware: M/L/XL hold for a human, S may auto, =all forces, default off',
+        () {
+      // M/L/XL never auto-flow from the global flag — their requirements need a human
+      expect(FeatureStore.autoApprove({'track': 'M'}, {'ORCH_AUTO_APPROVE': 'true'}),
+          isFalse);
+      expect(FeatureStore.autoApprove({'track': 'L'}, {'ORCH_AUTO_APPROVE': '1'}),
+          isFalse);
+      // unknown/absent track defaults to M (the safe choice) → holds
+      expect(FeatureStore.autoApprove({}, {'ORCH_AUTO_APPROVE': 'true'}), isFalse);
+      // track-S micro-fixes may auto-flow when the global flag is on
+      expect(FeatureStore.autoApprove({'track': 'S'}, {'ORCH_AUTO_APPROVE': 'true'}),
+          isTrue);
+      expect(FeatureStore.autoApprove({'track': 'S'}, {}), isFalse);
+      // =all is the power-user escape hatch: auto-approve every track
+      expect(FeatureStore.autoApprove({'track': 'M'}, {'ORCH_AUTO_APPROVE': 'all'}),
+          isTrue);
       expect(FeatureStore.autoApprove({}, {}), isFalse);
     });
   });

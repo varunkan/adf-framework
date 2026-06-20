@@ -689,10 +689,18 @@ $t
   /// disagreed before — auto-approve only covered the 6→7 handoff, so phases 1–6
   /// still nagged). `env` is injectable for tests.
   static bool autoApprove(Map<String, dynamic> state, [Map<String, String>? env]) {
-    if (state['auto_approve'] == true) return true;
-    final g = ((env ?? Platform.environment)['ORCH_AUTO_APPROVE'] ?? '')
-        .toLowerCase();
-    return g == 'true' || g == '1';
+    if (state['auto_approve'] == true) return true; // per-feature override always wins
+    final g =
+        ((env ?? Platform.environment)['ORCH_AUTO_APPROVE'] ?? '').toLowerCase();
+    if (g == 'all') return true; // explicit power-user escape hatch: auto every track
+    final globalOn = g == 'true' || g == '1';
+    // Track-aware gate: a track-S micro-fix (≤1 file) may auto-flow when the global
+    // flag is on, but tracks M/L/XL are net-new or cross-cutting work whose
+    // REQUIREMENTS must be confirmed by a human — they NEVER auto-flow from the global
+    // flag (only the per-feature `auto_approve` override above, or ORCH_AUTO_APPROVE=all).
+    // This is the fix for ADF barreling to implementation on an unconfirmed spec.
+    final track = (state['track'] as String? ?? 'M').toUpperCase();
+    return track == 'S' && globalOn;
   }
 
   /// The build stack chosen for [id] (contract C5), read from `state.stack`.

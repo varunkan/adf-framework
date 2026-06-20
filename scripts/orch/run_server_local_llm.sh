@@ -101,11 +101,12 @@ export ORCH_RUNNER_TIMEOUT_SEC="${ORCH_RUNNER_TIMEOUT_SEC:-600}"
 # of giving up after one — what the "build stopped after 1 attempt" report hit.
 export ORCH_MAX_HEAL_ATTEMPTS="${ORCH_MAX_HEAL_ATTEMPTS:-3}"
 
-# Smooth prompt-to-app flow by default: auto-approve the proof-governed spec gate so
-# a build runs straight through to a finished app instead of pausing for a manual
-# click. The proof / policy / audit artifacts are STILL produced (they're automatic
-# in the runner, not gated by approval). Set ORCH_AUTO_APPROVE=false to restore the
-# human gate for governance-strict workflows.
+# Track-aware approval (see FeatureStore.autoApprove): with the default `true`, only
+# track-S MICRO-FIXES (≤1 file) auto-flow straight to a finished app; tracks M/L/XL
+# (net-new / cross-cutting work) HOLD for human confirmation of the spec — so ADF can
+# never barrel to implementation on unconfirmed requirements. `=all` forces auto for
+# every track (power user); `=false` requires a human on every track. Per-feature
+# `auto_approve` overrides this. Proof/policy/audit artifacts are produced regardless.
 export ORCH_AUTO_APPROVE="${ORCH_AUTO_APPROVE:-true}"
 
 # New features build the real React+Vite+Tailwind+SQLite app by default (not the
