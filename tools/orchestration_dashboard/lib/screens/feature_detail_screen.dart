@@ -6,6 +6,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import '../main.dart';
 import '../services/api_client.dart';
 import '../theme/orchestration_colors.dart';
+import '../utils/auto_unstick.dart';
 import '../utils/step_label.dart';
 import '../widgets/agent_conversation_view.dart';
 import '../widgets/approval_action_bar.dart';
@@ -47,6 +48,8 @@ class _FeatureDetailScreenState extends State<FeatureDetailScreen> {
   int _pollTick = 0;
   bool _autoSynced = false;
   bool _autoUnstuck = false;
+  // When we first observed the run as "stuck" (client-side), for the race guard.
+  DateTime? _stuckSince;
   bool _autoAutopilotOnEnter = false;
   final Set<String> _shownMilestones = {};
   int _lastMilestonePhase = 0;
@@ -154,15 +157,20 @@ class _FeatureDetailScreenState extends State<FeatureDetailScreen> {
       final stuck = run0?['agent_active'] == true &&
           (state0['awaiting_user'] == true ||
               run0?['status'] == 'awaiting_approval');
-      // Race guard: a phase that JUST finished and set awaiting_user can briefly
-      // look "stuck" while the agent process tears down. Auto-cancelling here would
-      // clear the approval gate before the human ever sees it — so within 30s of the
-      // run starting/finishing, skip the unstick and let polling resolve it.
-      final recentlyActive = (_elapsedSeconds((run0?['finished_at'] as String?) ??
-                  (run0?['started_at'] as String?)) ??
-              999) <
-          30;
-      if (!_autoUnstuck && stuck && !recentlyActive) {
+      // Race guard (D16): anchor to how long WE'VE observed the stuck state, not a
+      // server timestamp that ages independently. A phase that just set
+      // awaiting_user must not be cancelled before the human sees its gate — only
+      // unstick once the stuck state has PERSISTED across polls. Resetting
+      // _stuckSince / _autoUnstuck when not stuck re-arms the valve per run (D15).
+      if (stuck) {
+        _stuckSince ??= DateTime.now();
+      } else {
+        _stuckSince = null;
+        _autoUnstuck = false;
+      }
+      final stuckFor =
+          _stuckSince == null ? null : DateTime.now().difference(_stuckSince!);
+      if (!_autoUnstuck && shouldAutoUnstick(stuck: stuck, stuckFor: stuckFor)) {
         _autoUnstuck = true;
         try {
           final unstuck = await widget.api.unstickFeature(widget.featureId);
