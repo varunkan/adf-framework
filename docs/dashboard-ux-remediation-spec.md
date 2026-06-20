@@ -178,3 +178,84 @@ Critical path: **D3 → D8 → D7**. Everything else parallelizes.
 | T12| D11+D13 | both | document cursor-only path + Python-runner narration test; debugPrint |
 
 Each task: failing test first, minimal fix, run task test + full package suite, commit.
+
+---
+
+# ROUND 2 — fixing the remediation's own holes (post second adversarial review)
+
+A second 4-lens review of T1–T12 (`123cabe..HEAD`) returned `needs-fixes-before-ship`. Findings
+fact-checked by running the actual classifier + reading the code. **Honesty correction:** the
+Round-1 "COMPLETE" status was premature — D2/D8/D1/D5/D6 were not delivered as specified.
+
+## Defects (grounded)
+
+### E1 — D2 blackout STILL live on the default runner [BLOCKER]
+The T7 heartbeat sits in `_stream_delta`, only called when `ADF_RUNNER_STREAM=1` (opt-in, default
+OFF — `agent_runner.py:937-943`). The default `generate()` is a single blocking `http_post_json`
+emitting nothing between `generating` and `generated`. **Spec:** start a watchdog timer thread
+BEFORE the blocking call that `narrate('generating_progress', …)` every ~6s, cancelled on return,
+so the feed never goes dark regardless of streaming. **Test:** a watchdog unit test (fake clock /
+short interval) asserts ≥1 heartbeat over a simulated slow call, none after cancel.
+
+### E2 — classifier eats prose containing `=>` / `::` / `word();` [MAJOR]
+`_callOrArrow` is unanchored → fires anywhere. VERIFIED: `"The request => response cycle now
+works."`, `"See ci.example.com::8080 …"`, `"verify(); confirm the output …"` → `isCodeLike=true`
+→ dropped at `phase_runner.dart:1381` (also defeats D14). **Spec:** drop bare `=>`/`::`; keep only
+line-anchored statement shapes (`[;{]\s*$`, `^\s*\w+\s*=>`, a bare-call line
+`^\s*[\w.]+\([^)]*\)\s*[;{]?\s*$`). **Test:** golden cases for prose arrows/URLs/method-refs = false;
+real `db.save(url);` / `obj.foo()` = true.
+
+### E3 — SQL false-positives: `select…from`+comma, prose `delete from` [MAJOR]
+VERIFIED: `"Select the rows from the cache, limit to 10."` and `"delete from your mind any
+assumption…"` → code. **Spec:** SELECT…FROM only when SELECT is NOT followed by an article
+(the/a/all/each/…); `delete from`/`insert into` only when followed by a non-possessive identifier
+(not your/the/my/…); drop bare `,`/`=` from the SQL signal. **Test:** those exact sentences =
+false; `SELECT * FROM t`, `SELECT id, name FROM t`, `DELETE FROM sessions` = true.
+
+### E4 — D1 deviated from spec (deleted vs disclosure) [MAJOR → re-scope]
+T9 deleted `rawBody`; the spec deliverable was an ActivityCard disclosure. Hiding raw tool JSON is
+consistent with the user's "less machine detail" intent, so **re-classify D1 as DEFERRED** (dead
+code removed; a power-user disclosure is a future opt-in) — and correct the Round-1 "landed" claim.
+No code change; spec + honesty fix.
+
+### E5 — D6 half-implemented [MAJOR]
+(1) Deselect clears `_phaseClicked` but the rail dot binds to `_viewPhase` (`feature_detail_screen
+.dart:1321`) so it stays lit. (2) No auto-clear when the live phase advances/ completes. **Spec:**
+bind the rail's selected highlight to `_phaseClicked`; in the detail-apply path, clear
+`_phaseClicked`/`_viewPhase` when the live phase advances past the viewed one or the build completes.
+**Test:** widget tests for deselect-unlights and advance-clears (currently zero D6 tests).
+
+### E6 — D5 dialog ratification + real test [MAJOR]
+The dialog is a reasonable design (captures fresh notes, never blind-submits) but deviates from the
+specced "focus-the-bar" and is only callback-tested. **Spec:** RATIFY the dialog (single capture
+surface for the banner path; the bar stays for the in-chat path) AND add a screen-level test that
+opens the dialog, submits a note, and asserts `_clarifyAndRedo` received it. Fold in E9 (dispose the
+controller) + E10 (treat empty == cancelled).
+
+### E7 — make the T8 suppression test non-vacuous [MAJOR]
+Deleting the `return;` in the `type:'text'` branch still yields zero spans (text falls through to
+no-match). **Spec:** the test must feed `text` THEN a known span-producing event on the same run and
+assert ONLY the latter survives in order — so removing the guard (which would then buffer/emit the
+text) fails the test.
+
+### E8 — remove the dead `selectionNonce` [MINOR]
+Deselect-toggle always changes `selectedPhase`, so the nonce clause never independently fires. Remove
+the param + plumbing.
+
+### E11 — ratify `generating_progress` → GENERATE + add the test [NIT]
+GENERATE (active tone) is better UX than the spec's STEP. Update the spec to GENERATE and add the
+missing `cardKind('generating_progress')` test.
+
+## DAG
+```
+U1 (E1 watchdog)            ─ python, isolated
+U2 (E2+E3 classifier)       ─ both pkgs + golden; isolated, highest correctness value
+U3 (E7 non-vacuous test)    ─ server test only
+U4 (E5 deselect/auto-clear) ─ dashboard screen + rail
+U5 (E6+E9+E10 dialog)       ─ dashboard screen + test
+U6 (E4 re-scope D1)         ─ spec only (honesty)
+U7 (E8 remove nonce)        ─ dashboard
+U8 (E11 cardKind)           ─ dashboard + test
+```
+All leaves are independent. Order by severity: U1 → U2 → U3 → U4 → U5 → U6 → U7 → U8.
+Each: failing test first, minimal fix, full suite, one commit.
