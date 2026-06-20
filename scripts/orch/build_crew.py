@@ -22,7 +22,17 @@ are unit-testable without a model.
   run_crew(agents, run_agent, ...)  -> {files, waves, blockers}
 """
 import concurrent.futures
+import fnmatch
 import os
+
+
+def matches_globs(path, globs):
+    """True if `path` matches any of `globs` (a subagent's emit_globs). Lenient by
+    design — `**` is normalized to `*`, and fnmatch's `*` crosses `/`, so
+    'src/**.tsx' routes 'src/components/App.tsx' to the ui agent. A path matching no
+    glob is kept anyway by the caller (over-emission is defensive, not fatal)."""
+    p = (path or "").replace("\\", "/")
+    return any(fnmatch.fnmatch(p, g.replace("**", "*")) for g in (globs or []))
 
 
 class BuildAgent:

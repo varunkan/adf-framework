@@ -52,6 +52,21 @@ class Kahn(unittest.TestCase):
         self.assertIn("cycle", str(cm.exception))
 
 
+class GlobRouting(unittest.TestCase):
+    def test_routes_files_to_owning_agent(self):
+        self.assertTrue(bc.matches_globs("src/components/App.tsx", ["src/**.tsx"]))
+        self.assertTrue(bc.matches_globs("server/api/items.mjs", ["server/api/*.mjs"]))
+        self.assertTrue(bc.matches_globs("schema.sql", ["schema.sql", "src/db.ts"]))
+        self.assertTrue(bc.matches_globs("src/db.ts", ["schema.sql", "src/db.ts"]))
+
+    def test_non_matching_path_is_false(self):
+        self.assertFalse(bc.matches_globs("README.md", ["src/**.tsx"]))
+        self.assertFalse(bc.matches_globs("test/a.test.mjs", ["server/**.mjs"]))
+
+    def test_empty_globs_is_false(self):
+        self.assertFalse(bc.matches_globs("x.ts", []))
+
+
 class Decomposition(unittest.TestCase):
     def test_react_has_a_valid_dag(self):
         crew = bc.decomposition_for("react-vite-sqlite")

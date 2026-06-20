@@ -1984,6 +1984,56 @@ def _tdd_red_baseline(workspace, fid, stack, files, timeout):
     return verdict, test_paths
 
 
+def _crew_generate(crew, system, user, stack, timeout, workspace, fid):
+    """Generate the first draft via the PARALLEL subagent crew (ADF_BUILD_CREW): each
+    subagent emits ONLY its slice (its emit_globs), with the files earlier waves wrote
+    already on disk as context (the app dir IS the shared memory). Returns the MERGED
+    (path, content) list, or None to fall back to monolithic generation (any blocker
+    under the default `fallback` policy). The merged files are still written + verified
+    + healed + sealed by the normal path — the crew only changes HOW the draft is made."""
+    import build_crew
+
+    def run_agent(agent, prior):
+        slice_directive = (
+            f"\n\n=== YOUR SLICE ({agent.name}) ===\n"
+            f"You are the '{agent.name}' subagent: {agent.role}. Emit ONLY the files "
+            f"you own (matching: {', '.join(agent.emit_globs)}) in the <<<FILE:>>> "
+            f"format. Do NOT emit any other file.")
+        if prior:
+            existing = "\n".join(f"- {p}" for p in sorted(prior))
+            slice_directive += (
+                "\nThese files already exist from earlier subagents — import/build on "
+                f"them, do NOT re-emit them:\n{existing}")
+        gen = generate([{"role": "system", "content": system},
+                        {"role": "user", "content": user + slice_directive}], timeout)
+        if not gen:
+            return False, [], f"{agent.name}: no model output"
+        emitted = parse_files(gen[0])
+        owned = [(p, c) for p, c in emitted
+                 if build_crew.matches_globs(p, agent.emit_globs)]
+        # Defensive: if the model labeled paths oddly, keep everything rather than lose
+        # work — the whole-app verify_app is still the single authoritative gate.
+        chosen = owned or emitted
+        if not chosen:
+            return False, [], f"{agent.name}: emitted no files"
+        write_files(workspace, fid, chosen)
+        narrate("crew_agent", agent=agent.name, files=len(chosen))
+        return True, chosen, f"{agent.name}: {len(chosen)} file(s)"
+
+    narrate("build_crew_start", agents=len(crew))
+    log(f"build crew: {len(crew)} subagents in dependency-ordered parallel waves")
+    parallelism = int(os.environ.get("ADF_BUILD_CREW_PARALLELISM", "3"))
+    result = build_crew.run_crew(crew, run_agent, parallelism=parallelism)
+    if result["blockers"] and build_crew.allows_fallback():
+        log(f"build crew blockers ({'; '.join(result['blockers'])}); "
+            f"falling back to monolithic generation")
+        narrate("build_crew_fallback", blockers=result["blockers"][:3])
+        return None
+    merged = list(result["files"].items())
+    narrate("build_crew_done", files=len(merged), waves=len(result["waves"]))
+    return merged or None
+
+
 # --- one-box iteration: edit an existing app ------------------------------
 EDIT_REQUEST_FILE = ".adf-edit-request.txt"
 
@@ -2448,22 +2498,38 @@ def main():
     verified = False
     last_failure = ""
     verify_summary = ""
-    # Phase 1 process disciplines (both gated, default-off): TDD red→green + a
-    # systematic-debugging self-heal. Imported once; stdlib-only siblings.
+    # Process disciplines (all gated, default-off): TDD red→green (P1), a
+    # systematic-debugging self-heal (P1), and a parallel subagent crew (P3). Imported
+    # once; stdlib-only siblings.
     import tdd_loop
     import heal
+    import build_crew
     tdd_verdict, tdd_test_paths = None, []
 
     for attempt in range(1, max_iters + 1):
         narrate("generating", attempt=attempt)
-        gen = generate(messages, timeout)
-        if not gen:
-            log("no model backend produced output (set NVIDIA_API_KEY / ANTHROPIC_API_KEY, or run Ollama)")
-            sys.exit(4)
-        text, usage = gen
-        in_tok += usage.get("prompt_tokens", 0)
-        out_tok += usage.get("completion_tokens", 0)
-        files = parse_files(text)
+        # Parallel subagent crew (ADF_BUILD_CREW): generate the FIRST draft as
+        # dependency-ordered subagents (attempt 1 only; heal turns use whole-app
+        # context). Falls back to monolithic on any blocker. Never changes the
+        # authoritative verify/heal/seal tail below.
+        used_crew = False
+        files = None
+        if attempt == 1 and not is_edit and build_crew.is_enabled():
+            crew = build_crew.decomposition_for(stack)
+            if crew:
+                files = _crew_generate(
+                    crew, system, user, stack, timeout, workspace, fid)
+                used_crew = files is not None
+        if files is None:
+            gen = generate(messages, timeout)
+            if not gen:
+                log("no model backend produced output (set NVIDIA_API_KEY / "
+                    "ANTHROPIC_API_KEY, or run Ollama)")
+                sys.exit(4)
+            text, usage = gen
+            in_tok += usage.get("prompt_tokens", 0)
+            out_tok += usage.get("completion_tokens", 0)
+            files = parse_files(text)
         narrate("generated", attempt=attempt, files=len(files))
         if not files:
             log(f"attempt {attempt}: no parseable <<<FILE:>>> blocks; first 400 chars:\n{text[:400]}")
@@ -2499,8 +2565,10 @@ def main():
 
         # TDD red→green (ADF_TDD): prove the tests FAIL before the implementation
         # exists, then let the normal write+verify drive them GREEN. Attempt 1 only;
-        # gated; never replaces verify_app. The full set is (re)written just below.
-        if attempt == 1 and not is_edit and tdd_loop.is_enabled():
+        # gated; never replaces verify_app. Skipped when the crew ran (it already wrote
+        # the implementation to disk, so a RED baseline would be invalid/vacuous).
+        if (attempt == 1 and not is_edit and tdd_loop.is_enabled()
+                and not used_crew):
             tdd_verdict, tdd_test_paths = _tdd_red_baseline(
                 workspace, fid, stack, files, timeout)
 
