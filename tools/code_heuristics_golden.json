@@ -1,0 +1,24 @@
+{
+  "_doc": "SHARED contract for CodeHeuristics.isCodeLike — the single source of truth for 'is this text code rather than prose?'. Both tools/orchestration_server/lib/code_heuristics.dart and tools/orchestration_dashboard/lib/utils/code_heuristics.dart MUST satisfy this vector (their tests load this file). Editing one impl without the other breaks its test against this contract — that is the anti-drift mechanism (D3).",
+  "cases": [
+    { "text": "const router = express.Router();", "code": true },
+    { "text": "import 'package:flutter/material.dart';", "code": true },
+    { "text": "export default function App() {", "code": true },
+    { "text": "def add_bookmark(url): return db.save(url)", "code": true },
+    { "text": "class Bookmark {", "code": true },
+    { "text": "SELECT * FROM users WHERE active = 1", "code": true },
+    { "text": "CREATE TABLE bookmarks (id INTEGER PRIMARY KEY);", "code": true },
+    { "text": "npm install express", "code": true },
+    { "text": "flutter pub get", "code": true },
+    { "text": "{ \"timeout\": 240, \"retries\": 3 }", "code": true },
+    { "text": "\"dependencies\": {", "code": true },
+    { "text": "```dart", "code": true },
+    { "text": "if (user == null) {", "code": true },
+
+    { "text": "I'll create the bookmarks table and wire the add-bookmark route.", "code": false },
+    { "text": "The SQLite database stores each bookmark with its URL and title.", "code": false },
+    { "text": "Generating the data layer now.", "code": false },
+    { "text": "Next, wire the API route that adds a bookmark.", "code": false },
+    { "text": "This validates the user input before saving.", "code": false }
+  ]
+}

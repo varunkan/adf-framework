@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'code_heuristics.dart';
 import 'cost_meter.dart';
 import 'feature_store.dart';
 import 'runner_health.dart';
@@ -1160,24 +1161,15 @@ Instructions:
     );
   }
 
-  static final RegExp _codeDumpStart = RegExp(
-    r'^(<<<FILE:|```|\{|\[|CREATE\s+TABLE|INSERT\s+INTO|SELECT\s|UPDATE\s|'
-    r'import\s|export\s|const\s+\w+\s*=|let\s+\w+\s*=|var\s+\w+\s*=|def\s|'
-    r'class\s|function\s|func\s|public\s|private\s|@\w+|#include|package\s)',
-    caseSensitive: false,
-  );
-  static final RegExp _codeSymbols = RegExp(r'''[{}()\[\];=<>|&/\\`]''');
-
   /// True when [text] is overwhelmingly code / SQL / a runner `<<<FILE>>>` block
-  /// rather than natural-language narration. Pure + static → unit-testable. This is
-  /// the server-side floor for the "no machine code in the live stream" rule.
+  /// rather than natural-language narration — the server-side floor for the "no
+  /// machine code in the live stream" rule. The per-line code/prose decision
+  /// delegates to the shared, golden-pinned [CodeHeuristics] so the server and the
+  /// client classifier never disagree (D3 SSOT); here we add only the multi-line
+  /// `<<<FILE>>>` / fenced-block check.
   static bool isCodeDump(String text) {
-    final t = text.trimLeft();
-    if (t.isEmpty) return false;
-    if (t.contains('<<<FILE:') || t.contains('```')) return true;
-    if (_codeDumpStart.hasMatch(t)) return true;
-    final symbols = _codeSymbols.allMatches(t).length;
-    return t.length > 40 && symbols / t.length > 0.10;
+    if (text.contains('<<<FILE:') || text.contains('```')) return true;
+    return CodeHeuristics.isCodeLike(text);
   }
 
   /// Narration for a runner `file_write` progress event: `Writing <path> (i/n)`.

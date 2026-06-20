@@ -1,3 +1,5 @@
+import 'code_heuristics.dart';
+
 /// Turns raw agent reasoning into Cursor/Claude-style NATURAL-LANGUAGE narration.
 ///
 /// The agents reason in whatever form they like — often raw SQL, Dart/TS code,
@@ -22,6 +24,8 @@ class ThoughtSanitizer {
 
   // --- classification --------------------------------------------------------
 
+  // Labelling regexes (used ONLY by _summarize to pick the NL phrase — NOT for
+  // the code/prose decision, which delegates to the shared CodeHeuristics).
   static final _sqlStart = RegExp(
       r'^\s*(select|insert\s+into|update|delete\s+from|create\s+(table|index|'
       r'view)|alter\s+table|drop\s+(table|index)|with\s+\w+\s+as)\b',
@@ -30,35 +34,11 @@ class ThoughtSanitizer {
       r'^\s*(\$\s|npm |npx |yarn |pnpm |flutter |dart |git |cd |mkdir |rm |pip '
       r'|python3? |node |curl |wget |docker |kubectl |make |sudo |export )',
       caseSensitive: false);
-  static final _codeStart = RegExp(
-      r'^\s*(import |export |from |const |let |var |function |func |def |class '
-      r'|public |private |protected |static |void |return |async |await |if\s*\('
-      r'|for\s*\(|while\s*\(|switch\s*\(|@\w+|<\?php|#include|package )',
-      caseSensitive: false);
-  static final _codeSymbols = RegExp(r'''[{}()\[\];=<>|&/\\`]''');
-  static final _callOrArrow =
-      RegExp(r'=>|::|\)\s*\{|\w+\([^)]*\)\s*[;{]|;\s*$');
   static final _longToken = RegExp(r'\S{46,}');
 
-  /// True when the line is overwhelmingly code/query/command rather than prose.
-  static bool _isMostlyCode(String t) {
-    if (t.startsWith('```') || t.startsWith('{') || t.startsWith('}') ||
-        t.startsWith('[') || t.startsWith('//') || t.startsWith('/*') ||
-        t.startsWith('<') && RegExp(r'^<\/?\w').hasMatch(t)) {
-      return true;
-    }
-    if (_sqlStart.hasMatch(t) || _shellStart.hasMatch(t) ||
-        _codeStart.hasMatch(t)) {
-      return true;
-    }
-    if (_callOrArrow.hasMatch(t)) return true;
-    // Symbol density: prose is mostly letters/spaces; code is punctuation-heavy.
-    final symbols = _codeSymbols.allMatches(t).length;
-    if (t.isNotEmpty && symbols / t.length > 0.12) return true;
-    // A JSON-ish "key": value fragment.
-    if (RegExp(r'^"[\w.-]+"\s*:').hasMatch(t)) return true;
-    return false;
-  }
+  /// True when the line is overwhelmingly code rather than prose. Delegates to the
+  /// canonical, golden-pinned predicate so server + client agree (D3 SSOT).
+  static bool _isMostlyCode(String t) => CodeHeuristics.isCodeLike(t);
 
   /// Lines that are not narration at all — bare paths, hashes, single tokens.
   static bool _isNoise(String t) {
