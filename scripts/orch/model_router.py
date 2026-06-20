@@ -41,24 +41,28 @@ _ROSTER = {
     # JSON-emitter (Nemotron Super) beats a slow reasoning model that rambles past the
     # JSON; DeepSeek is the fallback. (Reasoning is reserved for the PO/verify roles.)
     "plan":       [("nvidia", _M["super"]), ("nvidia", _M["deepseek"])],
-    # PO lens B — high-power reasoning, a DIFFERENT lineage than verify (Nemotron Ultra
-    # 550B, free) → perspective-diverse. Qwen fallback if Ultra is slow/down.
-    "judge":      [("nvidia", _M["ultra"]), ("nvidia", _M["qwen"])],
+    # PO lens B — reasoning, a DIFFERENT lineage than verify → perspective-diverse. Qwen
+    # (fast + reliable) by default; Nemotron Ultra under ADF_QUALITY=max (see candidates).
+    "judge":      [("nvidia", _M["qwen"])],
     "verify":     [("nvidia", _M["deepseek"])],                  # PO lens A — adversarial (fast)
     "cross_check": [("nvidia", _M["deepseek"])],                 # 2nd-opinion on the head
     "draft":      [("nvidia", _M["super"])],                     # high-throughput drafting
     "extract":    [("nvidia", _M["llama70"])],                   # mechanical extraction
     "longctx":    [("nvidia", _M["qwen"])],                      # digest big corpora
     "vision":     [("anthropic", _M["sonnet"]), ("nvidia", _M["vision_nim"])],
-    # HEADS / judgment (few calls, quality is the deliverable): Opus (paid) → Nemotron
-    # ULTRA 550B (free HIGH-POWER, reliable line/JSON output) → Qwen (free, faster) →
-    # Super. Ultra is reserved for the LOW-VOLUME heads — the 1000s of workers stay on
-    # the fast models. DeepSeek is excluded from the heads (it rambles on big output).
-    "synthesis":  [("anthropic", _M["opus"]), ("nvidia", _M["ultra"]), ("nvidia", _M["qwen"])],
-    "questions":  [("anthropic", _M["opus"]), ("nvidia", _M["ultra"]), ("nvidia", _M["qwen"])],
-    "split":      [("anthropic", _M["opus"]), ("nvidia", _M["ultra"]), ("nvidia", _M["qwen"]), ("nvidia", _M["super"])],
-    "converge":   [("anthropic", _M["opus"]), ("nvidia", _M["ultra"]), ("nvidia", _M["qwen"]), ("nvidia", _M["super"])],
+    # HEADS / judgment: Opus (paid) → Qwen (free, FAST + reliable) → Super by DEFAULT, so
+    # a crew/swarm run finishes in minutes. ADF_QUALITY=max prepends Nemotron Ultra 550B
+    # (high-power but slow) for these few low-volume head calls. DeepSeek is excluded
+    # from the heads (it rambles on big structured output).
+    "synthesis":  [("anthropic", _M["opus"]), ("nvidia", _M["qwen"]), ("nvidia", _M["super"])],
+    "questions":  [("anthropic", _M["opus"]), ("nvidia", _M["qwen"]), ("nvidia", _M["super"])],
+    "split":      [("anthropic", _M["opus"]), ("nvidia", _M["qwen"]), ("nvidia", _M["super"])],
+    "converge":   [("anthropic", _M["opus"]), ("nvidia", _M["qwen"]), ("nvidia", _M["super"])],
 }
+
+# Roles where ADF_QUALITY=max swaps in the slow high-power Nemotron Ultra head (these are
+# LOW-VOLUME judgment calls; never the 1000s of workers).
+_HEAD_ROLES = {"split", "converge", "synthesis", "questions", "judge"}
 
 _DEFAULT = [("nvidia", _M["super"]), ("anthropic", _M["opus"]), ("ollama", None)]
 
@@ -78,8 +82,13 @@ def candidates(role, env=None):
     if override and ":" in override:
         prov, mdl = override.split(":", 1)
         base = [(prov.strip(), mdl.strip())] + base
-    if role == "draft" and e.get("ORCH_QUALITY", "").strip().lower() == "high":
+    quality = (e.get("ADF_QUALITY") or e.get("ORCH_QUALITY") or "").strip().lower()
+    if role == "draft" and quality == "high":
         base = [("anthropic", _M["sonnet"])] + base
+    # ADF_QUALITY=max → swap the slow high-power Nemotron Ultra into the judgment HEADS
+    # (a few low-volume calls). Default keeps the FAST Qwen head so runs finish in minutes.
+    if role in _HEAD_ROLES and quality == "max":
+        base = [("nvidia", _M["ultra"])] + base
     if not (e.get("ANTHROPIC_API_KEY") or "").strip():
         base = [(p, m) for (p, m) in base if p != "anthropic"] or list(_DEFAULT)
     return base

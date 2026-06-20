@@ -32,15 +32,21 @@ class Candidates(unittest.TestCase):
         self.assertNotEqual(mr.candidates("verify", KEYED)[0][1],
                             mr.candidates("judge", KEYED)[0][1])
 
-    def test_nemotron_ultra_is_the_free_high_power_head(self):
-        # free-only path → split/converge/judge HEADS use Nemotron Ultra 550B (free,
-        # high-power), but the high-VOLUME worker roles stay on fast models.
+    def test_heads_fast_by_default_ultra_under_quality_max(self):
         ultra = "nvidia/nemotron-3-ultra-550b-a55b"
-        self.assertEqual(mr.candidates("split", {})[0], ("nvidia", ultra))
-        self.assertEqual(mr.candidates("converge", {})[0][1], ultra)
-        self.assertEqual(mr.candidates("judge", {})[0][1], ultra)
-        self.assertNotEqual(mr.candidates("draft", {})[0][1], ultra)   # workers stay fast
-        self.assertNotEqual(mr.candidates("verify", {})[0][1], ultra)
+        qwen = "qwen/qwen3.5-397b-a17b"
+        # DEFAULT (free): heads are FAST Qwen (so a run finishes in minutes), not Ultra
+        self.assertEqual(mr.candidates("split", {})[0], ("nvidia", qwen))
+        self.assertEqual(mr.candidates("converge", {})[0][1], qwen)
+        self.assertEqual(mr.candidates("judge", {})[0][1], qwen)
+        self.assertNotEqual(mr.candidates("synthesis", {})[0][1], ultra)
+        # ADF_QUALITY=max → swap in the high-power (slow) Nemotron Ultra HEAD
+        self.assertEqual(mr.candidates("split", {"ADF_QUALITY": "max"})[0], ("nvidia", ultra))
+        self.assertEqual(mr.candidates("converge", {"ADF_QUALITY": "max"})[0][1], ultra)
+        self.assertEqual(mr.candidates("synthesis", {"ADF_QUALITY": "max"})[0][1], ultra)
+        # but the high-VOLUME workers stay FAST even under max
+        self.assertNotEqual(mr.candidates("draft", {"ADF_QUALITY": "max"})[0][1], ultra)
+        self.assertNotEqual(mr.candidates("verify", {"ADF_QUALITY": "max"})[0][1], ultra)
 
     def test_role_override(self):
         env = {**KEYED, "ORCH_MODEL_DRAFT": "anthropic:claude-sonnet-4-6"}
