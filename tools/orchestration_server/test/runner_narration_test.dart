@@ -98,6 +98,59 @@ void main() {
     });
   });
 
+  group('ingest dispatch — the suppression/summary path (D7)', () {
+    List<Map<String, dynamic>> ingest(List<Map<String, dynamic>> lines) {
+      final repo = Directory.systemTemp.createTempSync('adf-ingest');
+      addTearDown(
+          () => repo.existsSync() ? repo.deleteSync(recursive: true) : null);
+      final runner = PhaseRunner(FeatureStore(repo.path));
+      for (final l in lines) {
+        runner.ingestAgentLine('demo', 7, jsonEncode(l));
+      }
+      final f = File(OrchestrationPaths(repo.path).otelTracesFile);
+      if (!f.existsSync()) return [];
+      return f
+          .readAsLinesSync()
+          .where((s) => s.trim().isNotEmpty)
+          .map((s) => jsonDecode(s) as Map<String, dynamic>)
+          .toList();
+    }
+
+    test('type:text (raw token stream) produces NO span', () {
+      final spans = ingest([
+        {'type': 'text', 'text': 'const router = express.Router();'}
+      ]);
+      expect(spans, isEmpty,
+          reason: 'the raw per-token code stream must be suppressed');
+    });
+
+    test('a <<<FILE>>> result is summarized, never dumped', () {
+      final spans = ingest([
+        {
+          'type': 'result',
+          'result': '<<<FILE: a.ts>>>\ncode\n<<<FILE: b.ts>>>\nmore code'
+        }
+      ]);
+      final summary =
+          spans.where((s) => s['name'] == 'runner.build_summary').toList();
+      expect(summary, hasLength(1));
+      expect((summary.first['attributes'] as Map)['orch.message'],
+          contains('2 file'));
+      expect(spans.any((s) => jsonEncode(s).contains('<<<FILE')), isFalse,
+          reason: 'no raw code may reach any span');
+    });
+
+    test('a plain prose result is KEPT as a span', () {
+      final spans = ingest([
+        {'type': 'result', 'result': 'I created the login flow and its tests.'}
+      ]);
+      final res = spans.where((s) => s['name'] == 'agent.result').toList();
+      expect(res, hasLength(1));
+      expect((res.first['attributes'] as Map)['agent.reasoning'],
+          contains('login flow'));
+    });
+  });
+
   test('a long PROSE result keeps up to 8000 chars, not 2000 (D14)', () {
     final repo = Directory.systemTemp.createTempSync('adf-prose');
     addTearDown(() => repo.existsSync() ? repo.deleteSync(recursive: true) : null);
