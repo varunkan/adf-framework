@@ -6,6 +6,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import '../main.dart';
 import '../services/api_client.dart';
 import '../theme/orchestration_colors.dart';
+import '../utils/step_label.dart';
 import '../widgets/agent_conversation_view.dart';
 import '../widgets/approval_action_bar.dart';
 import '../widgets/chat_composer.dart';
@@ -428,32 +429,21 @@ $clarification
   /// → 'Reviewing with the AI panel'). Prefers the pipeline's own label, then a
   /// keyword map, then a prettified id — never the raw machine id.
   String _humanStepLabel(String? id, int? phase) {
-    if (id == null || id.trim().isEmpty) {
-      return phase != null ? 'Phase $phase' : 'Working…';
-    }
-    for (final ph in _phases) {
-      for (final s
-          in ((ph['steps'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ??
-              const [])) {
-        if (s['id'] == id) {
-          final label = (s['label'] ?? s['title'] ?? s['name']) as String?;
-          if (label != null && label.trim().isNotEmpty) return label.trim();
+    // Prefer the pipeline's own human label if present…
+    if (id != null && id.trim().isNotEmpty) {
+      for (final ph in _phases) {
+        for (final s
+            in ((ph['steps'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ??
+                const [])) {
+          if (s['id'] == id) {
+            final label = (s['label'] ?? s['title'] ?? s['name']) as String?;
+            if (label != null && label.trim().isNotEmpty) return label.trim();
+          }
         }
       }
     }
-    final l = id.toLowerCase();
-    if (l.contains('review')) return 'Reviewing with the AI panel';
-    if (l.contains('spec')) return 'Writing the spec';
-    if (l.contains('plan')) return 'Planning';
-    if (l.contains('task')) return 'Breaking down tasks';
-    if (l.contains('test')) return 'Writing tests';
-    if (l.contains('implement') || l.contains('build') || l.contains('code')) {
-      return 'Building';
-    }
-    if (l.contains('intake') || l.contains('problem')) {
-      return 'Capturing requirements';
-    }
-    return id.replaceAll(RegExp(r'[-_]'), ' ').trim();
+    // …else the pure keyword mapping (test before plan — see stepLabelFromId).
+    return stepLabelFromId(id, phase);
   }
 
   String? _promptForCurrentStep() {
