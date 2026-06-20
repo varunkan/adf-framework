@@ -82,9 +82,9 @@ class ScrapeAndGather(unittest.TestCase):
         self.assertEqual(note["citations"], ["https://x/ectd"])
 
     def test_gather_prioritizes_user_urls_then_search(self):
-        pages = {  # > thin-threshold so the service result is used (not the fallback)
-            "https://user.test/doc": "# User\n\n" + "user-provided requirements doc " * 50,
-            "https://hit.test/a": "# Hit\n\n" + "searched page content " * 50,
+        pages = {  # well over the thin-threshold so the service result is used
+            "https://user.test/doc": "# User\n\n" + "user-provided requirements doc " * 80,
+            "https://hit.test/a": "# Hit\n\n" + "searched page content here " * 80,
         }
 
         def fetch(u, timeout=20):
