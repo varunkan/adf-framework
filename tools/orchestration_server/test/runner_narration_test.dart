@@ -41,6 +41,14 @@ void main() {
     test('an unknown type returns null (left for other handlers)', () {
       expect(PhaseRunner.runnerNarration({}, 'totally_unknown'), isNull);
     });
+
+    test('generating_progress is a NL heartbeat carrying no code (D2)', () {
+      final msg =
+          PhaseRunner.runnerNarration({'lines': 42}, 'generating_progress');
+      expect(msg, isNotNull);
+      expect(msg, contains('Generating'));
+      expect(msg, isNot(contains('<<<FILE')));
+    });
   });
 
   test('a runner narration event becomes a live trace span (kills dead-air)', () {

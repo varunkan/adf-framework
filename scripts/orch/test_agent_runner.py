@@ -1360,5 +1360,34 @@ class StreamingBackends(unittest.TestCase):
         self.assertIsNone(res)   # failover, not ("par", …) and not a traceback
 
 
+class GenerationHeartbeat(unittest.TestCase):
+    """D2: during generation the server suppresses the raw type:'text' token
+    stream, so the runner must emit a throttled NL progress heartbeat — never code
+    — or the live feed goes dark for the whole (longest) phase."""
+
+    def _run(self, total_chars, chunk=500):
+        events = []
+        ar._reset_stream_progress()
+        with mock.patch.object(ar, "emit_event", events.append):
+            big = "x" * total_chars
+            for i in range(0, len(big), chunk):
+                ar._stream_delta(big[i:i + chunk])
+        return events
+
+    def test_emits_progress_heartbeats_without_code(self):
+        events = self._run(5000)
+        progress = [e for e in events if e.get("type") == "generating_progress"]
+        self.assertGreaterEqual(len(progress), 1, "feed must not go dark")
+        blob = json.dumps(progress)
+        self.assertNotIn("<<<FILE", blob)   # never leaks code
+        self.assertNotIn("xxxx", blob)      # never echoes the streamed tokens
+
+    def test_short_stream_does_not_spam_heartbeats(self):
+        # below the throttle threshold → no heartbeat (avoid noise)
+        events = self._run(200, chunk=50)
+        progress = [e for e in events if e.get("type") == "generating_progress"]
+        self.assertEqual(len(progress), 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

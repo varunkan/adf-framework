@@ -83,6 +83,7 @@ class TraceSpan {
         return 'SEAL';
       case 'generating':
       case 'generated':
+      case 'generating_progress': // throttled heartbeat during generation (D2)
         return 'GENERATE';
       case 'scaffolding':
       case 'scaffolded':

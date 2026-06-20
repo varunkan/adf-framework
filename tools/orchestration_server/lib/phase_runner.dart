@@ -1216,6 +1216,8 @@ Instructions:
         return 'Recalled past-failure guidance from the learning store';
       case 'generating':
         return 'Generating code (attempt ${s(attempt)})…';
+      case 'generating_progress':
+        return 'Generating code… (~${s(obj['lines'])} lines so far)';
       case 'generated':
         return 'Generated ${s(obj['files'])} file(s) (attempt ${s(attempt)})';
       case 'writing_files':

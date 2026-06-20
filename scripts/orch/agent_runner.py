@@ -971,13 +971,33 @@ def http_post_stream(url, headers, payload, timeout):
     return _iter()
 
 
+_STREAM_HEARTBEAT_CHARS = 1500  # emit one NL progress pulse per ~this many chars
+_stream_chars = 0
+_stream_emitted = 0
+
+
+def _reset_stream_progress():
+    """Reset the generation heartbeat counters (call at the start of each generate)."""
+    global _stream_chars, _stream_emitted
+    _stream_chars = 0
+    _stream_emitted = 0
+
+
 def _stream_delta(text):
-    """Emit one streamed model-output delta as a live event so the Studio shows the
-    code typing out. DISPLAY-ONLY (raw model text) — never an authoritative claim;
-    the verify/seal events stay the only source of truth. Rides the runner's existing
-    reasoning-coalescing path (type 'text')."""
-    if text:
-        emit_event({"type": "text", "text": text})
+    """Emit one streamed model-output delta. The raw 'text' event is DISPLAY-ONLY
+    (the server suppresses it — it is the code typing out) and never authoritative.
+
+    Because the server drops that raw stream, generation would otherwise go DARK for
+    the whole (longest) phase, so we ALSO emit a throttled natural-language progress
+    heartbeat — a COUNT only, never the code — so the live feed keeps moving (D2)."""
+    global _stream_chars, _stream_emitted
+    if not text:
+        return
+    emit_event({"type": "text", "text": text})
+    _stream_chars += len(text)
+    if _stream_chars - _stream_emitted >= _STREAM_HEARTBEAT_CHARS:
+        _stream_emitted = _stream_chars
+        narrate("generating_progress", lines=max(1, _stream_chars // 50))
 
 
 def _max_tokens():
@@ -2544,6 +2564,7 @@ def main():
 
     for attempt in range(1, max_iters + 1):
         narrate("generating", attempt=attempt)
+        _reset_stream_progress()  # fresh heartbeat counter per generation attempt
         # Parallel subagent crew (ADF_BUILD_CREW): generate the FIRST draft as
         # dependency-ordered subagents (attempt 1 only; heal turns use whole-app
         # context). Falls back to monolithic on any blocker. Never changes the
