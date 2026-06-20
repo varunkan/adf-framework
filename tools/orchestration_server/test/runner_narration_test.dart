@@ -64,4 +64,29 @@ void main() {
     expect((narr[0]['attributes'] as Map)['orch.message'], 'Running vitest…');
     expect((narr[1]['attributes'] as Map)['orch.message'], 'vitest passed ✓');
   });
+
+  group('isCodeDump (NL-narration floor)', () {
+    test('flags <<<FILE>>> blocks, code fences, SQL and code', () {
+      expect(PhaseRunner.isCodeDump('<<<FILE: src/db.ts>>>\nexport const x=1'),
+          isTrue);
+      expect(PhaseRunner.isCodeDump('```dart\nvoid main() {}\n```'), isTrue);
+      expect(
+          PhaseRunner.isCodeDump('CREATE TABLE bookmarks (id INTEGER);'), isTrue);
+      expect(PhaseRunner.isCodeDump('import "package:flutter/material.dart";'),
+          isTrue);
+      expect(PhaseRunner.isCodeDump('const router = express.Router();'), isTrue);
+    });
+
+    test('keeps genuine natural-language narration', () {
+      expect(
+          PhaseRunner.isCodeDump(
+              "I'll create the bookmarks table and wire the add-bookmark route."),
+          isFalse);
+      expect(
+          PhaseRunner.isCodeDump(
+              'The SQLite database stores each bookmark with its URL and title.'),
+          isFalse);
+      expect(PhaseRunner.isCodeDump('Generating the data layer now.'), isFalse);
+    });
+  });
 }

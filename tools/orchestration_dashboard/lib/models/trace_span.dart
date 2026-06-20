@@ -118,6 +118,8 @@ class TraceSpan {
       case 'files_written':
       case 'recall_injected':
       case 'component_manifest':
+      case 'build_summary': // result-event NL summary ("wrote N files")
+      case 'stdout': // re-routed runner stdout (tracebacks/install logs)
         return 'STEP';
       default:
         // Unknown runner control event (e.g. runner.superseded / cancel) — HIDDEN,

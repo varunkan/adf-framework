@@ -1147,6 +1147,10 @@ Instructions:
     final text = buf.toString().trim();
     buf.clear();
     if (text.isEmpty) return;
+    // NL-narration: never surface a raw code/SQL/<<<FILE>>> dump as a "thought" —
+    // the typed runner events already narrate the build in plain English, and the
+    // full code persists to last-agent-response.md + the file viewer.
+    if (isCodeDump(text)) return;
     _traces.append(
       featureId: featureId,
       name: 'agent.stream',
@@ -1154,6 +1158,26 @@ Instructions:
       phase: phase,
       reasoning: text.length > 4000 ? '${text.substring(0, 4000)}…' : text,
     );
+  }
+
+  static final RegExp _codeDumpStart = RegExp(
+    r'^(<<<FILE:|```|\{|\[|CREATE\s+TABLE|INSERT\s+INTO|SELECT\s|UPDATE\s|'
+    r'import\s|export\s|const\s+\w+\s*=|let\s+\w+\s*=|var\s+\w+\s*=|def\s|'
+    r'class\s|function\s|func\s|public\s|private\s|@\w+|#include|package\s)',
+    caseSensitive: false,
+  );
+  static final RegExp _codeSymbols = RegExp(r'''[{}()\[\];=<>|&/\\`]''');
+
+  /// True when [text] is overwhelmingly code / SQL / a runner `<<<FILE>>>` block
+  /// rather than natural-language narration. Pure + static → unit-testable. This is
+  /// the server-side floor for the "no machine code in the live stream" rule.
+  static bool isCodeDump(String text) {
+    final t = text.trimLeft();
+    if (t.isEmpty) return false;
+    if (t.contains('<<<FILE:') || t.contains('```')) return true;
+    if (_codeDumpStart.hasMatch(t)) return true;
+    final symbols = _codeSymbols.allMatches(t).length;
+    return t.length > 40 && symbols / t.length > 0.10;
   }
 
   /// Narration for a runner `file_write` progress event: `Writing <path> (i/n)`.
@@ -1347,14 +1371,26 @@ Instructions:
       if (type == 'result') {
         _flushReasoningBuffer(featureId, phase);
         final resultText = obj['result'] as String? ?? '';
-        if (resultText.trim().isNotEmpty) {
+        // The full result (often large <<<FILE>>> code blocks) already persists to
+        // last-agent-response.md + the file viewer. Surface a NL summary, never the
+        // code dump. A genuine prose result (e.g. a chat answer) is kept, trimmed.
+        final fileCount = RegExp(r'<<<FILE:').allMatches(resultText).length;
+        if (fileCount > 0) {
+          _traces.append(
+            featureId: featureId,
+            name: 'runner.build_summary',
+            event: 'runner',
+            phase: phase,
+            message: 'Build complete — wrote $fileCount file(s)',
+          );
+        } else if (resultText.trim().isNotEmpty && !isCodeDump(resultText)) {
           _traces.append(
             featureId: featureId,
             name: 'agent.result',
             event: 'afterAgentResponse',
             phase: phase,
-            reasoning: resultText.length > 8000
-                ? '${resultText.substring(0, 8000)}…'
+            reasoning: resultText.length > 2000
+                ? '${resultText.substring(0, 2000)}…'
                 : resultText,
           );
         }
@@ -1379,7 +1415,15 @@ Instructions:
         return;
       }
 
-      if (type == 'assistant' || type == 'text' || type == 'message') {
+      if (type == 'text') {
+        // Raw per-token _stream_delta path — this is where the model emits the
+        // <<<FILE>>> code / SQL / TSX token-by-token. We do NOT surface the raw
+        // code stream; the live commentary comes from the typed runner events
+        // (generating / writing_files / verifying …) and completed assistant turns.
+        return;
+      }
+
+      if (type == 'assistant' || type == 'message') {
         final text = _extractText(obj);
         if (text == null || text.isEmpty) return;
         _reasoningBuffers.putIfAbsent(featureId, () => StringBuffer());
@@ -1391,13 +1435,23 @@ Instructions:
       }
     } catch (_) {
       if (line.length > 4) {
-        _traces.append(
-          featureId: featureId,
-          name: 'agent.stdout',
-          event: 'runner',
-          phase: phase,
-          message: line.length > 500 ? '${line.substring(0, 500)}…' : line,
-        );
+        // Non-JSON runner stdout (tracebacks, npm/tsc logs). Route to a typed STEP
+        // card (runner.* → isRunnerControlEvent) so it stays OUT of the NL prose
+        // stream but remains visible. Strip ANSI + collapse whitespace.
+        final clean = line
+            .replaceAll(RegExp(r'\x1b\[[0-9;]*m'), '')
+            .replaceAll(RegExp(r'\s+'), ' ')
+            .trim();
+        if (clean.isNotEmpty) {
+          _traces.append(
+            featureId: featureId,
+            name: 'runner.stdout',
+            event: 'runner',
+            phase: phase,
+            message:
+                'Runner: ${clean.length > 120 ? '${clean.substring(0, 120)}…' : clean}',
+          );
+        }
       }
     }
   }
