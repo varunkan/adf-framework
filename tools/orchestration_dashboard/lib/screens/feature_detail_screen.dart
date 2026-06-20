@@ -7,6 +7,7 @@ import '../main.dart';
 import '../services/api_client.dart';
 import '../theme/orchestration_colors.dart';
 import '../utils/auto_unstick.dart';
+import '../utils/phase_selection.dart';
 import '../utils/step_label.dart';
 import '../widgets/agent_conversation_view.dart';
 import '../widgets/approval_action_bar.dart';
@@ -286,11 +287,19 @@ class _FeatureDetailScreenState extends State<FeatureDetailScreen> {
         return serverKeys.contains(key);
       });
     }
+    final complete = (d['summary'] as Map<String, dynamic>?)?['pipeline_complete'] ==
+            true ||
+        (d['state'] as Map<String, dynamic>?)?['status'] == 'completed';
     setState(() {
       _detail = d;
       _runnerHealth = h;
       _loading = false;
       if (_viewPhase == 0 && phase > 0) _viewPhase = phase;
+      // D6: release a manual phase selection once the build COMPLETES (the dot
+      // shouldn't linger past the run). Mid-build look-back is intentionally kept.
+      if (clearSelectionOnComplete(phaseClicked: _phaseClicked, complete: complete)) {
+        _phaseClicked = false;
+      }
     });
     _checkMilestones(d);
   }
@@ -1315,7 +1324,10 @@ $clarification
             ? PipelineRail(
                 phases: _phases,
                 currentPhase: phase > 0 ? phase : 1,
-                selectedPhase: _viewPhase > 0 ? _viewPhase : (phase > 0 ? phase : 1),
+                selectedPhase: railHighlight(
+                    phaseClicked: _phaseClicked,
+                    viewPhase: _viewPhase,
+                    livePhase: phase),
                 currentStepId: _currentStepId,
                 onPhaseTap: (p) => setState(() {
                   // Re-tapping the selected phase deselects it (returns to
@@ -1343,7 +1355,8 @@ $clarification
           building: _autopilotRunning || _isRunning,
           // Clicking a phase in the rail focuses that stage's artifacts (only on
           // an explicit tap, not the rail's default current-phase highlight).
-          selectedPhase: _phaseClicked && _viewPhase > 0 ? _viewPhase : null,
+          selectedPhase: artifactSelection(
+              phaseClicked: _phaseClicked, viewPhase: _viewPhase),
           // Sticky review gate in the panel. Approve is one-click (safe); Request
           // changes prompts for what to change (D5), and both are disabled while a
           // request is in flight (D10).
