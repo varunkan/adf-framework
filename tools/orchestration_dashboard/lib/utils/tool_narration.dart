@@ -52,7 +52,7 @@ class ToolNarration {
   static String? _key(String? input, List<String> keys) {
     if (input == null || input.isEmpty) return null;
     for (final k in keys) {
-      final m = RegExp('"' + k + r'"\s*:\s*"([^"]+)"').firstMatch(input);
+      final m = RegExp('"$k"' r'\s*:\s*"([^"]+)"').firstMatch(input);
       if (m != null) return m.group(1);
     }
     return null;
