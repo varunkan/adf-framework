@@ -146,7 +146,9 @@ class TraceSpan {
     if (reasoning != null && reasoning!.isNotEmpty) return reasoning!;
     if (response != null && response!.isNotEmpty) return response!;
     // A tool call reads as a Cursor-style sentence ("Reading lib/db.dart",
-    // "$ npm install"), NOT raw "Tool: …\nInput: {json}" — see [rawBody] for the JSON.
+    // "$ npm install"), NOT raw "Tool: …\nInput: {json}". The raw tool JSON is
+    // intentionally not surfaced (it was the "machine output" complaint); a
+    // power-user "show details" disclosure would be a separate, opt-in feature.
     if (toolName != null) return ToolNarration.humanize(toolName, toolInput);
     if (runnerMessage != null && runnerMessage!.trim().isNotEmpty) {
       return runnerMessage!.trim();
@@ -155,21 +157,6 @@ class TraceSpan {
       return orchMessage!.trim();
     }
     return name;
-  }
-
-  /// The raw tool input/output JSON, for an opt-in "show details" expander. Null
-  /// when this span is not a tool call or carries no payload.
-  String? get rawBody {
-    if (toolName == null) return null;
-    final buf = StringBuffer('Tool: $toolName');
-    if (toolInput != null && toolInput!.isNotEmpty) {
-      buf.write('\nInput: ${toolInput!.length > 500 ? '${toolInput!.substring(0, 500)}…' : toolInput}');
-    }
-    if (toolOutput != null && toolOutput!.isNotEmpty) {
-      buf.write('\nOutput: ${toolOutput!.length > 500 ? '${toolOutput!.substring(0, 500)}…' : toolOutput}');
-    }
-    final s = buf.toString();
-    return s == 'Tool: $toolName' ? null : s;
   }
 
   String get shortTime {
