@@ -1,4 +1,5 @@
 import '../models/trace_span.dart';
+import 'thought_sanitizer.dart';
 
 /// Formats trace spans as plain Cursor-style thought lines (no badges/cards).
 class PlainThoughtFormatter {
@@ -14,7 +15,9 @@ class PlainThoughtFormatter {
       if (normalized.length < 8) return;
 
       for (final part in _splitIntoThoughts(normalized)) {
-        _addLine(lines, part);
+        // Cursor-style: keep prose, rewrite raw code/SQL/shell to plain English.
+        final clean = ThoughtSanitizer.clean(part);
+        if (clean != null) _addLine(lines, clean);
       }
     }
 
@@ -33,8 +36,10 @@ class PlainThoughtFormatter {
       if (kind == 'RESPONSE') {
         final text = (span.reasoning ?? span.body).trim();
         if (text.length > 400) continue;
+        final clean = ThoughtSanitizer.clean(text);
+        if (clean == null) continue;
         flushReasoning();
-        _addLine(lines, text);
+        _addLine(lines, clean);
         continue;
       }
 
