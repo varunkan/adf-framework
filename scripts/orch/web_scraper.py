@@ -31,11 +31,29 @@ def is_enabled(env=None):
     return env.get("ADF_RESEARCH", "1").strip().lower() not in ("0", "false", "off")
 
 
+_SSL = None
+
+
+def _ssl_ctx():
+    """Reuse agent_runner's SSL context — some Python builds (e.g. 3.15 here) lack a CA
+    bundle, so a plain urlopen silently fails cert verification → 0 sources. agent_runner
+    already solved this for the model APIs; share it."""
+    global _SSL
+    if _SSL is None:
+        try:
+            import agent_runner
+            _SSL = agent_runner.ssl_context()
+        except Exception:  # noqa: BLE001
+            import ssl
+            _SSL = ssl.create_default_context()
+    return _SSL
+
+
 def _http_get(url, timeout=20):
     """Plain GET → text, or None. The default fetcher (injectable in tests)."""
     req = urllib.request.Request(url, headers={"User-Agent": "ADF-Research/1.0"})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+        with urllib.request.urlopen(req, timeout=timeout, context=_ssl_ctx()) as resp:  # noqa: S310
             charset = resp.headers.get_content_charset() or "utf-8"
             return resp.read().decode(charset, errors="replace")
     except Exception:  # noqa: BLE001 — a dead URL must not crash research
@@ -108,25 +126,29 @@ def fetch_text(url, env=None, fetch=None):
     return {"url": url, "title": title or url, "markdown": text}
 
 
-_DDG_LINK = re.compile(r'<a[^>]+class="result__a"[^>]+href="([^"]+)"', re.I)
-
-
 def search(query, env=None, fetch=None, limit=5):
-    """Return result URLs for a query. Uses a provider API when configured
-    (`ADF_SEARCH_PROVIDER` + key) else a KEYLESS DuckDuckGo-HTML fallback so research
-    works with zero config. Empty on failure (degrade, never crash)."""
+    """Return result URLs for a query. Tries DuckDuckGo's LITE endpoint (the HTML one now
+    serves a bot challenge) and extracts external result links generically — tolerant to
+    markup drift, decoding `uddg=` redirects. Keyless; empty on failure (the crew then
+    relies on the planner's seed URLs + user-provided URLs). Degrades, never crashes."""
     env = env if env is not None else os.environ
     fetch = fetch or _http_get
     q = urllib.parse.quote(query)
-    raw = fetch("https://html.duckduckgo.com/html/?q=" + q)
+    raw = (fetch("https://lite.duckduckgo.com/lite/?q=" + q)
+           or fetch("https://html.duckduckgo.com/html/?q=" + q))
     if not raw:
         return []
     urls = []
-    for href in _DDG_LINK.findall(raw):
+    for href in re.findall(r'href="([^"]+)"', raw):
         href = html.unescape(href)
-        m = re.search(r"[?&]uddg=([^&]+)", href)   # DDG redirect → real URL
-        url = urllib.parse.unquote(m.group(1)) if m else href
-        if url.startswith("http") and url not in urls:
+        m = re.search(r"[?&]uddg=([^&]+)", href)        # DDG redirect → real URL
+        if m:
+            url = urllib.parse.unquote(m.group(1))
+        elif href.startswith("http"):
+            url = href
+        else:
+            continue
+        if url.startswith("http") and "duckduckgo.com" not in url and url not in urls:
             urls.append(url)
         if len(urls) >= limit:
             break

@@ -111,6 +111,11 @@ def run(feature_id, requirement, sources=None, specs_dir=None, verdict_dir=None,
     complete = complete or _complete
     gather = gather or _gather
     sources = sources or []
+    # Reasoning models (DeepSeek/Qwen) need real time to think — the default 75s
+    # NVIDIA cap (tuned to fail-fast in the build loop) makes the planner/PO time out and
+    # return nothing. The crew has no faster fallback here, so give it room (set once,
+    # before any threads). Respects an explicit override.
+    os.environ.setdefault("ADF_NVIDIA_TIMEOUT_SEC", "240")
     user_urls = [s["url"] for s in sources if s.get("url")]
     user_reqs = "\n".join(
         f"[{s.get('source','source')}] {s.get('requirements','')}"
@@ -222,7 +227,11 @@ def _render_spec(feature_id, r):
     for i, req in enumerate(r["requirements"], 1):
         rid = req.get("id") or f"REQ-{i:03d}"
         lines.append(f"### {rid}")
-        lines.append(f"The system SHALL {req.get('shall', '').lstrip('The system SHALL ').strip()}")
+        # Strip any leading "The system SHALL/shall " PREFIX (not chars) so we don't
+        # double it or mangle the first word (lstrip is a char-set, not a prefix).
+        shall = re.sub(r"^\s*the system shall\s+", "", req.get("shall", "").strip(),
+                       flags=re.I)
+        lines.append(f"The system SHALL {shall}")
         if req.get("acceptance"):
             lines.append(f"\n**Acceptance:** {req['acceptance']}")
         if req.get("source"):

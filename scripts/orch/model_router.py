@@ -35,7 +35,10 @@ _M = {
 # enforced by the assignment: drafts go to Super, verification to DeepSeek, and the PO's
 # two lenses are DIFFERENT lineages (verify=DeepSeek ∥ judge=Qwen).
 _ROSTER = {
-    "plan":       [("nvidia", _M["deepseek"])],                  # agentic decompose/plan
+    # plan is structured DECOMPOSITION (queries/categories/urls) — a fast, reliable
+    # JSON-emitter (Nemotron Super) beats a slow reasoning model that rambles past the
+    # JSON; DeepSeek is the fallback. (Reasoning is reserved for the PO/verify roles.)
+    "plan":       [("nvidia", _M["super"]), ("nvidia", _M["deepseek"])],
     "judge":      [("nvidia", _M["qwen"])],                      # PO lens B (≠ verify)
     "verify":     [("nvidia", _M["deepseek"])],                  # PO lens A — adversarial
     "cross_check": [("nvidia", _M["deepseek"])],                 # 2nd-opinion on the head
