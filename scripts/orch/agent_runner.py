@@ -1012,11 +1012,13 @@ def _nvidia_stream(url, headers, payload, timeout):
     return "".join(parts), usage
 
 
-def call_nvidia(messages, timeout):
+def call_nvidia(messages, timeout, model=None):
     key = (os.environ.get("NVIDIA_API_KEY") or os.environ.get("ORCH_NVIDIA_API_KEY") or "").strip()
     if not key:
         return None
-    model = os.environ.get("ADF_RUNNER_MODEL", "meta/llama-3.3-70b-instruct")
+    # `model` overrides the env default per-call (thread-safe — the requirements crew
+    # routes each subagent to a specific NIM model from its own thread).
+    model = model or os.environ.get("ADF_RUNNER_MODEL", "meta/llama-3.3-70b-instruct")
     base = os.environ.get("ORCH_NVIDIA_BASE_URL", NVIDIA_BASE).rstrip("/")
     # Cap NVIDIA's read time so a slow free-tier response fails FAST to the next
     # backend instead of hanging the whole build for minutes.
@@ -1073,11 +1075,13 @@ def _anthropic_stream(url, headers, payload, timeout):
     return "".join(parts), {"prompt_tokens": in_tok, "completion_tokens": out_tok}
 
 
-def call_anthropic(messages, timeout):
+def call_anthropic(messages, timeout, model=None):
     key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
     if not key:
         return None
-    model = os.environ.get("ADF_RUNNER_CLAUDE_MODEL", "claude-opus-4-8")
+    # `model` overrides the env default per-call (the crew routes the synthesis head to
+    # Opus while other agents run free on NIM — all from their own threads).
+    model = model or os.environ.get("ADF_RUNNER_CLAUDE_MODEL", "claude-opus-4-8")
     base = os.environ.get("ANTHROPIC_BASE_URL", ANTHROPIC_BASE).rstrip("/")
     system_text = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
     turns = [m for m in messages if m["role"] != "system"]
@@ -1132,9 +1136,9 @@ def _ollama_stream(url, headers, payload, timeout):
     return "".join(parts), {}
 
 
-def call_ollama(messages, timeout):
+def call_ollama(messages, timeout, model=None):
     host = (os.environ.get("ORCH_OLLAMA_HOST") or os.environ.get("OLLAMA_HOST") or "http://127.0.0.1:11434").rstrip("/")
-    model = os.environ.get("ORCH_OLLAMA_MODEL", "llama3.2")
+    model = model or os.environ.get("ORCH_OLLAMA_MODEL", "llama3.2")
     log(f"using local Ollama model {model}")
     url = f"{host}/api/chat"
     headers = {"Content-Type": "application/json"}
