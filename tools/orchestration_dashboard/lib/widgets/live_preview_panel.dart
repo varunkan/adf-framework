@@ -30,7 +30,6 @@ class LivePreviewPanel extends StatefulWidget {
     this.awaitingApproval = false,
     this.building = false,
     this.selectedPhase,
-    this.selectionNonce = 0,
     this.onApprove,
     this.onRevise,
   });
@@ -47,12 +46,9 @@ class LivePreviewPanel extends StatefulWidget {
   final bool building;
 
   /// A phase the user clicked in the pipeline rail — jumps to the Artifacts tab
-  /// and focuses that stage. Null when nothing is explicitly selected.
+  /// and focuses that stage. Null when nothing is explicitly selected. (Re-tapping
+  /// the same phase deselects it, so this always changes on a meaningful tap.)
   final int? selectedPhase;
-
-  /// Bumped on every rail tap; a change re-triggers the jump even when
-  /// [selectedPhase] is unchanged (re-tapping the same phase) (D6).
-  final int selectionNonce;
 
   /// Approve / request-changes for the phase awaiting review. Surfaced as a sticky
   /// banner in THIS panel (where the user is reading artifacts), so the gate is
@@ -128,9 +124,8 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
     }
     // The user clicked a phase in the rail → jump to the Artifacts tab so its
     // artifacts are front-and-centre (StageArtifacts then focuses the stage).
-    final tapped = oldWidget.selectedPhase != widget.selectedPhase ||
-        oldWidget.selectionNonce != widget.selectionNonce; // re-tap (D6)
-    if (tapped && widget.selectedPhase != null) {
+    if (oldWidget.selectedPhase != widget.selectedPhase &&
+        widget.selectedPhase != null) {
       _tabs.animateTo(_tabArtifacts);
     }
   }

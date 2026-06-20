@@ -43,9 +43,6 @@ class _FeatureDetailScreenState extends State<FeatureDetailScreen> {
   // True only after the user EXPLICITLY taps a phase in the rail (vs the default
   // highlight of the current phase) — gates the jump-to-artifacts behaviour.
   bool _phaseClicked = false;
-  // Monotonic — bumped on every rail tap so re-tapping the SAME phase still
-  // re-triggers the focus in LivePreviewPanel (D6).
-  int _selectionNonce = 0;
   // True while an approve/revise request is outstanding — disables both the banner
   // and the bar so the two surfaces can't double-submit (D10).
   bool _approvalInFlight = false;
@@ -1328,7 +1325,6 @@ $clarification
                   } else {
                     _viewPhase = p;
                     _phaseClicked = true;
-                    _selectionNonce++;
                   }
                 }),
               )
@@ -1348,7 +1344,6 @@ $clarification
           // Clicking a phase in the rail focuses that stage's artifacts (only on
           // an explicit tap, not the rail's default current-phase highlight).
           selectedPhase: _phaseClicked && _viewPhase > 0 ? _viewPhase : null,
-          selectionNonce: _selectionNonce,
           // Sticky review gate in the panel. Approve is one-click (safe); Request
           // changes prompts for what to change (D5), and both are disabled while a
           // request is in flight (D10).
