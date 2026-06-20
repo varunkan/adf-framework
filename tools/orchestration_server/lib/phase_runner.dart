@@ -1384,13 +1384,16 @@ Instructions:
             message: 'Build complete — wrote $fileCount file(s)',
           );
         } else if (resultText.trim().isNotEmpty && !isCodeDump(resultText)) {
+          // A genuine prose answer (chat result, no <<<FILE>>>): keep it nearly
+          // whole — the 2000 cap was for code dumps, which the isCodeDump guard
+          // above already excludes here.
           _traces.append(
             featureId: featureId,
             name: 'agent.result',
             event: 'afterAgentResponse',
             phase: phase,
-            reasoning: resultText.length > 2000
-                ? '${resultText.substring(0, 2000)}…'
+            reasoning: resultText.length > 8000
+                ? '${resultText.substring(0, 8000)}…'
                 : resultText,
           );
         }

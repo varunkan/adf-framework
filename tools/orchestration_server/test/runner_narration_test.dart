@@ -89,4 +89,27 @@ void main() {
       expect(PhaseRunner.isCodeDump('Generating the data layer now.'), isFalse);
     });
   });
+
+  test('a long PROSE result keeps up to 8000 chars, not 2000 (D14)', () {
+    final repo = Directory.systemTemp.createTempSync('adf-prose');
+    addTearDown(() => repo.existsSync() ? repo.deleteSync(recursive: true) : null);
+    final runner = PhaseRunner(FeatureStore(repo.path));
+
+    // ~11k chars of plain prose (no <<<FILE>>>, not code) → must NOT be cut to 2000.
+    final prose = 'The system stores each bookmark with its url and title. ' * 200;
+    runner.ingestAgentLine(
+        'demo', 2, jsonEncode({'type': 'result', 'result': prose}));
+
+    final spans = File(OrchestrationPaths(repo.path).otelTracesFile)
+        .readAsLinesSync()
+        .where((l) => l.trim().isNotEmpty)
+        .map((l) => jsonDecode(l) as Map<String, dynamic>)
+        .toList();
+    final result = spans.firstWhere((s) => s['name'] == 'agent.result');
+    final reasoning =
+        (result['attributes'] as Map)['agent.reasoning'] as String;
+    expect(reasoning.length, greaterThan(4000),
+        reason: 'a genuine prose answer must not be cut to the 2000 code-cap');
+    expect(reasoning.length, lessThanOrEqualTo(8001)); // 8000 + ellipsis
+  });
 }
