@@ -32,6 +32,16 @@ class Candidates(unittest.TestCase):
         self.assertNotEqual(mr.candidates("verify", KEYED)[0][1],
                             mr.candidates("judge", KEYED)[0][1])
 
+    def test_nemotron_ultra_is_the_free_high_power_head(self):
+        # free-only path → split/converge/judge HEADS use Nemotron Ultra 550B (free,
+        # high-power), but the high-VOLUME worker roles stay on fast models.
+        ultra = "nvidia/nemotron-3-ultra-550b-a55b"
+        self.assertEqual(mr.candidates("split", {})[0], ("nvidia", ultra))
+        self.assertEqual(mr.candidates("converge", {})[0][1], ultra)
+        self.assertEqual(mr.candidates("judge", {})[0][1], ultra)
+        self.assertNotEqual(mr.candidates("draft", {})[0][1], ultra)   # workers stay fast
+        self.assertNotEqual(mr.candidates("verify", {})[0][1], ultra)
+
     def test_role_override(self):
         env = {**KEYED, "ORCH_MODEL_DRAFT": "anthropic:claude-sonnet-4-6"}
         self.assertEqual(mr.candidates("draft", env)[0], ("anthropic", "claude-sonnet-4-6"))

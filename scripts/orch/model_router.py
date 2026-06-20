@@ -22,11 +22,13 @@ import os
 # 404 — so the strong free reasoner is deepseek-v4-pro; Qwen is qwen3.5-397b-a17b.)
 _M = {
     "deepseek": "deepseek-ai/deepseek-v4-pro",                  # strong reasoning (verifier)
+    "ultra": "nvidia/nemotron-3-ultra-550b-a55b",              # FREE high-power head (550B MoE,
+                                                               # reliable + deep; slow → heads only)
     "super": "nvidia/llama-3.3-nemotron-super-49b-v1.5",        # fast structured gen
     "llama70": "meta/llama-3.3-70b-instruct",                   # fast general
-    "qwen": "qwen/qwen3.5-397b-a17b",                           # long context + 2nd reasoner
+    "qwen": "qwen/qwen3.5-397b-a17b",                           # long context + fast reasoner
     "vision_nim": "meta/llama-3.2-90b-vision-instruct",         # free VLM
-    "opus": "claude-opus-4-8",                                  # frontier judgment
+    "opus": "claude-opus-4-8",                                  # frontier judgment (paid)
     "sonnet": "claude-sonnet-4-6",                              # vision + quality draft
 }
 
@@ -39,21 +41,23 @@ _ROSTER = {
     # JSON-emitter (Nemotron Super) beats a slow reasoning model that rambles past the
     # JSON; DeepSeek is the fallback. (Reasoning is reserved for the PO/verify roles.)
     "plan":       [("nvidia", _M["super"]), ("nvidia", _M["deepseek"])],
-    "judge":      [("nvidia", _M["qwen"])],                      # PO lens B (≠ verify)
-    "verify":     [("nvidia", _M["deepseek"])],                  # PO lens A — adversarial
+    # PO lens B — high-power reasoning, a DIFFERENT lineage than verify (Nemotron Ultra
+    # 550B, free) → perspective-diverse. Qwen fallback if Ultra is slow/down.
+    "judge":      [("nvidia", _M["ultra"]), ("nvidia", _M["qwen"])],
+    "verify":     [("nvidia", _M["deepseek"])],                  # PO lens A — adversarial (fast)
     "cross_check": [("nvidia", _M["deepseek"])],                 # 2nd-opinion on the head
     "draft":      [("nvidia", _M["super"])],                     # high-throughput drafting
     "extract":    [("nvidia", _M["llama70"])],                   # mechanical extraction
     "longctx":    [("nvidia", _M["qwen"])],                      # digest big corpora
     "vision":     [("anthropic", _M["sonnet"]), ("nvidia", _M["vision_nim"])],
-    "synthesis":  [("anthropic", _M["opus"]), ("nvidia", _M["deepseek"])],  # the HEAD
-    "questions":  [("anthropic", _M["opus"]), ("nvidia", _M["deepseek"])],  # human-facing
-    # The clarify-swarm HEADS — high-power + solid (split the requirement / converge the
-    # results). Opus when available; the FREE fallback is Qwen→Super (validated to emit
-    # clean large-JSON reliably — DeepSeek rambles past the JSON on big structured output,
-    # so it is NOT used for the heads even though it's a strong reasoner).
-    "split":      [("anthropic", _M["opus"]), ("nvidia", _M["qwen"]), ("nvidia", _M["super"])],
-    "converge":   [("anthropic", _M["opus"]), ("nvidia", _M["qwen"]), ("nvidia", _M["super"])],
+    # HEADS / judgment (few calls, quality is the deliverable): Opus (paid) → Nemotron
+    # ULTRA 550B (free HIGH-POWER, reliable line/JSON output) → Qwen (free, faster) →
+    # Super. Ultra is reserved for the LOW-VOLUME heads — the 1000s of workers stay on
+    # the fast models. DeepSeek is excluded from the heads (it rambles on big output).
+    "synthesis":  [("anthropic", _M["opus"]), ("nvidia", _M["ultra"]), ("nvidia", _M["qwen"])],
+    "questions":  [("anthropic", _M["opus"]), ("nvidia", _M["ultra"]), ("nvidia", _M["qwen"])],
+    "split":      [("anthropic", _M["opus"]), ("nvidia", _M["ultra"]), ("nvidia", _M["qwen"]), ("nvidia", _M["super"])],
+    "converge":   [("anthropic", _M["opus"]), ("nvidia", _M["ultra"]), ("nvidia", _M["qwen"]), ("nvidia", _M["super"])],
 }
 
 _DEFAULT = [("nvidia", _M["super"]), ("anthropic", _M["opus"]), ("ollama", None)]
