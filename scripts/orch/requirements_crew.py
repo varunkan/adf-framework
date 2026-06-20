@@ -239,12 +239,102 @@ def _render_po(r):
     lines = ["# PO validation", "",
              f"**Verdict:** {'PASS ✅' if r['po']['pass'] else 'REVISE ⚠'}", ""]
     if r["po"]["gaps"]:
-        lines += ["## Gaps", "", *[f"- {g}" for g in r["po"]["gaps"]], ""]
+        lines += ["## Gaps", "", *[f"- {_g(g)}" for g in r["po"]["gaps"]], ""]
     if r["open_questions"]:
         lines += ["## Open questions (confirm with the user)", "",
-                  *[f"- {q}" for q in r["open_questions"]], ""]
+                  *[f"- {_g(q)}" for q in r["open_questions"]], ""]
     if r["improvements"]:
-        lines += ["## Suggested improvements", "", *[f"- {i}" for i in r["improvements"]], ""]
+        lines += ["## Suggested improvements", "", *[f"- {_g(i)}" for i in r["improvements"]], ""]
     if r["cross_check"]:
-        lines += ["## Adversarial cross-check", "", *[f"- {i}" for i in r["cross_check"]], ""]
+        lines += ["## Adversarial cross-check", "", *[f"- {_g(i)}" for i in r["cross_check"]], ""]
     return "\n".join(lines)
+
+
+def _g(x):
+    """A model may return a gap/question as a string OR a {question/description/...}
+    dict — render either to one human line."""
+    if isinstance(x, dict):
+        return (x.get("question") or x.get("description") or x.get("issue")
+                or x.get("suggestion") or json.dumps(x))
+    return str(x)
+
+
+# --- CLI: invoked by the Dart orchestrator for phases 1-2 (like agent_runner) ----
+
+_CMD_LEAK = re.compile(r"^\s*@orch-orchestrator.*$|^\s*#\s*Builder:.*$", re.M)
+
+
+def clean_requirement(raw):
+    """Strip markdown scaffolding + the orchestrator command spam that leaks into
+    requirement.md (so the crew never ingests '@orch-orchestrator resume …' as a
+    requirement — the exact bug that produced the garbage spec)."""
+    raw = _CMD_LEAK.sub("", raw or "")
+    keep = []
+    for ln in raw.splitlines():
+        s = ln.strip()
+        if s.startswith("#") or re.match(r"^\*\*[^*]+:\*\*", s) or re.match(r"^[-=*_]{3,}$", s):
+            continue
+        keep.append(ln)
+    return "\n".join(keep).strip()
+
+
+def _load_sources(repo_root, sources_path):
+    """Read a sources.json the server wrote (docs/links/data/...) and pre-ingest the
+    document/data ones via doc_ingest; pass url/link entries through."""
+    if not sources_path or not os.path.isfile(sources_path):
+        return []
+    try:
+        raw = json.load(open(sources_path, encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    out = []
+    for s in raw if isinstance(raw, list) else []:
+        if s.get("url") or s.get("link"):
+            out.append({"url": s.get("url") or s.get("link")})
+        elif s.get("path"):
+            try:
+                import doc_ingest
+                out.append(doc_ingest.ingest(
+                    s["path"], complete=lambda p, r: _model_tuple(p, r)))
+            except Exception:  # noqa: BLE001
+                pass
+    return out
+
+
+def main():
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("feature_id")
+    ap.add_argument("--workspace", default=os.getcwd())
+    ap.add_argument("--sources", default=None)
+    args, _ = ap.parse_known_args()
+
+    import agent_runner
+    repo_root = os.environ.get("ORCH_REPO_ROOT", os.path.abspath(args.workspace))
+    agent_runner.load_env(repo_root)
+    fid = args.feature_id
+
+    req = ""
+    for d in (".cursor/orchestration", ".claude/orchestration", "orchestration"):
+        p = os.path.join(repo_root, d, "features", fid, "requirement.md")
+        if os.path.isfile(p):
+            with open(p, encoding="utf-8") as f:
+                req = f.read()
+            break
+    req = clean_requirement(req) or fid
+
+    sources = _load_sources(repo_root, args.sources)
+    specs_dir = os.path.join(repo_root, "specs", fid)
+    verdict_dir = os.path.join(repo_root, ".cursor", "orchestration", "features", fid,
+                               "judge-verdicts")
+    res = run(fid, req, sources=sources, specs_dir=specs_dir, verdict_dir=verdict_dir)
+    print(json.dumps({
+        "feature_id": fid, "requirements": len(res["requirements"]),
+        "po_pass": res["po"]["pass"], "gaps": len(res["po"]["gaps"]),
+        "open_questions": len(res["open_questions"]), "sources": res["sources"]}))
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main())

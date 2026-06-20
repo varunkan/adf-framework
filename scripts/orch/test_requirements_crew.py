@@ -83,5 +83,23 @@ class CrewRun(unittest.TestCase):
         self.assertNotIn("@orch-orchestrator", spec)
 
 
+class CleanRequirement(unittest.TestCase):
+    def test_strips_orchestrator_spam_and_scaffolding(self):
+        raw = ("# Requirement\n**Track:** M\n## Description\n"
+               "Build a Health Canada ANDS submission app.\n\n"
+               "## Client clarification\n@orch-orchestrator resume regulatory-affairs\n"
+               "# Builder: speckit-implement phase 7\n")
+        out = rc.clean_requirement(raw)
+        self.assertIn("Health Canada ANDS submission app", out)
+        self.assertNotIn("@orch-orchestrator", out)
+        self.assertNotIn("Builder:", out)
+        self.assertNotIn("**Track:**", out)
+
+    def test_renders_dict_or_string_gaps(self):
+        self.assertEqual(rc._g("plain gap"), "plain gap")
+        self.assertEqual(rc._g({"question": "Which modules?"}), "Which modules?")
+        self.assertEqual(rc._g({"issue": "untestable"}), "untestable")
+
+
 if __name__ == "__main__":
     unittest.main()
