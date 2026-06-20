@@ -23,7 +23,9 @@ class RecordAndRead(unittest.TestCase):
         self.assertIsNone(pf.read_process_facts(self.app))
 
     def test_verification_evidence_is_proven_with_stack_gates(self):
-        pf.record_verification(self.app, "react", "build + vitest passed; boots")
+        # Use the REAL stack string the pipeline seals (STACK_REACT value), not a
+        # nickname — a live build caught that "react" silently fell to the default.
+        pf.record_verification(self.app, "react-vite-sqlite", "build + vitest passed")
         facts = pf.read_process_facts(self.app)
         self.assertEqual(facts["schema"], "adf-process/1")
         ve = facts["facts"]["verification_evidence"]
@@ -35,7 +37,7 @@ class RecordAndRead(unittest.TestCase):
         self.assertEqual(facts["blocked"], [])
 
     def test_expo_and_stdlib_gate_lists_differ(self):
-        pf.record_verification(self.app, "expo")
+        pf.record_verification(self.app, "expo-rn")
         self.assertEqual(
             pf.read_process_facts(self.app)["facts"]["verification_evidence"]["gates"],
             ["typecheck", "test", "render"])

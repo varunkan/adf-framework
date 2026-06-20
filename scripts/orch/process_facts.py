@@ -33,10 +33,12 @@ PROCESS_DIR = ".adf-process"
 
 # The gates each stack's verifier (verify_app) runs — and that must ALL pass for it
 # to return ok. Listed structurally so a sealed build attests an explicit gate list
-# rather than an implicit `verified: true` boolean.
+# rather than an implicit `verified: true` boolean. Keys are the ACTUAL stack strings
+# (agent_runner.STACK_*), not nicknames — a live build seals stack="react-vite-sqlite",
+# so a "react" key here would silently fall to the default and under-report the gates.
 _STACK_GATES = {
-    "react": ["build", "test", "boot", "render"],
-    "expo": ["typecheck", "test", "render"],
+    "react-vite-sqlite": ["build", "test", "boot", "render"],
+    "expo-rn": ["typecheck", "test", "render"],
     "stdlib": ["test", "boot"],
 }
 
