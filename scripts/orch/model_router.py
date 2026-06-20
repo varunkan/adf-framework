@@ -17,31 +17,34 @@ Every model id is overridable (`ORCH_MODEL_<ROLE>=provider:model`,
 """
 import os
 
-# Concrete model ids per provider (NIM catalog ids; overridable via env).
+# Concrete model ids — VALIDATED live against the NVIDIA NIM catalog (free endpoint).
+# (DeepSeek R1 and Nemotron-Ultra-253B are listed but NOT served for inference there —
+# 404 — so the strong free reasoner is deepseek-v4-pro; Qwen is qwen3.5-397b-a17b.)
 _M = {
-    "r1": "deepseek-ai/deepseek-r1",                              # o1-class reasoning
-    "ultra": "nvidia/llama-3.1-nemotron-ultra-253b-v1",          # agentic reasoning
-    "super": "nvidia/llama-3.3-nemotron-super-49b-v1.5",         # fast structured gen
-    "llama70": "meta/llama-3.3-70b-instruct",                    # fast general
-    "qwen": "qwen/qwen3-235b-a22b",                              # long context
+    "deepseek": "deepseek-ai/deepseek-v4-pro",                  # strong reasoning (verifier)
+    "super": "nvidia/llama-3.3-nemotron-super-49b-v1.5",        # fast structured gen
+    "llama70": "meta/llama-3.3-70b-instruct",                   # fast general
+    "qwen": "qwen/qwen3.5-397b-a17b",                           # long context + 2nd reasoner
     "vision_nim": "meta/llama-3.2-90b-vision-instruct",         # free VLM
     "opus": "claude-opus-4-8",                                  # frontier judgment
     "sonnet": "claude-sonnet-4-6",                              # vision + quality draft
 }
 
 # role → ordered (provider, model) candidates. First AVAILABLE wins; the rest are
-# cross-provider fallback. Keyed by the CAPABILITY each role needs (the science above).
+# cross-provider fallback. The science (generator≠verifier, perspective diversity) is
+# enforced by the assignment: drafts go to Super, verification to DeepSeek, and the PO's
+# two lenses are DIFFERENT lineages (verify=DeepSeek ∥ judge=Qwen).
 _ROSTER = {
-    "plan":       [("nvidia", _M["ultra"])],                     # decompose / plan
-    "judge":      [("nvidia", _M["ultra"])],                     # holistic judgment (lens A)
-    "verify":     [("nvidia", _M["r1"])],                        # adversarial verification
-    "cross_check": [("nvidia", _M["r1"])],                       # 2nd-opinion on the head
+    "plan":       [("nvidia", _M["deepseek"])],                  # agentic decompose/plan
+    "judge":      [("nvidia", _M["qwen"])],                      # PO lens B (≠ verify)
+    "verify":     [("nvidia", _M["deepseek"])],                  # PO lens A — adversarial
+    "cross_check": [("nvidia", _M["deepseek"])],                 # 2nd-opinion on the head
     "draft":      [("nvidia", _M["super"])],                     # high-throughput drafting
     "extract":    [("nvidia", _M["llama70"])],                   # mechanical extraction
     "longctx":    [("nvidia", _M["qwen"])],                      # digest big corpora
     "vision":     [("anthropic", _M["sonnet"]), ("nvidia", _M["vision_nim"])],
-    "synthesis":  [("anthropic", _M["opus"]), ("nvidia", _M["ultra"])],  # the HEAD
-    "questions":  [("anthropic", _M["opus"]), ("nvidia", _M["ultra"])],  # human-facing
+    "synthesis":  [("anthropic", _M["opus"]), ("nvidia", _M["deepseek"])],  # the HEAD
+    "questions":  [("anthropic", _M["opus"]), ("nvidia", _M["deepseek"])],  # human-facing
 }
 
 _DEFAULT = [("nvidia", _M["super"]), ("anthropic", _M["opus"]), ("ollama", None)]

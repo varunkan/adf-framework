@@ -15,17 +15,22 @@ KEYED = {"ANTHROPIC_API_KEY": "x"}  # pretend Anthropic is available
 
 class Candidates(unittest.TestCase):
     def test_science_assignment(self):
-        # reasoning → verify on DeepSeek R1; drafting → Nemotron Super; head → Opus
-        self.assertEqual(mr.candidates("verify", KEYED)[0], ("nvidia", "deepseek-ai/deepseek-r1"))
+        # reasoning → verify on DeepSeek; drafting → Nemotron Super; head → Opus.
+        # (ids validated live against the NIM catalog.)
+        self.assertEqual(mr.candidates("verify", KEYED)[0], ("nvidia", "deepseek-ai/deepseek-v4-pro"))
         self.assertEqual(mr.candidates("draft", KEYED)[0][1], "nvidia/llama-3.3-nemotron-super-49b-v1.5")
         self.assertEqual(mr.candidates("synthesis", KEYED)[0], ("anthropic", "claude-opus-4-8"))
-        self.assertEqual(mr.candidates("plan", KEYED)[0][1], "nvidia/llama-3.1-nemotron-ultra-253b-v1")
+        self.assertEqual(mr.candidates("extract", KEYED)[0][1], "meta/llama-3.3-70b-instruct")
 
     def test_generator_ne_verifier(self):
-        # drafts and verification must be DIFFERENT model lineages
-        draft = mr.candidates("draft", KEYED)[0][1]
-        verify = mr.candidates("verify", KEYED)[0][1]
-        self.assertNotEqual(draft, verify)
+        # drafts and verification must be DIFFERENT model lineages (uncorrelated errors)
+        self.assertNotEqual(mr.candidates("draft", KEYED)[0][1],
+                            mr.candidates("verify", KEYED)[0][1])
+
+    def test_po_lenses_are_perspective_diverse(self):
+        # the PO's two reasoners (verify ∥ judge) must be different models
+        self.assertNotEqual(mr.candidates("verify", KEYED)[0][1],
+                            mr.candidates("judge", KEYED)[0][1])
 
     def test_role_override(self):
         env = {**KEYED, "ORCH_MODEL_DRAFT": "anthropic:claude-sonnet-4-6"}
@@ -54,7 +59,7 @@ class Complete(unittest.TestCase):
             return ("ok-from-" + model, {"tok": 1})
 
         out = mr.complete("hi", "verify", env=KEYED, call=fake)
-        self.assertEqual(out[0], "ok-from-deepseek-ai/deepseek-r1")
+        self.assertEqual(out[0], "ok-from-deepseek-ai/deepseek-v4-pro")
         self.assertEqual(len(calls), 1)  # first candidate succeeded
 
     def test_falls_through_on_empty(self):
