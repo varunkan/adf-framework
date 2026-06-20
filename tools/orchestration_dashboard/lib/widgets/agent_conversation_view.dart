@@ -402,13 +402,13 @@ class _WaitingForThoughtsState extends State<_WaitingForThoughts> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.hourglass_empty_outlined, size: 18, color: color),
+          Icon(Icons.auto_awesome_outlined, size: 18, color: color),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               _showSpinner
-                  ? 'Waiting for trace output from the agent…'
-                  : 'Agent is working (stream quiet). Your message is already saved — you can send another or use Cancel run.',
+                  ? 'ADF is working on your feature…'
+                  : 'Still working — this can take up to a minute. Your message is saved; you can send another or cancel the run.',
               style: TextStyle(fontSize: 12, color: color),
             ),
           ),
@@ -436,12 +436,13 @@ class _EmptyState extends StatelessWidget {
             Icon(Icons.chat_outlined, size: 56, color: scheme.outline),
             const SizedBox(height: 16),
             Text(
-              'No messages yet',
+              'Ready to build',
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 8),
             Text(
-              'Send a message — reasoning and tool steps appear here live.',
+              'Describe what you want — ADF will spec, plan, test, and build it, '
+              'narrating each step here.',
               textAlign: TextAlign.center,
               style: TextStyle(color: scheme.onSurfaceVariant),
             ),

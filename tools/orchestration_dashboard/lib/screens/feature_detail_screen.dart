@@ -424,6 +424,38 @@ $clarification
 4. Re-run phase $phase builders and BMAD review until judge verdict is **PASS**.''';
   }
 
+  /// A human-friendly label for an internal step id (e.g. 'bmad-review-phase-3'
+  /// → 'Reviewing with the AI panel'). Prefers the pipeline's own label, then a
+  /// keyword map, then a prettified id — never the raw machine id.
+  String _humanStepLabel(String? id, int? phase) {
+    if (id == null || id.trim().isEmpty) {
+      return phase != null ? 'Phase $phase' : 'Working…';
+    }
+    for (final ph in _phases) {
+      for (final s
+          in ((ph['steps'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ??
+              const [])) {
+        if (s['id'] == id) {
+          final label = (s['label'] ?? s['title'] ?? s['name']) as String?;
+          if (label != null && label.trim().isNotEmpty) return label.trim();
+        }
+      }
+    }
+    final l = id.toLowerCase();
+    if (l.contains('review')) return 'Reviewing with the AI panel';
+    if (l.contains('spec')) return 'Writing the spec';
+    if (l.contains('plan')) return 'Planning';
+    if (l.contains('task')) return 'Breaking down tasks';
+    if (l.contains('test')) return 'Writing tests';
+    if (l.contains('implement') || l.contains('build') || l.contains('code')) {
+      return 'Building';
+    }
+    if (l.contains('intake') || l.contains('problem')) {
+      return 'Capturing requirements';
+    }
+    return id.replaceAll(RegExp(r'[-_]'), ' ').trim();
+  }
+
   String? _promptForCurrentStep() {
     if (_currentStepId == null) return null;
     for (final ph in _phases) {
@@ -1014,8 +1046,9 @@ $clarification
       elapsed: elapsed,
       error: error,
       judgeVerdict: state['last_judge_verdict'] as String? ?? 'revise',
-      stepLabel:
-          '${run?['step_id'] ?? _currentStepId ?? 'phase ${run?['phase']}'}',
+      stepLabel: _humanStepLabel(
+          (run?['step_id'] as String?) ?? _currentStepId,
+          (run?['phase'] as num?)?.toInt()),
       ideMode: run?['resume_mode'] == 'cursor_ide' ||
           run?['headless_unavailable'] == true,
       ideHint: run?['hint'] as String?,
