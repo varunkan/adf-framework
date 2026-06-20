@@ -30,7 +30,7 @@ class ToolNarration {
       return u != null ? 'Fetching ${_domain(u)}' : 'Fetching a page';
     }
     final p = _path(input);
-    return p != null ? 'Using $name · $p' : 'Using $name';
+    return p != null ? 'Using $display · $p' : 'Using $display';
   }
 
   // --- helpers ---------------------------------------------------------------
