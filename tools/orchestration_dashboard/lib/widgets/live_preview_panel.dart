@@ -29,6 +29,7 @@ class LivePreviewPanel extends StatefulWidget {
     this.combinedRecommendation,
     this.awaitingApproval = false,
     this.building = false,
+    this.selectedPhase,
   });
 
   final ApiClient api;
@@ -41,6 +42,10 @@ class LivePreviewPanel extends StatefulWidget {
   final String? combinedRecommendation;
   final bool awaitingApproval;
   final bool building;
+
+  /// A phase the user clicked in the pipeline rail — jumps to the Artifacts tab
+  /// and focuses that stage. Null when nothing is explicitly selected.
+  final int? selectedPhase;
 
   @override
   State<LivePreviewPanel> createState() => _LivePreviewPanelState();
@@ -101,6 +106,12 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
         oldWidget.featureId != widget.featureId) {
       _wakePoll();
       _load(silent: true);
+    }
+    // The user clicked a phase in the rail → jump to the Artifacts tab so its
+    // artifacts are front-and-centre (StageArtifacts then focuses the stage).
+    if (oldWidget.selectedPhase != widget.selectedPhase &&
+        widget.selectedPhase != null) {
+      _tabs.animateTo(5); // Artifacts
     }
   }
 
@@ -306,13 +317,34 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
           labelColor: StudioTheme.accent,
           unselectedLabelColor: Colors.white54,
           indicatorColor: StudioTheme.accent,
-          tabs: const [
-            Tab(text: 'App'),
-            Tab(text: 'Overview'),
-            Tab(text: 'Data'),
-            Tab(text: 'Spec'),
-            Tab(text: 'Crew'),
-            Tab(text: 'Artifacts'),
+          tabs: [
+            const Tab(text: 'App'),
+            const Tab(text: 'Overview'),
+            const Tab(text: 'Data'),
+            const Tab(text: 'Spec'),
+            const Tab(text: 'Crew'),
+            Tab(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('Artifacts'),
+                    if (widget.selectedPhase != null) ...[
+                      const SizedBox(width: 5),
+                      Container(
+                        width: 7,
+                        height: 7,
+                        decoration: const BoxDecoration(
+                          color: StudioTheme.accent,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
           ],
         ),
         Expanded(
@@ -578,8 +610,11 @@ class _LivePreviewPanelState extends State<LivePreviewPanel>
   // The Artifacts tab is now a per-stage browser: every phase's artifacts, each
   // clickable to read its full content (problem → spec → plan → tasks → tests →
   // review → code). Available during AND after the build.
-  Widget _artifactsTab(BuildContext context) =>
-      StageArtifacts(api: widget.api, featureId: widget.featureId);
+  Widget _artifactsTab(BuildContext context) => StageArtifacts(
+        api: widget.api,
+        featureId: widget.featureId,
+        selectedPhase: widget.selectedPhase,
+      );
 
   Widget _skeleton(BuildContext context) {
     return ListView(

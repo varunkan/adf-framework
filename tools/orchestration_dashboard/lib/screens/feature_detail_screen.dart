@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 
 import '../main.dart';
 import '../services/api_client.dart';
@@ -37,6 +38,9 @@ class _FeatureDetailScreenState extends State<FeatureDetailScreen> {
   bool _loading = true;
   bool _starting = false;
   int _viewPhase = 0;
+  // True only after the user EXPLICITLY taps a phase in the rail (vs the default
+  // highlight of the current phase) — gates the jump-to-artifacts behaviour.
+  bool _phaseClicked = false;
   Timer? _poll;
   bool _loadInFlight = false;
   int _pollTick = 0;
@@ -810,6 +814,9 @@ $clarification
       content = 'Could not load: $e';
     }
     if (!mounted) return;
+    // Spec/plan/tasks/test docs are markdown — render them formatted, not as a
+    // monospace dump. Code/other files keep the monospace view.
+    final isMarkdown = name.toLowerCase().endsWith('.md');
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -818,10 +825,13 @@ $clarification
           width: 660,
           height: 460,
           child: SingleChildScrollView(
-            child: SelectableText(
-              content,
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-            ),
+            child: isMarkdown
+                ? MarkdownBody(data: content, selectable: true)
+                : SelectableText(
+                    content,
+                    style:
+                        const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                  ),
           ),
         ),
         actions: [
@@ -1227,7 +1237,10 @@ $clarification
                 currentPhase: phase > 0 ? phase : 1,
                 selectedPhase: _viewPhase > 0 ? _viewPhase : (phase > 0 ? phase : 1),
                 currentStepId: _currentStepId,
-                onPhaseTap: (p) => setState(() => _viewPhase = p),
+                onPhaseTap: (p) => setState(() {
+                  _viewPhase = p;
+                  _phaseClicked = true;
+                }),
               )
             : null,
         preview: LivePreviewPanel(
@@ -1242,6 +1255,9 @@ $clarification
               _detail!['combined_recommendation'] as String?,
           awaitingApproval: awaiting,
           building: _autopilotRunning || _isRunning,
+          // Clicking a phase in the rail focuses that stage's artifacts (only on
+          // an explicit tap, not the rail's default current-phase highlight).
+          selectedPhase: _phaseClicked && _viewPhase > 0 ? _viewPhase : null,
         ),
       ),
     );

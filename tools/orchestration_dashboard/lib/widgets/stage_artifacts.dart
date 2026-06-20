@@ -9,10 +9,19 @@ import '../services/api_client.dart';
 /// — during and after the build. Reuses the existing `listArtifacts`/`getArtifact`
 /// API; no server change needed.
 class StageArtifacts extends StatefulWidget {
-  const StageArtifacts({super.key, required this.api, required this.featureId});
+  const StageArtifacts({
+    super.key,
+    required this.api,
+    required this.featureId,
+    this.selectedPhase,
+  });
 
   final ApiClient api;
   final String featureId;
+
+  /// When set (a phase was clicked in the rail), that stage's section is
+  /// expanded, highlighted, and scrolled into view; others collapse.
+  final int? selectedPhase;
 
   @override
   State<StageArtifacts> createState() => _StageArtifactsState();
@@ -59,10 +68,46 @@ class _StageArtifactsState extends State<StageArtifacts> {
   bool _loading = true;
   String? _error;
 
+  final ScrollController _scroll = ScrollController();
+  final Map<int, GlobalKey> _sectionKeys = {};
+  // ExpansionTile.controller still takes ExpansionTileController in this SDK.
+  // ignore: deprecated_member_use
+  final Map<int, ExpansionTileController> _controllers = {};
+
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant StageArtifacts old) {
+    super.didUpdateWidget(old);
+    if (old.selectedPhase != widget.selectedPhase &&
+        widget.selectedPhase != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _focusSelected());
+    }
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  /// Expand + scroll the selected stage into view (best-effort — the section may
+  /// not be laid out yet on first paint).
+  void _focusSelected() {
+    final p = widget.selectedPhase;
+    if (p == null || !mounted) return;
+    try {
+      _controllers[p]?.expand();
+    } catch (_) {}
+    final ctx = _sectionKeys[p]?.currentContext;
+    if (ctx != null) {
+      Scrollable.ensureVisible(ctx,
+          duration: const Duration(milliseconds: 300), alignment: 0.05);
+    }
   }
 
   Future<void> _load() async {
@@ -86,6 +131,9 @@ class _StageArtifactsState extends State<StageArtifacts> {
         }
       }
       if (mounted) setState(() => _byPhase = byPhase);
+      if (widget.selectedPhase != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => _focusSelected());
+      }
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     } finally {
@@ -142,6 +190,7 @@ class _StageArtifactsState extends State<StageArtifacts> {
     final phases = _stages.keys.toList()..sort();
     return ListView(
       key: const Key('stage-artifacts'),
+      controller: _scroll,
       padding: const EdgeInsets.all(12),
       children: [
         Row(
@@ -164,12 +213,30 @@ class _StageArtifactsState extends State<StageArtifacts> {
   }
 
   Widget _stageSection(int phase, List<Map<String, dynamic>> items) {
-    return ExpansionTile(
-      key: Key('stage-$phase'),
-      initiallyExpanded: true,
-      tilePadding: const EdgeInsets.symmetric(horizontal: 4),
-      title: Text('$phase · ${_stages[phase]}',
-          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+    final selected = widget.selectedPhase == phase;
+    final controller =
+        // ignore: deprecated_member_use
+        _controllers.putIfAbsent(phase, () => ExpansionTileController());
+    final sectionKey = _sectionKeys.putIfAbsent(phase, () => GlobalKey());
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      key: sectionKey,
+      margin: const EdgeInsets.symmetric(vertical: 2),
+      decoration: selected
+          ? BoxDecoration(
+              border: Border.all(color: scheme.primary.withValues(alpha: 0.55)),
+              borderRadius: BorderRadius.circular(8),
+              color: scheme.primary.withValues(alpha: 0.05),
+            )
+          : null,
+      child: ExpansionTile(
+        key: Key('stage-$phase'),
+        controller: controller,
+        // Selected → only that stage opens; no selection → browse all open.
+        initiallyExpanded: widget.selectedPhase == null || selected,
+        tilePadding: const EdgeInsets.symmetric(horizontal: 4),
+        title: Text('$phase · ${_stages[phase]}',
+            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
       subtitle: Text('${items.length} artifact${items.length == 1 ? '' : 's'}',
           style: const TextStyle(fontSize: 11)),
       children: [
@@ -187,7 +254,8 @@ class _StageArtifactsState extends State<StageArtifacts> {
             trailing: const Icon(Icons.open_in_full, size: 14),
             onTap: () => _view(f['path'] as String, f['name'] as String),
           ),
-      ],
+        ],
+      ),
     );
   }
 }
