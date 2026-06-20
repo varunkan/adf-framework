@@ -43,6 +43,12 @@ class _FeatureDetailScreenState extends State<FeatureDetailScreen> {
   // True only after the user EXPLICITLY taps a phase in the rail (vs the default
   // highlight of the current phase) — gates the jump-to-artifacts behaviour.
   bool _phaseClicked = false;
+  // Monotonic — bumped on every rail tap so re-tapping the SAME phase still
+  // re-triggers the focus in LivePreviewPanel (D6).
+  int _selectionNonce = 0;
+  // True while an approve/revise request is outstanding — disables both the banner
+  // and the bar so the two surfaces can't double-submit (D10).
+  bool _approvalInFlight = false;
   Timer? _poll;
   bool _loadInFlight = false;
   int _pollTick = 0;
@@ -881,6 +887,7 @@ $clarification
   }
 
   Future<void> _approve(String decision, {String notes = ''}) async {
+    if (_approvalInFlight) return; // D10: no concurrent submit
     final approvePhase = _pendingPhase > 0 ? _pendingPhase : _phase;
     // The crew's spec phases (1-6) are deterministic — there is no judge verdict
     // — so the human's review of the spec/plan/tests IS the approval. Detect
@@ -912,6 +919,7 @@ $clarification
       );
       return;
     }
+    setState(() => _approvalInFlight = true);
     try {
       final updated = await widget.api.approve(
         id: widget.featureId,
@@ -927,6 +935,8 @@ $clarification
     } catch (e) {
       if (!mounted) return;
       showMessage(context, e.toString());
+    } finally {
+      if (mounted) setState(() => _approvalInFlight = false);
     }
   }
 
@@ -941,8 +951,10 @@ $clarification
       );
       return;
     }
+    if (_approvalInFlight) return; // D10: no concurrent submit
     final phase = _pendingPhase > 0 ? _pendingPhase : _phase;
     final verdict = _judgeVerdict;
+    setState(() => _approvalInFlight = true);
     try {
       await widget.api.approve(
         id: widget.featureId,
@@ -979,7 +991,39 @@ $clarification
     } catch (e) {
       if (!mounted) return;
       showMessage(context, e.toString());
+    } finally {
+      if (mounted) setState(() => _approvalInFlight = false);
     }
+  }
+
+  /// D5: the in-panel "Request changes" must capture WHAT to change (and not
+  /// bypass the confirm gate / discard typed notes). Prompt for a note, then run
+  /// the same confirmed-revise path the detailed bar uses.
+  Future<void> _promptRevise() async {
+    final controller = TextEditingController();
+    final note = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Request changes'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLines: 3,
+          decoration: const InputDecoration(
+            hintText: 'What should change? (the AI review is also used)',
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+              child: const Text('Request changes')),
+        ],
+      ),
+    );
+    if (note == null) return; // cancelled
+    await _clarifyAndRedo(note, clientConfirmed: true);
   }
 
   bool _autopilotRunning = false;
@@ -1277,8 +1321,15 @@ $clarification
                 selectedPhase: _viewPhase > 0 ? _viewPhase : (phase > 0 ? phase : 1),
                 currentStepId: _currentStepId,
                 onPhaseTap: (p) => setState(() {
-                  _viewPhase = p;
-                  _phaseClicked = true;
+                  // Re-tapping the selected phase deselects it (returns to
+                  // auto-follow + clears the dot); tapping another selects it (D6).
+                  if (_phaseClicked && _viewPhase == p) {
+                    _phaseClicked = false;
+                  } else {
+                    _viewPhase = p;
+                    _phaseClicked = true;
+                    _selectionNonce++;
+                  }
                 }),
               )
             : null,
@@ -1297,10 +1348,13 @@ $clarification
           // Clicking a phase in the rail focuses that stage's artifacts (only on
           // an explicit tap, not the rail's default current-phase highlight).
           selectedPhase: _phaseClicked && _viewPhase > 0 ? _viewPhase : null,
-          // Sticky review gate in the panel: Approve, or one-click Request changes.
-          onApprove: awaiting ? () => _approve('approved') : null,
-          onRevise:
-              awaiting ? () => _clarifyAndRedo('', clientConfirmed: true) : null,
+          selectionNonce: _selectionNonce,
+          // Sticky review gate in the panel. Approve is one-click (safe); Request
+          // changes prompts for what to change (D5), and both are disabled while a
+          // request is in flight (D10).
+          onApprove:
+              awaiting && !_approvalInFlight ? () => _approve('approved') : null,
+          onRevise: awaiting && !_approvalInFlight ? _promptRevise : null,
         ),
       ),
     );

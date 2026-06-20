@@ -152,4 +152,48 @@ void main() {
     expect(tabBar.controller!.index, 3,
         reason: 'Spec is tab index 3; the action used to open Data (2)');
   });
+
+  testWidgets('approval banner surfaces Approve + Request changes and wires them (D5)',
+      (tester) async {
+    final api = ApiClient(
+      baseUrl: 'http://test',
+      client: MockClient((_) async => http.Response(
+            jsonEncode({
+              'integrity': {'valid': true, 'sealed_files': 0, 'breaches': []},
+              'crew': {'agents': [], 'completed': 0, 'total': 0, 'running': false},
+              'artifacts': [],
+              'building': false,
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          )),
+    );
+    var revised = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: StudioTheme.dark(),
+        home: Scaffold(
+          body: LivePreviewPanel(
+            api: api,
+            featureId: 'demo',
+            phase: 3,
+            status: 'awaiting_approval',
+            requirement: 'x',
+            awaitingApproval: true,
+            onApprove: () {},
+            onRevise: () => revised = true,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Approve'), findsOneWidget);
+    expect(find.text('Request changes'), findsOneWidget);
+    // Request changes routes to onRevise (the screen opens a note dialog — it does
+    // NOT blind-submit), not a direct API call.
+    await tester.tap(find.text('Request changes'));
+    await tester.pump();
+    expect(revised, isTrue);
+  });
 }
