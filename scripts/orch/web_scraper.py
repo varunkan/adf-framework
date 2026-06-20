@@ -100,16 +100,30 @@ def _html_to_text(raw):
     return p.title, text
 
 
+_BLOCKED = re.compile(r"\b(401|403|unauthorized|access denied|forbidden|captcha|"
+                      r"are you a robot|reference #\w)\b", re.I)
+
+
+def _is_thin(md, minlen=1200):
+    """A scraping service can return a THIN block/401/JS-gated stub (e.g. Jina got 731
+    chars of a 401 page from FDA.gov while a plain GET returned the full 44KB). Treat
+    that as a miss so we fall back to the plain fetch, which often gets MORE."""
+    if not md or len(md.strip()) < minlen:
+        return True
+    return bool(_BLOCKED.search(md[:400]))
+
+
 def fetch_text(url, env=None, fetch=None):
     """Return {url, title, markdown} for a URL via the configured scraper, or None.
-    Tries the service first, then a plain GET + stdlib de-boilerplate."""
+    Tries the service first; if it returns a THIN/blocked stub, falls back to a plain GET
+    + stdlib de-boilerplate (which frequently retrieves more than a throttled service)."""
     env = env if env is not None else os.environ
     fetch = fetch or _http_get
     scraper = env.get("ADF_SCRAPER", "jina").strip().lower()
 
     if scraper == "jina":
         md = fetch("https://r.jina.ai/" + url)
-        if md and md.strip():
+        if md and not _is_thin(md):
             title = next((ln[2:].strip() for ln in md.splitlines()
                           if ln.startswith("# ")), url)
             return {"url": url, "title": title, "markdown": md.strip()}

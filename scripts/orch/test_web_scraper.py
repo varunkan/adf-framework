@@ -28,10 +28,22 @@ class FetchText(unittest.TestCase):
     def test_jina_service_path(self):
         def fetch(u, timeout=20):
             self.assertTrue(u.startswith("https://r.jina.ai/"))
-            return "# Health Canada ANDS\n\nAbbreviated New Drug Submission guidance."
+            return ("# Health Canada ANDS\n\n"
+                    + "Abbreviated New Drug Submission guidance. " * 40)  # not thin
         page = ws.fetch_text("https://example.com/ands", {"ADF_SCRAPER": "jina"}, fetch)
         self.assertEqual(page["title"], "Health Canada ANDS")
         self.assertIn("Abbreviated New Drug Submission", page["markdown"])
+
+    def test_thin_or_blocked_service_falls_back_to_plain_get(self):
+        # Jina returned a 731-char 401 stub for FDA while a plain GET got 44KB — so a
+        # thin/blocked service result must fall back to the plain fetch.
+        def fetch(u, timeout=20):
+            if u.startswith("https://r.jina.ai/"):
+                return "401 Unauthorized"                      # thin block stub
+            return "<title>Real</title><body>" + ("full eCTD content " * 200) + "</body>"
+        page = ws.fetch_text("https://www.fda.gov/ectd", {"ADF_SCRAPER": "jina"}, fetch)
+        self.assertEqual(page["title"], "Real")
+        self.assertIn("full eCTD content", page["markdown"])   # got it via fallback
 
     def test_fallback_plain_get_when_no_service(self):
         def fetch(u, timeout=20):
@@ -70,9 +82,9 @@ class ScrapeAndGather(unittest.TestCase):
         self.assertEqual(note["citations"], ["https://x/ectd"])
 
     def test_gather_prioritizes_user_urls_then_search(self):
-        pages = {
-            "https://user.test/doc": "# User\n\nuser-provided requirements doc",
-            "https://hit.test/a": "# Hit\n\nsearched page",
+        pages = {  # > thin-threshold so the service result is used (not the fallback)
+            "https://user.test/doc": "# User\n\n" + "user-provided requirements doc " * 50,
+            "https://hit.test/a": "# Hit\n\n" + "searched page content " * 50,
         }
 
         def fetch(u, timeout=20):
