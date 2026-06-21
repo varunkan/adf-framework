@@ -10,6 +10,7 @@ import '../services/sse_connector_stub.dart'
     if (dart.library.html) '../services/sse_connector_web.dart';
 import '../theme/orchestration_colors.dart';
 import '../utils/plain_thought_formatter.dart';
+import '../utils/live_span_cap.dart';
 import 'activity_card.dart';
 import 'plain_thought_view.dart';
 
@@ -169,9 +170,9 @@ class _AgentConversationViewState extends State<AgentConversationView> {
       if (span.isRunnerControlEvent || span.name == 'file.write') {
         // Typed card — but drop control noise (cardKind HIDDEN), exactly as the
         // prose formatter already filters out runner.superseded / cancel.
-        if (span.cardKind != 'HIDDEN') _activitySpans.add(span);
+        if (span.cardKind != 'HIDDEN') capLiveSpans(_activitySpans..add(span));
       } else {
-        _liveSpans.add(span);
+        capLiveSpans(_liveSpans..add(span)); // bound the tail over a long build
       }
       if (span.timestamp.isNotEmpty) _since = span.timestamp;
     });

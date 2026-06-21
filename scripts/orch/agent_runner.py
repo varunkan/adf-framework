@@ -63,11 +63,20 @@ def emit_result(text, usage=None):
     print(json.dumps(evt), flush=True)
 
 
+_emit_lock = threading.Lock()
+
+
 def emit_event(obj):
     """A structured progress line on stdout the phase runner narrates live (so a
     1-3 min build doesn't go dark). Any `type` other than 'result' is progress;
-    the runner's final answer is still the single emit_result line."""
-    print(json.dumps(obj), flush=True)
+    the runner's final answer is still the single emit_result line.
+
+    Lock-guarded: the generation-heartbeat WATCHDOG runs on its own thread while the
+    main thread also emits, and an unguarded print()+flush could interleave two
+    threads' output into one corrupt JSONL line the server can't parse."""
+    line = json.dumps(obj)  # serialize off-lock (CPU); only the write is serialized
+    with _emit_lock:
+        print(line, flush=True)
 
 
 def narrate(kind, **fields):

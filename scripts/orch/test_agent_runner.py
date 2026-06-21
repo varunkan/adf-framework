@@ -1389,6 +1389,28 @@ class GenerationHeartbeat(unittest.TestCase):
         progress = [e for e in events if e.get("type") == "generating_progress"]
         self.assertEqual(len(progress), 0)
 
+    def test_concurrent_emits_never_interleave_a_jsonl_line(self):
+        # The watchdog thread + main thread both emit; every line on stdout must
+        # remain a parseable JSON object (no interleaving — the _emit_lock invariant).
+        import threading as _t
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            threads = [
+                _t.Thread(target=lambda i=i: [
+                    ar.emit_event({"type": "generating_progress", "elapsed": i, "n": k})
+                    for k in range(50)
+                ])
+                for i in range(8)
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        lines = [ln for ln in buf.getvalue().splitlines() if ln.strip()]
+        self.assertEqual(len(lines), 8 * 50)
+        for ln in lines:                       # every line is valid JSON → no interleave
+            json.loads(ln)
+
     def test_watchdog_emits_on_the_blocking_path_and_stops(self):
         # E1: the DEFAULT (non-streaming) generate() is a blocking call with no
         # deltas; a watchdog must keep the feed alive and stop cleanly.
