@@ -1003,7 +1003,7 @@ def http_post_stream(url, headers, payload, timeout):
     return _iter()
 
 
-_STREAM_HEARTBEAT_CHARS = 1500  # emit one NL progress pulse per ~this many chars
+_STREAM_HEARTBEAT_CHARS = 800  # S2: one NL progress pulse per ~this many chars (was 1500 — too sparse)
 _stream_chars = 0
 _stream_emitted = 0
 
@@ -1038,8 +1038,13 @@ class _GenerationHeartbeat:
     fires, so the live feed never goes dark during a long BLOCKING model call (E1).
     Daemon thread; start() then stop() exactly once."""
 
-    def __init__(self, interval=6.0):
-        self.interval = interval
+    def __init__(self, interval=None):
+        # S2: sub-2s default so the live reasoning feed never goes dark for long
+        # (the old 6s left multi-second waits). Tunable via ADF_GEN_HEARTBEAT_SEC;
+        # an explicit arg (tests) wins.
+        self.interval = (
+            interval if interval is not None
+            else float(os.environ.get("ADF_GEN_HEARTBEAT_SEC", "1.5")))
         self._stop = threading.Event()
         self._thread = None
         self._ticks = 0

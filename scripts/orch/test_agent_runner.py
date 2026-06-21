@@ -1426,6 +1426,16 @@ class GenerationHeartbeat(unittest.TestCase):
         self.assertEqual(len(progress), n, "no heartbeat after stop()")
         self.assertNotIn("<<<FILE", json.dumps(progress))
 
+    def test_default_heartbeat_interval_is_sub_2s(self):
+        # S2: the live feed must move at least ~every 2s during a long blocking
+        # generate(); the old 6s default left multi-second dark gaps (the user's
+        # "sometimes it waited" complaint).
+        self.assertLess(ar._GenerationHeartbeat().interval, 2.0)
+
+    def test_heartbeat_interval_env_override(self):
+        with mock.patch.dict(os.environ, {"ADF_GEN_HEARTBEAT_SEC": "0.5"}):
+            self.assertEqual(ar._GenerationHeartbeat().interval, 0.5)
+
 
 class GenerateModelRouting(unittest.TestCase):
     """G10 — generate()/call_with_retry() accept an optional per-call model= that
