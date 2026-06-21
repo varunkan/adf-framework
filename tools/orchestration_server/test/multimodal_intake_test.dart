@@ -343,6 +343,54 @@ void main() {
       expect(after, before, reason: 'a rejected upload must not touch sources.json');
     });
 
+    // AC-5: a valid multipart body whose parts ALL lack a filename parameter
+    // (zero file parts) → HTTP 400.
+    //
+    // The production guard lives at bin/server.dart:1523-1524:
+    //   if (savedPaths.isEmpty) {
+    //     return _json({'error': 'no file parts found'}, status: 400);
+    //   }
+    // Removing those two lines makes this test fail (savedPaths stays empty and
+    // the handler falls through to writing sources.json + returning 200).
+    // That is the mutation-check: the guard has real teeth.
+    test('multipart body with zero file parts returns 400', () async {
+      final id = await createFeature();
+      // Build a multipart body with one text field (no filename= parameter in
+      // Content-Disposition).  The server will drain this part as a non-file
+      // field, leave savedPaths empty, and hit the guard.
+      const boundary = 'adfBoundaryAC5';
+      final part = '--$boundary\r\n'
+          'Content-Disposition: form-data; name="comment"\r\n\r\n'
+          'no filename here'
+          '\r\n--$boundary--\r\n';
+      final body = utf8.encode(part);
+
+      final srcFile =
+          File('$repoRoot/${store.paths.featureRel(id, 'sources.json')}');
+      final before =
+          srcFile.existsSync() ? srcFile.readAsStringSync() : null;
+
+      final client = HttpClient();
+      try {
+        final req = await client
+            .postUrl(Uri.parse('http://127.0.0.1:$port/features/$id/upload'));
+        req.headers.set(HttpHeaders.contentTypeHeader,
+            'multipart/form-data; boundary=$boundary');
+        req.add(body);
+        final resp = await req.close();
+        final respBody = await resp.transform(utf8.decoder).join();
+        expect(resp.statusCode, 400, reason: respBody);
+      } finally {
+        client.close(force: false);
+      }
+
+      // sources.json must be untouched.
+      final after =
+          srcFile.existsSync() ? srcFile.readAsStringSync() : null;
+      expect(after, before,
+          reason: 'a zero-file-parts upload must not touch sources.json');
+    });
+
     // AC-6: unknown feature id → 404 and no upload dir is created.
     test('upload to an unknown feature id returns 404', () async {
       const id = 'g18-unknown-feature-id-xyz';

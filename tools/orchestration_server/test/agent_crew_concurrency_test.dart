@@ -15,6 +15,18 @@ import 'package:test/test.dart';
 // entry-point (not a lib library) and the gate has no other importable home.
 import '../bin/server.dart';
 
+// SCOPE (honesty): this file tests the CrewGate PRIMITIVE and the shared-ledger
+// race it guards, NOT the production wiring. The tests below construct CrewGate
+// directly and (for the AC-1/AC-2 cases) drive a LOCAL `guardedRun()` closure
+// that mirrors runCrewForFeature's gate usage. Deleting `crewGate.tryAcquire`
+// from the real runCrewForFeature in bin/server.dart would NOT fail this file —
+// it proves the primitive is correct and that the unguarded race really
+// corrupts the ledger, not that the server seam actually calls the gate. The
+// PRODUCTION-SEAM teeth (that runCrewForFeature/the autopilot route and the
+// create-time auto-kick actually invoke the gate) live in
+// server_autopilot_guard_test.dart, whose 409 / no-duplicate-build assertions
+// fail when crewGate.tryAcquire is removed from runCrewForFeature
+// (mutation-verified). Read the two files together.
 void main() {
   group('G05 — concurrent crew runs over a shared ledger', () {
     late String repoRoot;
@@ -91,15 +103,21 @@ void main() {
               'to justify the gate');
     });
 
-    // GREEN (AC-1 + AC-2): the CrewGate at the seam admits exactly one run, so
-    // each phase is sealed at most once even under a concurrent double-trigger
-    // (AC-1), AND state.json's completed_builders/gates reflect a single coherent
-    // run with no last-write-wins interleaving (AC-2, asserted below).
+    // GREEN (AC-1 + AC-2 at the PRIMITIVE level): a CrewGate fronting two same-id
+    // runs admits exactly one, so each phase is sealed at most once even under a
+    // concurrent double-trigger (AC-1), AND state.json's completed_builders/gates
+    // reflect a single coherent run with no last-write-wins interleaving (AC-2,
+    // asserted below). NOTE: the guardedRun() closure below is a LOCAL stand-in
+    // for runCrewForFeature — it proves the gate primitive serializes correctly,
+    // not that the production seam calls the gate. The seam-level teeth for AC-1/
+    // AC-2 (and AC-6/AC-7) are in server_autopilot_guard_test.dart.
     test('CrewGate serializes same-id runs so each phase seals at most once',
         () async {
       final integrity = IntegrityChain(store);
       final gate = CrewGate();
 
+      // LOCAL stand-in for runCrewForFeature (see note above): mirrors the gate
+      // usage but is NOT the production seam.
       Future<Map<String, dynamic>> guardedRun() async {
         if (!gate.tryAcquire(id)) {
           return {'skipped': true, 'reason': 'crew_already_in_flight'};
