@@ -73,6 +73,9 @@ class CrewRun(unittest.TestCase):
         # the PO verdict is written where the approval gate reads it
         verdict = open(os.path.join(specs, "judge-verdicts", "phase-2.md")).read()
         self.assertIn("REVISE", verdict)   # judge flagged a gap
+        # CONTRACT with the Dart gate's parseReviewerSkills (live-E2E-caught): the
+        # reviewers line must be "**Reviewers:** <bare, comma-separated skills>".
+        self.assertIn("**Reviewers:** bmad-agent-pm, bmad-validate-prd", verdict)
         draft = json.load(open(os.path.join(specs, "requirements-draft.json")))
         self.assertEqual(draft["feature_id"], "pharma-demo")
 

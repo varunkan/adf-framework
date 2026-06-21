@@ -1,7 +1,19 @@
+import 'package:orchestration_server/feature_store.dart';
 import 'package:orchestration_server/run_post_sync.dart';
 import 'package:test/test.dart';
 
 void main() {
+  // CONTRACT with scripts/orch/requirements_crew.py's verdict writer — this is the
+  // EXACT phase-2.md the crew emits. The live E2E caught a format mismatch where the
+  // crew wrote "reviewers: …" but the parser wanted "**Reviewers:** …". Pin it both ways.
+  test('parseReviewerSkills reads the real crew verdict format (E2E contract)', () {
+    const crewVerdict = '# PO verdict (phase 2): REVISE\n\n'
+        '**Reviewers:** bmad-agent-pm, bmad-validate-prd\n'
+        '_(perspective-diverse: DeepSeek R1 ∥ Nemotron Ultra)_\n\ngaps: 8\n';
+    expect(FeatureStore('/tmp').parseReviewerSkills(crewVerdict),
+        ['bmad-agent-pm', 'bmad-validate-prd']);
+  });
+
   group('RunPostSync.resolveReviewers (P2 honest gate)', () {
     const legacy = ['bmad-agent-analyst', 'bmad-review-adversarial-general'];
 

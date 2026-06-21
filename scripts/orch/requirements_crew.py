@@ -225,8 +225,13 @@ def _write_artifacts(specs_dir, verdict_dir, feature_id, r):
         os.makedirs(verdict_dir, exist_ok=True)
         verdict = "PASS" if r["po"]["pass"] else "REVISE"
         with open(os.path.join(verdict_dir, "phase-2.md"), "w", encoding="utf-8") as f:
-            f.write(f"# PO verdict (phase 2): {verdict}\n\nreviewers: bmad-agent-pm, "
-                    f"bmad-validate-prd (DeepSeek R1 ∥ Nemotron Ultra)\n\n"
+            # The "**Reviewers:**" line is a CONTRACT with the Dart gate's
+            # parseReviewerSkills (feature_store.dart) — keep the exact prefix +
+            # bare, comma-separated skills (model attribution on its own line, so it
+            # is NOT parsed as a skill). The live E2E caught the old lowercase format.
+            f.write(f"# PO verdict (phase 2): {verdict}\n\n"
+                    f"**Reviewers:** bmad-agent-pm, bmad-validate-prd\n"
+                    f"_(perspective-diverse: DeepSeek R1 ∥ Nemotron Ultra)_\n\n"
                     f"gaps: {len(r['po']['gaps'])}\n")
 
 
