@@ -26,19 +26,31 @@ export ORCH_PROVIDER_BALANCED=nvidia
 export ORCH_NVIDIA_MODEL_FAST="$NEMOTRON"
 export ORCH_NVIDIA_MODEL_BALANCED="$NEMOTRON"
 
-# Runner: Claude Code CLI (subscription auth -> Opus, no API credits). User-authorized
-# headless build agent. The server spawns `claude -p --dangerously-skip-permissions
-# --add-dir <repo>` to build the app; Nemotron Super 49B remains the spec/plan brain.
-if [ "${ADF_USE_CLAUDE_CLI:-1}" = "1" ]; then
+# BOTH auth paths wired; auto-pick the MOST EFFICIENT available runner:
+#   1. Claude Code SUBSCRIPTION (CLAUDE_CODE_OAUTH_TOKEN via `claude setup-token`)
+#      -> claude backend: Opus quality at ZERO per-token cost. PREFERRED.
+#   2. else the custom runner (agent_runner.py): Anthropic API Opus when ADF_USE_OPUS=1
+#      + credits, otherwise the free NVIDIA Nemotron Super 49B.
+# Override the auto-pick with ADF_RUNNER_PREF=claude|custom.
+CLAUDE_BIN="$HOME/Library/Application Support/Claude/claude-code/2.1.181/claude.app/Contents/MacOS/claude"
+PREF="${ADF_RUNNER_PREF:-auto}"
+if { [ "$PREF" = auto ] && [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -x "$CLAUDE_BIN" ]; } \
+   || [ "$PREF" = claude ]; then
   export ADF_RUNNER=claude
-  export ADF_CLAUDE_PATH="$HOME/Library/Application Support/Claude/claude-code/2.1.181/claude.app/Contents/MacOS/claude"
-  echo "  (runner = Claude Code CLI @ $ADF_CLAUDE_PATH)"
+  export ADF_CLAUDE_PATH="$CLAUDE_BIN"
+  RUNNER_DESC="Claude Code subscription (Opus, \$0/token) — most efficient"
 else
   export ADF_RUNNER=custom
   export ADF_RUNNER_BIN="$FW/scripts/orch/agent_runner_headroom.sh"
   export ADF_RUNNER_ARGS='{prompt} --workspace {workspace}'
   export ADF_RUNNER_MODEL="$NEMOTRON"
+  if [ -n "${ANTHROPIC_API_KEY:-}" ] && [ "${ADF_USE_OPUS:-0}" = 1 ]; then
+    RUNNER_DESC="custom: Anthropic API Opus 4.8 (paid)"
+  else
+    RUNNER_DESC="custom: NVIDIA Nemotron Super 49B (free)"
+  fi
 fi
+echo "  (runner = $RUNNER_DESC)"
 
 # A Claude Code build is an agent doing many steps — give it real time.
 export ORCH_RUNNER_TIMEOUT_SEC="${ORCH_RUNNER_TIMEOUT_SEC:-1800}"
