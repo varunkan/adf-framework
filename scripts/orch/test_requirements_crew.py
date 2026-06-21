@@ -123,6 +123,20 @@ class CleanRequirement(unittest.TestCase):
         self.assertNotIn("Builder:", out)
         self.assertNotIn("**Track:**", out)
 
+    def test_keeps_user_clarification_answer_on_rerun(self):
+        # P3 answer→re-run loop: the user's clarification (appended to requirement.md)
+        # must SURVIVE clean_requirement so the crew incorporates it on the next run —
+        # only the heading + @orch spam are stripped, the answer prose stays.
+        raw = ("# Requirement\nBuild a Health Canada ANDS app.\n\n"
+               "## Client clarification (2026-06-20)\n"
+               "@orch-orchestrator resume ands\n"
+               "Use eCTD modules 1-5 and support multi-tenant.\n")
+        out = rc.clean_requirement(raw)
+        self.assertIn("eCTD modules 1-5", out)       # the answer survives
+        self.assertIn("multi-tenant", out)
+        self.assertNotIn("## Client clarification", out)  # heading stripped
+        self.assertNotIn("@orch-orchestrator", out)       # spam stripped
+
     def test_renders_dict_or_string_gaps(self):
         self.assertEqual(rc._g("plain gap"), "plain gap")
         self.assertEqual(rc._g({"question": "Which modules?"}), "Which modules?")
