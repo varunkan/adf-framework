@@ -118,7 +118,9 @@ void main() {
       final summary = await crew.run(id);
 
       expect(summary['phases_completed'], [1, 2, 3, 4, 5, 6]);
-      expect(summary['stop_reason'], 'implementation_handoff');
+      // G1: track-M holds for spec approval (was 'implementation_handoff'); the
+      // budget/escalation invariant is that all 6 phases still completed (above).
+      expect(summary['stop_reason'], 'awaiting_approval');
 
       final analyst = (summary['agents'] as List)
           .cast<Map>()
@@ -191,7 +193,9 @@ void main() {
       final summary = await crew.run(id);
 
       expect(summary['phases_completed'], [1, 2, 3, 4, 5, 6]);
-      expect(summary['stop_reason'], 'implementation_handoff');
+      // G1: track-M holds for spec approval (was 'implementation_handoff'); the
+      // budget/escalation invariant is that all 6 phases still completed (above).
+      expect(summary['stop_reason'], 'awaiting_approval');
       expect(
         (summary['agents'] as List).cast<Map>().map((a) => a['status']),
         everyElement('ok'),

@@ -225,7 +225,14 @@ class Autopilot {
     final gates = state['gates'] as Map<String, dynamic>? ?? {};
     state['current_phase'] = store.inferWorkPhase(gates);
     state['status'] = 'active';
-    state['awaiting_user'] = false;
+    // G1: same track-aware hold as AgentCrew._advance — M/L/XL hold for the user.
+    if (FeatureStore.autoApprove(state)) {
+      state['awaiting_user'] = false;
+      state['pending_approval_phase'] = null;
+    } else {
+      state['awaiting_user'] = true;
+      state['pending_approval_phase'] = phase;
+    }
     store.writeState(id, state);
   }
 

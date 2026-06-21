@@ -336,8 +336,15 @@ class AgentCrew {
       'waves': waves,
       'parallelism': waves.map((w) => w.length).reduce((a, b) => a > b ? a : b),
       'phases_completed': completed,
-      'stop_reason':
-          blockers.isNotEmpty ? 'blocked' : 'implementation_handoff',
+      // G1: only signal implementation_handoff (which auto-enqueues phase 7 via
+      // server.autoEnqueueImplement) when the gate actually auto-approves. For an
+      // unconfirmed track-M/L/XL spec we report 'awaiting_approval' so phase 7 is
+      // NOT auto-started — the feature holds for the user instead.
+      'stop_reason': blockers.isNotEmpty
+          ? 'blocked'
+          : (FeatureStore.autoApprove(store.readState(id))
+              ? 'implementation_handoff'
+              : 'awaiting_approval'),
       'blockers': blockers,
       'token_cost': engine.brain.billsTokens ? 'metered' : 'zero',
       'integrity': integrity.verify(id),
@@ -417,7 +424,19 @@ class AgentCrew {
     final gates = state['gates'] as Map<String, dynamic>? ?? {};
     state['current_phase'] = store.inferWorkPhase(gates);
     state['status'] = 'active';
-    state['awaiting_user'] = false;
+    // G1: route the hold decision through FeatureStore.autoApprove instead of
+    // hardcoding awaiting_user=false. Tracks M/L/XL (net-new / cross-cutting
+    // work) must HOLD for human confirmation of the verified spec — they never
+    // barrel into phase-7 implementation. Track S (or a per-feature/global
+    // override) auto-flows exactly as before. pending_approval_phase=<phase>
+    // so /approve advances current_phase to phase+1 (into implementation).
+    if (FeatureStore.autoApprove(state)) {
+      state['awaiting_user'] = false;
+      state['pending_approval_phase'] = null;
+    } else {
+      state['awaiting_user'] = true;
+      state['pending_approval_phase'] = phase;
+    }
     store.writeState(id, state);
   }
 
@@ -441,9 +460,14 @@ class AgentCrew {
       ..writeln('- ${agents.length} subagents, max parallelism '
           '${summary['parallelism']}, ${summary['duration_ms']}ms total, '
           'token cost: ${summary['token_cost']}')
-      ..writeln(summary['stop_reason'] == 'implementation_handoff'
-          ? '- Next: phase 7 implementation against the red tests.'
-          : '- Blocked: ${(summary['blockers'] as List).join('; ')}');
+      ..writeln(switch (summary['stop_reason']) {
+        'implementation_handoff' =>
+          '- Next: phase 7 implementation against the red tests.',
+        'awaiting_approval' =>
+          '- Verified requirements & spec are ready — review and approve to '
+              'start implementation.',
+        _ => '- Blocked: ${(summary['blockers'] as List).join('; ')}',
+      });
     final cmd = store.appendCommand(id, prompt: 'crew', execute: false);
     store.updateCommandMeta(
       id,

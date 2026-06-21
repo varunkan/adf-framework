@@ -101,7 +101,9 @@ void main() {
     expect(summary['parallelism'], 3);
     expect(summary['phases_completed'], [1, 2, 3, 4, 5, 6]);
     expect(summary['token_cost'], 'zero');
-    expect(summary['stop_reason'], 'implementation_handoff');
+    // G1: track-M (the default for this fixture) HOLDS for spec approval; the
+    // implementation_handoff path is covered by the auto-approve G1 test below.
+    expect(summary['stop_reason'], 'awaiting_approval');
   });
 
   test('crew sets gates and logs every subagent', () async {
@@ -120,5 +122,35 @@ void main() {
         .lastWhere((c) => c['llm_source'] == 'crew');
     expect(announce['assistant_reply'], contains('Multi-agent crew finished'));
     expect(announce['assistant_reply'], contains('6 subagents'));
+  });
+
+  // ---- G1: the requirements/spec hold (track-aware) -----------------------
+  // A track-M feature must NOT barrel from the crew straight into phase-7
+  // implementation. It must HOLD so the user can confirm the verified spec.
+  // _advance hardcoded awaiting_user=false and the summary always reported
+  // 'implementation_handoff' (which is what auto-enqueues phase 7) — both
+  // bypassing FeatureStore.autoApprove (the track-aware gate). RED until fixed.
+  test('G1: a track-M crew HOLDS for spec approval, not implementation_handoff',
+      () async {
+    final summary = await buildCrew().run(id); // id is track M, no auto_approve
+    expect(summary['stop_reason'], 'awaiting_approval',
+        reason: 'track M must hold for human confirmation, not hand off to '
+            'phase 7 implementation');
+    final state = store.readState(id);
+    expect(state['awaiting_user'], isTrue,
+        reason: 'the feature must wait for the user at the spec gate');
+    expect(state['pending_approval_phase'], 6,
+        reason: 'approving phase 6 advances current_phase to 7 (implementation)');
+  });
+
+  test('G1: an auto-approved feature still hands off to implementation',
+      () async {
+    final st = store.readState(id);
+    st['auto_approve'] = true; // per-feature override → autoApprove true
+    store.writeState(id, st);
+    final summary = await buildCrew().run(id);
+    expect(summary['stop_reason'], 'implementation_handoff');
+    expect(store.readState(id)['awaiting_user'], isFalse);
+    expect(store.readState(id)['pending_approval_phase'], isNull);
   });
 }

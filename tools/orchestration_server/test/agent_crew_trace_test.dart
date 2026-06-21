@@ -156,7 +156,9 @@ void main() {
     expect(crewLog(id).length, 7);
     // Never-block is preserved: all six phases still complete.
     expect(summary['phases_completed'], [1, 2, 3, 4, 5, 6]);
-    expect(summary['stop_reason'], 'implementation_handoff');
+    // G1: this is a track-M feature, so the crew HOLDS for spec approval rather
+    // than handing off to implementation (was 'implementation_handoff').
+    expect(summary['stop_reason'], 'awaiting_approval');
   });
 
   test('crew-enabled successful run records spec_source=crew', () async {
