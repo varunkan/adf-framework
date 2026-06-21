@@ -146,29 +146,33 @@ class ClaudeBackend extends RunnerBackend {
   @override
   List<String> streamArgs(String prompt, String workspace,
       {bool partial = true}) {
-    // `--add-dir` grants tool access to the repo; cwd is set by the caller.
+    // The prompt MUST precede `--add-dir`: claude's `--add-dir <directories...>` is
+    // VARIADIC and will otherwise swallow the prompt as a directory, leaving claude
+    // with no prompt ("Input must be provided … when using --print"). `--add-dir`
+    // grants tool access to the repo; cwd is set by the caller.
     return [
       '-p',
+      prompt,
       '--output-format',
       'stream-json',
       '--verbose',
       '--dangerously-skip-permissions',
       '--add-dir',
       workspace,
-      prompt,
     ];
   }
 
   @override
   List<String> textArgs(String prompt, String workspace) {
+    // Prompt before --add-dir (variadic) — see streamArgs.
     return [
       '-p',
+      prompt,
       '--output-format',
       'text',
       '--dangerously-skip-permissions',
       '--add-dir',
       workspace,
-      prompt,
     ];
   }
 

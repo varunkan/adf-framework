@@ -11,7 +11,11 @@ void main() {
       expect(args, contains('--verbose'));
       expect(args, contains('--dangerously-skip-permissions'));
       expect(args, containsAllInOrder(['--add-dir', '/repo']));
-      expect(args.last, 'hello');
+      // The prompt MUST sit right after -p and BEFORE the variadic --add-dir, or
+      // claude consumes it as a directory ("Input must be provided … --print").
+      expect(args[1], 'hello');
+      expect(args.indexOf('hello') < args.indexOf('--add-dir'), isTrue,
+          reason: 'prompt must precede the variadic --add-dir');
       expect(b.apiKeyEnvVar, 'ANTHROPIC_API_KEY');
       // Claude must NOT receive Cursor-only flags.
       expect(args, isNot(contains('--workspace')));
