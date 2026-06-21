@@ -22,6 +22,13 @@ void main() {
       expect(args, isNot(contains('--print')));
     });
 
+    test('claude builds app directly (real prompt); custom uses ADF protocol', () {
+      expect(ClaudeBackend().buildsAppDirectly, isTrue,
+          reason: 'Claude Code writes files via its own tools — needs a real prompt');
+      expect(CustomBackend().buildsAppDirectly, isFalse,
+          reason: 'agent_runner.py understands @orch-orchestrator');
+    });
+
     test('custom backend expands {prompt}/{workspace} template', () {
       // Simulate an env-driven custom runner without mutating the process env
       // by exercising the template logic through a subclass shim.

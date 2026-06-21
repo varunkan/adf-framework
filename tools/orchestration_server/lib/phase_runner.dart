@@ -78,12 +78,27 @@ class PhaseRunner {
   Map<String, String> childEnvFor(String featureId) {
     // Pass the feature id EXPLICITLY — the runner must never have to guess it from
     // the prompt prose (which mis-parsed 'phase' and failed the build).
-    return {
+    final env = <String, String>{
       ..._env,
       ...nonInteractiveEnv,
       'ADF_STACK': store.stackFor(featureId),
       'ADF_FEATURE_ID': featureId,
     };
+    // A coding-agent backend (Claude Code) must run as a FRESH top-level session.
+    // When ADF was itself launched from inside a Claude Code session, the server's
+    // env carries nested-session markers (CLAUDE_CODE_*, CLAUDE_AGENT_SDK_*,
+    // CLAUDECODE) and a session-scoped ANTHROPIC_BASE_URL. Inherited by the spawned
+    // `claude -p`, they make it behave as a nested SDK call — it returns a
+    // <synthetic> error and exits 1 instead of building. Scrub them so the child
+    // uses its own login/config. (Harmless to strip for argv runners too.)
+    if (_health.backend.buildsAppDirectly) {
+      env.removeWhere((k, _) =>
+          k.startsWith('CLAUDE_CODE_') ||
+          k.startsWith('CLAUDE_AGENT_SDK') ||
+          k == 'CLAUDECODE' ||
+          k == 'ANTHROPIC_BASE_URL');
+    }
+    return env;
   }
 
   /// Force every spawned tool (the runner, the real coding-agent CLIs, and any
@@ -617,9 +632,15 @@ class PhaseRunner {
 
       final state = store.readState(featureId);
       final awaiting = state['awaiting_user'] == true;
-      final prompt = awaiting
-          ? '@orch-orchestrator sync $featureId'
-          : '@orch-orchestrator resume $featureId';
+      // A general coding agent (Claude Code) does not understand the
+      // `@orch-orchestrator` control command — it needs a real build prompt that
+      // points it at the spec and tells it to write + test the app. An ADF-protocol
+      // runner (agent_runner.py) gets the resume/sync command as before.
+      final prompt = _health.backend.buildsAppDirectly
+          ? _buildAgentBuildPrompt(featureId)
+          : (awaiting
+              ? '@orch-orchestrator sync $featureId'
+              : '@orch-orchestrator resume $featureId');
 
       await _spawnAgent(
         featureId: featureId,
@@ -659,6 +680,35 @@ class PhaseRunner {
 
   static const int contextBudgetWarnTokens = 400;
   static const int contextBudgetHardCapTokens = 800;
+
+  /// The build instruction handed to a coding-agent backend (Claude Code), which
+  /// builds files via its own tools. Points it at the verified spec and tells it to
+  /// write + self-test a runnable app under apps/<id>/. (agent_runner.py instead
+  /// gets the `@orch-orchestrator` command, which only it understands.)
+  String _buildAgentBuildPrompt(String featureId) {
+    final specDir = 'specs/$featureId';
+    return 'You are the ADF build agent. Build a complete, runnable, well-tested '
+        'application for the feature "$featureId" in THIS repository.\n\n'
+        '1. READ THE SPEC FIRST (authoritative):\n'
+        '   - $specDir/requirements.md      (verified EARS requirements — implement the MUST items)\n'
+        '   - $specDir/problem-statement.md (vision, screens, workflows, integration design)\n'
+        '   - $specDir/spec.md              (combined specification)\n'
+        '   Also read requirement.md if present.\n\n'
+        '2. BUILD (write all files under apps/$featureId/ — create the directory):\n'
+        '   - Python 3 standard library ONLY (http.server, json, sqlite3, unittest, html). '
+        'No pip installs, no external packages, no outbound network — it must run with `python3 server.py`.\n'
+        '   - server.py: an HTTP server exposing a JSON API and serving a single-page HTML/JS UI.\n'
+        '   - Implement the CORE DOMAIN LOGIC for real, not stubs — especially the rules in the spec '
+        '(for this ANDS/eCTD portal: dossier-ID validation, the eCTD validation rules, sequence/lifecycle, '
+        'REP identifiers, CESG packaging model). Prioritize MUST requirements; COULD items may be scoped down.\n'
+        '   - test_app.py: a unittest suite covering the core domain logic AND the API endpoints.\n'
+        '   - README.md: how to run it.\n\n'
+        '3. VERIFY YOURSELF — do NOT finish with failing tests:\n'
+        '   - Run: cd apps/$featureId && python3 -m unittest -v\n'
+        '   - Fix until ALL tests pass; confirm `python3 server.py` boots and serves, then stop it.\n\n'
+        '4. FINISH with a short summary: files created, what domain logic is implemented, and the final '
+        'test result (e.g. "14 tests, all passing").';
+  }
 
   Future<String> _resolveWorkingDirectory(String featureId, int phase) async {
     if (phase != 7) return repoRoot;
@@ -752,6 +802,12 @@ class PhaseRunner {
     final proc = await Process.start(agent, args,
         workingDirectory: cwd, environment: childEnvFor(featureId));
     _processes[featureId] = proc;
+    // Headless agents (`claude -p`) take the prompt from argv and otherwise block
+    // ~3s waiting on piped stdin ("no stdin data received in 3s"). Close it so they
+    // start immediately. Harmless for argv-driven runners (agent_runner.py).
+    try {
+      unawaited(proc.stdin.close());
+    } catch (_) {}
     final killTimer = Timer(maxRunDuration, () {
       if (_processes[featureId] == proc) {
         try {

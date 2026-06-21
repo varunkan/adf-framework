@@ -63,6 +63,13 @@ abstract class RunnerBackend {
   /// Interactive login command for this CLI, or null if it has none.
   String? get loginCommand => null;
 
+  /// True when this backend is a general coding AGENT that builds files in its
+  /// working directory via its own tools (e.g. Claude Code), rather than an
+  /// ADF-protocol runner (agent_runner.py) that understands `@orch-orchestrator`.
+  /// Such a backend must be handed a real build prompt and have its output
+  /// (the app it wrote to disk) verified by ADF directly.
+  bool get buildsAppDirectly => false;
+
   /// Operator-facing recovery steps surfaced in the dashboard.
   List<String> get recoverySteps;
 
@@ -125,6 +132,9 @@ abstract class RunnerBackend {
 class ClaudeBackend extends RunnerBackend {
   @override
   RunnerKind get kind => RunnerKind.claude;
+
+  @override
+  bool get buildsAppDirectly => true; // Claude Code writes files via its own tools
 
   @override
   String? resolveExecutable() {

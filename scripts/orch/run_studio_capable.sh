@@ -41,7 +41,7 @@ else
 fi
 
 # A Claude Code build is an agent doing many steps — give it real time.
-export ORCH_RUNNER_TIMEOUT_SEC="${ORCH_RUNNER_TIMEOUT_SEC:-900}"
+export ORCH_RUNNER_TIMEOUT_SEC="${ORCH_RUNNER_TIMEOUT_SEC:-1800}"
 export ADF_NVIDIA_TIMEOUT_SEC="${ADF_NVIDIA_TIMEOUT_SEC:-480}"
 export ADF_RUNNER_MAX_TOKENS="${ADF_RUNNER_MAX_TOKENS:-12000}"
 
