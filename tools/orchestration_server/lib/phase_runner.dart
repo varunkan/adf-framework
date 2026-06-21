@@ -70,12 +70,16 @@ class PhaseRunner {
 
   /// Force every spawned tool (the runner, the real coding-agent CLIs, and any
   /// git/pip/npm they shell) into non-interactive mode so none blocks on a pager
-  /// or a credential prompt and dies only at the timeout. Mirrors the Python
-  /// runner's NON_INTERACTIVE_ENV (scripts/orch/agent_runner.py) — adopted from
-  /// oh-my-pi; see docs/ADF_VS_OH_MY_PI.md §5.2.
+  /// or a credential prompt and dies only at the timeout. Adopted from oh-my-pi;
+  /// see docs/ADF_VS_OH_MY_PI.md §5.2.
+  ///
+  /// Exact mirror of Python NON_INTERACTIVE_ENV (scripts/orch/agent_runner.py).
+  /// Keep in sync: add a key here whenever you add one there. Drift is caught by
+  /// test/phase_runner_env_test.dart.
   static const Map<String, String> nonInteractiveEnv = {
     'CI': '1',
     'NO_COLOR': '1',
+    'TERM': 'dumb',
     'PAGER': 'cat',
     'GIT_PAGER': 'cat',
     'MANPAGER': 'cat',
@@ -85,10 +89,15 @@ class PhaseRunner {
     'DEBIAN_FRONTEND': 'noninteractive',
     'PYTHONUNBUFFERED': '1',
     'PIP_NO_INPUT': '1',
+    'PIP_DISABLE_PIP_VERSION_CHECK': '1',
+    'PIP_PROGRESS_BAR': 'off',
     'npm_config_yes': 'true',
     'npm_config_audit': 'false',
     'npm_config_fund': 'false',
     'npm_config_progress': 'false',
+    'npm_config_update_notifier': 'false',
+    'ADBLOCK': '1',
+    'HOMEBREW_NO_AUTO_UPDATE': '1',
   };
 
   late TraceWriter _traces;

@@ -114,6 +114,158 @@ class ScrapeAndGather(unittest.TestCase):
     def test_disabled_research_returns_empty(self):
         self.assertEqual(ws.gather(["q"], env={"ADF_RESEARCH": "0"}), [])
 
+    # ---- G20: scrape() clips head+tail instead of blind [:12000] truncation ----
+    def test_scrape_preserves_tail_content_of_long_page(self):
+        head_part = "HEAD_CONTENT " * 923     # ~12000 chars
+        tail_part = " TAIL_SENTINEL " * 800   # ~12000 chars
+        big_body = head_part + tail_part
+
+        captured = []
+
+        def fetch(u, timeout=20):
+            return big_body                    # Jina path: markdown used verbatim
+
+        def complete(prompt, role):
+            captured.append(prompt)
+            return ("- some extracted fact", {})
+
+        note = ws.scrape("https://x.test", {"ADF_SCRAPER": "jina"}, fetch, complete)
+        self.assertIsNotNone(note)
+        self.assertTrue(captured, "complete() was never called")
+        self.assertIn("TAIL_SENTINEL", captured[0])   # tail survives the clip
+
+    def test_scrape_no_model_fallback_also_clips_not_truncates(self):
+        head_part = "HEAD_CONTENT " * 923
+        tail_part = " TAIL_SENTINEL " * 800
+        big_body = head_part + tail_part
+
+        def fetch(u, timeout=20):
+            return big_body                    # Jina path
+
+        note = ws.scrape("https://x.test", {"ADF_SCRAPER": "jina"}, fetch, complete=None)
+        self.assertIsNotNone(note)
+        self.assertIn("TAIL_SENTINEL", note["facts"])
+
+    # ---- G19: gather() warns when user URLs exceed max_pages ----
+    def test_gather_warns_when_user_urls_exceed_cap(self):
+        """gather() must emit a WARNING when caller supplies >max_pages user URLs."""
+        user_urls = [f"https://user{i}.test/doc" for i in range(9)]
+
+        def fetch(u, timeout=20):
+            return "# Page\n\n" + f"authoritative content from {u} " * 80
+
+        with self.assertLogs("web_scraper", level="WARNING") as cm:
+            notes = ws.gather(
+                queries=[], urls=user_urls,
+                env={"ADF_RESEARCH": "1", "ADF_SCRAPER": "none"},
+                fetch=fetch, max_pages=8)
+
+        warning_text = " ".join(cm.output)
+        self.assertIn("9", warning_text)              # supplied count
+        self.assertIn("8", warning_text)              # cap
+        self.assertIn("1", warning_text)              # dropped count
+        self.assertLessEqual(len(notes), 8)           # 9th URL never scraped
+
+    def test_gather_no_warn_when_duplicates_collapse_under_cap(self):
+        """9 copies of 1 URL collapse to 1 unique after dedup — no WARNING fires."""
+        dup_urls = ["https://same.test/doc"] * 9
+
+        with self.assertNoLogs("web_scraper", level="WARNING"):
+            ws.gather(
+                queries=[], urls=dup_urls,
+                env={"ADF_RESEARCH": "1", "ADF_SCRAPER": "none"},
+                fetch=lambda u, timeout=20: "# Same\n\n" + "content " * 80,
+                max_pages=8)
+
+    def test_gather_does_not_warn_when_user_urls_within_cap(self):
+        """3 user URLs with max_pages=8: no WARNING should fire."""
+        with self.assertNoLogs("web_scraper", level="WARNING"):
+            ws.gather(
+                queries=[], urls=["https://a.test/", "https://b.test/", "https://c.test/"],
+                env={"ADF_RESEARCH": "1", "ADF_SCRAPER": "none"},
+                fetch=lambda u, timeout=20: "# T\n\n" + "x " * 80,
+                max_pages=8)
+
+    def test_gather_does_not_warn_on_search_only_truncation(self):
+        """0 user URLs + 12 search hits with max_pages=8: search trimming is silent."""
+        def fetch(u, timeout=20):
+            if "duckduckgo" in u:
+                return "".join(f'<a href="https://h{i}.test/">r</a>' for i in range(12))
+            return "# H\n\n" + "y " * 80
+
+        with self.assertNoLogs("web_scraper", level="WARNING"):
+            ws.gather(
+                queries=["test query"], urls=[],
+                env={"ADF_RESEARCH": "1", "ADF_SCRAPER": "none"},
+                fetch=fetch, max_pages=8)
+
+
+class RobotsCompliance(unittest.TestCase):
+    """G17 — robots.txt awareness on the urllib FALLBACK path only."""
+
+    def test_robots_disallow_blocks_fallback_fetch(self):
+        def fetch(u, timeout=20):
+            if u.endswith("/robots.txt"):
+                return "User-agent: *\nDisallow: /docs/"
+            return "<title>T</title><p>content</p>"
+
+        result = ws.fetch_text("https://example.com/docs/guide",
+                               {"ADF_SCRAPER": "none"}, fetch)
+        self.assertIsNone(result)
+
+    def test_robots_disallow_returns_none_not_exception(self):
+        called = []
+
+        def fetch(u, timeout=20):
+            called.append(u)
+            # robotparser matches the agent TOKEN before "/" (per RFC), so a site
+            # targeting our crawler declares the bare product token "ADF-Research".
+            if u.endswith("/robots.txt"):
+                return "User-agent: ADF-Research\nDisallow: /"
+            return "<title>T</title><p>content</p>"
+
+        result = ws.fetch_text("https://example.com/page",
+                               {"ADF_SCRAPER": "none"}, fetch)
+        self.assertIsNone(result)
+        self.assertNotIn("https://example.com/page", called)  # blocked GET never issued
+
+    def test_robots_crawl_delay_is_respected(self):
+        sleep_calls = []
+
+        def fetch(u, timeout=20):
+            if u.endswith("/robots.txt"):
+                return "User-agent: *\nCrawl-delay: 3"
+            return "<title>T</title><p>content</p>"
+
+        result = ws.fetch_text("https://example.com/page",
+                               {"ADF_SCRAPER": "none"}, fetch,
+                               _sleep=lambda s: sleep_calls.append(s))
+        self.assertIsNotNone(result)
+        self.assertEqual(len(sleep_calls), 1)
+        self.assertTrue(3 <= sleep_calls[0] <= 10)
+
+    def test_robots_fetch_error_is_fail_open(self):
+        def fetch(u, timeout=20):
+            if u.endswith("/robots.txt"):
+                raise Exception("network error")
+            return "<title>T</title><p>content here</p>"
+
+        result = ws.fetch_text("https://example.com/page",
+                               {"ADF_SCRAPER": "none"}, fetch)
+        self.assertIsNotNone(result)
+        self.assertIn("content here", result["markdown"])
+
+    def test_robots_not_checked_on_jina_primary_path(self):
+        called = []
+
+        def fetch(u, timeout=20):
+            called.append(u)
+            return "# Jina Page\n\n" + "non-thin markdown content here " * 80
+
+        ws.fetch_text("https://example.com/page", {"ADF_SCRAPER": "jina"}, fetch)
+        self.assertFalse([u for u in called if u.endswith("/robots.txt")],
+                         "robots.txt must NOT be fetched on the primary Jina path")
+
 
 if __name__ == "__main__":
     unittest.main()

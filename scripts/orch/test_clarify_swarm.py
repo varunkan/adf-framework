@@ -66,7 +66,7 @@ class Swarm(unittest.TestCase):
         self.assertEqual(res["risks"], ["r"])
 
     def test_scales_with_grid(self):
-        # a bigger grid → more tasks (proves it scales to 100s-1000s deterministically)
+        # proves task-generation count scales — does NOT prove concurrent thread count
         res = cs.run("x", complete=self._fake, gather=lambda q, u: [],
                      areas=3, tasks_per_area=2, parallelism=8, env={})
         self.assertEqual(res["stats"]["tasks"], 6)   # 3 × 2-canned
@@ -77,6 +77,29 @@ class Swarm(unittest.TestCase):
         self.assertGreaterEqual(a * t, 800)
         a2, t2 = cs._scale({"ADF_TRACK": "S"})
         self.assertLess(a2 * t2, 100)
+
+
+    def test_workers_actually_concurrent(self):
+        """Proves at least 2 worker threads enter the WORK wave simultaneously."""
+        barrier = threading.Barrier(2, timeout=10)
+        barrier_passed = threading.Event()
+
+        def concurrent_complete(prompt, role, system=None):
+            if role in ("verify", "extract"):
+                # BrokenBarrierError if serialised; both threads arriving sets the event
+                barrier.wait()          # raises BrokenBarrierError if serialised
+                barrier_passed.set()
+            return self._fake(prompt, role, system)
+
+        # areas=1, tasks_per_area=4 → canned stub yields 2 tasks → needs 2 concurrent workers
+        cs.run("test req", complete=concurrent_complete,
+               gather=lambda q, u: [],
+               areas=1, tasks_per_area=4, parallelism=2, env={})
+        # If both workers ran concurrently the barrier unblocked and barrier_passed is set.
+        # If serialised, BrokenBarrierError is raised inside the pool (swallowed as a
+        # blocker by run_crew) and barrier_passed is never set.
+        self.assertTrue(barrier_passed.is_set(),
+                        "Barrier never unblocked — workers did not run concurrently")
 
 
 if __name__ == "__main__":

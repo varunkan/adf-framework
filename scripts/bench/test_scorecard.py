@@ -84,5 +84,67 @@ class WriteDoc(unittest.TestCase):
         self.assertIn("ADF", open(out, encoding="utf-8").read())
 
 
+class MultiResults(unittest.TestCase):
+    def test_multi_results_surfaces_all_backends(self):
+        nvidia_cap = {"apps": 3, "built": 0, "backend": "nvidia"}
+        ollama_cap = {
+            "apps": 1, "built": 0, "budget_s": 600,
+            "backend": "ollama qwen2.5-coder:32b (local, $0, offline)",
+        }
+        md = scorecard.render_scorecard(capabilities=[nvidia_cap, ollama_cap])
+        self.assertIn("nvidia", md)
+        self.assertIn("ollama", md)
+        self.assertIn("0/3", md)
+        self.assertIn("0/1", md)
+
+    def test_regenerated_doc_includes_free_path_failures(self):
+        import json
+        tmp = tempfile.mkdtemp()
+        # Write minimal result JSON files matching the real shape
+        nvidia_data = {
+            "summary": {"apps": 3, "governed": 0, "proven": 0,
+                        "compliant": 3, "offline": 3, "total_files": 0},
+            "capability": {"apps": 3, "built": 0, "backend": "nvidia"},
+        }
+        ollama_data = {
+            "summary": {"apps": 1, "governed": 0, "proven": 0,
+                        "compliant": 1, "offline": 1, "total_files": 0},
+            "capability": {
+                "apps": 1, "built": 0, "budget_s": 600,
+                "backend": "ollama qwen2.5-coder:32b (local, $0, offline)",
+            },
+        }
+        nvidia_path = os.path.join(tmp, "build-nvidia.json")
+        ollama_path = os.path.join(tmp, "build-latest.json")
+        out_path = os.path.join(tmp, "scorecard.md")
+        with open(nvidia_path, "w") as f:
+            json.dump(nvidia_data, f)
+        with open(ollama_path, "w") as f:
+            json.dump(ollama_data, f)
+        rc = scorecard._main([
+            "--out", out_path,
+            "--results", nvidia_path,
+            "--results", ollama_path,
+        ])
+        self.assertEqual(rc, 0)
+        content = open(out_path, encoding="utf-8").read()
+        self.assertIn("nvidia", content)   # fails against current code
+        self.assertIn("ollama", content)
+
+    def test_missing_budget_s_no_double_article(self):
+        md = scorecard.render_scorecard(capability={
+            "apps": 3, "built": 0, "backend": "nvidia",
+        })
+        self.assertNotIn("within the the", md)
+        self.assertIn("0/3", md)
+
+    def test_capability_and_capabilities_both_raises(self):
+        with self.assertRaises(ValueError):
+            scorecard.render_scorecard(
+                capability={"apps": 1, "built": 0},
+                capabilities=[{"apps": 1, "built": 0}],
+            )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

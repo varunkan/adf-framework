@@ -118,7 +118,9 @@ class AuditBundleBuilder {
           ? null
           : {
               'seal': proof['seal'],
-              'root': proof['root'],
+              // Key name is 'merkle_root' per proof_of_build.py:238 (SSOT);
+              // 'root' retained as legacy fallback.
+              'root': proof['merkle_root'] ?? proof['root'],
               'n_files': (proof['files'] as List?)?.length,
             },
       'policy': policy == null

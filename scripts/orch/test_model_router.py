@@ -57,10 +57,25 @@ class Candidates(unittest.TestCase):
         self.assertEqual(mr.candidates("draft", env)[0], ("anthropic", "claude-sonnet-4-6"))
 
     def test_free_only_drops_anthropic(self):
-        # no ANTHROPIC_API_KEY → synthesis head falls to NVIDIA (Nemotron Ultra), no Claude
+        # no ANTHROPIC_API_KEY → synthesis head falls to NVIDIA (Qwen), no Claude
         cands = mr.candidates("synthesis", {})
         self.assertTrue(all(p != "anthropic" for p, _ in cands))
         self.assertEqual(cands[0][0], "nvidia")
+
+    def test_free_only_synthesis_falls_to_qwen_not_ultra(self):
+        """Regression anchor (G23): on the free path, synthesis head is Qwen, not Nemotron Ultra."""
+        cands = mr.candidates("synthesis", {})  # no ANTHROPIC_API_KEY
+        self.assertTrue(all(p != "anthropic" for p, _ in cands))
+        self.assertEqual(cands[0][0], "nvidia")
+        # Pin the specific model: Qwen, not Ultra (Ultra only under ADF_QUALITY=max)
+        self.assertEqual(cands[0][1], mr._M["qwen"])
+        self.assertNotEqual(cands[0][1], mr._M["ultra"])
+
+    def test_plan_role_does_not_route_to_ultra(self):
+        """G23 anchor: plan routes to Super, not Ultra (Ultra is HEAD_ROLES only)."""
+        self.assertEqual(mr.candidates("plan", {})[0][1], mr._M["super"])
+        self.assertNotEqual(mr.candidates("plan", {})[0][1], mr._M["ultra"])
+        self.assertNotIn("plan", mr._HEAD_ROLES)  # Ultra never prepended to plan
 
     def test_unknown_role_uses_default(self):
         self.assertEqual(mr.candidates("zzz", KEYED)[0][0], "nvidia")
@@ -101,6 +116,90 @@ class Complete(unittest.TestCase):
         mr.complete("draft this", "draft", system="You are a PM", env=KEYED, call=fake)
         roles = [m["role"] for m in captured["messages"]]
         self.assertEqual(roles, ["system", "user"])
+
+    # --- G28: cross-provider None-fallthrough (documented invariant guard) ---
+    def test_falls_through_on_none(self):
+        """A provider that exhausts retries returns None (call_with_retry contract);
+        complete() must treat None as a miss and advance to the next candidate."""
+        seen = []
+
+        def fake(provider, messages, timeout, model):
+            seen.append(provider)
+            if provider == "anthropic":
+                return None  # simulate call_with_retry exhaustion
+            return ("fallback-text", {})
+
+        out = mr.complete("synthesize", "synthesis", env=KEYED, call=fake)
+        self.assertEqual(out[0], "fallback-text")
+        self.assertEqual(seen[:2], ["anthropic", "nvidia"])
+
+    # --- G08: default timeout reads ADF_NVIDIA_TIMEOUT_SEC ---
+    def test_complete_default_timeout_reads_nvidia_env(self):
+        """RED (G08): with ADF_NVIDIA_TIMEOUT_SEC=240, the default timeout forwarded is 240."""
+        captured = []
+
+        def fake(provider, messages, timeout, model):
+            captured.append(timeout)
+            return ("ok", {})
+
+        mr.complete("hi", "extract", env={"ADF_NVIDIA_TIMEOUT_SEC": "240"}, call=fake)
+        self.assertEqual(captured[0], 240)
+
+    def test_complete_default_timeout_unset_is_120(self):
+        """GUARD (G08): with the env var absent, the effective default stays 120."""
+        captured = []
+
+        def fake(provider, messages, timeout, model):
+            captured.append(timeout)
+            return ("ok", {})
+
+        mr.complete("hi", "extract", env={}, call=fake)
+        self.assertEqual(captured[0], 120)
+
+    def test_complete_explicit_timeout_is_honored(self):
+        """GUARD (G08): an explicit caller timeout wins over the env-derived default."""
+        captured = []
+
+        def fake(provider, messages, timeout, model):
+            captured.append(timeout)
+            return ("ok", {})
+
+        mr.complete("hi", "extract",
+                    env={"ADF_NVIDIA_TIMEOUT_SEC": "240"}, timeout=30, call=fake)
+        self.assertEqual(captured[0], 30)
+
+    def test_complete_malformed_timeout_falls_back_to_120(self):
+        """GUARD (G08): empty/non-numeric ADF_NVIDIA_TIMEOUT_SEC must not raise; falls to 120."""
+        captured = []
+
+        def fake(provider, messages, timeout, model):
+            captured.append(timeout)
+            return ("ok", {})
+
+        mr.complete("hi", "extract", env={"ADF_NVIDIA_TIMEOUT_SEC": ""}, call=fake)
+        mr.complete("hi", "extract", env={"ADF_NVIDIA_TIMEOUT_SEC": "abc"}, call=fake)
+        self.assertEqual(captured, [120, 120])
+
+    # --- G11 (router side): served (provider, model) stamped into usage ---
+    def test_complete_usage_carries_served_model_identity(self):
+        """RED (G11): the winning (provider, model) must be stamped into the returned usage."""
+        def fake(provider, messages, timeout, model):
+            return ("ok", {"tok": 1})
+
+        out = mr.complete("hi", "verify", env=KEYED, call=fake)
+        self.assertEqual(out[1]["provider"], "nvidia")
+        self.assertEqual(out[1]["model"], "deepseek-ai/deepseek-v4-pro")
+        # additive: existing usage keys are preserved (setdefault, non-destructive)
+        self.assertEqual(out[1]["tok"], 1)
+
+    def test_complete_usage_stamp_does_not_overwrite_existing(self):
+        """GUARD (G11): if a backend already supplied provider/model, do not clobber it."""
+        def fake(provider, messages, timeout, model):
+            return ("ok", {"provider": "custom", "model": "custom-model"})
+
+        out = mr.complete("hi", "verify", env=KEYED, call=fake)
+        self.assertEqual(out[1]["provider"], "custom")
+        self.assertEqual(out[1]["model"], "custom-model")
 
 
 class RateLimitRetry(unittest.TestCase):

@@ -31,7 +31,8 @@ void main() {
 
     test('invokes the crew CLI and reports success when a real verdict lands', () async {
       late List<String> gotArgs;
-      final runner = RequirementsCrewRunner(store, run: (exe, args, cwd) async {
+      final runner = RequirementsCrewRunner(store,
+          run: (exe, args, cwd, {Map<String, String>? environment}) async {
         gotArgs = args;
         expect(exe, 'python3');
         expect(cwd, repo.path);
@@ -47,7 +48,8 @@ void main() {
 
     test('lifts the crew open-questions into state for the user (P3)', () async {
       store.writeState('feat-q', {'current_phase': 2}, skipRepair: true);
-      final runner = RequirementsCrewRunner(store, run: (e, a, c) async {
+      final runner = RequirementsCrewRunner(store,
+          run: (e, a, c, {Map<String, String>? environment}) async {
         File(runner_verdict(store, 'feat-q'))
           ..createSync(recursive: true)
           ..writeAsStringSync('# PO verdict (phase 2): REVISE');
@@ -67,7 +69,8 @@ void main() {
 
     test('passes --sources to the crew when a sources file exists (P4)', () async {
       late List<String> gotArgs;
-      final runner = RequirementsCrewRunner(store, run: (e, a, c) async {
+      final runner = RequirementsCrewRunner(store,
+          run: (e, a, c, {Map<String, String>? environment}) async {
         gotArgs = a;
         File(runner_verdict(store, 'feat-s'))
           ..createSync(recursive: true)
@@ -81,7 +84,9 @@ void main() {
       File(runner.sourcesPath('feat-s2'))
         ..createSync(recursive: true)
         ..writeAsStringSync('[{"url":"https://x/ref"}]');
-      File(runner_verdict(store, 'feat-s2')).createSync(recursive: true);
+      File(runner_verdict(store, 'feat-s2'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('# PO verdict (phase 2): REVISE');
       await runner.run('feat-s2');
       expect(gotArgs, containsAllInOrder(['--sources', runner.sourcesPath('feat-s2')]));
     });
@@ -102,16 +107,75 @@ void main() {
     test('NEVER fakes a pass: exit!=0 or no verdict file → false', () async {
       // non-zero exit
       final r1 = RequirementsCrewRunner(store,
-          run: (e, a, c) async => ProcessResult(0, 1, '', 'boom'));
+          run: (e, a, c, {Map<String, String>? environment}) async =>
+              ProcessResult(0, 1, '', 'boom'));
       expect(await r1.run('feat-2'), isFalse);
       // exit 0 but no verdict written
       final r2 = RequirementsCrewRunner(store,
-          run: (e, a, c) async => ProcessResult(0, 0, '{}', ''));
+          run: (e, a, c, {Map<String, String>? environment}) async =>
+              ProcessResult(0, 0, '{}', ''));
       expect(await r2.run('feat-3'), isFalse);
       // process throws (python missing) → false, not an exception
       final r3 = RequirementsCrewRunner(store,
-          run: (e, a, c) async => throw const ProcessException('python3', []));
+          run: (e, a, c, {Map<String, String>? environment}) async =>
+              throw const ProcessException('python3', []));
       expect(await r3.run('feat-4'), isFalse);
+    });
+
+    // ---- G13: content validation (empty/garbage verdict must not fake a pass) ----
+
+    test('NEVER fakes a pass: exit 0 + empty verdict file → false', () async {
+      final runner = RequirementsCrewRunner(store,
+          run: (e, a, c, {Map<String, String>? environment}) async {
+        File(runner_verdict(store, 'feat-empty'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync('');
+        return ProcessResult(0, 0, '{}', '');
+      });
+      expect(await runner.run('feat-empty'), isFalse);
+    });
+
+    test('NEVER fakes a pass: exit 0 + garbage verdict (no token) → false',
+        () async {
+      final runner = RequirementsCrewRunner(store,
+          run: (e, a, c, {Map<String, String>? environment}) async {
+        File(runner_verdict(store, 'feat-garbage'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync('lorem ipsum no verdict here\nsome error output\n');
+        return ProcessResult(0, 0, '{}', '');
+      });
+      expect(await runner.run('feat-garbage'), isFalse);
+    });
+
+    // ---- G01: non-.cursor layout — runner forwards resolved orchestration root ----
+
+    test(
+        'non-.cursor layout: successful crew run must NOT produce phantom gate '
+        'failure (forwards ORCH_ORCHESTRATION_DIR)', () async {
+      // Configure a non-.cursor layout via an install manifest pointing at
+      // .adf/orchestration, then re-resolve the store's paths.
+      Directory('${repo.path}/.adf/orchestration').createSync(recursive: true);
+      File('${repo.path}/.adf-install.json')
+          .writeAsStringSync('{"orchestration_dir": ".adf/orchestration"}');
+      store = FeatureStore(repo.path);
+      expect(store.paths.orchestrationRoot, endsWith('.adf/orchestration'));
+
+      Map<String, String>? capturedEnv;
+      final runner = RequirementsCrewRunner(store,
+          run: (exe, args, cwd, {Map<String, String>? environment}) async {
+        capturedEnv = environment;
+        // Faithful stub: write the verdict to wherever the env says to.
+        final envOrchDir = environment?['ORCH_ORCHESTRATION_DIR'] ??
+            '${repo.path}/.cursor/orchestration';
+        File('$envOrchDir/features/feat-x/judge-verdicts/phase-2.md')
+          ..createSync(recursive: true)
+          ..writeAsStringSync('# PO verdict (phase 2): PASS');
+        return ProcessResult(0, 0, '{}', '');
+      });
+
+      expect(await runner.run('feat-x'), isTrue);
+      expect(capturedEnv,
+          containsPair('ORCH_ORCHESTRATION_DIR', store.paths.orchestrationRoot));
     });
   });
 }

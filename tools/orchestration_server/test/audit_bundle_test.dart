@@ -132,7 +132,10 @@ void main() {
     final app = Directory('${tmp.path}/apps/$id')..createSync(recursive: true);
     File('${app.path}/.adf-proof.json').writeAsStringSync(jsonEncode({
       'seal': 'adf1:abc123def456',
-      'root': 'abc123def456aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      // Canonical key is 'merkle_root' per proof_of_build.py:238 (SSOT). The
+      // first 12 hex chars match the seal suffix, by design.
+      'merkle_root':
+          'abc123def456aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       'files': [
         {'path': 'src/App.tsx', 'sha256': 'aa'},
         {'path': 'server/index.mjs', 'sha256': 'bb'},
@@ -159,6 +162,13 @@ void main() {
     final moat = bundle['moat'] as Map<String, dynamic>;
     expect((moat['proof'] as Map)['seal'], 'adf1:abc123def456');
     expect((moat['proof'] as Map)['n_files'], 2);
+    // The real Merkle root is surfaced (read from 'merkle_root'), not null.
+    final proofMap = moat['proof'] as Map;
+    expect(proofMap['root'], isNotNull);
+    expect((proofMap['root'] as String).length, 64);
+    // Seal prefix must match the first 12 chars of the root.
+    expect(proofMap['seal'],
+        'adf1:${(proofMap['root'] as String).substring(0, 12)}');
     expect((moat['policy'] as Map)['ok'], isTrue);
     expect((moat['policy'] as Map)['policy_id'], 'adf-default-secure');
     expect((moat['context'] as Map)['cards'], 1);

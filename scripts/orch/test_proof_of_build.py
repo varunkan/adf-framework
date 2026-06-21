@@ -56,6 +56,24 @@ class Merkle(unittest.TestCase):
         r2 = pob.compute_proof("d", "s", files, "spec", BUILD, created_at="2030-12-31")
         self.assertEqual(r1["merkle_root"], r2["merkle_root"])
 
+    def test_backend_is_metadata_not_in_the_root(self):
+        # G14: `backend` is provenance metadata, NEVER folded into the root — so the
+        # same app re-verifies VERIFIED after switching backends (no false TAMPERED).
+        files = [("a.ts", "1")]
+        r1 = pob.compute_proof("d", "s", files, "spec", {**BUILD, "backend": "stub"})
+        r2 = pob.compute_proof("d", "s", files, "spec",
+                               {**BUILD, "backend": "claude-opus-4-8"})
+        self.assertEqual(r1["merkle_root"], r2["merkle_root"])
+
+    def test_model_is_metadata_not_in_the_root(self):
+        # G14: `model` is provenance metadata, NEVER folded into the root — same app,
+        # different model, identical root (the seal is a pure function of substance).
+        files = [("a.ts", "1")]
+        r1 = pob.compute_proof("d", "s", files, "spec", {**BUILD, "model": "test"})
+        r2 = pob.compute_proof("d", "s", files, "spec",
+                               {**BUILD, "model": "claude-opus-4-8-20251101"})
+        self.assertEqual(r1["merkle_root"], r2["merkle_root"])
+
     def test_render_facts_are_sealed_and_tamper_evident(self):
         # MM11: the render platforms (web/iOS) fold into the SEALED verdict, so
         # "renders on iOS" is cryptographically attested + tamper-evident.
@@ -96,6 +114,37 @@ class Merkle(unittest.TestCase):
         # every historical seal re-seals to the byte-identical root
         plain = pob.compute_proof("d", "react-vite-sqlite", files, "spec", BUILD)
         self.assertNotIn("process", plain["verdict"])
+
+    def test_mobile_facts_are_sealed_and_tamper_evident(self):
+        # G04: Mobile APK facts must fold into the sealed Merkle root so a
+        # swapped/tampered APK binary is detectable by recomputing offline.
+        files = [("a.ts", "x")]
+        mobile = {
+            "apk": "outputs/app-release.apk",
+            "package": "com.adf.demo",
+            "size_bytes": 10_485_760,
+            "sha256": "deadbeef" * 8,
+            "screenshot": ".adf-mobile/screenshot.png",
+            "preview": "booted on emulator-5554",
+        }
+        with_mobile = {**BUILD, "mobile": mobile}
+        proof = pob.compute_proof("d", "expo-rn", files, "spec", with_mobile)
+
+        # (a) sealed mobile sub-dict is present and carries the input sha256
+        self.assertIn("mobile", proof["verdict"])
+        self.assertEqual(proof["verdict"]["mobile"]["sha256"], "deadbeef" * 8)
+        self.assertEqual(proof["verdict"]["mobile"]["package"], "com.adf.demo")
+        self.assertEqual(proof["verdict"]["mobile"]["size_bytes"], 10_485_760)
+
+        # (b) mutating only the APK sha256 changes the Merkle root (tamper-evidence)
+        tampered_mobile = {**mobile, "sha256": "CHANGED__" * 8}
+        tampered_proof = pob.compute_proof("d", "expo-rn", files, "spec",
+                                           {**BUILD, "mobile": tampered_mobile})
+        self.assertNotEqual(proof["merkle_root"], tampered_proof["merkle_root"])
+
+        # (c) back-compat: a web build with no mobile key has no 'mobile' in verdict
+        plain = pob.compute_proof("d", "react-vite-sqlite", files, "spec", BUILD)
+        self.assertNotIn("mobile", plain["verdict"])
 
 
 class SealAndVerify(unittest.TestCase):
@@ -147,6 +196,17 @@ class SealAndVerify(unittest.TestCase):
         ok, report = pob.verify_proof(self.app)
         self.assertFalse(ok)
         self.assertFalse(report["spec_ok"])
+
+    def test_mobile_facts_survive_verify_round_trip(self):
+        # G04: a proof sealed with mobile facts must verify VERIFIED on unchanged
+        # disk — verify_proof re-serializes verdict['mobile'] identically.
+        mobile = {"apk": "out/app.apk", "package": "com.test", "size_bytes": 1024,
+                  "sha256": "abc" * 21 + "ab", "screenshot": None, "preview": None}
+        pob.seal_app(self.app, "demo", "expo-rn", "the spec",
+                     {**BUILD, "mobile": mobile})
+        ok, report = pob.verify_proof(self.app)
+        self.assertTrue(ok, report)
+        self.assertEqual(report["status"], "VERIFIED")
 
 
 @unittest.skipUnless(pob.signing_available(),

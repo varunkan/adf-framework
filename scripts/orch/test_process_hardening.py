@@ -7,6 +7,7 @@ prior-build evidence, non-dict/tampered artifacts, and malformed sealed proofs.
 """
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -94,6 +95,45 @@ class MalformedSealedProof(unittest.TestCase):
         ok2, _ = pf.required_disciplines_met(
             {"process": {"facts": {"tdd_followed": "proven"}}}, ["tdd_followed"])
         self.assertFalse(ok2)
+
+
+class ProductionIsolationPath(unittest.TestCase):
+    """G16 regression guard: prove the production wipe+UUID belt-and-braces rejects
+    any artifact planted with _nonce='' (cannot know the per-build UUID)."""
+
+    def setUp(self):
+        self.app = tempfile.mkdtemp()
+
+    def test_empty_nonce_plant_rejected_under_production_uuid_path(self):
+        """Primary regression guard — simulates agent_runner.main:2524-2525.
+
+        Step 1: wipe the evidence dir (mirrors agent_runner.py:2524 exactly;
+                ignore_errors=True is safe even if the dir does not yet exist).
+        Step 2: stamp a UUID nonce in a local dict — do NOT mutate os.environ.
+        Step 3: plant an artifact with _nonce='' (attacker/stale plant cannot
+                know the per-build UUID).
+        Step 4: assert _read rejects the plant (returns None).
+        Step 5: assert read_process_facts returns None (no valid facts to seal).
+        """
+        # (1) Wipe — mirrors production exactly; safe on a fresh tempdir
+        shutil.rmtree(os.path.join(self.app, pf.PROCESS_DIR), ignore_errors=True)
+        # (2) UUID nonce in a local env dict — never mutate os.environ in tests
+        prod_env = {"ADF_BUILD_NONCE": "a1b2c3d4e5f67890abcdef1234567890"}
+        # (3) Plant artifact with _nonce='' — cannot match the UUID
+        _plant(self.app, "tdd.json", {"proven": True, "_nonce": ""})
+        # (4) _read must reject: '' != 'a1b2c3d4e5f67890abcdef1234567890'
+        self.assertIsNone(pf._read(self.app, "tdd.json", env=prod_env))
+        # (5) Aggregate must also return None (no facts pass the nonce check)
+        self.assertIsNone(pf.read_process_facts(self.app, env=prod_env))
+
+    def test_empty_nonce_noop_without_wipe_uuid(self):
+        """Companion latent-risk demonstrator — without the production wipe+UUID,
+        the same plant with _nonce='' IS accepted because _current_nonce({}) also
+        returns '' (both sides match).  Documents why the UUID stamp is load-bearing.
+        """
+        _plant(self.app, "tdd.json", {"proven": True, "_nonce": ""})
+        # env={} → _current_nonce returns '' → '' == '' → plant is accepted
+        self.assertIsNotNone(pf._read(self.app, "tdd.json", env={}))
 
 
 if __name__ == "__main__":

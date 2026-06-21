@@ -18,9 +18,13 @@ class ProofCheck {
       File('${appDir(id)}/.adf-proof.json').existsSync();
 
   /// Returns `{has_proof:false}` when the app carries no seal, otherwise the
-  /// verifier's report merged with `has_proof:true` and a LIVE `policy` verdict:
+  /// verifier's report merged with `has_proof:true`, the sealed-at-build-time
+  /// policy verdict (`sealed_policy`, relayed from the verifier), a LIVE
+  /// `live_policy` re-run, and a `policy_diverged` flag when their `ok` values
+  /// disagree:
   /// `{has_proof, ok, status:'VERIFIED'|'TAMPERED', seal, files:[...],
-  ///   policy:{ok, n_violations, rules:[...]}}`.
+  ///   sealed_policy:{...}|null, live_policy:{ok, n_violations, rules:[...]}|null,
+  ///   policy_diverged:bool}`.
   Future<Map<String, dynamic>> verify(String id) async {
     if (!hasProof(id)) return {'has_proof': false};
     final script = '$repoRoot/scripts/orch/verify_proof.py';
@@ -38,7 +42,22 @@ class ProofCheck {
         };
       }
       final report = jsonDecode(out) as Map<String, dynamic>;
-      return {'has_proof': true, ...report, 'policy': await checkPolicy(id)};
+      // `sealed_policy` rides in via the `...report` spread (relayed verbatim
+      // from verify_proof.py, which owns the policy logic). We add a LIVE
+      // re-run and flag divergence between the two `ok` verdicts. Compare on
+      // raw dynamic values (not `as bool?`) so a non-boolean `ok` can't crash.
+      final livePolicy = await checkPolicy(id);
+      final sealedPolicy = report['sealed_policy'] as Map<String, dynamic>?;
+      final liveOk = livePolicy?['ok'];
+      final sealedOk = sealedPolicy?['ok'];
+      final diverged =
+          (sealedOk != null && liveOk != null) && sealedOk != liveOk;
+      return {
+        'has_proof': true,
+        ...report,
+        'live_policy': livePolicy,
+        'policy_diverged': diverged,
+      };
     } catch (e) {
       return {'has_proof': true, 'error': 'verifier failed: $e'};
     }

@@ -7,7 +7,8 @@ draft/extract at volume; LONG-CONTEXT models digest corpora; FRONTIER judgment (
 does only the final synthesis + the human-facing questions. Free NVIDIA does the bulk;
 paid Opus is spent only where quality is the deliverable. **Generator ≠ verifier** and
 **perspective-diverse verification** are enforced right here by ROLE→model assignment
-(drafts go to Nemotron/Sonnet; verification goes to DeepSeek R1 — a different lineage).
+(drafts go to Nemotron Super/Sonnet; verification goes to deepseek-ai/deepseek-v4-pro —
+strong reasoning, a different pretraining lineage than the Qwen judge lens).
 
   candidates(role, env)            -> ordered [(provider, model), …]
   complete(prompt, role, …)        -> (text, usage) | None  (tries candidates in order)
@@ -110,11 +111,29 @@ def _dispatch(provider, messages, timeout, model):
         lambda m, t: fn(m, t, model=model), messages, timeout)
 
 
-def complete(prompt, role, system=None, env=None, timeout=120, call=None):
+def complete(prompt, role, system=None, env=None, timeout=None, call=None):
     """Run `role`'s task on the best available model. Tries each (provider, model)
     candidate until one returns non-empty text. `call(provider, messages, timeout,
-    model)` is injectable for tests. Returns (text, usage) or None."""
+    model)` is injectable for tests. Returns (text, usage) or None.
+
+    timeout=None means: resolve the per-call wall from ADF_NVIDIA_TIMEOUT_SEC in the
+    effective env (the injected `env` dict, else os.environ), defaulting to 120s and
+    falling back to 120 on a malformed value. This makes ADF_NVIDIA_TIMEOUT_SEC the
+    single knob: it governs BOTH this caller-default AND agent_runner.call_nvidia's
+    own min() ceiling, so the swarm's setdefault(240) actually takes effect end-to-end
+    (min(240, 240) = 240) instead of being silently capped at 120. A non-None timeout
+    is forwarded verbatim (an explicit caller value always wins).
+
+    On a successful candidate, the served (provider, model) is stamped into the
+    returned usage dict via setdefault (non-destructive — existing usage keys survive),
+    so callers can observe which model actually served the call without changing the
+    (text, usage) return arity."""
     e = _env(env)
+    if timeout is None:
+        try:
+            timeout = int(str(e.get("ADF_NVIDIA_TIMEOUT_SEC") or "").strip() or "120")
+        except ValueError:
+            timeout = 120
     messages = ([{"role": "system", "content": system}] if system else []) + \
                [{"role": "user", "content": prompt}]
     runner = call or _dispatch
@@ -125,6 +144,13 @@ def complete(prompt, role, system=None, env=None, timeout=120, call=None):
         except Exception:  # noqa: BLE001 — an outage on one provider must fall to next
             res = None
         if res and res[0] and res[0].strip():
+            # Stamp the served identity so callers (e.g. requirements_crew) can record
+            # which model actually served each role. setdefault keeps any provider-
+            # supplied keys (prompt_tokens/completion_tokens/…); the dict guard is
+            # defensive — all live backends return a dict for usage.
+            if isinstance(res[1], dict):
+                res[1].setdefault("provider", prov)
+                res[1].setdefault("model", model)
             return res
         last = res
     return last

@@ -1427,5 +1427,268 @@ class GenerationHeartbeat(unittest.TestCase):
         self.assertNotIn("<<<FILE", json.dumps(progress))
 
 
+class GenerateModelRouting(unittest.TestCase):
+    """G10 — generate()/call_with_retry() accept an optional per-call model= that
+    threads through to the backend on every attempt, with the legacy 2-arg
+    call(messages, timeout) contract preserved when model is omitted."""
+
+    def test_generate_threads_model_to_backend(self):
+        captured = {}
+
+        def stub_backend(messages, timeout, model=None):
+            captured["model"] = model
+            return ("ok", {})
+
+        with mock.patch.dict("os.environ", {"ADF_RUNNER_BACKEND": "anthropic",
+                                            "ANTHROPIC_API_KEY": "dummy"}):
+            with mock.patch.object(ar, "apply_headroom", side_effect=lambda m: m):
+                with mock.patch.object(ar, "call_anthropic", stub_backend):
+                    result = ar.generate([], 10, model="custom/model-x")
+
+        self.assertEqual(result, ("ok", {}))
+        self.assertEqual(captured["model"], "custom/model-x")
+
+    def test_generate_default_omitted_uses_backend_env_default(self):
+        captured = {}
+
+        def stub_backend(messages, timeout, model=None):
+            captured["model"] = model
+            return ("ok", {})
+
+        with mock.patch.dict("os.environ", {"ADF_RUNNER_BACKEND": "anthropic",
+                                            "ANTHROPIC_API_KEY": "dummy"}):
+            with mock.patch.object(ar, "apply_headroom", side_effect=lambda m: m):
+                with mock.patch.object(ar, "call_anthropic", stub_backend):
+                    ar.generate([], 10)
+
+        self.assertIsNone(captured["model"],
+                          "omitting model must leave the backend on its env-default path")
+
+    def test_call_with_retry_forwards_model_on_each_attempt(self):
+        seen = []
+        n = {"c": 0}
+
+        def call(messages, timeout, model=None):
+            seen.append(model)
+            n["c"] += 1
+            if n["c"] < 2:
+                raise ar.HttpError(529)
+            return ("ok", {})
+
+        result = ar.call_with_retry(
+            call, [], 10, attempts=3, sleeper=lambda s: None, model="m1")
+
+        self.assertEqual(result, ("ok", {}))
+        self.assertEqual(seen, ["m1", "m1"],
+                         "model must be forwarded on both the failed and succeeding attempt")
+
+    def test_call_with_retry_2arg_callable_no_model(self):
+        # A strictly 2-arg callable + no model= kwarg must still work (the
+        # `model is not None` guard is a branch check, not a signature inspection).
+        def call(messages, timeout):
+            return ("ok", {})
+
+        result = ar.call_with_retry(call, [], 10, attempts=1, sleeper=lambda s: None)
+        self.assertEqual(result, ("ok", {}))
+
+
+class TddRedBaselineGuards(unittest.TestCase):
+    """G12 — direct coverage for the agent_runner._tdd_red_baseline honesty seam.
+    The load-bearing test pins the deps-absent guard (no node_modules → inconclusive,
+    never a fake RED); companions cover the not-applicable and no-impl branches."""
+
+    def setUp(self):
+        self._dirs = []
+
+    def tearDown(self):
+        for d in self._dirs:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def _mkdtemp(self):
+        d = tempfile.mkdtemp()
+        self._dirs.append(d)
+        return d
+
+    def test_deps_absent_is_inconclusive_not_red(self):
+        # Both a test file AND an impl file are required so execution reaches the
+        # :2043 deps guard (a test-only input would exit early at the no-impl guard).
+        workspace = self._mkdtemp()
+        fid = "tddapp"
+        files = [
+            ("test/app.test.mjs", 'import {expect} from "vitest"; expect(1).toBe(2)'),
+            ("src/App.tsx", "export const real = () => 1"),
+        ]
+        # Patch the module-level _npm; update if renamed.
+        npm_mock = mock.MagicMock(
+            side_effect=AssertionError("npm invoked when deps absent"))
+        with mock.patch.object(ar, "_npm", npm_mock):
+            verdict, paths = ar._tdd_red_baseline(
+                workspace, fid, ar.STACK_REACT, files, 30)
+        self.assertIs(verdict["red"], False)
+        self.assertIs(verdict["vacuous"], False)
+        self.assertIn("deps absent", verdict["reason"])
+        npm_mock.assert_not_called()
+
+    def test_non_test_bearing_stack_returns_not_applicable(self):
+        verdict, paths = ar._tdd_red_baseline(
+            self._mkdtemp(), "x", ar.STACK_STDLIB, [("a.py", "x")], 30)
+        self.assertIsNone(verdict)
+        self.assertEqual(paths, [])
+
+    def test_no_impl_files_returns_inconclusive(self):
+        # Exercises the :2039 no-impl guard (distinct from the :2043 deps guard).
+        npm_mock = mock.MagicMock(
+            side_effect=AssertionError("npm invoked with no impl files"))
+        with mock.patch.object(ar, "_npm", npm_mock):
+            verdict, paths = ar._tdd_red_baseline(
+                self._mkdtemp(), "x", ar.STACK_REACT,
+                [("test/a.test.mjs", "t")], 30)
+        self.assertIs(verdict["red"], False)
+        self.assertIs(verdict["vacuous"], False)
+        self.assertIn("no test or no implementation", verdict["reason"])
+        npm_mock.assert_not_called()
+
+
+class WarmNodeModulesNarration(unittest.TestCase):
+    """G27 — the CoW fast path is platform-aware (APFS clonefile on macOS, reflink
+    on Linux) and narrates an HONEST method label (clone/hardlink/copy)."""
+
+    def test_warm_linux_uses_reflink_not_cp_c(self):
+        tpl = tempfile.mkdtemp()
+        os.makedirs(os.path.join(tpl, "node_modules", "pkg"))
+        app = tempfile.mkdtemp()
+        calls = []
+
+        def fake_run(cmd, **kw):
+            calls.append(list(cmd))
+            # all subprocess commands fail -> falls through to shutil.copytree
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+
+        with mock.patch("sys.platform", "linux"), \
+                mock.patch.object(ar.subprocess, "run", side_effect=fake_run):
+            ar.warm_node_modules(tpl, app)  # return value irrelevant here
+
+        self.assertTrue(len(calls) >= 1,
+                        "subprocess.run must have been called at least once")
+        self.assertEqual(
+            calls[0],
+            ["cp", "--reflink=auto", "-R",
+             os.path.join(tpl, "node_modules"),
+             os.path.join(app, "node_modules")],
+            f"Expected cp --reflink=auto as first command on Linux; got {calls[0]}")
+
+    def test_warm_narrates_hardlink_not_clone_when_cow_fails(self):
+        import shutil as _shutil
+        tpl = tempfile.mkdtemp()
+        src = os.path.join(tpl, "node_modules")
+        os.makedirs(os.path.join(src, "pkg"))
+        app = tempfile.mkdtemp()
+        dst = os.path.join(app, "node_modules")
+        narrated = []
+
+        def fake_run(cmd, **kw):
+            cmd = list(cmd)
+            # First cmd (CoW: cp -c or cp --reflink=auto): always fail.
+            if "reflink" in cmd[1] or cmd[1] == "-c":
+                return subprocess.CompletedProcess(cmd, 1)
+            # Second cmd (cp -al): succeed by creating dst.
+            if "-al" in cmd:
+                _shutil.copytree(src, dst, symlinks=True)
+                return subprocess.CompletedProcess(cmd, 0)
+            return subprocess.CompletedProcess(cmd, 1)
+
+        def fake_narrate(kind, **fields):
+            narrated.append((kind, fields))
+
+        with mock.patch.object(ar.subprocess, "run", side_effect=fake_run), \
+                mock.patch.object(ar, "narrate", side_effect=fake_narrate):
+            result = ar.warm_node_modules(tpl, app)
+
+        self.assertTrue(result)
+        deps_warm = [(k, f) for k, f in narrated if k == "deps_warm"]
+        self.assertEqual(len(deps_warm), 1)
+        self.assertEqual(
+            deps_warm[0][1].get("method"), "hardlink",
+            f"Expected method='hardlink' but got: {deps_warm[0][1]}")
+
+
+# G02 — driver run as a subprocess so sys.exit() and on-disk proof presence are
+# observable. It stubs ONLY the heavy I/O (generation + verification) to reach the
+# real `if verified:` policy-gate path; the policy gate itself is shadowed by a
+# PYTHONPATH shim whose check_policy raises, exercising the real except handler.
+_G02_DRIVER = r'''
+import os, sys
+import agent_runner as ar
+
+# Reach the verified policy-gate path without an LLM or a real test run.
+ar.generate = lambda messages, timeout, model=None: (
+    "<<<FILE: server.py>>>\nprint('ok')\n<<<END>>>\n"
+    "<<<FILE: test_app.py>>>\ndef test_ok():\n    assert True\n<<<END>>>\n", {})
+ar.verify_app = lambda app_root, stack=None, timeout=None: (True, "ok")
+ar.audit_completion = lambda *a, **k: []
+sys.argv = ["agent_runner", "build feature stub", "--workspace", sys.argv[1]]
+ar.main()
+'''
+
+
+class PolicyGateFailClosed(unittest.TestCase):
+    """G02 — a policy-gate exception under ENFORCED policy fails CLOSED (no proof,
+    exit 6); under ADF_POLICY=advisory the old record-but-ship behavior is kept."""
+
+    def test_policy_failclosed_helper(self):
+        self.assertEqual(ar._policy_failclosed(False), ["policy_gate_error"])
+        self.assertEqual(ar._policy_failclosed(True), [])
+
+    def _run_with_raising_gate(self, extra_env):
+        workspace = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, workspace, ignore_errors=True)
+        fid = "stub"
+        # Minimal spec so load_feature_context yields a non-empty ctx.
+        feat_dir = os.path.join(workspace, "orchestration", "features", fid)
+        os.makedirs(feat_dir, exist_ok=True)
+        with open(os.path.join(feat_dir, "requirement.md"), "w") as f:
+            f.write("Build a stub app.\n")
+        # PYTHONPATH shim: a policy_gate whose check_policy raises, shadowing the
+        # real module (prepended so it wins over scripts/orch on sys.path).
+        shim = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, shim, ignore_errors=True)
+        with open(os.path.join(shim, "policy_gate.py"), "w") as f:
+            f.write("def check_policy(app_root, policy=None):\n"
+                    "    raise RuntimeError('injected gate failure')\n")
+        orch = os.path.dirname(os.path.abspath(ar.__file__))
+        env = {**os.environ}
+        env["PYTHONPATH"] = os.pathsep.join(
+            [shim, orch, env.get("PYTHONPATH", "")])
+        env["ORCH_REPO_ROOT"] = workspace
+        env["ADF_FEATURE_ID"] = fid
+        env["ADF_STACK"] = ar.STACK_STDLIB
+        env.pop("ADF_PROCESS", None)
+        env.pop("ADF_TDD", None)
+        env.pop("ADF_POLICY", None)   # default strict unless extra_env opts out
+        env.update(extra_env)
+        driver = os.path.join(shim, "_g02_driver.py")
+        with open(driver, "w") as f:
+            f.write(_G02_DRIVER)
+        r = subprocess.run([sys.executable, driver, workspace],
+                           env=env, capture_output=True, text=True, timeout=120)
+        proof = os.path.join(workspace, "apps", fid, ".adf-proof.json")
+        return r, proof
+
+    def test_policy_gate_exception_fails_closed_exit6(self):
+        # ADF_POLICY unset (default strict) — the driver env does not set it.
+        r, proof = self._run_with_raising_gate({})
+        self.assertEqual(r.returncode, 6,
+                         f"expected fail-closed exit 6; stdout/stderr:\n{r.stdout}\n{r.stderr}")
+        self.assertFalse(os.path.exists(proof),
+                         "a gate exception under enforced policy must NOT seal a proof")
+
+    def test_policy_gate_exception_advisory_ships_exit0(self):
+        r, proof = self._run_with_raising_gate({"ADF_POLICY": "advisory"})
+        self.assertEqual(r.returncode, 0,
+                         f"advisory escape hatch must ship; stdout/stderr:\n{r.stdout}\n{r.stderr}")
+        self.assertTrue(os.path.exists(proof),
+                        "advisory mode preserves the old record-but-ship seal")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

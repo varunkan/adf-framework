@@ -11,6 +11,10 @@
 
 **Measured capability (bench --build):** 3/3 apps built and tests-passing, avg 42.5s each (real npm + Vite + Vitest + Node), cost ~$0.37 total for 3 apps (17,867 tokens) — backend claude-opus-4-8 (cloud). All 3/3 were also fully **governed** (proven + policy-compliant + offline).
 
+**Measured capability (bench --build):** a live **$0, offline** build was attempted with nvidia; 0/3 finished within the configured budget on a single dev machine (local-model latency is real — see *time-to-first-app* below). The build/test/run **pipeline** itself is proven by the deterministic e2e (`scripts/test/e2e_react_app.py`: prompt → build → boot → serve → persist → hot-edit, with real npm + Vite + Vitest + Node). So the pipeline is fast; the variable cost is the model's generation time, which you control by choosing the backend.
+
+**Measured capability (bench --build):** a live **$0, offline** build was attempted with ollama qwen2.5-coder:32b (local, $0, offline); 0/1 finished within the 600s budget on a single dev machine (local-model latency is real — see *time-to-first-app* below). The build/test/run **pipeline** itself is proven by the deterministic e2e (`scripts/test/e2e_react_app.py`: prompt → build → boot → serve → persist → hot-edit, with real npm + Vite + Vitest + Node). So the pipeline is fast; the variable cost is the model's generation time, which you control by choosing the backend.
+
 ## Governance & ownership — the moat (ADF wins 9/9)
 
 These are structural. Lovable is a hosted SaaS; it cannot offer offline builds,

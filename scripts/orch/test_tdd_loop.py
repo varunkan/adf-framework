@@ -89,6 +89,9 @@ class Record(unittest.TestCase):
         v = {"red": True, "vacuous": False, "reason": "RED"}
         fact = tdd_loop.record(self.app, v, False, ["test/a.test.mjs"])
         self.assertFalse(fact["proven"])
+        facts = process_facts.read_process_facts(self.app)
+        self.assertIsNotNone(facts)
+        self.assertEqual(facts["facts"]["tdd_followed"]["status"], "skipped")
 
 
 if __name__ == "__main__":

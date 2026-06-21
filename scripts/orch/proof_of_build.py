@@ -81,6 +81,23 @@ def _verdict_bytes(stack: str, build: dict) -> bytes:
     # build (no `process`) re-seals to the byte-identical root.
     if build.get("process") is not None:
         verdict["process"] = build["process"]
+    # G04: seal the native mobile (APK) facts so a swapped/tampered downloadable
+    # binary is detectable by recomputing the proof offline. Curated subset only:
+    # `sha256` (the integrity value, written by mobile_native_delivery as "sha256"),
+    # `package`, `size_bytes`, and the `screenshot` evidence reference. The `apk`
+    # relpath and the human `preview` string are intentionally EXCLUDED so a moved
+    # app root or a corrected preview note never re-seals the root. The `.adf-mobile/`
+    # dir is (correctly) excluded from the file-leaf walk; this verdict branch is the
+    # canonical, single seal point for mobile facts. Conditional, so any build without
+    # a `mobile` key (every web build, historical Expo seals) re-seals identically.
+    if build.get("mobile") is not None:
+        m = build["mobile"]
+        verdict["mobile"] = {
+            "sha256": m.get("sha256"),
+            "package": m.get("package"),
+            "size_bytes": m.get("size_bytes"),
+            "screenshot": m.get("screenshot"),
+        }
     return json.dumps(verdict, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
@@ -276,6 +293,19 @@ def _process_line(proof):
         return ""
 
 
+def _mobile_line(proof):
+    """The human line attesting the sealed native mobile (APK) facts, or ''."""
+    mobile = (proof.get("verdict") or {}).get("mobile")
+    if not mobile:
+        return ""
+    sha = (mobile.get("sha256") or "")
+    sha_disp = f"`{sha[:16]}…`" if sha else "n/a"
+    pkg = mobile.get("package") or "n/a"
+    kb = (mobile.get("size_bytes") or 0) // 1024
+    size = f"  ·  **APK:** {kb} KB" if kb else ""
+    return f"**Mobile-sealed:** `{pkg}`  ·  **sha256:** {sha_disp}{size}  "
+
+
 def _signature_line(proof):
     """The human line attesting an optional provenance signature, or ''."""
     sig = proof.get("signature")
@@ -299,6 +329,7 @@ def render_proof_md(proof):
         f"**Verified:** {'✅ ' + (b.get('verify_summary') or 'yes') if b.get('verified') else '❌ no'}",
         *([_render_line(proof)] if _render_line(proof) else []),
         *([_process_line(proof)] if _process_line(proof) else []),
+        *([_mobile_line(proof)] if _mobile_line(proof) else []),
         *([_signature_line(proof)] if _signature_line(proof) else []),
         "",
         "This app ships a tamper-evident certificate. The Merkle root above seals "
@@ -443,4 +474,6 @@ def verify_proof(app_dir, trusted_pubkeys=None):
         "signer": signer,               # the signing public key (hex), or None
         "signer_trusted": signer_trusted,  # True/False when trusted_pubkeys given
         "process": verdict.get("process"),  # sealed process-discipline facts, or None
+        "sealed_policy": verdict.get("policy"),  # G15: sealed policy verdict, so the
+        # Dart layer can surface sealed-vs-live policy and flag divergence (proof_check.dart)
     }

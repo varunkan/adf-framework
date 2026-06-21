@@ -776,11 +776,15 @@ def _ensure_template_node_modules(tpl_dir, timeout=600):
 
 def warm_node_modules(tpl_dir, app_dir):
     """Clone the template's node_modules into the app (no per-app `npm ci`). Tries,
-    fastest-first: APFS clonefile (`cp -c`, instant + zero extra disk) → hardlink
-    (`cp -al`, Linux) → plain copy. On a cold checkout the template has no
+    fastest-first: a copy-on-write clone → hardlink (`cp -al`) → plain copy. The CoW
+    command is platform-specific: APFS clonefile (`cp -c`) is macOS-ONLY; on Linux
+    the equivalent is reflink (`cp --reflink=auto`, instant + zero extra disk on
+    btrfs/XFS, falling through on ext4/tmpfs). On a cold checkout the template has no
     node_modules yet, so it is bootstrapped ONCE here (deps are pinned + identical
     for every app) — otherwise every app falls back to a full `npm ci` and the COW
-    clone never engages. No-op if the app already has one. Returns True on success."""
+    clone never engages. No-op if the app already has one. Returns True on success.
+    The narrated `method` is honest: 'clone' ONLY when the platform CoW command
+    succeeded, 'hardlink' when `cp -al` succeeded, 'copy' for the copytree fallback."""
     import shutil
     src = os.path.join(tpl_dir, "node_modules")
     dst = os.path.join(app_dir, "node_modules")
@@ -788,12 +792,19 @@ def warm_node_modules(tpl_dir, app_dir):
         return False
     if not os.path.isdir(src) and not _ensure_template_node_modules(tpl_dir):
         return False                    # cold + couldn't bootstrap → caller's npm ci
-    for cmd in (["cp", "-c", "-R", src, dst], ["cp", "-al", src, dst]):
+    # Platform-aware CoW candidate: APFS clonefile on macOS, reflink on Linux/other.
+    if sys.platform == "darwin":
+        cow_cmd = ["cp", "-c", "-R", src, dst]
+    else:
+        cow_cmd = ["cp", "--reflink=auto", "-R", src, dst]
+    # (cmd, method) pairs keep the command co-located with its HONEST label, so a
+    # `cp -al` success narrates 'hardlink', not 'clone'.
+    for cmd, method in ((cow_cmd, "clone"), (["cp", "-al", src, dst], "hardlink")):
         try:
             if subprocess.run(cmd, capture_output=True).returncode == 0 \
                     and os.path.isdir(dst):
                 log("warm node_modules cloned from template — npm ci skipped")
-                narrate("deps_warm", method="clone")
+                narrate("deps_warm", method=method)
                 return True
         except Exception:
             pass
@@ -903,17 +914,28 @@ def _retry_backoff_seconds(reason, attempt, retry_after=None):
     return delay + random.uniform(0, 0.5 * delay)
 
 
-def call_with_retry(call, messages, timeout, *, attempts=None, sleeper=None):
+def call_with_retry(call, messages, timeout, *, attempts=None, sleeper=None,
+                    model=None):
     """Run a backend, retrying the SAME backend on a transient HTTP status with
     bounded backoff BEFORE `generate()` falls through to a weaker backend — so a
     transient Anthropic 529 no longer silently demotes a Claude build to free
     NVIDIA mid-run. A non-retryable status, a missing key (the call returns None),
-    or exhausted attempts returns None (then `generate()` tries the next backend)."""
+    or exhausted attempts returns None (then `generate()` tries the next backend).
+
+    Optional per-call `model`: when not None it is forwarded to `call` on EVERY
+    attempt as `call(messages, timeout, model=model)`. When None (the default) the
+    legacy 2-arg `call(messages, timeout)` contract is preserved verbatim, so every
+    existing 2-arg callable (and `model_router._dispatch`'s closure) stays valid.
+    The guard is `model is not None` (identity, NOT truthiness): an explicit
+    `model=''` is still forwarded — the backend's `model or os.environ.get(...)`
+    coercion then falls to its env default, which is the correct, consistent
+    behavior."""
     attempts = attempts or int(os.environ.get("ADF_RUNNER_RETRIES", "3"))
     sleeper = sleeper or time.sleep
     for i in range(attempts):
         try:
-            return call(messages, timeout)
+            return (call(messages, timeout, model=model) if model is not None
+                    else call(messages, timeout))
         except HttpError as e:
             reason = classify_http_status(e.status)
             if e.status not in _RETRYABLE_STATUS or i == attempts - 1:
@@ -1239,7 +1261,7 @@ def apply_headroom(messages):
         return messages
 
 
-def generate(messages, timeout):
+def generate(messages, timeout, model=None):
     """Try each configured backend in order; return (text, usage) or None.
     Headroom runs FIRST, before any backend dispatch.
 
@@ -1248,7 +1270,14 @@ def generate(messages, timeout):
       - Otherwise RELIABILITY-FIRST: if ANTHROPIC_API_KEY is set, Claude leads
         (it builds in one shot — no slow free-tier self-heal grind), with NVIDIA
         and Ollama as fallbacks. Set ADF_RUNNER_BACKEND=nvidia for the free path.
-      - With no Claude key, fall back to NVIDIA (free) then Ollama (local)."""
+      - With no Claude key, fall back to NVIDIA (free) then Ollama (local).
+
+    Optional per-call `model`: when provided it is threaded through to whichever
+    backend in the order runs (the same model on every failover step), letting a
+    caller route a specific model without an env var. When omitted (or None) the
+    behavior is byte-for-byte identical to before — each backend resolves its model
+    from its own env-var default chain (the SSOT for model defaults stays in the
+    backend functions; generate() only passes the override through)."""
     messages = apply_headroom(messages)
     pin = os.environ.get("ADF_RUNNER_BACKEND", "").strip().lower()
     if pin in ("nvidia", "anthropic", "ollama"):
@@ -1261,7 +1290,7 @@ def generate(messages, timeout):
     for backend in order:
         # Retry THIS backend on a transient status before failing over to the next
         # (weaker) one — a 529 overloaded shouldn't demote a Claude build to NVIDIA.
-        res = call_with_retry(backend, messages, timeout)
+        res = call_with_retry(backend, messages, timeout, model=model)
         if res and res[0] and res[0].strip():
             return res
     return None
@@ -1393,6 +1422,8 @@ _SECRET_ENV_EXACT = {"ANTHROPIC_API_KEY", "NVIDIA_API_KEY", "ORCH_NVIDIA_API_KEY
 # from oh-my-pi's NON_INTERACTIVE_ENV / buildNonInteractiveEnv; see
 # docs/ADF_VS_OH_MY_PI.md §5.2.) Real env values (a user-set PAGER, etc.) are
 # overridden because a build child must never wait on a human.
+# MIRROR: tools/orchestration_server/lib/phase_runner.dart `nonInteractiveEnv` must
+# carry the same keys (G29 parity). Keep the two in sync when editing either.
 NON_INTERACTIVE_ENV = {
     "CI": "1",
     "NO_COLOR": "1",
@@ -2476,6 +2507,16 @@ class _PolicyBlocked(Exception):
     intentionally NOT sealed (distinct from a sealing error)."""
 
 
+def _policy_failclosed(advisory):
+    """SSOT for the fail-closed-on-error decision, paralleling the process gate's
+    inline `["process_facts_error"]`. Returns the synthetic blocking-rule list
+    `["policy_gate_error"]` when the policy is ENFORCED (`advisory` is False) so a
+    gate exception fails CLOSED (build not sealed, exit 6); returns `[]` under the
+    explicit advisory escape hatch so the old record-but-ship behavior is preserved.
+    Pure: reads no globals, no side effects."""
+    return ["policy_gate_error"] if not advisory else []
+
+
 def should_scaffold(stack, app_dir):
     """Decide whether a fresh build scaffolds from the checked-in template.
 
@@ -2795,7 +2836,28 @@ def main():
                     repo_root, fid, False,
                     f"policy enforced-rule violation: {', '.join(blocking)}")
         except Exception as e:
-            log(f"policy gate skipped: {e}")
+            # FAIL-CLOSED on a gate error, mirroring the PROCESS gate at the
+            # `process_facts_error` block below. The policy gate is opt-OUT advisory
+            # (ADF_POLICY defaults to "strict"), so recompute `advisory` from the
+            # environment HERE — the try-local may not exist if the exception fired
+            # before line ~2790 (e.g. ImportError on `import policy_gate`). This read
+            # MUST stay byte-identical to the happy-path check above; if one changes,
+            # change both (Risk: SSOT divergence).
+            _advisory = os.environ.get("ADF_POLICY", "strict").strip().lower() in (
+                "advisory", "warn", "off")
+            fc = _policy_failclosed(_advisory)
+            if fc:
+                # `policy_blocked or fc` PRESERVES real rule names if a genuine
+                # violation was already set before the exception fired; only falls
+                # back to the synthetic name when nothing was set. Do NOT simplify to
+                # a straight assignment — that would clobber the real cause.
+                policy_blocked = policy_blocked or fc
+                record_build_outcome(
+                    repo_root, fid, False, f"policy gate error: {e}")
+                log(f"🚫 policy gate BLOCKED on error — policy_gate_error "
+                    f"(set ADF_POLICY=advisory to override): {e}")
+            else:
+                log(f"policy gate skipped (advisory mode): {e}")
         try:
             if policy_blocked:
                 # A blocked build is never sealed — a sealed proof is a POSITIVE
@@ -2848,7 +2910,10 @@ def main():
                 raise _PolicyBlocked()
             # Native mobile deliverable (gated, best-effort): a standalone, signed
             # APK + a clean-emulator preview — the "download + run on a device"
-            # artifact, its hash sealed below so the downloadable binary is attested.
+            # artifact. When mobile_native_delivery actually ran and returned facts,
+            # the proof_of_build agent folds its sha256 into the sealed verdict (so
+            # the downloadable binary is tamper-evident); when it did not run
+            # (mobile_facts is None), nothing mobile is sealed.
             mobile_facts = (mobile_native_delivery(app_root, fid)
                             if stack == STACK_EXPO else None)
             import proof_of_build

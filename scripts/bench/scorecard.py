@@ -78,7 +78,56 @@ def _table(rows):
     return "\n".join(out)
 
 
-def render_scorecard(bench=None, capability=None):
+def _capability_block(cap: dict) -> str:
+    """Render one 'Measured capability' paragraph for a single backend result dict.
+
+    This is the single source of truth for per-backend prose. Call it once per
+    result file when multiple --results flags are supplied.
+    """
+    apps = cap.get("apps", 0)
+    built = cap.get("built", 0)
+    backend = cap.get("backend", "a local model")
+    if apps and built >= apps:
+        cost = (cap.get("cost")
+                or ("$0 (local model, offline)"
+                    if cap.get("local") else "measured"))
+        gov_note = ""
+        if cap.get("governed") is not None:
+            gov_note = (f" All {cap['governed']}/{apps} were also fully "
+                        f"**governed** (proven + policy-compliant + offline).")
+        return (
+            f"\n**Measured capability (bench --build):** "
+            f"{built}/{apps} apps built and tests-passing"
+            + (f", avg {cap['avg_seconds']}s each (real npm + Vite + "
+               f"Vitest + Node)" if cap.get('avg_seconds') else "")
+            + f", cost {cost} — backend {backend}." + gov_note + "\n")
+    else:
+        # Honest: distinguish the (proven) pipeline from a (latency-bound) local
+        # model run. Do not pass a raw "0/N built" off as a pipeline failure.
+        budget_s = cap.get("budget_s")
+        budget_phrase = (f"the {budget_s}s" if budget_s is not None
+                         else "the configured")
+        pipe = cap.get("pipeline_seconds")
+        pipe_txt = (f" — measured at ~{pipe}s end to end" if pipe else "")
+        return (
+            f"\n**Measured capability (bench --build):** a live **$0, offline** "
+            f"build was attempted with {backend}; {built}/{apps} finished within "
+            f"{budget_phrase} budget on a single dev machine (local-model latency is "
+            f"real — see *time-to-first-app* below). The build/test/run **pipeline** "
+            f"itself is proven by the deterministic e2e "
+            f"(`scripts/test/e2e_react_app.py`: prompt → build → boot → serve → "
+            f"persist → hot-edit, with real npm + Vite + Vitest + Node{pipe_txt}). "
+            f"So the pipeline is fast; the variable cost is the model's generation "
+            f"time, which you control by choosing the backend.\n")
+
+
+def render_scorecard(bench=None, capability=None, capabilities=None):
+    # Fail-CLOSED: both call forms supplied simultaneously is a caller bug.
+    if capability is not None and capabilities is not None:
+        raise ValueError(
+            "render_scorecard(): supply either capability= (single dict) or "
+            "capabilities= (list), not both.")
+
     gov_yes = sum(1 for r in GOVERNANCE if r[1] == "yes")
     measured = ""
     if bench:
@@ -90,40 +139,17 @@ def render_scorecard(bench=None, capability=None):
             f"compliant {bench.get('compliant', 0)}/{bench.get('apps', 0)}, "
             f"offline {bench.get('offline', 0)}/{bench.get('apps', 0)}. "
             f"See `scripts/bench/`.\n")
-    if capability:
-        apps = capability.get("apps", 0)
-        built = capability.get("built", 0)
-        backend = capability.get("backend", "a local model")
-        if apps and built >= apps:
-            cost = (capability.get("cost")
-                    or ("$0 (local model, offline)"
-                        if capability.get("local") else "measured"))
-            gov_note = ""
-            if capability.get("governed") is not None:
-                gov_note = (f" All {capability['governed']}/{apps} were also fully "
-                            f"**governed** (proven + policy-compliant + offline).")
-            measured += (
-                f"\n**Measured capability (bench --build):** "
-                f"{built}/{apps} apps built and tests-passing"
-                + (f", avg {capability['avg_seconds']}s each (real npm + Vite + "
-                   f"Vitest + Node)" if capability.get('avg_seconds') else "")
-                + f", cost {cost} — backend {backend}." + gov_note + "\n")
-        else:
-            # Honest: distinguish the (proven) pipeline from a (latency-bound) local
-            # model run. Do not pass a raw "0/N built" off as a pipeline failure.
-            budget = capability.get("budget_s", "the")
-            pipe = capability.get("pipeline_seconds")
-            pipe_txt = (f" — measured at ~{pipe}s end to end" if pipe else "")
-            measured += (
-                f"\n**Measured capability (bench --build):** a live **$0, offline** "
-                f"build was attempted with {backend}; {built}/{apps} finished within "
-                f"the {budget}s budget on a single dev machine (local-model latency is "
-                f"real — see *time-to-first-app* below). The build/test/run **pipeline** "
-                f"itself is proven by the deterministic e2e "
-                f"(`scripts/test/e2e_react_app.py`: prompt → build → boot → serve → "
-                f"persist → hot-edit, with real npm + Vite + Vitest + Node{pipe_txt}). "
-                f"So the pipeline is fast; the variable cost is the model's generation "
-                f"time, which you control by choosing the backend.\n")
+
+    # Determine the list of capability dicts to render.
+    if capabilities is not None:
+        cap_list = capabilities  # new multi-backend call form
+    elif capability is not None:
+        cap_list = [capability]  # legacy single-dict call form, wrapped for SSOT
+    else:
+        cap_list = []
+
+    for cap in cap_list:
+        measured += _capability_block(cap)
 
     return f"""# ADF vs Lovable — the honest scorecard
 
@@ -175,18 +201,37 @@ def _main(argv=None):
     root = os.path.abspath(os.path.join(here, "..", ".."))
     ap = argparse.ArgumentParser(description="Generate the ADF-vs-Lovable scorecard")
     ap.add_argument("--out", default=os.path.join(root, "docs", "ADF_VS_LOVABLE.md"))
-    ap.add_argument("--results", help="a run_bench results JSON to embed")
+    ap.add_argument("--results", action="append",
+                    help="a run_bench results JSON to embed; may be repeated")
     args = ap.parse_args(argv)
 
-    bench = capability = None
-    if args.results and os.path.isfile(args.results):
-        import json
-        with open(args.results, encoding="utf-8") as f:
-            data = json.load(f)
-        bench = data.get("summary")
-        capability = data.get("capability")
+    import json
+    # action='append' returns None when the flag is absent, not [].
+    results = args.results or []
 
-    md = render_scorecard(bench, capability)
+    bench = None
+    cap_list = []
+    for i, path in enumerate(results):
+        if not os.path.isfile(path):
+            print(f"warning: --results path not found, skipping: {path}",
+                  file=sys.stderr)
+            continue
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        # Populate bench from the FIRST file's summary only (the paid-run governance
+        # numbers are what the governance table references; later files may be
+        # free/local runs whose summary reflects only their own subset of apps).
+        if i == 0:
+            bench = data.get("summary")
+        cap = data.get("capability")
+        if cap is None:
+            print(f"warning: no 'capability' key in {path}, skipping",
+                  file=sys.stderr)
+            continue
+        cap_list.append(cap)
+
+    md = render_scorecard(bench=bench,
+                          capabilities=cap_list if cap_list else None)
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:
         f.write(md)

@@ -19,11 +19,19 @@ Injection-based (`fetch` + `complete` are injectable) so it's unit-testable offl
   gather(queries, urls, env, …)        -> [note, …]   (the research corpus)
 """
 import html
+import logging
 import os
 import re
 import urllib.parse
 import urllib.request
+import urllib.robotparser
 from html.parser import HTMLParser
+
+_log = logging.getLogger(__name__)
+
+# SSOT for the crawler user-agent — referenced by both _http_get's header and
+# _check_robots's robotparser agent string. Change it here, it changes everywhere.
+_UA = "ADF-Research/1.0"
 
 
 def is_enabled(env=None):
@@ -51,13 +59,40 @@ def _ssl_ctx():
 
 def _http_get(url, timeout=20):
     """Plain GET → text, or None. The default fetcher (injectable in tests)."""
-    req = urllib.request.Request(url, headers={"User-Agent": "ADF-Research/1.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": _UA})
     try:
         with urllib.request.urlopen(req, timeout=timeout, context=_ssl_ctx()) as resp:  # noqa: S310
             charset = resp.headers.get_content_charset() or "utf-8"
             return resp.read().decode(charset, errors="replace")
     except Exception:  # noqa: BLE001 — a dead URL must not crash research
         return None
+
+
+def _check_robots(url, fetch, env=None, timeout=10):
+    """Robots.txt politeness for the urllib FALLBACK path only (G17). Fetches the
+    target origin's /robots.txt via the injectable `fetch`, parses it with the stdlib
+    robotparser, and returns (allowed, crawl_delay).
+
+    FAIL OPEN on ANY problem (escape hatch set, fetch error, None/empty body, malformed
+    robots.txt) -> (True, 0.0) — consistent with the never-crashes-research contract.
+    Returns crawl_delay for `_UA` (falling back to the `*` wildcard) so the caller can
+    honor a Crawl-delay directive (capped by the caller)."""
+    env = env if env is not None else os.environ
+    if (env.get("ADF_ROBOTS_CHECK") or "").strip() == "0":  # operator escape hatch
+        return (True, 0.0)
+    try:
+        parsed = urllib.parse.urlparse(url)
+        robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
+        text = fetch(robots_url)
+        if not text:                       # None / empty -> fail open before .parse()
+            return (True, 0.0)
+        rp = urllib.robotparser.RobotFileParser()
+        rp.parse(text.splitlines())
+        allowed = rp.can_fetch(_UA, url)
+        delay = rp.crawl_delay(_UA) or rp.crawl_delay("*") or 0.0
+        return (bool(allowed), float(delay))
+    except Exception:  # noqa: BLE001 — malformed robots / odd robotparser edge -> allow
+        return (True, 0.0)
 
 
 class _Textify(HTMLParser):
@@ -113,10 +148,17 @@ def _is_thin(md, minlen=1200):
     return bool(_BLOCKED.search(md[:400]))
 
 
-def fetch_text(url, env=None, fetch=None):
+def fetch_text(url, env=None, fetch=None, *, _sleep=None):
     """Return {url, title, markdown} for a URL via the configured scraper, or None.
     Tries the service first; if it returns a THIN/blocked stub, falls back to a plain GET
-    + stdlib de-boilerplate (which frequently retrieves more than a throttled service)."""
+    + stdlib de-boilerplate (which frequently retrieves more than a throttled service).
+
+    Only the urllib FALLBACK path consults robots.txt (G17): the primary Jina/Firecrawl
+    services manage their own compliance, so a successful non-thin service result returns
+    BEFORE any robots check (no extra round-trip on the primary path). `_sleep` is a
+    keyword-only test seam for the Crawl-delay sleep; it defaults to time.sleep."""
+    import time as _time
+    _sleep = _sleep or _time.sleep
     env = env if env is not None else os.environ
     fetch = fetch or _http_get
     scraper = env.get("ADF_SCRAPER", "jina").strip().lower()
@@ -133,6 +175,13 @@ def fetch_text(url, env=None, fetch=None):
         if md and not _is_thin(md):   # same thin/blocked-stub guard as jina → fall back
             return {"url": url, "title": url, "markdown": md.strip()}
 
+    # FALLBACK path only: consult robots.txt before the plain GET (G17). The primary
+    # services above already returned if they had non-thin content.
+    allowed, delay = _check_robots(url, fetch, env)
+    if not allowed:
+        return None                               # disallowed -> treat URL as dead
+    if delay > 0:
+        _sleep(min(max(delay, 0.0), 10.0))        # cap at 10s so ADF never stalls (G17)
     raw = fetch(url)                              # fallback: plain GET + de-boilerplate
     if not raw or not raw.strip():
         return None
@@ -171,12 +220,18 @@ def search(query, env=None, fetch=None, limit=5):
 
 def scrape(url, env=None, fetch=None, complete=None):
     """Fetch a URL and return a focused research note {url, title, facts, citations}.
+    Pipeline: head+tail-clipped body -> single extract-role LLM call -> cited note.
     When a model `complete(prompt, role)` is given, a fast model extracts the
-    requirement-relevant facts; otherwise the cleaned text is returned (truncated)."""
+    requirement-relevant facts; otherwise the cleaned (clipped) text is returned.
+
+    The body is bounded with `compaction.clip` (the canonical head+tail primitive),
+    NOT a blind `text[:N]` slice — so the TAIL of long regulatory pages (conclusions,
+    open questions, constraints) survives into the extract prompt (G20)."""
     page = fetch_text(url, env, fetch)
     if not page:
         return None
-    body = page["markdown"][:12000]
+    import compaction  # lazy — matches the pattern in requirements_crew.py
+    body = compaction.clip(page["markdown"], 12000)
     facts = body
     if complete is not None:
         res = complete(
@@ -192,7 +247,13 @@ def scrape(url, env=None, fetch=None, complete=None):
 def gather(queries=None, urls=None, env=None, fetch=None, complete=None,
            per_query=3, max_pages=8):
     """The research corpus: search each query, fetch the top hits + any user-named URLs,
-    and scrape each into a cited note. Returns [] when research is disabled or offline."""
+    and scrape each into a cited note. Returns [] when research is disabled or offline.
+
+    CAP: at most `max_pages` URLs (default 8) are scraped per call — a rate-control
+    measure bounding token, latency, and HTTP cost. User-named URLs are prioritized
+    (prepended before search hits) but share the SAME cap as search-derived results:
+    if a caller supplies MORE than `max_pages` unique user URLs, the excess are dropped
+    and a WARNING is logged (per-dropped-URL detail at DEBUG) so the loss is observable."""
     env = env if env is not None else os.environ
     if not is_enabled(env):
         return []
@@ -201,11 +262,19 @@ def gather(queries=None, urls=None, env=None, fetch=None, complete=None,
         if u not in seen:
             seen.add(u)
             targets.append(u)
+    user_unique = len(targets)                     # unique user URLs, post-dedup (G19)
     for q in (queries or []):
         for u in search(q, env, fetch, limit=per_query):
             if u not in seen:
                 seen.add(u)
                 targets.append(u)
+    if user_unique > max_pages:                    # caller's own URLs dropped by the cap
+        dropped = user_unique - max_pages
+        _log.warning(
+            "gather() truncating user URLs: %d unique supplied, cap is %d, %d dropped",
+            user_unique, max_pages, dropped)
+        for u in targets[max_pages:user_unique]:   # only the dropped USER URLs
+            _log.debug("gather() dropped user URL (over max_pages): %s", u)
     notes = []
     for u in targets[:max_pages]:
         note = scrape(u, env, fetch, complete)

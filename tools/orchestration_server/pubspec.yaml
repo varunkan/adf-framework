@@ -8,6 +8,11 @@ environment:
 
 dependencies:
   crypto: ^3.0.7
+  # Promoted from transitive (already in pubspec.lock) to explicit: multipart
+  # file-upload parsing on POST /features/<id>/upload (G18). Zero new packages.
+  http_parser: ^4.0.0
+  mime: ^2.0.0
+  path: ^1.9.0
   shelf: ^1.4.2
   shelf_router: ^1.1.4
   yaml: ^3.1.2

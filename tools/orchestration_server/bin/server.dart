@@ -27,6 +27,9 @@ import 'package:orchestration_server/pipeline_planner.dart';
 import 'package:orchestration_server/preview_service.dart';
 import 'package:orchestration_server/run_post_sync.dart';
 import 'package:orchestration_server/trace_writer.dart';
+import 'package:http_parser/http_parser.dart';
+import 'package:mime/mime.dart';
+import 'package:path/path.dart' as p;
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as io;
 import 'package:shelf_router/shelf_router.dart';
@@ -47,6 +50,81 @@ final _localOrigin = RegExp(
 
 bool _isLocalOrigin(String? origin) =>
     origin == null || _localOrigin.hasMatch(origin);
+
+/// Per-featureId single-flight guard for crew runs. A second concurrent trigger
+/// for an id whose crew is already in flight is rejected (G05), preventing the
+/// duplicate phase seals / last-write-wins state corruption that two interleaved
+/// `AgentCrew.run(id)` calls over the shared `IntegrityChain` would otherwise
+/// produce. `tryAcquire` is a synchronous check+add — atomic between Dart's
+/// await points (no Mutex package needed). In-memory only: a process restart
+/// resets it, which is correct since a crashed server has no live run to collide
+/// with (matches `PhaseRunner._active` semantics). Single-process assumption — a
+/// multi-process deployment would need a file-lock or DB-backed lease.
+class CrewGate {
+  final Set<String> _inFlight = {};
+
+  /// Atomically claim [id] if free. Returns true on claim, false if already
+  /// in flight. No `await` between the check and the add, so the event loop
+  /// cannot interleave another microtask and double-admit.
+  bool tryAcquire(String id) {
+    if (_inFlight.contains(id)) return false;
+    _inFlight.add(id);
+    return true;
+  }
+
+  /// Release [id]'s marker. Idempotent — safe to call in a `finally` regardless
+  /// of whether the run returned, threw, or timed out.
+  void release(String id) => _inFlight.remove(id);
+
+  bool isInFlight(String id) => _inFlight.contains(id);
+}
+
+/// Normalize the multimodal intake fields of a POST /features body into the flat
+/// `sources.json` shape (`{"url":...}` | `{"path":...}`) the Python crew already
+/// reads (G18). Merges, in order:
+///   1. `sources[]` — the existing freeform link/doc array (passed through).
+///   2. `figma_url` — an explicit Figma file URL → `{"url": figma_url}`.
+///   3. `reference_sites[]` — bare string URLs or `{"url":...}` objects → `{"url":...}`.
+/// `audio[]` and `repo_path` are silently DROPPED (forward-compat shim — their
+/// Python ingest backends, audio_ingest.py / repo_analyst.py, are unbuilt; G09).
+/// Returns an empty list when no intake fields are present (caller skips the write).
+List<Map<String, dynamic>> normalizeIntakeSources(Map<String, dynamic> body) {
+  final out = <Map<String, dynamic>>[];
+  final srcs = body['sources'];
+  if (srcs is List) {
+    for (final s in srcs) {
+      if (s is Map) out.add(Map<String, dynamic>.from(s));
+    }
+  }
+  final figmaUrl = body['figma_url'];
+  if (figmaUrl is String && figmaUrl.trim().isNotEmpty) {
+    out.add({'url': figmaUrl.trim()});
+  }
+  final refs = body['reference_sites'];
+  if (refs is List) {
+    for (final r in refs) {
+      if (r is String && r.trim().isNotEmpty) {
+        out.add({'url': r.trim()});
+      } else if (r is Map && r['url'] is String) {
+        final u = (r['url'] as String).trim();
+        if (u.isNotEmpty) out.add({'url': u});
+      }
+    }
+  }
+  // audio[] and repo_path: intentionally ignored (G09 dependency).
+  return out;
+}
+
+/// Sanitize an attacker-controlled `Content-Disposition` filename to a safe
+/// basename for on-disk storage (G18). Strips all directory components so a
+/// `../../etc/passwd` filename cannot escape the upload dir. Returns null for an
+/// empty/dotfile-only basename the caller must reject.
+String? sanitizeUploadFilename(String? raw) {
+  if (raw == null) return null;
+  final base = p.basename(raw.trim());
+  if (base.isEmpty || base == '.' || base == '..') return null;
+  return base;
+}
 
 Response _json(Object body, {int status = 200}) => Response(
       status,
@@ -216,12 +294,33 @@ Future<void> main(List<String> args) async {
   final autoAutopilot = Platform.environment['ORCH_AUTO_AUTOPILOT'] != 'false';
 
   final crewTraces = TraceWriter(repoRoot);
+  // Single-flight guard (G05): one crew run per featureId. Declared in main()
+  // scope so the marker persists across runCrewForFeature calls (NOT inside the
+  // function — that would reset it every call and defeat the guard).
+  final crewGate = CrewGate();
   Future<Map<String, dynamic>> runCrewForFeature(String id) async {
-    final brain = await brainSelector.select();
-    final engine = DeterministicArtifactEngine(store, brain: brain);
-    final crew = AgentCrew(store, engine, artifactValidator, learnings,
-        integrity: integrity, traces: crewTraces);
-    return crew.run(id).timeout(const Duration(seconds: 120));
+    // Synchronous check+add is atomic in Dart's single-threaded event loop —
+    // no await between contains() and add(), so a racing trigger cannot slip in.
+    if (!crewGate.tryAcquire(id)) {
+      stderr.writeln(
+          '[adf] runCrewForFeature: skipping duplicate in-flight run for $id');
+      return {
+        'skipped': true,
+        'reason': 'crew_already_in_flight',
+        'feature_id': id,
+      };
+    }
+    try {
+      final brain = await brainSelector.select();
+      final engine = DeterministicArtifactEngine(store, brain: brain);
+      final crew = AgentCrew(store, engine, artifactValidator, learnings,
+          integrity: integrity, traces: crewTraces);
+      // The timeout MUST stay inside the guarded body so a TimeoutException is
+      // thrown from within the try and the finally still releases the marker.
+      return await crew.run(id).timeout(const Duration(seconds: 120));
+    } finally {
+      crewGate.release(id);
+    }
   }
 
   /// Pulls a Figma design and folds it into the feature requirement so the
@@ -481,6 +580,8 @@ Future<void> main(List<String> args) async {
       try {
         detailCache.remove(id);
         final summary = await runCrewForFeature(id);
+        // Already in flight (G05): the in-flight run owns the handoff — no-op.
+        if (summary['skipped'] == true) return;
         detailCache.remove(id);
         await autoEnqueueImplement(id, summary);
       } catch (e) {
@@ -918,11 +1019,13 @@ Future<void> main(List<String> args) async {
       }
       store.createFeature(
           id: id, requirement: requirement, track: track, stack: stack);
-      // Multimodal sources (P4): links + doc paths the user provided. Persisted so
-      // the requirements crew grounds + traces the spec to them. Shape per entry:
-      // {"url": "..."} (a reference link) or {"path": "..."} (an ingested doc).
-      final srcs = body['sources'];
-      if (srcs is List && srcs.isNotEmpty) {
+      // Multimodal sources (P4 + G18): links + doc paths the user provided.
+      // Persisted so the requirements crew grounds + traces the spec to them.
+      // Shape per entry: {"url": "..."} (a reference link) or {"path": "..."} (an
+      // ingested doc). normalizeIntakeSources merges sources[] + figma_url +
+      // reference_sites and drops audio[]/repo_path (G09 forward-compat shim).
+      final srcs = normalizeIntakeSources(body);
+      if (srcs.isNotEmpty) {
         store.writeSources(id, srcs);
       }
       // Persist the per-feature "proceed without approval" choice so the crew
@@ -938,6 +1041,16 @@ Future<void> main(List<String> args) async {
               .firstMatch(requirement)!
               .group(0)!;
           await figmaIntake(id, url);
+        } catch (_) {/* design intake is best-effort at create time */}
+      }
+      // G18: an explicit figma_url field also triggers the design connector (in
+      // addition to the requirement-text sniff above). Same best-effort guard.
+      final figmaUrlField = body['figma_url'];
+      if (figmaUrlField is String &&
+          FigmaConnector.looksLikeFigmaUrl(figmaUrlField) &&
+          figma.configured) {
+        try {
+          await figmaIntake(id, figmaUrlField.trim());
         } catch (_) {/* design intake is best-effort at create time */}
       }
       final payload = featureDetailPayload(id);
@@ -1288,10 +1401,95 @@ Future<void> main(List<String> args) async {
     }
     try {
       final summary = await runCrewForFeature(id);
+      // A crew is already running for this id (G05): reject deterministically
+      // rather than spawning a corrupting parallel run.
+      if (summary['skipped'] == true) {
+        return _json(
+          {'error': 'crew already in flight', 'feature_id': id},
+          status: 409,
+        );
+      }
       detailCache.remove(id);
       await autoEnqueueImplement(id, summary);
       summary['detail'] = featureDetailPayload(id);
       return _json(summary);
+    } catch (e) {
+      return _json({'error': e.toString()}, status: 500);
+    }
+  });
+
+  // G18: multipart file upload. Saves each file part to
+  // <repoRoot>/.adf-uploads/<id>/<sanitized_filename> and appends a {"path":...}
+  // entry to sources.json so the requirements crew ingests it via doc_ingest.
+  // Inherits the existing CORS middleware (state-changing POST → local-origin only).
+  router.post('/features/<id>/upload', (Request request, String id) async {
+    if (!store.featureExists(id)) {
+      return _json({'error': 'unknown feature: $id'}, status: 404);
+    }
+    // Must be multipart/form-data with a boundary, else reject before touching disk.
+    final contentType = request.headers['content-type'];
+    if (contentType == null) {
+      return _json({'error': 'expected multipart/form-data'}, status: 400);
+    }
+    MediaType media;
+    try {
+      media = MediaType.parse(contentType);
+    } catch (_) {
+      return _json({'error': 'malformed Content-Type'}, status: 400);
+    }
+    final boundary = media.parameters['boundary'];
+    if (media.mimeType != 'multipart/form-data' ||
+        boundary == null ||
+        boundary.isEmpty) {
+      return _json({'error': 'expected multipart/form-data'}, status: 400);
+    }
+    try {
+      final uploadDir = Directory('$repoRoot/.adf-uploads/$id');
+      final savedPaths = <String>[];
+      final transformer = MimeMultipartTransformer(boundary);
+      await for (final part in request.read().transform(transformer)) {
+        final disposition = part.headers['content-disposition'];
+        if (disposition == null) {
+          await part.drain<void>();
+          continue;
+        }
+        final match =
+            RegExp(r'filename="([^"]*)"').firstMatch(disposition);
+        final filename = sanitizeUploadFilename(match?.group(1));
+        if (filename == null) {
+          // A non-file form field (no filename) — skip it.
+          await part.drain<void>();
+          continue;
+        }
+        uploadDir.createSync(recursive: true);
+        final dest = File('${uploadDir.path}/$filename');
+        final sink = dest.openWrite();
+        try {
+          await part.pipe(sink);
+        } finally {
+          await sink.close();
+        }
+        savedPaths.add(dest.absolute.path);
+      }
+      if (savedPaths.isEmpty) {
+        return _json({'error': 'no file parts found'}, status: 400);
+      }
+      // Read-modify-write the existing sources list, appending the new paths.
+      final merged = <dynamic>[];
+      final existing =
+          File('$repoRoot/${store.paths.featureRel(id, 'sources.json')}');
+      if (existing.existsSync()) {
+        try {
+          final parsed = jsonDecode(existing.readAsStringSync());
+          if (parsed is List) merged.addAll(parsed);
+        } catch (_) {/* corrupt/absent → start fresh */}
+      }
+      for (final path in savedPaths) {
+        merged.add({'path': path});
+      }
+      store.writeSources(id, merged);
+      detailCache.remove(id);
+      return _json({'appended': savedPaths.length});
     } catch (e) {
       return _json({'error': e.toString()}, status: 500);
     }

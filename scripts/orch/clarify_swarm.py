@@ -2,8 +2,8 @@
 """ADF clarify-and-verify SWARM — split → free workers → converge.
 
 A HIGH-POWER splitter (Opus) explodes a requirement into 100s-1000s of small, atomic
-research + verification TASKS; ONE FREE-model worker runs each task (the massive parallel
-muscle); a HIGH-POWER converger (Opus) merges the results into clarified + verified
+research + verification TASKS; up to N concurrent workers (default 8) process those tasks
+via a pool-bounded ThreadPoolExecutor; a HIGH-POWER converger (Opus) merges the results into clarified + verified
 requirements. HIERARCHICAL (map-reduce: split→areas, expand→tasks, work→per-task,
 reduce→per-area, converge→final) so the Opus heads stay context-bounded even at 1000s of
 tasks. Reuses build_crew.run_crew (parallel + rate-limit-resilient via model_router) +
@@ -182,9 +182,9 @@ def run(requirement, complete=None, gather=None, areas=None, tasks_per_area=None
             tasks.append({"id": f"t{len(tasks)}", "area": area_name,
                           "task": t["task"], "type": t.get("type", "verify")})
 
-    _log(f"EXPAND → {len(tasks)} atomic tasks → spinning {len(tasks)} worker agents")
+    _log(f"EXPAND → {len(tasks)} atomic tasks → dispatching {len(tasks)} tasks to up to {par} concurrent workers")
 
-    # 3) WORK (free, ONE agent per task — the massive parallel layer)
+    # 3) WORK (free, up to par concurrent workers from pool — one agent per task)
     by_id = {t["id"]: t for t in tasks}
     _work_t0 = time.time()
 

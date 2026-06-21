@@ -76,9 +76,23 @@ class AgentCrew {
     Duration? agentBudget,
     Map<String, String>? env,
     this.traces,
+    RequirementsCrewRunner Function(FeatureStore)? requirementsRunnerFactory,
   })  : integrity = integrity ?? IntegrityChain(store),
+        _env = env ?? Platform.environment,
         agentBudget =
-            agentBudget ?? agentBudgetFromEnv(env ?? Platform.environment);
+            agentBudget ?? agentBudgetFromEnv(env ?? Platform.environment),
+        _requirementsRunnerFactory = requirementsRunnerFactory;
+
+  /// Optional seam to inject a pre-configured [RequirementsCrewRunner] (e.g. a
+  /// test runner whose `ProcessRun` is stubbed). Defaults to `null` → the live
+  /// `RequirementsCrewRunner(store)`. Loose-coupling, mirroring [escalation].
+  final RequirementsCrewRunner Function(FeatureStore)? _requirementsRunnerFactory;
+
+  /// Resolved environment (defaults to `Platform.environment`). The same map
+  /// drives the crew-enabled decision (`ADF_REQUIREMENTS_CREW`) AND the crew
+  /// budget, so an injected env lets a test exercise the crew-enabled path
+  /// (success vs. silent-fallback) without mutating the real process env.
+  final Map<String, String> _env;
 
   /// Optional live-trace sink. When wired, the crew narrates itself span-by-span
   /// (wave start + each subagent done) so the dashboard's live-trace stream has
@@ -101,14 +115,49 @@ class AgentCrew {
 
   /// Phase 2 (the requirements spec). With the multi-agent crew enabled
   /// (`ADF_REQUIREMENTS_CREW=1`) it writes a research-grounded spec + a REAL PO
-  /// verdict; on ANY failure we fall back to the deterministic engine so the
-  /// pipeline never blocks on the crew (P2).
+  /// verdict; on ANY (non-timeout) failure we fall back to the deterministic
+  /// engine so the pipeline never blocks on the crew (P2).
+  ///
+  /// Provenance (G06): every path records `spec_source` in state — `'crew'` on a
+  /// real crew success, `'deterministic_fallback'` when an enabled crew's
+  /// `run()` returns false (so a degraded spec is NOT indistinguishable from a
+  /// research-grounded one), and `'deterministic'` when the crew is off. The
+  /// silent-fallback path also appends a `status:'deterministic_fallback'`
+  /// crew-log entry so the degradation has an audit trail. This is additive
+  /// provenance only — the seal/gate/validator behaviour is unchanged, and the
+  /// never-block resilience policy is preserved.
   Future<List<String>> _specPhase(String id) async {
-    if (RequirementsCrewRunner.isEnabled()) {
-      final ok = await RequirementsCrewRunner(store).run(id);
-      if (ok) return ['specs/$id/spec.md'];
+    if (RequirementsCrewRunner.isEnabled(_env)) {
+      final runner =
+          _requirementsRunnerFactory?.call(store) ?? RequirementsCrewRunner(store);
+      final ok = await runner.run(id);
+      if (ok) {
+        _recordSpecSource(id, 'crew');
+        return ['specs/$id/spec.md'];
+      }
+      _recordSpecSource(id, 'deterministic_fallback');
+      _logAgent(id, {
+        'agent': 'spec-writer',
+        'role': 'EARS requirements & acceptance criteria',
+        'phase': 2,
+        'status': 'deterministic_fallback',
+        'reason': 'requirements crew returned no verdict (non-timeout); '
+            'fell back to deterministic engine',
+      });
+    } else {
+      _recordSpecSource(id, 'deterministic');
     }
     return engine.generatePhase(id, 2);
+  }
+
+  /// Persist the phase-2 provenance flag. Safe because `_specPhase` is only ever
+  /// reached from `AgentCrew.run(id)`, which runs after `createFeature` has
+  /// written state.json (so `readState` cannot throw here). `skipRepair` keeps
+  /// this a pure additive write that never mutates other state.
+  void _recordSpecSource(String id, String source) {
+    final state = store.readState(id);
+    state['spec_source'] = source;
+    store.writeState(id, state, skipRepair: true);
   }
 
   static Duration _crewBudgetFromEnv([Map<String, String>? env]) {
@@ -130,8 +179,8 @@ class AgentCrew {
           needs: ['product-analyst'],
           run: () => _specPhase(id),
           // The model-backed crew needs minutes, not the 30s deterministic budget.
-          budget: RequirementsCrewRunner.isEnabled()
-              ? _crewBudgetFromEnv()
+          budget: RequirementsCrewRunner.isEnabled(_env)
+              ? _crewBudgetFromEnv(_env)
               : null,
         ),
         CrewAgent(

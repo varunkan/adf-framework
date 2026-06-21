@@ -4,7 +4,8 @@ import 'dart:io';
 import 'feature_store.dart';
 
 typedef ProcessRun = Future<ProcessResult> Function(
-    String exe, List<String> args, String workingDirectory);
+    String exe, List<String> args, String workingDirectory,
+    {Map<String, String>? environment});
 
 /// Invokes the multi-agent requirements CREW (scripts/orch/requirements_crew.py)
 /// for a feature, producing a research-grounded spec + a REAL Product-Owner verdict
@@ -12,7 +13,9 @@ typedef ProcessRun = Future<ProcessResult> Function(
 ///
 /// Gated by `ADF_REQUIREMENTS_CREW=1` so behaviour is unchanged when off. The run
 /// is only reported successful when a real phase-2 verdict actually landed where the
-/// approval gate reads it, so a crashed/empty crew run can NEVER fake a pass.
+/// approval gate reads it, so a crashed/empty crew run can NEVER fake a pass (the
+/// file's content is validated for a recognizable verdict token, not merely its
+/// existence).
 class RequirementsCrewRunner {
   RequirementsCrewRunner(this.store, {ProcessRun? run})
       : _run = run ?? _defaultRun;
@@ -40,7 +43,8 @@ class RequirementsCrewRunner {
       '${store.repoRoot}/${store.paths.featureRel(featureId, 'sources.json')}';
 
   /// Runs the crew for [featureId]. Returns true ONLY if exit 0 AND a real phase-2
-  /// verdict now exists at [verdictPath] — otherwise the gate stays un-passed.
+  /// verdict now exists at [verdictPath] with a recognizable PASS/REVISE/FAIL token
+  /// — otherwise the gate stays un-passed.
   Future<bool> run(String featureId) async {
     final args = [
       scriptPath(),
@@ -55,13 +59,36 @@ class RequirementsCrewRunner {
     }
     final ProcessResult result;
     try {
-      result = await _run('python3', args, store.repoRoot);
+      // Pass Dart's resolver-chosen orchestration root explicitly so the Python
+      // writer and the Dart gate reader are provably bound to the same path,
+      // regardless of install layout (G01).
+      result = await _run('python3', args, store.repoRoot,
+          environment: {'ORCH_ORCHESTRATION_DIR': store.paths.orchestrationRoot});
     } on Object {
       return false; // process couldn't start → never fake a pass
     }
-    final ok = result.exitCode == 0 && File(verdictPath(featureId)).existsSync();
+    final ok =
+        result.exitCode == 0 && _hasValidVerdict(File(verdictPath(featureId)));
     if (ok) _liftOpenQuestions(featureId, '${result.stdout}');
     return ok;
+  }
+
+  /// True only when the phase-2 verdict file exists, is non-empty, and carries a
+  /// recognizable verdict token — so an empty (0-byte), whitespace-only, or garbage
+  /// file can NEVER fake a pass (G13). Matches the crew's real phase-2.md format
+  /// `# PO verdict (phase 2): PASS|REVISE` (requirements_crew.py:237) and the bare
+  /// `Verdict: PASS|REVISE|FAIL` token. Does NOT match po-validation.md's
+  /// `**Verdict:**` form — that is a different artifact owned by
+  /// feature_store.parseJudgeVerdict; keep them separate.
+  static bool _hasValidVerdict(File f) {
+    if (!f.existsSync()) return false;
+    final content = f.readAsStringSync().trim();
+    if (content.isEmpty) return false;
+    return RegExp(
+      r'(?:#\s*)?PO verdict[^:\n]*:\s*(PASS|REVISE|FAIL)'
+      r'|Verdict:\s*(PASS|REVISE|FAIL)',
+      caseSensitive: false,
+    ).hasMatch(content);
   }
 
   /// Lift the crew's open questions out of its stdout summary into structured state
@@ -83,6 +110,14 @@ class RequirementsCrewRunner {
   }
 
   static Future<ProcessResult> _defaultRun(
-          String exe, List<String> args, String cwd) =>
-      Process.run(exe, args, workingDirectory: cwd);
+          String exe, List<String> args, String cwd,
+          {Map<String, String>? environment}) =>
+      Process.run(exe, args,
+          workingDirectory: cwd,
+          // Merge so the explicitly-passed ORCH_ORCHESTRATION_DIR WINS over any
+          // ambient shell value — the Dart-resolved path is authoritative (fail
+          // CLOSED; a shell override cannot silently redirect verdict writes).
+          environment: environment == null
+              ? null
+              : {...Platform.environment, ...environment});
 }

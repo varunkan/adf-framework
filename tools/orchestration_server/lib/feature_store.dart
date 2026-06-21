@@ -845,6 +845,9 @@ $requirement
       // The crew's open questions, surfaced so the user can confirm requirements
       // before the build proceeds (P3 — interactive elicitation).
       'requirements_open_questions': state['requirements_open_questions'],
+      // G06: surface whether phase-2 used the real crew or fell back to the
+      // deterministic template, so a silent fallback is auditable in the UI.
+      'spec_source': state['spec_source'],
       'run_status': run?['status'],
     };
   }

@@ -4,12 +4,17 @@ VALIDATES a detailed requirements document before any code is written. Each suba
 a SMALL, precise task routed (via model_router) to the model best suited to it; the
 parallel waves reuse build_crew's Kahn-DAG + run_crew. Waves:
 
-  0 plan       — Nemotron Ultra decomposes the request → {queries, categories, seed_urls}
-  1 research   — web_scraper gathers a cited corpus (+ pre-ingested user sources)
+  0 plan       — Nemotron Super decomposes the request → {queries, categories, seed_urls}
+  1 research   — web_scraper gathers a cited corpus (+ pre-ingested user sources). Each
+                 page is LLM-extracted per-URL (Llama-70B, role='extract' → {facts,
+                 citations}) and assembled by _corpus_text() via compaction.clip — this
+                 per-URL extract is the ACCEPTED SUBSTITUTE for the originally-planned
+                 per-domain-slice Qwen synth (research-synth), which is not wired (G21).
   2 draft      — per category, EARS items grounded in the corpus (Nemotron Super) [parallel]
-  3 po         — DeepSeek R1 verifies (measurability/traceability/completeness) ∥ Nemotron
-                 Ultra judges (domain/holistic) + reconciles sources; clarifying-questions [parallel]
-  4 head       — Opus synthesizes ONE coherent PRD; DeepSeek R1 cross-checks
+  3 po         — deepseek-v4-pro verifies (measurability/traceability/completeness) ∥ Qwen
+                 judges (domain/holistic) + reconciles sources; clarifying-questions
+                 [parallel] (Ultra/R1 only under ADF_QUALITY=max)
+  4 head       — Opus synthesizes ONE coherent PRD; deepseek-v4-pro cross-checks
 
 Writes specs/<id>/{spec.md, problem-statement.md, requirements-draft.json (with
 sources[] traceability), po-validation.md} + judge-verdicts/phase-2.md. The crew never
@@ -35,6 +40,11 @@ def _complete(prompt, role, system=None):
 
 
 def _gather(queries, urls):
+    # NOTE (G21): web_scraper does a per-URL Llama-70B extract (role='extract'); the
+    # per-domain-slice Qwen synth (model_router._ROSTER['longctx']) is intentionally NOT
+    # wired in the default pipeline — per-URL extract is the accepted Wave 1 substitute.
+    # Qwen long-context remains available for a future per-slice synth pass.
+    # TODO(future): per-domain-slice Qwen synth over the corpus before Wave 2.
     import web_scraper
     return web_scraper.gather(queries=queries, urls=urls,
                               complete=lambda p, r: _model_tuple(p, r))
@@ -99,6 +109,14 @@ _XCHECK_SYS = ("You are an adversarial reviewer (different model than the author
 
 
 def _corpus_text(corpus, limit=9000):
+    """Assemble the Wave 1 → Wave 2 research corpus into a bounded string.
+
+    Input: `[{url, title, facts, citations}]` from `gather()` — each entry is a single
+    page already LLM-extracted PER-URL (per-page Llama-70B `role='extract'`), not a
+    per-domain-slice synthesis. Output: a `compaction.clip`-bounded (head+tail) string of
+    those per-page notes for the Wave 2 draft agents. NO per-slice aggregation occurs
+    here — per-URL extract is the accepted substitute for the planned per-domain-slice
+    Qwen synth (`research-synth`); see the module docstring (G21)."""
     import compaction
     out = []
     for n in corpus:
@@ -119,10 +137,42 @@ def run(feature_id, requirement, sources=None, specs_dir=None, verdict_dir=None,
         complete=None, gather=None, parallelism=4):
     """Run the crew. `sources` is a list of pre-ingested {source, requirements} dicts
     (docs/data/repo) + optional {url} entries. Returns the result dict and writes the
-    spec artifacts. complete/gather injectable for tests."""
-    complete = complete or _complete
+    spec artifacts. complete/gather injectable for tests. Every call executes all five
+    waves at full LLM cost — no per-wave cache or skip logic exists (G22)."""
     gather = gather or _gather
     sources = sources or []
+    # G11 — collect the (provider, model) the router actually served per role, into
+    # result['models'] (replacing the static literal). The module-level _complete is NOT
+    # the fix target (it serves _gather/_model_tuple for the scraper, which needs no role
+    # attribution); instead wrap the effective complete here:
+    #   - default path (complete is None): call model_router.complete directly and read
+    #     the served identity it stamps into usage (model_router.complete:146-154).
+    #   - injected path: forward the text-only callable, record 'unknown' per role.
+    # Thread-safety: build_crew.run_crew (parallelism>1) runs distinct role keys
+    # concurrently; the GIL makes each unique-key dict assignment atomic. A role that ran
+    # twice would last-write-win, but no role runs twice in this DAG.
+    served_models = {}
+    if complete is None:
+        def _default_complete(prompt, role, system=None):
+            import model_router
+            res = model_router.complete(prompt, role, system=system)
+            if res is None:
+                served_models.setdefault(role, "unknown")
+                return ""
+            text = (res[0] if res else "") or ""
+            usage = res[1] if isinstance(res, tuple) and len(res) > 1 else {}
+            prov = (usage.get("provider") or "unknown") if isinstance(usage, dict) else "unknown"
+            mdl = (usage.get("model") or "unknown") if isinstance(usage, dict) else "unknown"
+            served_models[role] = f"{prov}:{mdl}"
+            return text
+        complete = _default_complete
+    else:
+        injected = complete
+
+        def _injected_complete(prompt, role, system=None):
+            served_models.setdefault(role, "unknown")
+            return injected(prompt, role, system=system)
+        complete = _injected_complete
     # Reasoning models (DeepSeek/Qwen) need real time to think — the default 75s
     # NVIDIA cap (tuned to fail-fast in the build loop) makes the planner/PO time out and
     # return nothing. The crew has no faster fallback here, so give it room (set once,
@@ -133,7 +183,7 @@ def run(feature_id, requirement, sources=None, specs_dir=None, verdict_dir=None,
         f"[{s.get('source','source')}] {s.get('requirements','')}"
         for s in sources if s.get("requirements"))
 
-    # Wave 0 — plan (Nemotron Ultra)
+    # Wave 0 — plan (Nemotron Super)
     plan = _json(complete(
         f"REQUEST:\n{requirement}\n\nUSER-PROVIDED REQUIREMENTS (authoritative):\n"
         f"{user_reqs or '(none)'}", "plan", _PLAN_SYS),
@@ -159,7 +209,8 @@ def run(feature_id, requirement, sources=None, specs_dir=None, verdict_dir=None,
     all_reqs = [r for d in drafts.values() for r in (d.get("requirements") or [])]
     draft_text = _headroom(all_reqs, 9000)
 
-    # Wave 3a — PO validation (perspective-diverse: R1 rigor ∥ Ultra judge, parallel)
+    # Wave 3a — PO validation (perspective-diverse: deepseek-v4-pro rigor ∥ Qwen judge,
+    # parallel; Ultra/R1 only under ADF_QUALITY=max)
     def run_po(agent, prior):
         role = "verify" if agent.name == "rigor" else "judge"
         lens = ("measurability, testability, traceability, completeness"
@@ -207,7 +258,9 @@ def run(feature_id, requirement, sources=None, specs_dir=None, verdict_dir=None,
         "improvements": qs.get("improvements") or [],
         "po": {"pass": po_pass, "gaps": po_gaps},
         "cross_check": xcheck.get("issues") or [],
-        "models": "free NVIDIA bulk + Opus head",
+        # G11 — real per-role 'provider:model' map of what the router actually served
+        # (was a static literal). 'unknown' for roles served via an injected complete.
+        "models": served_models,
     }
     if specs_dir:
         _write_artifacts(specs_dir, verdict_dir, feature_id, result)
@@ -229,6 +282,7 @@ def _write_artifacts(specs_dir, verdict_dir, feature_id, r):
     if verdict_dir:
         os.makedirs(verdict_dir, exist_ok=True)
         verdict = "PASS" if r["po"]["pass"] else "REVISE"
+        attribution = _attribution_line(r.get("models") or {})
         with open(os.path.join(verdict_dir, "phase-2.md"), "w", encoding="utf-8") as f:
             # The "**Reviewers:**" line is a CONTRACT with the Dart gate's
             # parseReviewerSkills (feature_store.dart) — keep the exact prefix +
@@ -236,8 +290,33 @@ def _write_artifacts(specs_dir, verdict_dir, feature_id, r):
             # is NOT parsed as a skill). The live E2E caught the old lowercase format.
             f.write(f"# PO verdict (phase 2): {verdict}\n\n"
                     f"**Reviewers:** bmad-agent-pm, bmad-validate-prd\n"
-                    f"_(perspective-diverse: DeepSeek R1 ∥ Nemotron Ultra)_\n\n"
+                    f"{attribution}\n\n"
                     f"gaps: {len(r['po']['gaps'])}\n")
+
+
+def _attribution_line(models):
+    """The dynamic model-attribution line for phase-2.md (G11/G23). Prefer the per-role
+    models the router ACTUALLY served (G11); else fall back to model_router.candidates()'s
+    first choice for the current env (G23 label honesty — the model the router WOULD use,
+    not necessarily the one that served if a fallback fired). Never emits the stale
+    'DeepSeek R1 ∥ Nemotron Ultra' literal. Shows Ultra/R1 only when candidates() routes
+    them (ADF_QUALITY=max)."""
+    def served_or_candidate(role):
+        v = models.get(role)
+        if v and v != "unknown":
+            # served map stores 'provider:model' — keep the model id for display
+            return v.split(":", 1)[-1]
+        try:
+            import model_router
+            return model_router.candidates(role, None)[0][1] or "unknown"
+        except Exception:  # noqa: BLE001
+            return "unknown"
+
+    verify_id = served_or_candidate("verify")
+    judge_id = served_or_candidate("judge")
+    if verify_id == "unknown" and judge_id == "unknown":
+        return "_(model attribution unavailable)_"
+    return f"_(perspective-diverse: {verify_id} ∥ {judge_id})_"
 
 
 def _render_spec(feature_id, r):
@@ -329,7 +408,66 @@ def _load_sources(repo_root, sources_path):
                     s["path"], complete=lambda p, r: _model_tuple(p, r)))
             except Exception:  # noqa: BLE001
                 pass
+        elif s.get("audio"):
+            # G09 — transcribe a voice note → user-stated requirement source.
+            try:
+                import audio_ingest
+                out.append(audio_ingest.ingest(
+                    s["audio"], complete=lambda p, r: _model_tuple(p, r)))
+            except Exception:  # noqa: BLE001
+                pass
+        elif s.get("repo") or s.get("repo_path"):
+            # G09 — analyze an existing local repo → authoritative existing-constraints.
+            try:
+                import repo_analyst
+                out.append(repo_analyst.ingest(
+                    s.get("repo") or s.get("repo_path"),
+                    complete=lambda p, r: _model_tuple(p, r)))
+            except Exception:  # noqa: BLE001
+                pass
     return out
+
+
+_ORCH_PROBE = (".cursor/orchestration", "adf-framework/orchestration", ".adf/orchestration")
+
+
+def resolve_orchestration_dir(repo_root, env):
+    """Resolve the orchestration directory for a STANDALONE CLI run, mirroring Dart's
+    OrchestrationPaths._resolveOrchestrationRoot precedence exactly (G01). Dart remains
+    the SSOT: on the server path it passes the already-resolved absolute path via
+    ORCH_ORCHESTRATION_DIR, so this mirror only governs standalone invocations.
+
+    Precedence:
+      1. ORCH_ORCHESTRATION_DIR (if set, non-empty) — abspath against CWD, matching
+         Dart's Directory(env).absolute.path (NOT joined under repo_root; a relative
+         standalone export resolves against CWD).
+      2. .adf-install.json `orchestration_dir` at repo_root, if that dir exists
+         (relative paths resolved under repo_root, mirroring Dart's _absUnderRepo).
+      3. directory probe: .cursor/orchestration, adf-framework/orchestration,
+         .adf/orchestration — first that exists wins.
+      4. default: <repo_root>/.cursor/orchestration."""
+    env_val = (env.get("ORCH_ORCHESTRATION_DIR") or "").strip()
+    if env_val:
+        return os.path.abspath(env_val)
+
+    manifest = os.path.join(repo_root, ".adf-install.json")
+    if os.path.isfile(manifest):
+        try:
+            data = json.load(open(manifest, encoding="utf-8"))
+            d = (data.get("orchestration_dir") or "").strip()
+            if d:
+                abs_d = d if os.path.isabs(d) else os.path.join(repo_root, d)
+                if os.path.isdir(abs_d):
+                    return abs_d
+        except (OSError, ValueError, AttributeError):
+            pass
+
+    for rel in _ORCH_PROBE:
+        abs_d = os.path.join(repo_root, *rel.split("/"))
+        if os.path.isdir(abs_d):
+            return abs_d
+
+    return os.path.join(repo_root, ".cursor", "orchestration")
 
 
 def main():
@@ -340,33 +478,47 @@ def main():
     ap.add_argument("--sources", default=None)
     args, _ = ap.parse_known_args()
 
-    import agent_runner
-    repo_root = os.environ.get("ORCH_REPO_ROOT", os.path.abspath(args.workspace))
-    agent_runner.load_env(repo_root)
-    fid = args.feature_id
+    try:
+        import agent_runner
+        repo_root = os.environ.get("ORCH_REPO_ROOT", os.path.abspath(args.workspace))
+        agent_runner.load_env(repo_root)
+        fid = args.feature_id
 
-    req = ""
-    for d in (".cursor/orchestration", ".claude/orchestration", "orchestration"):
-        p = os.path.join(repo_root, d, "features", fid, "requirement.md")
-        if os.path.isfile(p):
-            with open(p, encoding="utf-8") as f:
-                req = f.read()
-            break
-    req = clean_requirement(req) or fid
+        req = ""
+        for d in (".cursor/orchestration", ".claude/orchestration", "orchestration"):
+            p = os.path.join(repo_root, d, "features", fid, "requirement.md")
+            if os.path.isfile(p):
+                with open(p, encoding="utf-8") as f:
+                    req = f.read()
+                break
+        req = clean_requirement(req) or fid
 
-    sources = _load_sources(repo_root, args.sources)
-    specs_dir = os.path.join(repo_root, "specs", fid)
-    verdict_dir = os.path.join(repo_root, ".cursor", "orchestration", "features", fid,
-                               "judge-verdicts")
-    res = run(fid, req, sources=sources, specs_dir=specs_dir, verdict_dir=verdict_dir)
-    print(json.dumps({
-        "feature_id": fid, "requirements": len(res["requirements"]),
-        "po_pass": res["po"]["pass"], "gaps": len(res["po"]["gaps"]),
-        "open_questions": len(res["open_questions"]), "sources": res["sources"],
-        # The actual question STRINGS (capped) so the gate can present them to the
-        # user for interactive confirmation (P3), not just a count.
-        "questions": [_g(q) for q in res["open_questions"]][:10]}))
-    return 0
+        sources = _load_sources(repo_root, args.sources)
+        specs_dir = os.path.join(repo_root, "specs", fid)
+        # G01 — resolve the orchestration dir the same way Dart does (env →
+        # .adf-install.json → probe → default), instead of hardcoding .cursor, so the
+        # Python writer and the Dart gate reader bind to the identical verdict path.
+        verdict_dir = os.path.join(
+            resolve_orchestration_dir(repo_root, os.environ),
+            "features", fid, "judge-verdicts")
+        res = run(fid, req, sources=sources, specs_dir=specs_dir, verdict_dir=verdict_dir)
+        print(json.dumps({
+            "feature_id": fid, "requirements": len(res["requirements"]),
+            "po_pass": res["po"]["pass"], "gaps": len(res["po"]["gaps"]),
+            "open_questions": len(res["open_questions"]), "sources": res["sources"],
+            # The actual question STRINGS (capped) so the gate can present them to the
+            # user for interactive confirmation (P3), not just a count.
+            "questions": [_g(q) for q in res["open_questions"]][:10]}))
+        # G13 — both PASS and REVISE are valid crew completions → exit 0. REVISE is
+        # enforced downstream at the approval gate, NOT by a non-zero exit here (a
+        # non-zero exit would make a REVISE indistinguishable from a crash).
+        return 0
+    except Exception as e:  # noqa: BLE001
+        # G13 — a genuine crash exits with a controlled non-zero code so the Dart runner's
+        # `exitCode == 0` check fails and it falls back, instead of a silent exit 0.
+        import sys as _sys
+        print(f"requirements_crew failed: {e}", file=_sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
