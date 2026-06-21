@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:orchestration_server/adf_brain.dart';
 import 'package:orchestration_server/agent_crew.dart';
@@ -124,6 +125,49 @@ String? sanitizeUploadFilename(String? raw) {
   final base = p.basename(raw.trim());
   if (base.isEmpty || base == '.' || base == '..') return null;
   return base;
+}
+
+/// Extract the raw (still-unsanitized) filename from a multipart
+/// `Content-Disposition` header, handling BOTH RFC 6266 forms (G18):
+///   - plain:    `filename="report.pdf"`
+///   - extended: `filename*=UTF-8''r%C3%A9sum%C3%A9.pdf` (RFC 5987 pct-encoded)
+/// The extended form (`filename*`) is PREFERRED when present, per RFC 6266 §4.3 —
+/// a sender that emits both intends the extended value to win. The caller must
+/// still pass the result through [sanitizeUploadFilename] to strip path
+/// components. Returns null when no filename parameter is present.
+String? extractDispositionFilename(String disposition) {
+  // RFC 5987 extended form first: filename*=<charset>'<lang>'<pct-encoded>.
+  final ext = RegExp(r"filename\*\s*=\s*([^;]+)", caseSensitive: false)
+      .firstMatch(disposition);
+  if (ext != null) {
+    var value = ext.group(1)!.trim();
+    // Strip surrounding quotes some clients add despite the RFC.
+    if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+      value = value.substring(1, value.length - 1);
+    }
+    // <charset>'<lang>'<pct-encoded-value> — keep only the value segment.
+    final tick = value.indexOf("'");
+    if (tick != -1) {
+      final tick2 = value.indexOf("'", tick + 1);
+      if (tick2 != -1) value = value.substring(tick2 + 1);
+    }
+    try {
+      // Percent-decode as UTF-8 (the only charset we accept; others fall back to
+      // the raw value, which sanitizeUploadFilename still basenames safely).
+      return Uri.decodeComponent(value);
+    } catch (_) {
+      return value;
+    }
+  }
+  // Plain form: filename="..." or unquoted filename=...
+  final quoted =
+      RegExp(r'filename\s*=\s*"([^"]*)"', caseSensitive: false)
+          .firstMatch(disposition);
+  if (quoted != null) return quoted.group(1);
+  final bare = RegExp(r'filename\s*=\s*([^;]+)', caseSensitive: false)
+      .firstMatch(disposition);
+  if (bare != null) return bare.group(1)!.trim();
+  return null;
 }
 
 Response _json(Object body, {int status = 200}) => Response(
@@ -1447,15 +1491,20 @@ Future<void> main(List<String> args) async {
       final uploadDir = Directory('$repoRoot/.adf-uploads/$id');
       final savedPaths = <String>[];
       final transformer = MimeMultipartTransformer(boundary);
-      await for (final part in request.read().transform(transformer)) {
+      // shelf's request.read() yields Stream<List<int>>; mime 2.0's transformer
+      // requires Stream<Uint8List>. Adapt each chunk (a view, not a copy, when
+      // it is already a Uint8List).
+      final byteStream = request.read().map<Uint8List>(
+          (chunk) => chunk is Uint8List ? chunk : Uint8List.fromList(chunk));
+      await for (final part in transformer.bind(byteStream)) {
         final disposition = part.headers['content-disposition'];
         if (disposition == null) {
           await part.drain<void>();
           continue;
         }
-        final match =
-            RegExp(r'filename="([^"]*)"').firstMatch(disposition);
-        final filename = sanitizeUploadFilename(match?.group(1));
+        // Handles both filename="..." and RFC 5987 filename*=UTF-8''... forms.
+        final filename =
+            sanitizeUploadFilename(extractDispositionFilename(disposition));
         if (filename == null) {
           // A non-file form field (no filename) — skip it.
           await part.drain<void>();

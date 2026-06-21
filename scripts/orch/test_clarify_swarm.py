@@ -102,5 +102,53 @@ class Swarm(unittest.TestCase):
                         "Barrier never unblocked — workers did not run concurrently")
 
 
+class SwarmTimeoutChain(unittest.TestCase):
+    """AC4 — _complete -> model_router.complete timeout end-to-end."""
+
+    def test_nvidia_timeout_env_reaches_complete(self):
+        """ADF_NVIDIA_TIMEOUT_SEC=240 in os.environ must be forwarded as timeout=240
+        through clarify_swarm._complete -> model_router.complete -> fake runner.
+
+        Mutation-check: if model_router.complete defaulted to timeout=120 (the old
+        hard-coded default) instead of resolving from ADF_NVIDIA_TIMEOUT_SEC, the
+        assertion would fail because captured_timeout would be 120, not 240.
+        """
+        import model_router
+
+        captured_timeout = []
+
+        def fake_dispatch(provider, messages, timeout, model):
+            captured_timeout.append(timeout)
+            return ("ok", {})
+
+        original_complete = model_router.complete
+
+        def patched_complete(prompt, role, system=None, env=None, timeout=None, call=None):
+            # Inject our fake runner but preserve env=None so it reads from os.environ
+            return original_complete(prompt, role, system=system, env=env,
+                                     timeout=timeout, call=fake_dispatch)
+
+        prev_val = os.environ.pop("ADF_NVIDIA_TIMEOUT_SEC", None)
+        try:
+            os.environ["ADF_NVIDIA_TIMEOUT_SEC"] = "240"
+            model_router.complete = patched_complete
+            cs._complete("test prompt", "extract")
+        finally:
+            model_router.complete = original_complete
+            if prev_val is None:
+                os.environ.pop("ADF_NVIDIA_TIMEOUT_SEC", None)
+            else:
+                os.environ["ADF_NVIDIA_TIMEOUT_SEC"] = prev_val
+
+        self.assertTrue(captured_timeout,
+                        "_complete did not invoke model_router.complete at all")
+        self.assertEqual(
+            captured_timeout[0], 240,
+            f"Expected timeout=240 forwarded to the backend, got {captured_timeout[0]}. "
+            "This would be 120 if model_router.complete used a hard-coded default "
+            "instead of reading ADF_NVIDIA_TIMEOUT_SEC from os.environ."
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -18,7 +18,10 @@ import audio_ingest as ai  # noqa: E402
 
 class Transcribe(unittest.TestCase):
     def test_missing_file_notes(self):
-        res = ai.transcribe("/no/such/voice.wav")
+        # tmp dir is outside the project tree, so confine the root to it (R8) — we are
+        # testing the missing-file degrade, not the subtree guard, here.
+        d = tempfile.mkdtemp()
+        res = ai.transcribe(os.path.join(d, "voice.wav"), allowed_root=d)
         self.assertEqual(res["text"], "")
         self.assertIn("missing file", res["note"].lower())
         self.assertEqual(res["kind"], "audio")
@@ -29,7 +32,7 @@ class Transcribe(unittest.TestCase):
         p = os.path.join(d, "clip.wav")
         with open(p, "wb") as f:
             f.write(b"RIFF....WAVEfmt ")  # not a real transcribable wav; backend absent
-        res = ai.transcribe(p)
+        res = ai.transcribe(p, allowed_root=d)
         self.assertEqual(res["kind"], "audio")
         # With no backend/ADF_ASR_CMD the text is '' and a note explains the degrade.
         if not res["text"]:
@@ -38,14 +41,21 @@ class Transcribe(unittest.TestCase):
 
 class Ingest(unittest.TestCase):
     def test_degrades_without_backend(self):
-        # RED test #3 from the spec: import + no-backend degrade.
-        res = ai.ingest("/tmp/nonexistent.wav", complete=None)
+        # RED test #3 from the spec: import + no-backend degrade. Confine the root to the
+        # tmp dir (R8) so we test the no-backend/missing-file degrade, not the subtree
+        # guard — and so the note is NOT a subtree rejection.
+        d = tempfile.mkdtemp()
+        res = ai.ingest(os.path.join(d, "nonexistent.wav"), complete=None,
+                        allowed_root=d)
         self.assertEqual(res["requirements"], "")
         self.assertTrue(res["note"])
+        self.assertNotIn("subtree", res["note"].lower())
         self.assertEqual(res["kind"], "audio")
 
     def test_contract_shape(self):
-        res = ai.ingest("/tmp/nonexistent.wav", complete=None)
+        d = tempfile.mkdtemp()
+        res = ai.ingest(os.path.join(d, "nonexistent.wav"), complete=None,
+                        allowed_root=d)
         for key in ("source", "kind", "requirements", "raw", "note"):
             self.assertIn(key, res)
         self.assertEqual(res["source"], "nonexistent.wav")
@@ -68,7 +78,7 @@ class Ingest(unittest.TestCase):
         os.environ["ADF_ASR_CMD"] = (
             f"{py} -c \"print('the app SHALL let users log time')\" {{path}}")
         try:
-            res = ai.ingest(p, complete=None)
+            res = ai.ingest(p, complete=None, allowed_root=d)
         finally:
             del os.environ["ADF_ASR_CMD"]
         self.assertEqual(res["kind"], "audio")
@@ -88,7 +98,7 @@ class Ingest(unittest.TestCase):
             self.assertIn("AUTHORITATIVE", prompt)
             return ("- SHALL track habits daily", {})
         try:
-            res = ai.ingest(p, complete)
+            res = ai.ingest(p, complete, allowed_root=d)
         finally:
             del os.environ["ADF_ASR_CMD"]
         self.assertIn("track habits daily", res["requirements"])
@@ -99,6 +109,34 @@ class Ingest(unittest.TestCase):
             ai.ingest("")
         except Exception as e:  # noqa: BLE001
             self.fail(f"ingest raised: {e}")
+
+    def test_absolute_path_outside_root_rejected(self):
+        # R8 subtree confinement: an absolute path with NO '..' that resolves outside the
+        # allowed root (e.g. /etc) must still be rejected — the '..'-only guard missed it.
+        d = tempfile.mkdtemp()
+        res = ai.ingest("/etc/passwd", allowed_root=d)
+        self.assertEqual(res["requirements"], "")
+        note = res["note"].lower()
+        self.assertTrue("rejected" in note or "subtree" in note)
+
+    def test_subtree_guard_via_env_root(self):
+        # The confinement root can also come from ADF_INGEST_ROOT (the env override).
+        d = tempfile.mkdtemp()
+        os.environ["ADF_INGEST_ROOT"] = d
+        try:
+            res = ai.ingest("/etc/passwd")
+        finally:
+            os.environ.pop("ADF_INGEST_ROOT", None)
+        self.assertEqual(res["requirements"], "")
+        self.assertTrue("rejected" in res["note"].lower())
+
+    def test_path_under_allowed_root_not_subtree_rejected(self):
+        # A path UNDER the allowed root passes the subtree guard (it degrades on the
+        # missing file / absent backend, NOT on a subtree rejection).
+        d = tempfile.mkdtemp()
+        res = ai.transcribe(os.path.join(d, "inside.wav"), allowed_root=d)
+        self.assertNotIn("subtree", res["note"].lower())
+        self.assertNotIn("rejected", res["note"].lower())
 
 
 if __name__ == "__main__":

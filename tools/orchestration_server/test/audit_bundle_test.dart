@@ -349,5 +349,37 @@ void main() {
           .map((c) => c['check']);
       expect(failing, ['moat_attested']);
     });
+
+    test('a tampered moat proof.root fails moat_attested even with a fixed-up '
+        'digest', () async {
+      if (python == null) {
+        markTestSkipped('python3 not on PATH — skipping verifier interop');
+        return;
+      }
+      writeMoatArtifacts();
+      final bundle =
+          jsonDecode(jsonEncode(sealedBundle())) as Map<String, dynamic>;
+      // The genuine bundle surfaces merkle_root as proof.root, consistent with
+      // seal 'adf1:abc123def456'. Swap the root to a DIFFERENT valid 64-hex
+      // value while leaving the seal alone, so seal != 'adf1:' + root[:12].
+      // This is NOT the seal-string mutation the prior test exercises: the seal
+      // stays well-formed; only the full 256-bit root is forged.
+      final proof = (bundle['moat'] as Map)['proof'] as Map;
+      expect(proof['root'],
+          'abc123def456aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+      proof['root'] =
+          'deadbeefcafe1111111111111111111111111111111111111111111111111111';
+      expect(proof['seal'], 'adf1:abc123def456'); // seal untouched, still valid
+      bundle['bundle_digest'] = digestOf(bundle); // digest passes; root binding fails
+      final result = await Process.run(
+          python!, [script, '--json', writeBundle(bundle).path]);
+      expect(result.exitCode, 1, reason: '${result.stdout}\n${result.stderr}');
+      final report =
+          jsonDecode(result.stdout as String) as Map<String, dynamic>;
+      final failing = (report['checks'] as List)
+          .where((c) => c['ok'] != true)
+          .map((c) => c['check']);
+      expect(failing, ['moat_attested']);
+    });
   });
 }

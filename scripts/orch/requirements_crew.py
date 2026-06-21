@@ -394,7 +394,8 @@ def _load_sources(repo_root, sources_path):
     if not sources_path or not os.path.isfile(sources_path):
         return []
     try:
-        raw = json.load(open(sources_path, encoding="utf-8"))
+        with open(sources_path, encoding="utf-8") as fh:
+            raw = json.load(fh)
     except (OSError, ValueError):
         return []
     out = []
@@ -413,7 +414,8 @@ def _load_sources(repo_root, sources_path):
             try:
                 import audio_ingest
                 out.append(audio_ingest.ingest(
-                    s["audio"], complete=lambda p, r: _model_tuple(p, r)))
+                    s["audio"], complete=lambda p, r: _model_tuple(p, r),
+                    allowed_root=repo_root))
             except Exception:  # noqa: BLE001
                 pass
         elif s.get("repo") or s.get("repo_path"):
@@ -422,7 +424,8 @@ def _load_sources(repo_root, sources_path):
                 import repo_analyst
                 out.append(repo_analyst.ingest(
                     s.get("repo") or s.get("repo_path"),
-                    complete=lambda p, r: _model_tuple(p, r)))
+                    complete=lambda p, r: _model_tuple(p, r),
+                    allowed_root=repo_root))
             except Exception:  # noqa: BLE001
                 pass
     return out

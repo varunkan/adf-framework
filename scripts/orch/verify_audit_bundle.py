@@ -302,6 +302,22 @@ def verify_bundle(bundle, repo=None):
             seal = proof.get("seal")
             if not (isinstance(seal, str) and seal.startswith("adf1:")):
                 problems.append("proof seal malformed (%r)" % seal)
+            # 'root' key populated by audit_bundle.dart from proof['merkle_root']
+            # per proof_of_build.py:238 (SSOT). When present and non-null it
+            # binds the full 256-bit Merkle root: it must be 64 lowercase hex
+            # chars AND seal == 'adf1:' + root[:12] (seal derivation per
+            # proof_of_build.py:239). Absent/null root is a soft pass (legacy
+            # bundles exported before this binding landed).
+            root = proof.get("root")
+            if root is not None:
+                if not (isinstance(root, str) and len(root) == 64
+                        and all(c in "0123456789abcdef" for c in root)):
+                    problems.append("proof root malformed (%r)" % root)
+                elif seal != "adf1:" + root[:12]:
+                    problems.append(
+                        "proof seal/root mismatch: seal=%r root_prefix=%r"
+                        % (seal, root[:12])
+                    )
         policy = moat.get("policy")
         if policy is not None and not isinstance(policy.get("ok"), bool):
             problems.append("policy verdict is not a boolean")

@@ -208,6 +208,37 @@ class SealAndVerify(unittest.TestCase):
         self.assertTrue(ok, report)
         self.assertEqual(report["status"], "VERIFIED")
 
+    def test_verify_proof_includes_sealed_policy(self):
+        # G15 / AC9 / RED-1: when a proof is sealed with a 'policy' block in the
+        # build dict, verify_proof() must surface it as 'sealed_policy' in the
+        # returned report — allowing an auditor to compare the sealed vs live verdict.
+        policy_block = {
+            "ok": True,
+            "n_violations": 0,
+            "policy_id": "adf-default-secure",
+            "checked": True,
+            "enforced": ["no_secrets"],
+            "blocked": [],
+            "rules": ["no_secrets:pass"],
+        }
+        pob.seal_app(self.app, "demo", "react-vite-sqlite", "the spec",
+                     {**BUILD, "policy": policy_block})
+        ok, r = pob.verify_proof(self.app)
+        self.assertTrue(ok, r)
+        self.assertIn("sealed_policy", r)
+        self.assertEqual(r["sealed_policy"]["ok"], True)
+        self.assertEqual(r["sealed_policy"], policy_block)
+
+    def test_verify_proof_sealed_policy_null_when_no_policy_in_proof(self):
+        # G15 / AC9 / RED-2: when the build dict has no 'policy' key, sealed_policy
+        # must still be present in the report (always-present key) but its value
+        # must be None — signalling "no policy was sealed at build time".
+        # BUILD has no 'policy' key.
+        pob.seal_app(self.app, "demo", "react-vite-sqlite", "the spec", BUILD)
+        _ok, r = pob.verify_proof(self.app)
+        self.assertIn("sealed_policy", r)       # key must always be present
+        self.assertIsNone(r["sealed_policy"])   # value is None when no policy sealed
+
 
 @unittest.skipUnless(pob.signing_available(),
                      "cryptography lib required for Ed25519 provenance")

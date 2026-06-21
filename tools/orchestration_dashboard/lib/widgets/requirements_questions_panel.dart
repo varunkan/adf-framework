@@ -10,8 +10,13 @@ class RequirementsQuestionsPanel extends StatelessWidget {
   final List<String> questions;
 
   /// Pulls the questions out of a feature-detail payload (null/!=List → empty).
+  /// The server emits them nested at `detail['summary']['requirements_open_questions']`
+  /// (consistent with every other summary field); fall back to a lifted top-level
+  /// key for backward compatibility. Nested wins when both are present.
   static List<String> fromDetail(Map<String, dynamic>? detail) {
-    final q = detail?['requirements_open_questions'];
+    final summary = detail?['summary'];
+    final q = (summary is Map ? summary['requirements_open_questions'] : null) ??
+        detail?['requirements_open_questions'];
     return q is List ? q.map((e) => '$e').toList() : const [];
   }
 

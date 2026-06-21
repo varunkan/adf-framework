@@ -37,5 +37,61 @@ void main() {
               {'requirements_open_questions': 'not-a-list'}),
           isEmpty);
     });
+
+    test('fromDetail reads the nested summary shape the server actually emits',
+        () {
+      final detail = {
+        'summary': {
+          'requirements_open_questions': [
+            'Which eCTD modules: 1 or 1-5?',
+            'Single tenant?',
+          ],
+        },
+      };
+      expect(
+        RequirementsQuestionsPanel.fromDetail(detail),
+        ['Which eCTD modules: 1 or 1-5?', 'Single tenant?'],
+      );
+    });
+
+    test('fromDetail prefers the nested summary value over the top-level one',
+        () {
+      final detail = {
+        'summary': {
+          'requirements_open_questions': ['nested'],
+        },
+        'requirements_open_questions': ['top'],
+      };
+      expect(RequirementsQuestionsPanel.fromDetail(detail), ['nested']);
+    });
+
+    test('fromDetail tolerates malformed nested shapes', () {
+      expect(RequirementsQuestionsPanel.fromDetail({'summary': {}}), isEmpty);
+      expect(
+          RequirementsQuestionsPanel.fromDetail(
+              {'summary': {'requirements_open_questions': 'not-a-list'}}),
+          isEmpty);
+      expect(
+          RequirementsQuestionsPanel.fromDetail({'summary': 'not-a-map'}),
+          isEmpty);
+    });
+
+    testWidgets('renders questions from the nested server payload',
+        (tester) async {
+      final detail = {
+        'summary': {
+          'requirements_open_questions': ['Q1', 'Q2'],
+        },
+      };
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: RequirementsQuestionsPanel(
+            questions: RequirementsQuestionsPanel.fromDetail(detail),
+          ),
+        ),
+      ));
+      expect(find.textContaining('Confirm before building (2)'), findsOneWidget);
+      expect(find.textContaining('1. Q1'), findsOneWidget);
+    });
   });
 }

@@ -20,9 +20,14 @@ Public API (structurally identical to `doc_ingest`'s surface):
   analyze(path)            -> {kind, text, note}            (text='' + note on degrade)
   ingest(path, complete)   -> {source, kind, requirements, raw, note}
 
-SECURITY: paths are validated for `..` traversal BEFORE any file-read or subprocess
-call; the code-review-graph binary is invoked with `shell=False` and the repo path as a
-pre-split list element — never interpolated into a shell string.
+SECURITY: paths are subtree-confined (R8). A path is rejected if it contains a `..`
+traversal component OR if its resolved real path is neither the allowed root nor under
+it. The allowed root is, in order: an explicit `allowed_root` argument (threaded from the
+caller — e.g. the crew passes the repo root so an untrusted sources.json cannot escape
+it), the `ADF_INGEST_ROOT` env var, else the project tree. This means an absolute path
+outside the tree (e.g. `/etc`) is rejected even though it has no `..`. The
+code-review-graph binary is invoked with `shell=False` and the repo path as a pre-split
+list element — never interpolated into a shell string.
 """
 import os
 import shutil
@@ -34,14 +39,31 @@ _WALK_MAX_DEPTH = 2
 _MAX_ENTRIES = 200  # cap how many names we collect, to keep the summary compact.
 
 
-def _path_rejected(path):
+def _effective_root(allowed_root=None):
+    """Resolve the confinement root: explicit arg, else ADF_INGEST_ROOT, else the project
+    tree (three dirnames up from this file: scripts/orch/repo_analyst.py -> repo root)."""
+    root = allowed_root or os.environ.get("ADF_INGEST_ROOT")
+    if not root:
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.realpath(root)
+
+
+def _path_rejected(path, allowed_root=None):
     """Return a rejection reason string if the path is unsafe, else None. Rejects
-    traversal (`..` components) before any file/subprocess access (R8)."""
+    traversal (`..` components) AND any path that resolves outside the allowed subtree
+    (R8 subtree confinement) — before any file/subprocess access."""
     if not path or not isinstance(path, str):
         return "rejected: empty or non-string path"
     parts = path.replace("\\", "/").split("/")
     if ".." in parts:
         return "rejected: path traversal ('..') component not allowed"
+    # Subtree confinement: the resolved real path must be the root or under root+os.sep,
+    # so an absolute path outside the tree (e.g. /etc) is rejected (R8).
+    root = _effective_root(allowed_root)
+    real = os.path.realpath(path)
+    if real != root and not real.startswith(root + os.sep):
+        return ("rejected: path resolves outside the allowed subtree "
+                f"({root})")
     return None
 
 
@@ -111,12 +133,12 @@ def _walk_summary(path):
     return "\n".join(lines), ""
 
 
-def analyze(path):
+def analyze(path, allowed_root=None):
     """Produce a compact repo-analysis text (+ a `kind` and a `note` on degrade).
 
     Tries code-review-graph opportunistically, else the stdlib walk (the primary, always-
-    available path). Never raises."""
-    rej = _path_rejected(path)
+    available path). `allowed_root` confines the path to a subtree (R8). Never raises."""
+    rej = _path_rejected(path, allowed_root)
     if rej:
         return {"kind": "repo", "text": "", "note": rej}
     if not os.path.exists(path):
@@ -138,10 +160,12 @@ def analyze(path):
     return {"kind": "repo", "text": text, "note": note}
 
 
-def ingest(path, complete=None):
+def ingest(path, complete=None, allowed_root=None):
     """Ingest an existing repo into structured requirement text. With a model `complete`,
     it summarizes the existing domain/features/conventions; otherwise returns the raw
     analysis text. Always returns a dict (with a `note` on degrade) — never crashes.
+    `allowed_root` confines the path to a subtree (R8); callers should pass the repo root
+    when the path comes from an untrusted sources.json.
 
     Returns the same shape `doc_ingest.ingest` returns:
         {source, kind, requirements, raw, note}
@@ -149,7 +173,7 @@ def ingest(path, complete=None):
     name = os.path.basename(path.rstrip(os.sep)) if isinstance(path, str) and path \
         else (str(path) if path else "")
     try:
-        doc = analyze(path)
+        doc = analyze(path, allowed_root)
     except Exception as e:  # noqa: BLE001
         return {"source": name, "kind": "repo", "requirements": "",
                 "raw": "", "note": f"repo analysis failed: {e}"}

@@ -19,8 +19,13 @@ Public API (structurally identical to `doc_ingest`'s surface):
   transcribe(path)         -> {kind, text, note}            (text='' + note on degrade)
   ingest(path, complete)   -> {source, kind, requirements, raw, note}
 
-SECURITY: paths are validated for `..` traversal BEFORE any file-read or subprocess
-call; all subprocess invocations use `shell=False` with a pre-split command list — the
+SECURITY: paths are subtree-confined (R8). A path is rejected if it contains a `..`
+traversal component OR if its resolved real path is neither the allowed root nor under
+it. The allowed root is, in order: an explicit `allowed_root` argument (threaded from the
+caller — e.g. the crew passes the repo root so an untrusted sources.json cannot escape
+it), the `ADF_INGEST_ROOT` env var, else the project tree. This means an absolute path
+outside the tree (e.g. `/etc/passwd`) is rejected even though it has no `..`. All
+subprocess invocations use `shell=False` with a pre-split command list — the
 user-controlled path is NEVER interpolated into a shell string. Only the transcript text
 (never the audio bytes) is sent to the model.
 """
@@ -31,9 +36,19 @@ import subprocess
 _ASR_TIMEOUT = 600  # seconds; transcription can be slow, but bounded.
 
 
-def _path_rejected(path):
+def _effective_root(allowed_root=None):
+    """Resolve the confinement root: explicit arg, else ADF_INGEST_ROOT, else the project
+    tree (three dirnames up from this file: scripts/orch/audio_ingest.py -> repo root)."""
+    root = allowed_root or os.environ.get("ADF_INGEST_ROOT")
+    if not root:
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.realpath(root)
+
+
+def _path_rejected(path, allowed_root=None):
     """Return a rejection reason string if the path is unsafe, else None. Rejects
-    traversal (`..` components) before any file/subprocess access (R8)."""
+    traversal (`..` components) AND any path that resolves outside the allowed subtree
+    (R8 subtree confinement) — before any file/subprocess access."""
     if not path or not isinstance(path, str):
         return "rejected: empty or non-string path"
     # Normalize and look for traversal components in the ORIGINAL (pre-resolve) path so
@@ -41,6 +56,13 @@ def _path_rejected(path):
     parts = path.replace("\\", "/").split("/")
     if ".." in parts:
         return "rejected: path traversal ('..') component not allowed"
+    # Subtree confinement: the resolved real path must be the root or under root+os.sep,
+    # so an absolute path outside the tree (e.g. /etc) is rejected (R8).
+    root = _effective_root(allowed_root)
+    real = os.path.realpath(path)
+    if real != root and not real.startswith(root + os.sep):
+        return ("rejected: path resolves outside the allowed subtree "
+                f"({root})")
     return None
 
 
@@ -94,12 +116,12 @@ def _whisper_transcribe(path):
         return "", f"whisper failed: {e}"
 
 
-def transcribe(path):
+def transcribe(path, allowed_root=None):
     """Transcribe an audio file to text (+ a `kind` and a `note` on any degrade).
 
     Tries ADF_ASR_CMD, then faster-whisper, then whisper; degrades to a note if none are
-    available. Never raises."""
-    rej = _path_rejected(path)
+    available. `allowed_root` confines the path to a subtree (R8). Never raises."""
+    rej = _path_rejected(path, allowed_root)
     if rej:
         return {"kind": "audio", "text": "", "note": rej}
     if not os.path.isfile(path):
@@ -123,17 +145,19 @@ def transcribe(path):
     return {"kind": "audio", "text": "", "note": degrade}
 
 
-def ingest(path, complete=None):
+def ingest(path, complete=None, allowed_root=None):
     """Ingest an audio file into structured requirement text. With a model `complete`,
     it extracts the explicit requirements; otherwise returns the raw transcript. Always
-    returns a dict (with a `note` on degrade) — never crashes the stage.
+    returns a dict (with a `note` on degrade) — never crashes the stage. `allowed_root`
+    confines the path to a subtree (R8); callers should pass the repo root when the path
+    comes from an untrusted sources.json.
 
     Returns the same shape `doc_ingest.ingest` returns:
         {source, kind, requirements, raw, note}
     """
     name = os.path.basename(path) if isinstance(path, str) else str(path)
     try:
-        doc = transcribe(path)
+        doc = transcribe(path, allowed_root)
     except Exception as e:  # noqa: BLE001
         return {"source": name, "kind": "audio", "requirements": "",
                 "raw": "", "note": f"audio ingest failed: {e}"}

@@ -29,9 +29,13 @@ class Analyze(unittest.TestCase):
     def setUp(self):
         # Force the stdlib fallback regardless of host machine state.
         os.environ["ADF_CODE_REVIEW_GRAPH_BIN"] = "/nonexistent/bin/crg"
+        # tmp repos live outside the project tree; confine the subtree-guard (R8) to the
+        # system temp dir so these tests exercise analysis, not the subtree rejection.
+        os.environ["ADF_INGEST_ROOT"] = tempfile.gettempdir()
 
     def tearDown(self):
         os.environ.pop("ADF_CODE_REVIEW_GRAPH_BIN", None)
+        os.environ.pop("ADF_INGEST_ROOT", None)
 
     def test_stdlib_fallback_lists_files(self):
         d = _mkrepo()
@@ -41,9 +45,9 @@ class Analyze(unittest.TestCase):
         self.assertTrue("sub.py" in res["text"] or "README" in res["text"])
 
     def test_missing_dir_notes(self):
-        res = ra.analyze("/no/such/repo/here")
+        res = ra.analyze(os.path.join(tempfile.gettempdir(), "no_such_repo_here_xyz"))
         self.assertEqual(res["text"], "")
-        self.assertTrue(res["note"])
+        self.assertIn("missing repo path", res["note"].lower())
 
     def test_file_not_dir_notes(self):
         d = tempfile.mkdtemp()
@@ -57,9 +61,11 @@ class Analyze(unittest.TestCase):
 class Ingest(unittest.TestCase):
     def setUp(self):
         os.environ["ADF_CODE_REVIEW_GRAPH_BIN"] = "/nonexistent/bin/crg"
+        os.environ["ADF_INGEST_ROOT"] = tempfile.gettempdir()
 
     def tearDown(self):
         os.environ.pop("ADF_CODE_REVIEW_GRAPH_BIN", None)
+        os.environ.pop("ADF_INGEST_ROOT", None)
 
     def test_stdlib_fallback_summarizes_dir(self):
         # RED test #4 from the spec.
@@ -102,6 +108,26 @@ class Ingest(unittest.TestCase):
             ra.ingest("")
         except Exception as e:  # noqa: BLE001
             self.fail(f"ingest raised: {e}")
+
+    def test_absolute_path_outside_root_rejected(self):
+        # R8 subtree confinement: /etc has no '..' but resolves outside the allowed root,
+        # so it must be rejected — the system tree is never folded into the LLM prompt.
+        d = tempfile.mkdtemp()
+        res = ra.ingest("/etc", allowed_root=d)
+        self.assertEqual(res["requirements"], "")
+        note = res["note"].lower()
+        self.assertTrue("rejected" in note or "subtree" in note)
+
+    def test_path_under_allowed_root_accepted(self):
+        # A repo UNDER the allowed root passes the subtree guard and is summarized.
+        d = tempfile.mkdtemp()
+        repo = os.path.join(d, "myrepo")
+        os.makedirs(repo)
+        open(os.path.join(repo, "known.py"), "w").close()
+        res = ra.ingest(repo, complete=None, allowed_root=d)
+        self.assertEqual(res["kind"], "repo")
+        self.assertNotIn("rejected", res["note"].lower())
+        self.assertIn("known.py", res["raw"])
 
 
 if __name__ == "__main__":

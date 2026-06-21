@@ -91,8 +91,10 @@ void main() {
               'to justify the gate');
     });
 
-    // GREEN (AC-1/AC-2): the CrewGate at the seam admits exactly one run, so each
-    // phase is sealed at most once even under a concurrent double-trigger.
+    // GREEN (AC-1 + AC-2): the CrewGate at the seam admits exactly one run, so
+    // each phase is sealed at most once even under a concurrent double-trigger
+    // (AC-1), AND state.json's completed_builders/gates reflect a single coherent
+    // run with no last-write-wins interleaving (AC-2, asserted below).
     test('CrewGate serializes same-id runs so each phase seals at most once',
         () async {
       final integrity = IntegrityChain(store);
@@ -118,6 +120,28 @@ void main() {
             reason: 'phase ${entry.key} sealed ${entry.value}x — '
                 'concurrent duplicate seal');
       }
+
+      // AC-2: state.json reflects a SINGLE coherent run, not last-write-wins
+      // interleaving. completed_builders maps each completed phase to exactly
+      // one builder entry — ['adf-crew'] — with no duplicate/garbled list from a
+      // second concurrent _advance read-modify-write.
+      final state = store.readState(id);
+      final completed =
+          state['completed_builders'] as Map<String, dynamic>? ?? {};
+      expect(completed, isNotEmpty,
+          reason: 'the admitted run must record completed_builders');
+      completed.forEach((phase, builders) {
+        expect(builders, ['adf-crew'],
+            reason: 'phase $phase completed_builders must be a single coherent '
+                "['adf-crew'] entry, not an interleaved/duplicated list");
+      });
+      // Gates that the admitted run passed must be `true` (a single coherent
+      // run), and the sealed phase count must not exceed the recorded phases.
+      final gates = state['gates'] as Map<String, dynamic>? ?? {};
+      expect(gates.values.where((v) => v == true), isNotEmpty,
+          reason: 'the admitted run must advance at least one gate');
+      expect(byPhase.length, lessThanOrEqualTo(completed.length + 1),
+          reason: 'sealed phases must track the single run, not a doubled run');
     });
 
     // AC-3: exactly one run body executes when two same-id triggers race.
