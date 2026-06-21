@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'feature_store.dart';
@@ -44,7 +45,27 @@ class RequirementsCrewRunner {
     } on Object {
       return false; // process couldn't start → never fake a pass
     }
-    return result.exitCode == 0 && File(verdictPath(featureId)).existsSync();
+    final ok = result.exitCode == 0 && File(verdictPath(featureId)).existsSync();
+    if (ok) _liftOpenQuestions(featureId, '${result.stdout}');
+    return ok;
+  }
+
+  /// Lift the crew's open questions out of its stdout summary into structured state
+  /// so the gate can PRESENT them to the user for interactive confirmation (P3) —
+  /// the "confirm requirements with me first" loop. Best-effort: never breaks the run.
+  void _liftOpenQuestions(String featureId, String stdout) {
+    try {
+      final line = stdout
+          .split('\n')
+          .reversed
+          .firstWhere((l) => l.trim().startsWith('{'), orElse: () => '');
+      if (line.isEmpty) return;
+      final qs = (jsonDecode(line) as Map<String, dynamic>)['questions'];
+      if (qs is! List || qs.isEmpty) return;
+      final state = store.readState(featureId);
+      state['requirements_open_questions'] = qs.map((q) => '$q').toList();
+      store.writeState(featureId, state, skipRepair: true);
+    } catch (_) {/* questions are a nicety; never fail the run on them */}
   }
 
   static Future<ProcessResult> _defaultRun(

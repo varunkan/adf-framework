@@ -357,7 +357,10 @@ def main():
     print(json.dumps({
         "feature_id": fid, "requirements": len(res["requirements"]),
         "po_pass": res["po"]["pass"], "gaps": len(res["po"]["gaps"]),
-        "open_questions": len(res["open_questions"]), "sources": res["sources"]}))
+        "open_questions": len(res["open_questions"]), "sources": res["sources"],
+        # The actual question STRINGS (capped) so the gate can present them to the
+        # user for interactive confirmation (P3), not just a count.
+        "questions": [_g(q) for q in res["open_questions"]][:10]}))
     return 0
 
 

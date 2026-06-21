@@ -35,6 +35,26 @@ void main() {
       expect(gotArgs, containsAll(['scripts/orch/requirements_crew.py', 'feat-1']));
     });
 
+    test('lifts the crew open-questions into state for the user (P3)', () async {
+      store.writeState('feat-q', {'current_phase': 2}, skipRepair: true);
+      final runner = RequirementsCrewRunner(store, run: (e, a, c) async {
+        File(runner_verdict(store, 'feat-q'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync('# PO verdict (phase 2): REVISE');
+        return ProcessResult(0, 0,
+            '{"po_pass": false, "questions": '
+            '["Which eCTD modules: 1 or 1-5?", "Single tenant?"]}',
+            '');
+      });
+      expect(await runner.run('feat-q'), isTrue);
+      final state = store.readState('feat-q');
+      expect(state['requirements_open_questions'],
+          ['Which eCTD modules: 1 or 1-5?', 'Single tenant?']);
+      // …and the feature-detail payload surfaces them to the dashboard.
+      expect(store.featureSummary('feat-q')['requirements_open_questions'],
+          ['Which eCTD modules: 1 or 1-5?', 'Single tenant?']);
+    });
+
     test('NEVER fakes a pass: exit!=0 or no verdict file → false', () async {
       // non-zero exit
       final r1 = RequirementsCrewRunner(store,

@@ -833,6 +833,9 @@ $requirement
       'awaiting_user': state['awaiting_user'],
       'pending_approval_phase': state['pending_approval_phase'],
       'last_judge_verdict': state['last_judge_verdict'],
+      // The crew's open questions, surfaced so the user can confirm requirements
+      // before the build proceeds (P3 — interactive elicitation).
+      'requirements_open_questions': state['requirements_open_questions'],
       'run_status': run?['status'],
     };
   }
