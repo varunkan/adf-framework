@@ -25,7 +25,7 @@ void main() {
       store,
       integrity: chain,
       costs: costs,
-      backend: CursorBackend(),
+      backend: ClaudeBackend(), // CURSOR-1: cursor backend removed; any backend works here
     );
     store.createFeature(
       id: id,
@@ -72,8 +72,8 @@ void main() {
     expect(DateTime.tryParse(bundle['created_at'] as String), isNotNull);
 
     final runner = bundle['runner'] as Map<String, dynamic>;
-    expect(runner['runner'], 'cursor');
-    expect(runner['runner_label'], 'Cursor CLI (cursor-agent)');
+    expect(runner['runner'], 'claude'); // CURSOR-1: bundle backend is ClaudeBackend now
+    expect(runner['runner_label'], 'Claude Code CLI (claude)');
 
     final blocks = (bundle['chain'] as List).cast<Map<String, dynamic>>();
     expect(blocks, hasLength(1));

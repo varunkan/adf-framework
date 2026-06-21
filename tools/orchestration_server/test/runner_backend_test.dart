@@ -3,17 +3,6 @@ import 'package:test/test.dart';
 
 void main() {
   group('backend identity', () {
-    test('cursor backend builds cursor-agent stream args', () {
-      final b = CursorBackend();
-      expect(b.kind, RunnerKind.cursor);
-      final args = b.streamArgs('hello', '/repo');
-      expect(args, contains('--print'));
-      expect(args, contains('--workspace'));
-      expect(args, contains('stream-json'));
-      expect(args.last, 'hello'); // prompt is the final positional arg
-      expect(b.apiKeyEnvVar, 'CURSOR_API_KEY');
-    });
-
     test('claude backend builds claude -p stream args', () {
       final b = ClaudeBackend();
       expect(b.kind, RunnerKind.claude);
@@ -35,6 +24,20 @@ void main() {
       final b = _CustomShim(args: '-p {prompt} --cwd {workspace}');
       final out = b.streamArgs('do it', '/work');
       expect(out, ['-p', 'do it', '--cwd', '/work']);
+    });
+  });
+
+  // CURSOR-1 — cursor-the-tool is purged: no cursor RunnerKind, no CursorBackend,
+  // and the auto/default selection never yields a cursor runner.
+  group('CURSOR-1: cursor purged', () {
+    test('cursor is not a runner kind (only claude + custom remain)', () {
+      expect(RunnerKind.values.map((k) => k.id), isNot(contains('cursor')));
+      expect(RunnerKind.values.map((k) => k.id).toSet(), {'claude', 'custom'});
+    });
+
+    test('the active backend is never cursor', () {
+      expect(RunnerBackend.active().kind.id, isNot('cursor'),
+          reason: 'default/auto resolution must fall back to custom, not cursor');
     });
   });
 }

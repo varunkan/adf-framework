@@ -1,31 +1,29 @@
 import 'dart:io';
 
 /// Identifies which headless agent CLI drives the orchestration runner.
-enum RunnerKind { cursor, claude, custom }
+enum RunnerKind { claude, custom }
 
 extension RunnerKindName on RunnerKind {
   String get id => switch (this) {
-        RunnerKind.cursor => 'cursor',
         RunnerKind.claude => 'claude',
         RunnerKind.custom => 'custom',
       };
 
   String get label => switch (this) {
-        RunnerKind.cursor => 'Cursor CLI (cursor-agent)',
         RunnerKind.claude => 'Claude Code CLI (claude)',
         RunnerKind.custom => 'Custom agent CLI',
       };
 }
 
 /// Abstraction over a headless agent CLI so the orchestration server can drive
-/// Cursor, Claude Code, or any other agent runner without code changes.
+/// Claude Code, ADF's own Python runner, or any other agent runner without code
+/// changes. (Cursor support was removed — ADF runs on its own custom runner.)
 ///
 /// Selection is controlled by the `ADF_RUNNER` environment variable:
-///   - `cursor`  → [CursorBackend]
 ///   - `claude`  → [ClaudeBackend]
 ///   - `custom`  → [CustomBackend] (driven by ADF_RUNNER_BIN / ADF_RUNNER_ARGS)
 ///   - unset/`auto` → pick the first backend whose binary resolves
-///     (custom if configured, else cursor, else claude, else cursor default).
+///     (custom if configured, else claude, else the custom runner by default).
 ///
 /// All supported runners emit a JSON-lines ("stream-json") protocol with a
 /// terminal `{"type":"result","result":"…"}` event, which the existing parsers
@@ -73,9 +71,6 @@ abstract class RunnerBackend {
     final raw =
         (Platform.environment['ADF_RUNNER'] ?? 'auto').trim().toLowerCase();
     switch (raw) {
-      case 'cursor':
-      case 'cursor-agent':
-        return CursorBackend();
       case 'claude':
       case 'claude-code':
         return ClaudeBackend();
@@ -85,7 +80,8 @@ abstract class RunnerBackend {
       case 'auto':
         return _autoSelect();
       default:
-        // Unknown value → behave like auto so a typo never bricks the runner.
+        // Unknown value (incl. a stale `cursor`) → behave like auto so a typo or
+        // a removed backend never bricks the runner.
         return _autoSelect();
     }
   }
@@ -95,12 +91,11 @@ abstract class RunnerBackend {
     if (Platform.environment['ADF_RUNNER_BIN']?.isNotEmpty == true) {
       return CustomBackend();
     }
-    final cursor = CursorBackend();
-    if (cursor.resolveExecutable() != null) return cursor;
     final claude = ClaudeBackend();
     if (claude.resolveExecutable() != null) return claude;
-    // Nothing installed: default to cursor so existing error/hint UX is intact.
-    return cursor;
+    // Nothing installed: default to ADF's own custom runner (driven via
+    // ADF_RUNNER_BIN); its install hint points the operator to configure it.
+    return CustomBackend();
   }
 
   /// Search PATH and a list of well-known absolute candidates for [names].
@@ -119,95 +114,6 @@ abstract class RunnerBackend {
     }
     return null;
   }
-}
-
-/// Cursor's headless `cursor-agent --print` runner (the original ADF backend).
-class CursorBackend extends RunnerBackend {
-  @override
-  RunnerKind get kind => RunnerKind.cursor;
-
-  @override
-  String? resolveExecutable() {
-    final env = Platform.environment['CURSOR_AGENT_PATH'];
-    if (env != null && env.isNotEmpty && File(env).existsSync()) return env;
-    final home = Platform.environment['HOME'] ?? '';
-    return RunnerBackend.firstExisting(
-      [
-        '$home/.local/bin/cursor-agent',
-        '$home/.local/bin/agent',
-        '/Applications/Cursor.app/Contents/Resources/app/bin/cursor',
-      ],
-      ['cursor-agent'],
-    );
-  }
-
-  @override
-  List<String> streamArgs(String prompt, String workspace,
-      {bool partial = true}) {
-    final args = <String>[
-      '--print',
-      '--trust',
-      '--force',
-      '--approve-mcps',
-      '--workspace',
-      workspace,
-      '--output-format',
-      'stream-json',
-      if (partial) '--stream-partial-output',
-      prompt,
-    ];
-    return _withApiKey(args);
-  }
-
-  @override
-  List<String> textArgs(String prompt, String workspace) {
-    final args = <String>[
-      '--print',
-      '--trust',
-      '--force',
-      '--approve-mcps',
-      '--workspace',
-      workspace,
-      '--output-format',
-      'text',
-      prompt,
-    ];
-    return _withApiKey(args);
-  }
-
-  List<String> _withApiKey(List<String> args) {
-    final apiKey = Platform.environment['CURSOR_API_KEY'];
-    if (apiKey != null && apiKey.isNotEmpty) {
-      return ['--api-key', apiKey, ...args];
-    }
-    return args;
-  }
-
-  @override
-  List<String>? statusArgs() => ['status'];
-
-  @override
-  String get killPattern => r'cursor-agent.*--print';
-
-  @override
-  String? get apiKeyEnvVar => 'CURSOR_API_KEY';
-
-  @override
-  String get installHint =>
-      'cursor-agent not found. Install via: curl -fsSL https://cursor.com/install | bash';
-
-  @override
-  String get loginCommand => 'cursor-agent login';
-
-  @override
-  List<String> get recoverySteps => const [
-        'Kill stuck headless agents: pkill -f "cursor-agent.*--print"',
-        'Restart Cursor app, run: cursor-agent login',
-        'Or set CURSOR_API_KEY in your environment',
-        'Restart the orchestration API server',
-        'Until headless works: resume in Cursor IDE, then Sync',
-        'Tap Verify in the dashboard for a fresh headless probe',
-      ];
 }
 
 /// Anthropic's Claude Code headless `claude -p` runner.
