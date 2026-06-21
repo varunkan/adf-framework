@@ -149,25 +149,8 @@ void main() {
     expect(sw.elapsedMilliseconds, lessThan(1000));
   });
 
-  test('ORCH_CHAT_LLM=cursor never probes Ollama', () async {
-    final fake = await FakeOllama.start(reply: 'should never be used');
-    addTearDown(fake.close);
-    final processor = processorWith({
-      'ORCH_CHAT_LLM': 'cursor',
-      'ORCH_OLLAMA_HOST': fake.host,
-      'ORCH_CHAT_USE_CURSOR': '0', // keep the test offline: no agent probe
-    });
-
-    expect(await processor.ollamaChatReady(), isFalse);
-    final r = await processor.process(
-      'chat1',
-      freeForm,
-      mode: ChatProcessMode.httpOnly,
-    );
-
-    expect(fake.hits, 0);
-    expect(r.source, 'fallback');
-  });
+  // (Removed: 'ORCH_CHAT_LLM=cursor never probes Ollama' — the cursor chat
+  // backend was purged; ORCH_CHAT_LLM=cursor is no longer a supported value.)
 
   test('reachability probe is cached, not re-run on every message', () async {
     final fake = await FakeOllama.start(

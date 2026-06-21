@@ -64,7 +64,7 @@ class _PhaseStepListState extends State<PhaseStepList> {
                       ? null
                       : () => widget.onStepCommand!(
                             s['id'] as String,
-                            s['cursor_command'] as String? ?? '',
+                            s['run_hint'] as String? ?? '',
                           ),
                 ))
             .toList(),

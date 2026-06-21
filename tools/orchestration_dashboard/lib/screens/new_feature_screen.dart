@@ -63,12 +63,12 @@ class _NewFeatureScreenState extends State<NewFeatureScreen> {
         if (status == 'needs_login' || mode == 'needs_login') {
           showMessage(
             context,
-            'Feature created. Run cursor-agent login, then open it to start.',
+            'Feature created. Sign in to your runner, then open it to start.',
           );
         } else if (run?['headless_unavailable'] == true || mode == 'ide_only') {
           showMessage(
             context,
-            'Feature created (IDE mode). In Cursor run: '
+            'Feature created (IDE mode). In your IDE run: '
             '@orch-orchestrator start $id — then Sync in the dashboard.',
           );
         }

@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'feature_store.dart';
 
-/// After headless cursor-agent run, sync state.json from artifacts on disk.
+/// After a headless agent run, sync state.json from artifacts on disk.
 class RunPostSync {
   RunPostSync(this.store, {bool? crewEnabled})
       : crewEnabled = crewEnabled ??

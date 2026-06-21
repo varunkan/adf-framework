@@ -10,21 +10,17 @@ export ORCH_REPO_ROOT="$ROOT"
 API_PORT="${ORCH_PORT:-3847}"
 WEB_PORT="${ORCH_WEB_PORT:-3848}"
 
-# Backend selection. Default: local Ollama (chat + runner), no cursor-agent.
-# Override with `adf studio --cursor` or ADF_STUDIO_BACKEND=cursor.
-BACKEND="${ADF_STUDIO_BACKEND:-local}"
+# Backend selection. Default: local Ollama (chat + runner).
+BACKEND=local
 DEV=0
 for arg in "$@"; do
   case "$arg" in
-    --cursor) BACKEND=cursor ;;
     --local)  BACKEND=local ;;
     --dev)    DEV=1 ;;
   esac
 done
-case "$BACKEND" in
-  cursor) API_LAUNCHER="run_server_cursor_cli.sh"; BACKEND_LABEL="Cursor CLI chat + zero-token crew" ;;
-  *)      API_LAUNCHER="run_server_local_llm.sh";  BACKEND_LABEL="local Ollama chat + runner (no cursor)" ;;
-esac
+API_LAUNCHER="run_server_local_llm.sh"
+BACKEND_LABEL="local Ollama chat + runner"
 
 echo "╔══════════════════════════════════════════════════════════╗"
 echo "║  ADF Studio — proof-governed agentic development         ║"
@@ -92,5 +88,5 @@ echo "       Crew runs instantly (zero tokens) · integrity chain seals artifact
 echo ""
 echo "  Logs: /tmp/orch-api.log · /tmp/orch-dashboard.log"
 echo "  Backend: $BACKEND_LABEL"
-echo "  Dev mode (hot reload): adf studio --dev   ·   Cursor backend: adf studio --cursor"
+echo "  Dev mode (hot reload): adf studio --dev"
 echo ""

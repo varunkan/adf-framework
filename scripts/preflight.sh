@@ -17,7 +17,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -t|--target) TARGET="$2"; shift 2 ;;
     --runner)    WANT_RUNNER="$2"; shift 2 ;;
-    -h|--help)   echo "Usage: $0 [-t TARGET] [--runner cursor|claude|ollama|custom]"; exit 0 ;;
+    -h|--help)   echo "Usage: $0 [-t TARGET] [--runner claude|ollama|custom]"; exit 0 ;;
     *) TARGET="$1"; shift ;;
   esac
 done
@@ -78,9 +78,8 @@ case "${RUNNER_SEL:-auto}" in
       bad "runner=ollama but 'ollama' not installed (brew install ollama)"
     fi ;;
   claude)  have claude && ok "claude (Claude Code) on PATH" || bad "runner=claude but 'claude' missing (npm i -g @anthropic-ai/claude-code)" ;;
-  cursor)  have cursor-agent && ok "cursor-agent on PATH" || warn "runner=cursor but 'cursor-agent' missing (IDE path may still work)" ;;
   custom)  ok "runner=custom (ensure ADF_RUNNER_BIN points at your agent)" ;;
-  auto|*)  warn "runner=auto — will probe custom→cursor→claude at start; install at least one" ;;
+  auto|*)  warn "runner=auto — will probe custom→claude at start; install at least one" ;;
 esac
 
 # ---- 3. ports ---------------------------------------------------------------

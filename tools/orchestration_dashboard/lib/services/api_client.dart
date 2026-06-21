@@ -253,10 +253,10 @@ class ApiClient {
     });
     if (r.statusCode != 200) throw Exception(_formatError(r));
     final data = jsonDecode(r.body) as Map<String, dynamic>;
-    return data['cursor_prompt'] as String? ?? '@orch-orchestrator resume $id';
+    return data['ide_prompt'] as String? ?? 'Re-run the phase for $id once the runner is ready';
   }
 
-  /// Start (or queue) headless phase execution via cursor-agent.
+  /// Start (or queue) headless phase execution via the configured runner.
   Future<Map<String, dynamic>> runFeature(String id, {int? phase}) async {
     final r = await _post('/features/$id/run', {
       if (phase != null) 'phase': phase,

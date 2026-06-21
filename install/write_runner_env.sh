@@ -10,14 +10,6 @@ mkdir -p "$TARGET/.adf"
 ENV_FILE="$TARGET/.adf/runner.env"
 
 case "$RUNNER" in
-  cursor)
-    cat > "$ENV_FILE" << 'ENV'
-# ADF runner: Cursor CLI (cursor-agent)
-ADF_RUNNER=cursor
-# Optional unattended auth (else run: cursor-agent login)
-# CURSOR_API_KEY=...
-ENV
-    ;;
   claude)
     cat > "$ENV_FILE" << 'ENV'
 # ADF runner: Claude Code CLI (claude)
@@ -43,7 +35,7 @@ ADF_RUNNER_KILL_PATTERN="ollama_runner.sh"
 # Alternatives: nemotron-mini (smallest), hf.co/MaziyarPanahi/NVIDIA-Nemotron-Nano-12B-v2-GGUF (higher quality)
 # ORCH_OLLAMA_MODEL=hf.co/nvidia/NVIDIA-Nemotron-3-Nano-4B-GGUF:Q4_K_M
 # OLLAMA_HOST=http://127.0.0.1:11434
-# Dashboard chat backend: auto = instant state answers, then local Ollama, then cursor-agent
+# Dashboard chat backend: auto = instant state answers, then local Ollama
 # ORCH_CHAT_LLM=auto
 ENV
     ;;
@@ -60,7 +52,7 @@ ENV
     ;;
   auto|*)
     cat > "$ENV_FILE" << 'ENV'
-# ADF runner: auto-detect (custom if configured, else cursor, else claude)
+# ADF runner: auto-detect (custom if configured, else claude)
 ADF_RUNNER=auto
 ENV
     ;;

@@ -6,7 +6,7 @@ import 'cost_meter.dart';
 import 'feature_store.dart';
 import 'runner_health.dart';
 
-/// Headless cursor-agent for conversational dashboard chat (Cursor-like replies).
+/// Headless runner-backed conversational dashboard chat.
 class AgentChatRunner {
   AgentChatRunner({
     required this.repoRoot,
@@ -48,7 +48,7 @@ class AgentChatRunner {
       history.writeln('${role.toUpperCase()}: $text');
     }
 
-    final prompt = "You are the ADF orchestration assistant (like Cursor chat).\n"
+    final prompt = "You are the ADF orchestration assistant.\n"
         "Feature: $featureId\n\n"
         "$contextBlock\n\n"
         "${history.isEmpty ? '' : 'Recent chat:\n$history\n'}"

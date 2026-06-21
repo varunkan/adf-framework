@@ -63,7 +63,6 @@ class _FeatureDetailScreenState extends State<FeatureDetailScreen> {
   final List<Map<String, dynamic>> _optimisticMessages = [];
   Map<String, dynamic>? _artifactChecklist;
   bool? _chatLlmConfigured;
-  bool? _chatPreferCursor;
 
   @override
   void initState() {
@@ -146,7 +145,6 @@ class _FeatureDetailScreenState extends State<FeatureDetailScreen> {
       if (mounted) {
         setState(() {
           _chatLlmConfigured = health['chat_llm_configured'] as bool?;
-          _chatPreferCursor = health['chat_prefer_cursor'] as bool?;
         });
       }
     } catch (_) {}
@@ -321,7 +319,7 @@ class _FeatureDetailScreenState extends State<FeatureDetailScreen> {
     return run?['status'] as String?;
   }
 
-  /// True while cursor-agent is working (including background revise during approval).
+  /// True while the agent is working (including background revise during approval).
   bool get _agentActive {
     final run = _detail?['run_status'] as Map<String, dynamic>?;
     if (run?['agent_active'] == true) return true;
@@ -475,7 +473,7 @@ $clarification
           (ph['steps'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ?? [];
       for (final s in steps) {
         if (s['id'] == _currentStepId) {
-          return s['cursor_command'] as String?;
+          return s['run_hint'] as String?;
         }
       }
     }
@@ -512,14 +510,14 @@ $clarification
 
   Future<void> _startPhase() async {
     if (!_runnerReady) {
-      showMessage(context, 'Complete Cursor agent setup first');
+      showMessage(context, 'Complete runner setup first');
       return;
     }
     if (!_headlessReady) {
       showMessage(
         context,
         'Headless agent unavailable on this machine. '
-        'Run `@orch-orchestrator resume ${widget.featureId}` in Cursor IDE, then Sync.',
+        'Run `@orch-orchestrator resume ${widget.featureId}` in your IDE, then Sync.',
       );
       return;
     }
@@ -574,20 +572,16 @@ $clarification
 
 
   Widget? _chatSetupBanner() {
-    if (_chatLlmConfigured != false && _chatPreferCursor != true) return null;
+    if (_chatLlmConfigured != false) return null;
     return MaterialBanner(
       backgroundColor: Theme.of(context).colorScheme.tertiaryContainer,
-      content: Text(
-        _chatPreferCursor == true
-            ? 'Chat is using your Cursor CLI (cursor-agent). Replies may take 30–120 seconds; the panel refreshes automatically.'
-            : 'Chat uses static fallbacks until you set GROQ_API_KEY on the API server, '
-                'or start the API with scripts/orch/run_server_cursor_cli.sh for Cursor CLI chat.',
+      content: const Text(
+        'Chat uses static fallbacks until you set GROQ_API_KEY on the API server.',
       ),
       actions: [
         TextButton(
           onPressed: () => setState(() {
             _chatLlmConfigured = null;
-            _chatPreferCursor = null;
           }),
           child: const Text('Dismiss'),
         ),
@@ -624,19 +618,14 @@ $clarification
         // Do NOT clear optimistic messages wholesale — that was the flash-then-
         // gone bug. _applyDetail() (run by _load above) has already pruned the
         // entries the server now holds; _mergedConversation() de-dupes the rest.
-        showMessage(
-          context,
-          reply['llm_source'] == 'cursor_agent'
-              ? 'Cursor CLI reply ready.'
-              : 'Reply ready.',
-        );
+        showMessage(context, 'Reply ready.');
         return;
       }
     }
     if (mounted) {
       showMessage(
         context,
-        'Cursor CLI is still working — wait a bit longer or check API logs.',
+        'The agent is still working — wait a bit longer or check API logs.',
       );
     }
   }
@@ -745,13 +734,13 @@ $clarification
           msg = 'Orchestrator replied (no agent run needed).';
         } else if (mode == 'llm_ide' || mode == 'ide_only') {
           msg = orch != null
-              ? 'LLM processed your message. Run in Cursor: $orch'
+              ? 'LLM processed your message. Run in your IDE: $orch'
               : (res['message'] as String? ??
-                  'Saved — run `@orch-orchestrator sync ${widget.featureId}` in Cursor IDE.');
+                  'Saved — run `@orch-orchestrator sync ${widget.featureId}` in your IDE.');
         } else if (mode == 'feature_complete') {
           msg = res['message'] as String? ?? 'Notes saved (feature completed).';
         } else if (mode == 'chat_pending') {
-          msg = 'Cursor CLI is thinking — chat will update automatically.';
+          msg = 'The agent is thinking — chat will update automatically.';
         } else {
           msg = 'Orchestrator is executing your request via the agent.';
         }
@@ -1078,7 +1067,7 @@ $clarification
       stepLabel: _humanStepLabel(
           (run?['step_id'] as String?) ?? _currentStepId,
           (run?['phase'] as num?)?.toInt()),
-      ideMode: run?['resume_mode'] == 'cursor_ide' ||
+      ideMode: run?['resume_mode'] == 'ide' ||
           run?['headless_unavailable'] == true,
       ideHint: run?['hint'] as String?,
       featureId: widget.featureId,

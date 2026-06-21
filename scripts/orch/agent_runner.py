@@ -6,8 +6,8 @@ NIM tier.
 ADF's phase runner invokes a runner CLI as:
     agent_runner.py "<prompt>" --workspace <repo-or-worktree>
 where <prompt> is the thin orchestration directive (e.g.
-"@orch-orchestrator resume <feature-id>"). Real coding agents (cursor-agent,
-claude CLI) read the orchestration spec and write files via tool calls. A plain
+"@orch-orchestrator resume <feature-id>"). Real coding agents (claude CLI) read
+the orchestration spec and write files via tool calls. A plain
 chat model can't — so this adapter does the agent's job explicitly:
 
   1. Resolve the feature id from the prompt.
@@ -1414,7 +1414,7 @@ def run_verification(app_root, timeout=60):
 # operator's API keys to arbitrary code. Scrubbed from every npm/node child env.
 _SECRET_ENV_RE = re.compile(r"(API_KEY|_TOKEN|SECRET|PASSWORD|CREDENTIAL)", re.I)
 _SECRET_ENV_EXACT = {"ANTHROPIC_API_KEY", "NVIDIA_API_KEY", "ORCH_NVIDIA_API_KEY",
-                     "OPENAI_API_KEY", "CURSOR_API_KEY", "HF_TOKEN", "GITHUB_TOKEN"}
+                     "OPENAI_API_KEY", "HF_TOKEN", "GITHUB_TOKEN"}
 
 # Force every child tool (npm, git, pip, node, the built app) into NON-INTERACTIVE
 # mode. Without this an npm/git/pip step can open a pager or block on a credential

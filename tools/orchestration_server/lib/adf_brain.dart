@@ -6,9 +6,9 @@ import 'model_router.dart';
 /// Pluggable intelligence for the ADF harness.
 ///
 /// Brains are ordered by cost: deterministic templates (0 tokens, always
-/// available) -> local Ollama model ($0 marginal cost) -> cloud LLM ->
-/// cursor-agent. The harness always has a working brain because the
-/// deterministic tier can never fail or cost anything.
+/// available) -> local Ollama model ($0 marginal cost) -> cloud LLM. The
+/// harness always has a working brain because the deterministic tier can
+/// never fail or cost anything.
 abstract class AdfBrain {
   String get name;
 

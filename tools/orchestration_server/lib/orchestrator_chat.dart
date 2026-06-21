@@ -2,18 +2,17 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'adf_brain.dart';
-import 'agent_chat_runner.dart';
 import 'conversation_builder.dart';
 import 'feature_store.dart';
 import 'pipeline_planner.dart';
 
 /// How much of the chat pipeline [process] runs.
 enum ChatProcessMode {
-  /// HTTP LLM → optional static context → fallback (no cursor-agent wait).
+  /// HTTP LLM → optional static context → fallback.
   httpOnly,
-  /// Full pipeline including cursor-agent (can take minutes).
+  /// Full pipeline (router/Claude/NVIDIA + local Ollama).
   full,
-  /// Skip cursor/LLM — state-based answers only (fast fallback).
+  /// Skip the LLM — state-based answers only (fast fallback).
   stateOnly,
 }
 
@@ -22,14 +21,12 @@ class OrchestratorChatProcessor {
   OrchestratorChatProcessor(
     this.store, {
     PipelinePlanner? planner,
-    AgentChatRunner? agentChat,
     OllamaBrain? ollama,
     Object? router,
     void Function(String featureId, Map<String, dynamic> event)? onUsage,
     Map<String, String>? env,
     bool forceStaticContext = false,
   })  : _planner = planner,
-        _agentChat = agentChat ?? AgentChatRunner(repoRoot: store.repoRoot),
         _ollama = ollama ?? OllamaBrain(env: env),
         _router = router,
         _onUsage = onUsage,
@@ -38,7 +35,6 @@ class OrchestratorChatProcessor {
 
   final FeatureStore store;
   final PipelinePlanner? _planner;
-  final AgentChatRunner _agentChat;
   final OllamaBrain _ollama;
 
   /// Loose-coupled model router (concrete type lives in model_router.dart and
@@ -61,16 +57,15 @@ class OrchestratorChatProcessor {
 
   String? get llmApiKey => _llmApiKey();
 
-  /// `ORCH_CHAT_LLM`: `auto` (default — Ollama when reachable, else the
-  /// cursor-agent path) | `ollama` | `cursor` (never touch Ollama).
+  /// `ORCH_CHAT_LLM`: `auto` (default — API LLM / router, then Ollama) |
+  /// `ollama` (pin chat to the local model).
   String get chatLlmMode {
     final v = (_env['ORCH_CHAT_LLM'] ?? 'auto').trim().toLowerCase();
-    return (v == 'ollama' || v == 'cursor') ? v : 'auto';
+    return v == 'ollama' ? v : 'auto';
   }
 
   /// Cached <=500ms reachability probe — safe to call once per message.
   Future<bool> ollamaChatReady() async {
-    if (chatLlmMode == 'cursor') return false;
     return _ollama.availableCached();
   }
 
@@ -88,37 +83,13 @@ class OrchestratorChatProcessor {
   }
 
   /// Which LLM free-form chat will use right now: `llm` (cloud API),
-  /// `ollama:<model>`, `cursor_agent`, or `none`.
+  /// `ollama:<model>`, or `none`.
   Future<String> describeChatLlm() async {
     final apiKey = _llmApiKey();
-    if (apiKey != null && !preferCursorCli) return 'llm';
-    if (await ollamaChatReady()) return _ollama.name;
-    if (await cursorChatReady()) return 'cursor_agent';
     if (apiKey != null) return 'llm';
+    if (await ollamaChatReady()) return _ollama.name;
     return 'none';
   }
-
-  /// When true, dashboard chat uses cursor-agent before HTTP LLM (Groq/OpenAI).
-  bool get preferCursorCli {
-    final v = _env['ORCH_CHAT_PREFER_CURSOR'];
-    if (v == '0' || v == 'false') return false;
-    if (v == '1' || v == 'true') return true;
-    // Default: prefer Cursor CLI when no cloud LLM key is configured.
-    return _llmApiKey() == null;
-  }
-
-  Future<bool> cursorChatReady() => _shouldTryCursorChat();
-
-  /// True only when chat genuinely routes to cursor-agent BEFORE the local /
-  /// HTTP models — mirrors the `cursorFirst` decision in [process]. Unlike
-  /// [preferCursorCli] (which defaults true whenever no cloud key is set, for
-  /// the API-key fallback ordering), this reflects what actually happens, so
-  /// `/health` does not report a cursor preference when chat is pinned to
-  /// Ollama or cursor chat is disabled.
-  bool get cursorIsPreferred =>
-      chatLlmMode == 'cursor' ||
-      _env['ORCH_CHAT_PREFER_CURSOR'] == '1' ||
-      _env['ORCH_CHAT_PREFER_CURSOR'] == 'true';
 
   bool get staticContextEnabled =>
       _forceStaticContext ||
@@ -169,67 +140,31 @@ class OrchestratorChatProcessor {
       return _stamped(_fallback(ctx, trimmed), sw);
     }
 
-    final contextBlock = _formatContextBlock(ctx);
     final history = _filterChatHistory(
       ConversationBuilder(store).buildChatView(featureId, limit: 12),
     );
 
-    final useCursor =
-        mode == ChatProcessMode.full && await _shouldTryCursorChat();
-    final cursorFirst = chatLlmMode == 'cursor' ||
-        _env['ORCH_CHAT_PREFER_CURSOR'] == '1' ||
-        _env['ORCH_CHAT_PREFER_CURSOR'] == 'true';
-
-    // ORCH_CHAT_LLM=cursor (or explicit prefer-cursor) keeps the legacy
-    // cursor-first ordering; auto order is API LLM -> Ollama -> cursor.
-    if (cursorFirst && useCursor) {
-      final agentReply = await _agentChat.converse(
-        featureId: featureId,
-        contextBlock: contextBlock,
-        userMessage: trimmed,
-        recentMessages: history,
-        onPartial: onPartial,
-      );
-      if (agentReply != null && agentReply.reply.trim().isNotEmpty) {
-        return _stamped(_fromAgentChat(ctx, trimmed, agentReply), sw);
-      }
-    }
-
     // Model router (auto mode only): after the instant tier misses, the
     // router scores complexity — simple stays on the free local tier, hard
-    // goes to the right Claude tier. ORCH_CHAT_LLM=ollama|cursor bypasses the
+    // goes to the right Claude tier. ORCH_CHAT_LLM=ollama bypasses the
     // router entirely, and any router/brain failure returns null so the
-    // existing ollama -> cursor-agent -> fallback chain below takes over.
+    // existing ollama -> fallback chain below takes over.
     if (chatLlmMode == 'auto' && _router != null) {
       final routed = await _callRoutedModel(ctx, trimmed, history);
       if (routed != null) return _stamped(routed, sw);
     }
 
     final apiKey = _llmApiKey();
-    if (apiKey != null && (!preferCursorCli || cursorFirst)) {
+    if (apiKey != null) {
       try {
         return _stamped(await _callHttpLlm(ctx, trimmed, apiKey, history), sw);
       } catch (_) {}
     }
 
-    // Local Ollama answers free-form chat at $0 before any cursor-agent
-    // fallback. ollamaChatReady() is false when ORCH_CHAT_LLM=cursor.
+    // Local Ollama answers free-form chat at $0.
     if (await ollamaChatReady()) {
       final viaOllama = await _callOllama(ctx, trimmed, history);
       if (viaOllama != null) return _stamped(viaOllama, sw);
-    }
-
-    if (!cursorFirst && useCursor) {
-      final agentReply = await _agentChat.converse(
-        featureId: featureId,
-        contextBlock: contextBlock,
-        userMessage: trimmed,
-        recentMessages: history,
-        onPartial: onPartial,
-      );
-      if (agentReply != null && agentReply.reply.trim().isNotEmpty) {
-        return _stamped(_fromAgentChat(ctx, trimmed, agentReply), sw);
-      }
     }
 
     return _stamped(
@@ -237,7 +172,7 @@ class OrchestratorChatProcessor {
         ctx,
         trimmed,
         note:
-            'Could not reach a chat model. Start Ollama (ORCH_OLLAMA_HOST), run cursor-agent login, or set ORCH_LLM_API_KEY / GROQ_API_KEY on the API server.',
+            'Could not reach a chat model. Start Ollama (ORCH_OLLAMA_HOST), or set ORCH_LLM_API_KEY / GROQ_API_KEY on the API server.',
       ),
       sw,
     );
@@ -248,15 +183,6 @@ class OrchestratorChatProcessor {
     sw.stop();
     r.latencyMs ??= sw.elapsedMilliseconds;
     return r;
-  }
-
-  Future<bool> _shouldTryCursorChat() async {
-    if (_env['ORCH_CHAT_USE_CURSOR'] == '0' ||
-        _env['ORCH_CHAT_USE_CURSOR'] == 'false') {
-      return false;
-    }
-    final health = await _agentChat.health.probe();
-    return health['ready'] == true;
   }
 
   /// Free-form chat through the local Ollama model. The reply carries an
@@ -504,37 +430,6 @@ class OrchestratorChatProcessor {
         '$step\n'
         'Requirement:\n'
         '${ctx.requirementSnippet.isEmpty ? "(see requirement.md)" : ctx.requirementSnippet}';
-  }
-
-  OrchestratorChatResult _fromAgentChat(
-    OrchestratorChatContext ctx,
-    String userMessage,
-    AgentChatResponse agentReply,
-  ) {
-    final action = switch (agentReply.actionTag) {
-      'sync' => OrchestratorAction.sync,
-      'clarify' => OrchestratorAction.clarify,
-      'answer_only' => OrchestratorAction.answerOnly,
-      _ => OrchestratorAction.resume,
-    };
-    final cmd = action == OrchestratorAction.sync
-        ? '@orch-orchestrator sync ${ctx.featureId}'
-        : '@orch-orchestrator resume ${ctx.featureId}';
-    final agentPrompt = action == OrchestratorAction.answerOnly
-        ? ''
-        : _buildAgentPrompt(
-            ctx,
-            cmd,
-            'Execute per user chat request and ADF routing.',
-            userMessage,
-          );
-    return OrchestratorChatResult(
-      assistantReply: agentReply.reply,
-      orchestratorCommand: cmd,
-      agentPrompt: agentPrompt,
-      action: action,
-      source: 'cursor_agent',
-    );
   }
 
   String? _llmApiKey() {
@@ -887,7 +782,6 @@ You are chatting about feature **${ctx.featureId}** (phase ${ctx.phase}).
 - Ask **status**: "what phase are we on?"
 - **Approve**: "sync" or "approve" → runs `@orch-orchestrator sync`
 - **Continue work**: describe changes → orchestrator updates requirement and runs agents
-- **IDE**: `@orch-orchestrator resume ${ctx.featureId}` in Cursor
 
 $links''',
         orchestratorCommand: '@orch-orchestrator resume ${ctx.featureId}',
@@ -1082,7 +976,7 @@ ${ctx.requirementSnippet.isEmpty ? '(none yet)' : ctx.requirementSnippet}
 
 Respond with ONLY valid JSON:
 {
-  "assistant_reply": "natural, varied reply like ChatGPT/Cursor chat (2-5 sentences). Answer the specific question; use links above only when relevant.",
+  "assistant_reply": "natural, varied reply like a chat assistant (2-5 sentences). Answer the specific question; use links above only when relevant.",
   "action": "resume" | "sync" | "clarify" | "answer_only",
   "orchestrator_command": "@orch-orchestrator resume|sync ${ctx.featureId}",
   "agent_instructions": "detailed instructions for the coding agent (empty string if answer_only)"

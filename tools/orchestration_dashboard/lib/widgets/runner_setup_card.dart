@@ -5,10 +5,10 @@ import '../main.dart';
 import '../services/api_client.dart';
 
 /// Identity of the active runner backend, derived from `/runner/health`.
-/// Falls back to Cursor wording when the server predates the `runner` field.
+/// Falls back to Claude wording when the server predates the `runner` field.
 class _RunnerIdentity {
   _RunnerIdentity(Map<String, dynamic> health)
-      : id = health['runner'] as String? ?? 'cursor',
+      : id = health['runner'] as String? ?? 'claude',
         _label = health['runner_label'] as String?,
         _login = health['login_command'] as String?;
 
@@ -19,26 +19,24 @@ class _RunnerIdentity {
   String get label =>
       _label ??
       switch (id) {
-        'claude' => 'Claude Code CLI (claude)',
         'custom' => 'Custom agent CLI',
-        _ => 'Cursor CLI (cursor-agent)',
+        _ => 'Claude Code CLI (claude)',
       };
 
   String? get loginCommand =>
       _login ??
       switch (id) {
-        'claude' => 'claude login',
         'custom' => null,
-        _ => 'cursor-agent login',
+        _ => 'claude login',
       };
 
   List<String> get fallbackSteps => [
         if (loginCommand != null)
           'In Terminal: $loginCommand (complete sign-in if prompted)',
-        if (id == 'cursor') 'Or add CURSOR_API_KEY to ~/.cursor/agent.env',
-        if (id == 'claude') 'Or export ANTHROPIC_API_KEY in your environment',
         if (id == 'custom')
-          'Set ADF_RUNNER_BIN / ADF_RUNNER_ARGS in .adf/runner.env',
+          'Set ADF_RUNNER_BIN / ADF_RUNNER_ARGS in .adf/runner.env'
+        else
+          'Or export ANTHROPIC_API_KEY in your environment',
         'Restart API: dart run tools/orchestration_server/bin/server.dart',
         'Tap Verify below, then Start pipeline',
       ];
@@ -145,18 +143,6 @@ class RunnerSetupCard extends StatelessWidget {
                 child: Text('${e.key + 1}. ${e.value}'),
               ),
             ),
-            if (runner.id == 'cursor') ...[
-              const SizedBox(height: 8),
-              const Text(
-                'Quick setup (Terminal):',
-                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-              ),
-              const SizedBox(height: 4),
-              const SelectableText(
-                './scripts/orch/setup_cursor_runner.sh',
-                style: TextStyle(fontFamily: 'monospace', fontSize: 12),
-              ),
-            ],
             const SizedBox(height: 12),
             Wrap(
               spacing: 8,

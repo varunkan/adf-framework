@@ -251,34 +251,12 @@ Map<String, dynamic> _modelRouterInfo(Map<String, String> env) {
   };
 }
 
-Future<void> _loadAgentEnv(String repoRoot) async {
-  final home = Platform.environment['HOME'] ?? '';
-  final envFile = File('$home/.cursor/agent.env');
-  if (!envFile.existsSync()) return;
-  for (final line in envFile.readAsLinesSync()) {
-    final trimmed = line.trim();
-    if (trimmed.isEmpty || trimmed.startsWith('#')) continue;
-    final eq = trimmed.indexOf('=');
-    if (eq <= 0) continue;
-    final key = trimmed.substring(0, eq).trim();
-    var value = trimmed.substring(eq + 1).trim();
-    if ((value.startsWith('"') && value.endsWith('"')) ||
-        (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.substring(1, value.length - 1);
-    }
-    if (Platform.environment[key] == null) {
-      Platform.environment[key] = value;
-    }
-  }
-}
-
 Future<void> main(List<String> args) async {
   final port = int.tryParse(
         Platform.environment['ORCH_PORT'] ?? '3847',
       ) ??
       3847;
   final repoRoot = resolveRepoRoot();
-  await _loadAgentEnv(repoRoot);
   // Platform.environment is unmodifiable, so merge repo-local .env values over
   // it into a plain map the router/chat read from. Exported keys still win.
   final env = <String, String>{
@@ -409,7 +387,7 @@ Future<void> main(List<String> args) async {
   final health = await runner.getHealth();
   print('Orchestration server repo root: $repoRoot');
   print('Auto phase runner: ${autoRunner ? 'on' : 'off'}');
-  print('Active runner: ${health['runner'] ?? 'cursor'} '
+  print('Active runner: ${health['runner'] ?? 'custom'} '
       '(ADF_RUNNER=${Platform.environment['ADF_RUNNER'] ?? 'auto'})');
   print('Runner ready: ${health['ready']} (${health['agent_path'] ?? 'no agent'})');
   final chatLlm = await chatProcessor.describeChatLlm();
@@ -429,80 +407,6 @@ Future<void> main(List<String> args) async {
   if (chatLlm.startsWith('ollama:')) {
     unawaited(chatProcessor.warmOllama().then((_) =>
         print('Local chat model warmed and resident ($chatLlm)')));
-  }
-
-
-  Future<void> runChatInBackground(
-    String featureId,
-    String commandId,
-    String prompt,
-  ) async {
-    await runner.health.killStalePrintAgents();
-    try {
-      OrchestratorChatResult chat;
-      var lastFlush = DateTime.now();
-      var finalized = false;
-      void streamPartial(String partial) {
-        if (finalized) return;
-        final now = DateTime.now();
-        if (now.difference(lastFlush).inMilliseconds < 700) return;
-        lastFlush = now;
-        store.updateCommandMeta(
-          featureId,
-          commandId,
-          assistantReply: partial,
-          llmSource: 'streaming',
-        );
-      }
-
-      try {
-        chat = await chatProcessor
-            .process(
-              featureId,
-              prompt,
-              mode: ChatProcessMode.full,
-              onPartial: streamPartial,
-            )
-            .timeout(const Duration(seconds: 95));
-      } on TimeoutException {
-        await runner.health.killStalePrintAgents();
-        chat = await chatProcessor.process(
-          featureId,
-          prompt,
-          mode: ChatProcessMode.stateOnly,
-        );
-      }
-      finalized = true;
-      store.updateCommandMeta(
-        featureId,
-        commandId,
-        assistantReply: chat.assistantReply,
-        orchestratorCommand: chat.orchestratorCommand,
-        agentPrompt: chat.agentPrompt,
-        llmSource: chat.source,
-      );
-      if (chat.shouldRunAgent) {
-        final state = store.readState(featureId);
-        if (state['status'] != 'completed') {
-          final healthNow = await runner.getHealth(refresh: false);
-          if (healthNow['ready'] == true) {
-            await runner.enqueueCommand(
-              featureId,
-              prompt: prompt,
-              commandId: commandId,
-              agentPrompt: chat.agentPrompt,
-            );
-          }
-        }
-      }
-    } catch (e) {
-      store.updateCommandMeta(
-        featureId,
-        commandId,
-        assistantReply: 'Chat failed: $e',
-        llmSource: 'error',
-      );
-    }
   }
 
   // ---- Efficiency layer: fingerprint cache + request metrics ----
@@ -636,7 +540,7 @@ Future<void> main(List<String> args) async {
 
   final router = Router();
 
-  // /health is polled constantly; cache the expensive cursor probe for 60s.
+  // /health is polled constantly; cache the expensive runner probe for 60s.
   Map<String, dynamic>? healthCache;
   DateTime healthCachedAt = DateTime.fromMillisecondsSinceEpoch(0);
   router.get('/health', (Request _) async {
@@ -649,8 +553,6 @@ Future<void> main(List<String> args) async {
         'chat_llm': await chatProcessor.describeChatLlm(),
         'chat_llm_configured':
             orchLlmConfigured(env) || await chatProcessor.ollamaChatReady(),
-        'chat_cursor_ready': await chatProcessor.cursorChatReady(),
-        'chat_prefer_cursor': chatProcessor.cursorIsPreferred,
         'chat_static_context':
             Platform.environment['ORCH_CHAT_STATIC_CONTEXT'] == '1',
         'model_router': modelRouter,
@@ -908,16 +810,10 @@ Future<void> main(List<String> args) async {
 
       // Instant-first chat: reply in milliseconds at zero token cost.
       // Free-form questions go to a cloud LLM (if configured) or local
-      // Ollama (~seconds, $0). cursor-agent refinement is opt-in via
-      // ORCH_CHAT_REFINE=1 and upgrades the reply in place.
+      // Ollama (~seconds, $0).
       OrchestratorChatResult chat;
-      final refineEnabled =
-          Platform.environment['ORCH_CHAT_REFINE'] == '1' ||
-              Platform.environment['ORCH_CHAT_REFINE'] == 'true';
-
-      final hasHttpLlm =
-          (chatProcessor.llmApiKey != null && !chatProcessor.preferCursorCli) ||
-              await chatProcessor.ollamaChatReady();
+      final hasHttpLlm = chatProcessor.llmApiKey != null ||
+          await chatProcessor.ollamaChatReady();
       chat = await chatProcessor.process(
         id,
         prompt.trim(),
@@ -932,14 +828,6 @@ Future<void> main(List<String> args) async {
         llmSource: chat.source,
         latencyMs: chat.latencyMs,
       );
-      // The instant tier already produced a final answer — never replace it
-      // with a 'Thinking…'/streaming placeholder pass.
-      final instantAnswered = chat.source == 'state' || chat.source == 'direct';
-      if (refineEnabled &&
-          !instantAnswered &&
-          await chatProcessor.cursorChatReady()) {
-        unawaited(runChatInBackground(id, cmd['id'] as String, prompt.trim()));
-      }
 
       if (execute) {
         if (chat.source == 'pending') {
@@ -1115,11 +1003,11 @@ Future<void> main(List<String> args) async {
         if (h['ready'] == true) {
           final run = await runner.enqueue(id, phase: 1);
           if (run['headless_unavailable'] == true ||
-              run['resume_mode'] == 'cursor_ide') {
+              run['resume_mode'] == 'ide') {
             payload['mode'] = 'ide_only';
             payload['message'] =
                 'Feature created. Headless agent is unavailable on this host — '
-                'run `@orch-orchestrator start $id` in Cursor IDE, then Sync '
+                'run `@orch-orchestrator start $id` in your IDE, then Sync '
                 'in the dashboard.';
           } else if (run['status'] == 'queued') {
             payload['mode'] = 'queued';
@@ -1128,7 +1016,7 @@ Future<void> main(List<String> args) async {
         } else {
           payload['mode'] = 'needs_login';
           payload['message'] = h['hint'] as String? ??
-              'Run cursor-agent login, then open the feature in the dashboard.';
+              'Sign in to the runner CLI, then open the feature in the dashboard.';
         }
       }
       return _json(payload, status: 201);
@@ -1764,7 +1652,7 @@ Future<void> main(List<String> args) async {
         final status = await runner.enqueue(id, phase: phase);
         return _json({
           'ok': true,
-          'cursor_prompt': '@orch-orchestrator resume $id',
+          'ide_prompt': 'Re-run the phase for $id once the runner is ready',
           'phase_request': store.readPhaseRequest(id),
           'run_status': status,
         });
@@ -1775,7 +1663,7 @@ Future<void> main(List<String> args) async {
       store.writePhaseRequest(id, runPhase);
       return _json({
         'ok': true,
-        'cursor_prompt': '@orch-orchestrator resume $id',
+        'ide_prompt': 'Re-run the phase for $id once the runner is ready',
         'phase_request': store.readPhaseRequest(id),
       });
     } catch (e) {

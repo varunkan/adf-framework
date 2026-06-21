@@ -4,9 +4,9 @@ import 'package:orchestration_server/runner_health.dart';
 import 'package:test/test.dart';
 
 void main() {
-  test('resolveCursorAgent finds binary or returns null gracefully', () {
+  test('resolveAgent finds binary or returns null gracefully', () {
     final h = RunnerHealth(repoRoot: Directory.current.path);
-    final path = h.resolveCursorAgent();
+    final path = h.resolveAgent();
     if (path != null) {
       expect(File(path).existsSync(), isTrue);
     }

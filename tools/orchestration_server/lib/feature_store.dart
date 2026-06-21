@@ -637,7 +637,7 @@ $t
             cmd['llm_source'] = 'timeout';
             cmd['assistant_reply'] =
                 'The assistant did not finish replying (server restarted or '
-                'cursor-agent timed out). Ask again, or set GROQ_API_KEY for '
+                'the agent timed out). Ask again, or set GROQ_API_KEY for '
                 'instant replies.';
             changed = true;
           }

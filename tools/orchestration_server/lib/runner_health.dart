@@ -4,35 +4,32 @@ import 'dart:io';
 
 import 'runner_backend.dart';
 
-/// Probes the active agent runner (Cursor, Claude, or a custom CLI) for
-/// availability and authentication.
+/// Probes the active agent runner (Claude or a custom CLI) for availability and
+/// authentication.
 ///
-/// Historically this class only knew about `cursor-agent`; it now delegates
-/// executable resolution and argv construction to the [RunnerBackend] selected
-/// via the `ADF_RUNNER` environment variable. The original method names
-/// (`resolveCursorAgent`, `probe`, `livenessProbe`, `killStalePrintAgents`) are
-/// preserved so existing callers and tests keep working regardless of backend.
+/// Executable resolution and argv construction are delegated to the
+/// [RunnerBackend] selected via the `ADF_RUNNER` environment variable. The
+/// method names (`probe`, `livenessProbe`, `killStalePrintAgents`) are stable
+/// so existing callers and tests keep working regardless of backend.
 class RunnerHealth {
   RunnerHealth({this.repoRoot, RunnerBackend? backend})
       : backend = backend ?? RunnerBackend.active();
 
   final String? repoRoot;
 
-  /// The active runner backend (cursor / claude / custom).
+  /// The active runner backend (claude / custom).
   final RunnerBackend backend;
 
   DateTime? _headlessProbeAt;
   bool? _headlessOk;
   static const Duration _headlessProbeTtl = Duration(minutes: 5);
 
-  /// Retained for back-compat (cursor-flavoured defaults). Prefer
-  /// [activeRecoverySteps] which reflects the selected backend.
+  /// Generic fallback recovery steps. Prefer [activeRecoverySteps], which
+  /// reflects the selected backend.
   static const recoverySteps = [
-    'Kill stuck headless agents: pkill -f "cursor-agent.*--print" (macOS/Linux)',
-    'Restart Cursor app, run: cursor-agent login',
-    'Or set CURSOR_API_KEY in your environment',
+    'Kill stuck headless agents (macOS/Linux)',
+    'Sign in to the runner CLI, or set its API key in your environment',
     'Restart the orchestration API server',
-    'Until headless works: resume in Cursor IDE, then Sync',
     'Tap Verify in the dashboard for a fresh headless probe',
   ];
 
@@ -43,8 +40,8 @@ class RunnerHealth {
   /// Resolve the active runner binary (any backend).
   String? resolveRunner() => backend.resolveExecutable();
 
-  /// Back-compat alias — resolves the active runner, not necessarily Cursor.
-  String? resolveCursorAgent() => backend.resolveExecutable();
+  /// Back-compat alias — resolves the active runner binary.
+  String? resolveAgent() => backend.resolveExecutable();
 
   Future<Map<String, dynamic>> probe({bool useCache = true}) async {
     final apiKeySet = backend.apiKeyConfigured;

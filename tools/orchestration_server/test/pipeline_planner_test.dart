@@ -77,6 +77,37 @@ void main() {
     Directory(store.featurePath(id)).deleteSync(recursive: true);
   });
 
+  test('no step emits @orch-orchestrator or "# Builder:" run hints', () {
+    const id = 'planner-no-cursor-spam';
+    if (store.featureExists(id)) {
+      Directory(store.featurePath(id)).deleteSync(recursive: true);
+    }
+    store.createFeature(id: id, requirement: 'no cursor spam', track: 'S');
+    addTearDown(() {
+      if (store.featureExists(id)) {
+        Directory(store.featurePath(id)).deleteSync(recursive: true);
+      }
+    });
+
+    final plan = planner.buildPlan(id);
+    final phases = (plan['phases'] as List).cast<Map<String, dynamic>>();
+    final hints = <String>[];
+    for (final ph in phases) {
+      for (final s in (ph['steps'] as List).cast<Map<String, dynamic>>()) {
+        final hint = s['run_hint'] as String? ?? '';
+        hints.add(hint);
+      }
+    }
+
+    expect(hints, isNotEmpty, reason: 'plan should produce steps');
+    for (final hint in hints) {
+      expect(hint.contains('@orch-orchestrator'), isFalse,
+          reason: 'no @orch-orchestrator command spam in run hints: "$hint"');
+      expect(hint.contains('# Builder:'), isFalse,
+          reason: 'no "# Builder:" command spam in run hints: "$hint"');
+    }
+  });
+
   test('phase 1 has builder steps', () {
     final ids = store.listFeatures();
     if (ids.isEmpty) return;

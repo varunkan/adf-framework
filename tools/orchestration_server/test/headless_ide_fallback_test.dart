@@ -49,7 +49,7 @@ void main() {
     expect(run?['status'], 'idle');
     expect(run?['agent_active'], isNot(true));
     expect(run?['headless_unavailable'], isTrue);
-    expect(run?['resume_mode'], 'cursor_ide');
+    expect(run?['resume_mode'], 'ide');
   }, skip: Platform.environment['ORCH_SKIP_HEADLESS_PROBE'] != '1'
       ? 'ORCH_SKIP_HEADLESS_PROBE=1 not set'
       : false);

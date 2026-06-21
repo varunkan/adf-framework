@@ -402,7 +402,7 @@ def _self_test_bundle():
         "format": FORMAT,
         "feature_id": "x",
         "created_at": "2026-06-12T00:00:02.000Z",
-        "runner": {"runner": "cursor", "runner_label": "Cursor CLI (cursor-agent)"},
+        "runner": {"runner": "custom", "runner_label": "Custom agent runner"},
         "chain": chain,
         "artifacts": [
             {"path": "specs/x/spec.md", "sha256": manifest["specs/x/spec.md"], "bytes": 4},

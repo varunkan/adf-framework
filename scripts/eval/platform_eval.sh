@@ -19,7 +19,7 @@ echo "===== ADF platform eval — $(date '+%Y-%m-%d %H:%M') ====="
 # C1 — cursor-the-tool references in active code (excl tests/docs/.cursor data path)
 c1=$(grep -rIn -E "cursor-agent|RunnerKind\.cursor|CursorBackend|run_server_cursor|setup_cursor|ADF_STUDIO_BACKEND|prefer_cursor|cursor_cli|CURSOR_API_KEY|chat_cursor|cursorCommand|cursor_command" \
   --include='*.dart' --include='*.py' --include='*.sh' "$LIB" "$BIN" "$DASH" scripts install 2>/dev/null \
-  | grep -v "/test/" | grep -vc "\.cursor/orchestration")
+  | grep -v "/test/" | grep -v "scripts/eval/" | grep -vc "\.cursor/orchestration")
 [ "$c1" -eq 0 ] && pass "C1 cursor-tool refs == 0 (got $c1)" || miss "C1 cursor-tool refs == 0 (got $c1)"
 
 # C2 — cursor tool scripts/adapters on disk

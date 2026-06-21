@@ -28,7 +28,8 @@ String phaseOutcomeLine(int phase,
   return 'Build complete — Phase $phase finished; the build ran and tests passed.';
 }
 
-/// Runs orchestration phases via headless `cursor-agent` (or CURSOR_API_KEY).
+/// Runs orchestration phases via the active headless runner CLI (claude /
+/// custom), selected through the [RunnerBackend] abstraction.
 class PhaseRunner {
   PhaseRunner(
     this.store, {
@@ -130,7 +131,7 @@ class PhaseRunner {
 
   String get repoRoot => store.repoRoot;
 
-  /// Whether headless `cursor-agent --print` is usable (distinct from auth [ready]).
+  /// Whether the headless runner CLI is usable (distinct from auth [ready]).
   Future<bool> isHeadlessReady({bool refresh = false}) async {
     final h = await getHealth(refresh: refresh);
     return h['headless_ready'] == true;
@@ -149,10 +150,10 @@ class PhaseRunner {
       'finished_at': DateTime.now().toUtc().toIso8601String(),
       'error': null,
       'error_code': null,
-      'resume_mode': 'cursor_ide',
+      'resume_mode': 'ide',
       'headless_unavailable': true,
       'hint': hint ??
-          'Headless cursor-agent unavailable — paste the prompt in Cursor IDE, then Sync.',
+          'Headless runner unavailable — run the prompt in your IDE, then Sync.',
     });
     if (commandId != null) {
       store.markCommandExecuted(featureId, commandId, status: 'recorded_ide');
@@ -172,8 +173,8 @@ class PhaseRunner {
     const headlessUnknown =
         'Not probed yet; open GET /runner/health or enqueue a phase';
     const headlessHint =
-        'cursor-agent --print produced no output within 20s — use Cursor IDE '
-        'or kill stuck agents (pkill -f "cursor-agent.*--print")';
+        'The headless runner produced no output within 20s — use your IDE '
+        'or kill stuck agents';
 
     if (!refresh && _cachedHealth == null) {
       merged.addAll({'headless_ready': null, 'headless_hint': headlessUnknown});
@@ -187,7 +188,7 @@ class PhaseRunner {
             ? null
             : versionOk
                 ? headlessHint
-                : 'cursor-agent not responding — install or run cursor-agent login',
+                : 'Runner CLI not responding — install it or sign in',
       });
     }
 
@@ -239,10 +240,10 @@ class PhaseRunner {
         'finished_at': DateTime.now().toUtc().toIso8601String(),
         'error': null,
         'error_code': null,
-        'resume_mode': 'cursor_ide',
+        'resume_mode': 'ide',
         'headless_unavailable': true,
         'hint': health['headless_hint'] as String? ??
-            'Headless agent unavailable — use Cursor IDE',
+            'Headless agent unavailable — use your IDE',
       });
       return store.readRunStatus(featureId) ?? {'status': 'idle'};
     }
@@ -441,7 +442,7 @@ class PhaseRunner {
     return true;
   }
 
-  /// Clear stale `running` / `agent_active` when no live cursor-agent process.
+  /// Clear stale `running` / `agent_active` when no live runner process.
   void reconcileStaleRunStatus(String featureId) {
     store.reconcileFeatureState(featureId);
     final run = store.readRunStatus(featureId);
@@ -588,7 +589,7 @@ class PhaseRunner {
           'finished_at': DateTime.now().toUtc().toIso8601String(),
           'error': null,
           'error_code': null,
-          'resume_mode': 'cursor_ide',
+          'resume_mode': 'ide',
           'headless_unavailable': true,
           'hint': health['headless_hint'] as String?,
         });
@@ -611,7 +612,7 @@ class PhaseRunner {
         name: 'runner.phase_start',
         event: 'runner',
         phase: phase,
-        message: 'Starting cursor-agent for phase $phase',
+        message: 'Starting runner for phase $phase',
       );
 
       final state = store.readState(featureId);
@@ -1036,7 +1037,7 @@ Instructions:
         'error_code': 'heal_exhausted',
         'recovery_steps': [
           'Review run-log.jsonl for this feature',
-          'Fix manually in Cursor',
+          'Fix manually in your editor',
           'Reset heal_attempts in state.json and Retry',
         ],
       });
@@ -1062,7 +1063,7 @@ Instructions:
     }
   }
 
-  /// Runs orch-self-healer via cursor-agent. Returns result map.
+  /// Runs orch-self-healer via the active runner. Returns result map.
   Future<Map<String, dynamic>> triggerSelfHeal(
     String featureId, {
     int? phase,
@@ -1133,10 +1134,9 @@ Error:
 $error
 
 Instructions:
-1. Read .cursor/skills/orch-self-healer/SKILL.md
-2. Diagnose root cause (do not weaken tests or gates)
-3. Apply minimal fix and continue the current phase
-4. Update state.json when phase can proceed
+1. Diagnose root cause (do not weaken tests or gates)
+2. Apply minimal fix and continue the current phase
+3. Update state.json when phase can proceed
 ''';
   }
 
@@ -1468,7 +1468,8 @@ Instructions:
         // NOTE: the default Python runner (agent_runner.py) emits neither
         // 'assistant' nor 'message' — its live narration comes from the typed
         // narrate() events + the result summary. This reasoning-buffer path is
-        // LIVE only on the cursor-agent runner (ADF_RUNNER=cursor) (D11).
+        // LIVE only for a custom runner CLI that streams assistant/message
+        // chunks (D11).
         final text = _extractText(obj);
         if (text == null || text.isEmpty) return;
         _reasoningBuffers.putIfAbsent(featureId, () => StringBuffer());

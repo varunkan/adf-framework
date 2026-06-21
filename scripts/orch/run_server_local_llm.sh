@@ -45,10 +45,8 @@ _load_env_key ADF_RUNNER
 _load_env_key ANTHROPIC_API_KEY
 _load_env_key NVIDIA_API_KEY
 
-# --- Chat: default local Ollama, no cursor-agent --------------------------
+# --- Chat: default local Ollama -------------------------------------------
 export ORCH_CHAT_LLM="${ORCH_CHAT_LLM:-ollama}"
-export ORCH_CHAT_USE_CURSOR=0
-unset ORCH_CHAT_PREFER_CURSOR 2>/dev/null || true
 
 # --- Headroom-first by default: compress context before every LLM call ------
 # Default ON when the venv is present. The build runner (agent_runner.py)
