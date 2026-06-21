@@ -117,6 +117,19 @@ class FeatureStore {
       changed = true;
     }
 
+    // A blocked feature has FAILED — it is NOT awaiting your approval. Clear the
+    // stale awaiting/pending flags so the UI shows the blocked banner (the real
+    // error + recovery steps), never a phantom "approve phase N" gate for an
+    // already-passed phase that the user can't act on. (Bug: a feature blocked at
+    // phase 7 showed "phase 1 needs your attention".)
+    if (state['status'] == 'blocked' &&
+        (state['awaiting_user'] == true ||
+            state['pending_approval_phase'] != null)) {
+      state['awaiting_user'] = false;
+      state['pending_approval_phase'] = null;
+      changed = true;
+    }
+
     state['gates'] = gates;
     return changed;
   }

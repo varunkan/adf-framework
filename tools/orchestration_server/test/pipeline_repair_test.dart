@@ -51,6 +51,34 @@ void main() {
     expect(store.effectivePhase(id, disk), 9);
   });
 
+  test('a blocked feature is NOT awaiting approval — phantom phase gate cleared',
+      () {
+    // Repro: a feature blocked at phase 7 with a STALE awaiting_user + a
+    // pending_approval_phase pointing at an already-passed phase made the UI ask
+    // "approve phase 1" — a phase the user can neither act on nor see content for.
+    final state = store.readState(id)
+      ..['status'] = 'blocked'
+      ..['current_phase'] = 7
+      ..['awaiting_user'] = true
+      ..['pending_approval_phase'] = 1
+      ..['gates'] = {
+        'problem_statement_approved': true,
+        'requirements_complete': true,
+        'plan_covers_all_requirements': true,
+        'tasks_atomic_and_traced': true,
+        'test_strategy_approved': true,
+        'tests_red': true,
+      };
+    store.writeState(id, state, skipRepair: true);
+
+    final disk = store.readState(id); // readState repairs
+    expect(disk['awaiting_user'], isFalse,
+        reason: 'a blocked feature has FAILED — it is not awaiting your approval');
+    expect(disk['pending_approval_phase'], isNull,
+        reason: 'no phantom "approve phase N" gate on a blocked feature');
+    expect(disk['status'], 'blocked', reason: 'still blocked — the real state');
+  });
+
   test('repairRunStatus clears queued when feature completed', () {
     final state = store.readState(id)
       ..['current_phase'] = 9
