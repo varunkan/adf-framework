@@ -10,6 +10,7 @@ import '../utils/auto_unstick.dart';
 import '../utils/phase_selection.dart';
 import '../utils/step_label.dart';
 import '../widgets/agent_conversation_view.dart';
+import '../widgets/requirements_questions_panel.dart';
 import '../widgets/revision_dialog.dart';
 import '../widgets/approval_action_bar.dart';
 import '../widgets/chat_composer.dart';
@@ -1262,21 +1263,31 @@ $clarification
             _statusBar(context),
           ],
         ),
-        chatContent: AgentConversationView(
-          api: widget.api,
-          featureId: widget.featureId,
-          messages: conversation,
-          scrollController: _chatScroll,
-          // Autopilot (the zero-token crew) also streams live trace spans now,
-          // so treat it as a running session for the live-trace panel.
-          isRunning: _showAgentActivityUi || _autopilotRunning,
-          liveTraceSince: runStatus?['started_at'] as String? ??
-              _autopilotStartedAt?.toIso8601String(),
-          sessionEnded: sessionEnded,
-          awaitingApproval: awaiting,
-          needsRevision: awaiting && !_verdictPassed,
-          canStartPipeline: canRun,
-          onStartPipeline: _startPhase,
+        chatContent: Column(
+          children: [
+            // The crew's open questions to confirm before building (P3). Renders
+            // nothing when there are none, so it never disturbs the normal layout.
+            RequirementsQuestionsPanel(
+                questions: RequirementsQuestionsPanel.fromDetail(_detail)),
+            Expanded(
+              child: AgentConversationView(
+                api: widget.api,
+                featureId: widget.featureId,
+                messages: conversation,
+                scrollController: _chatScroll,
+                // Autopilot (the zero-token crew) also streams live trace spans now,
+                // so treat it as a running session for the live-trace panel.
+                isRunning: _showAgentActivityUi || _autopilotRunning,
+                liveTraceSince: runStatus?['started_at'] as String? ??
+                    _autopilotStartedAt?.toIso8601String(),
+                sessionEnded: sessionEnded,
+                awaitingApproval: awaiting,
+                needsRevision: awaiting && !_verdictPassed,
+                canStartPipeline: canRun,
+                onStartPipeline: _startPhase,
+              ),
+            ),
+          ],
         ),
         approvalBar: _showApprovalGate
             ? ApprovalActionBar(
