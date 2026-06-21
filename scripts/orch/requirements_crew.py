@@ -103,6 +103,13 @@ def _corpus_text(corpus, limit=9000):
     return "\n\n".join(out)[:limit]
 
 
+def _headroom(value, limit=3000):
+    """Bound any list/text fed into a HEAD (synthesis/questions) so a large run can't
+    blow the context window — context compaction at the wave boundary."""
+    text = value if isinstance(value, str) else json.dumps(value)
+    return text if len(text) <= limit else text[:limit] + " …(truncated)"
+
+
 def run(feature_id, requirement, sources=None, specs_dir=None, verdict_dir=None,
         complete=None, gather=None, parallelism=4):
     """Run the crew. `sources` is a list of pre-ingested {source, requirements} dicts
@@ -147,31 +154,36 @@ def run(feature_id, requirement, sources=None, specs_dir=None, verdict_dir=None,
     all_reqs = [r for d in drafts.values() for r in (d.get("requirements") or [])]
     draft_text = json.dumps(all_reqs)[:9000]
 
-    # Wave 3 — PO validation (parallel: R1 verify ∥ Ultra judge + questions)
+    # Wave 3a — PO validation (perspective-diverse: R1 rigor ∥ Ultra judge, parallel)
     def run_po(agent, prior):
-        if agent.name == "questions":
-            out = complete(f"DRAFT:\n{draft_text}", "questions", _Q_SYS)
-        else:
-            role = "verify" if agent.name == "rigor" else "judge"
-            lens = ("measurability, testability, traceability, completeness"
-                    if agent.name == "rigor"
-                    else "domain-compliance, holistic coherence, source reconciliation")
-            out = complete(f"LENS: {lens}\nDRAFT:\n{draft_text}\n\nSOURCES: {sources_list}",
-                           role, _PO_SYS)
+        role = "verify" if agent.name == "rigor" else "judge"
+        lens = ("measurability, testability, traceability, completeness"
+                if agent.name == "rigor"
+                else "domain-compliance, holistic coherence, source reconciliation")
+        out = complete(f"LENS: {lens}\nDRAFT:\n{draft_text}\n\nSOURCES: {sources_list}",
+                       role, _PO_SYS)
         return True, [(agent.name, out)], agent.name
-    po_agents = [build_crew.BuildAgent(n, n) for n in ("rigor", "judge", "questions")]
+    po_agents = [build_crew.BuildAgent(n, n) for n in ("rigor", "judge")]
     po_res = build_crew.run_crew(po_agents, run_po, parallelism=parallelism)
     rigor = _json(po_res["files"].get("rigor", ""), {"pass": True, "gaps": []})
     judge = _json(po_res["files"].get("judge", ""), {"pass": True, "gaps": []})
-    qs = _json(po_res["files"].get("questions", ""), {"questions": [], "improvements": []})
     # perspective-diverse: a gap counts if EITHER reasoner flags it
     po_gaps = list(rigor.get("gaps") or []) + list(judge.get("gaps") or [])
     po_pass = bool(rigor.get("pass")) and bool(judge.get("pass")) and not po_gaps
 
-    # Wave 4 — synthesis head (Opus) + adversarial cross-check (R1)
+    # Wave 3b — clarifying questions (DAG edge: DEPENDS on the PO gaps, so it can
+    # ask about exactly what the PO flagged — was wrongly run blind in parallel).
+    qs = _json(complete(
+        f"DRAFT:\n{draft_text}\n\nPO GAPS (focus the questions on these):\n"
+        f"{_headroom(po_gaps)}", "questions", _Q_SYS),
+        {"questions": [], "improvements": []})
+
+    # Wave 4 — synthesis head (Opus) + adversarial cross-check (R1). Head inputs are
+    # headroom-capped so a big run can't blow the context.
     head = _json(complete(
         f"REQUEST: {requirement}\nCATEGORIES: {categories}\nDRAFTS:\n{draft_text}\n\n"
-        f"PO GAPS:\n{po_gaps}\n\nCORPUS:\n{corpus_text}\n\nSOURCES: {sources_list}",
+        f"PO GAPS:\n{_headroom(po_gaps)}\n\nCORPUS:\n{corpus_text}\n\n"
+        f"SOURCES: {_headroom(sources_list, 1500)}",
         "synthesis", _HEAD_SYS),
         {"problem_statement": requirement, "requirements": all_reqs,
          "assumptions": [], "out_of_scope": [], "open_questions": []})

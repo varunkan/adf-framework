@@ -82,6 +82,31 @@ class CrewRun(unittest.TestCase):
         spec = open(os.path.join(specs, "spec.md")).read()
         self.assertNotIn("@orch-orchestrator", spec)
 
+    def test_questions_wave_consumes_po_gaps(self):
+        # DAG edge: clarifying-questions must run AFTER the PO checks and receive their
+        # gaps (its prompt asks it to focus on "the gaps") — not in parallel, blind.
+        seen = {}
+
+        def cap(prompt, role, system=None):
+            seen[role] = prompt
+            return _CANNED.get(role, "{}")
+
+        rc.run("demo", "build x", sources=[], complete=cap, gather=fake_gather)
+        self.assertIn("missing Health Canada validation rule", seen.get("questions", ""),
+                      "questions wave did not receive the PO gaps")
+
+
+class Headroom(unittest.TestCase):
+    def test_caps_oversized_head_input(self):
+        big = ["x" * 1000] * 100  # ~100k chars fed toward a head
+        out = rc._headroom(big, limit=3000)
+        self.assertLessEqual(len(out), 3100)
+        self.assertIn("truncated", out)
+
+    def test_small_input_passes_through(self):
+        self.assertEqual(rc._headroom(["a"], limit=3000), json.dumps(["a"]))
+        self.assertEqual(rc._headroom("hi", limit=3000), "hi")
+
 
 class CleanRequirement(unittest.TestCase):
     def test_strips_orchestrator_spam_and_scaffolding(self):
