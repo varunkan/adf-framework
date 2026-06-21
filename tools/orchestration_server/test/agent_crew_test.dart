@@ -156,4 +156,27 @@ void main() {
     expect(store.readState(id)['awaiting_user'], isFalse);
     expect(store.readState(id)['pending_approval_phase'], isNull);
   });
+
+  // ---- G5: the hold PRESENTS the captured requirements (not just "ready") -----
+  test('G5: requirementsDigest extracts EARS requirements, excludes acceptance',
+      () {
+    const spec = '## Requirements (EARS)\n\n'
+        '### REQ-001\n\nThe system SHALL let a user add a note.\n\n'
+        '**Acceptance criteria**\n- GIVEN the app WHEN added THEN shown\n\n'
+        '### REQ-002\n\nThe system SHALL list all saved notes.\n';
+    final d = AgentCrew.requirementsDigest(spec);
+    expect(d, contains('Captured requirements'));
+    expect(d, contains('REQ-001: The system SHALL let a user add a note.'));
+    expect(d, contains('REQ-002: The system SHALL list all saved notes.'));
+    expect(d, isNot(contains('GIVEN')),
+        reason: 'acceptance criteria must not pollute the requirements digest');
+  });
+
+  test('G5: a track-M crew hold PRESENTS the captured requirements', () async {
+    await buildCrew().run(id); // track M → holds + the deterministic engine wrote spec.md
+    final announce =
+        store.listCommands(id).lastWhere((c) => c['llm_source'] == 'crew');
+    expect(announce['assistant_reply'], contains('Captured requirements'),
+        reason: 'the hold message must show WHAT will be built, for confirmation');
+  });
 }

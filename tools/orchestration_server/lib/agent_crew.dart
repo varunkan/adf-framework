@@ -456,6 +456,32 @@ class AgentCrew {
     );
   }
 
+  /// G5/C6: a short, human-readable digest of the captured EARS requirements from a
+  /// spec.md, so the requirements HOLD actually PRESENTS what will be built (not just
+  /// "ready — approve"). Pure + testable. Returns '' when no requirements are found.
+  static String requirementsDigest(String specMd, {int max = 8}) {
+    final lines = specMd.split('\n');
+    final header = RegExp(r'^#{2,4}\s*(REQ[-\w]*)', caseSensitive: false);
+    final reqs = <String>[];
+    for (var i = 0; i < lines.length; i++) {
+      final h = header.firstMatch(lines[i].trim());
+      if (h == null) continue;
+      for (var j = i + 1; j < lines.length && j < i + 6; j++) {
+        final s = lines[j].trim();
+        if (s.isEmpty) continue;
+        if (s.startsWith('#') || s.startsWith('**')) break; // next section/acceptance
+        reqs.add('${h.group(1)}: ${s.length > 140 ? '${s.substring(0, 140)}…' : s}');
+        break;
+      }
+    }
+    if (reqs.isEmpty) return '';
+    final shown = reqs.take(max).map((r) => '  - $r').join('\n');
+    final more = reqs.length > max
+        ? '\n  - …and ${reqs.length - max} more (open the Spec tab)'
+        : '';
+    return '\n\n**Captured requirements — confirm before I build:**\n$shown$more';
+  }
+
   void _announce(String id, Map<String, dynamic> summary) {
     final agents = summary['agents'] as List;
     final waves = summary['waves'] as List;
@@ -475,6 +501,16 @@ class AgentCrew {
               'start implementation.',
         _ => '- Blocked: ${(summary['blockers'] as List).join('; ')}',
       });
+    // G5/C6: when holding for approval, PRESENT the captured requirements so the
+    // user can confirm WHAT will be built (the "it should have presented the
+    // requirements" gap), not just that something is ready.
+    if (summary['stop_reason'] == 'awaiting_approval') {
+      final spec = File('${store.repoRoot}/specs/$id/spec.md');
+      if (spec.existsSync()) {
+        final digest = requirementsDigest(spec.readAsStringSync());
+        if (digest.isNotEmpty) text.write(digest);
+      }
+    }
     final cmd = store.appendCommand(id, prompt: 'crew', execute: false);
     store.updateCommandMeta(
       id,
