@@ -5,7 +5,8 @@ import 'orchestration_paths.dart';
 
 export 'orchestration_paths.dart' show resolveRepoRoot;
 
-/// Reads/writes `.cursor/orchestration/features/<id>/` under repo root.
+/// Reads/writes `<orchestration>/features/<id>/` under repo root — `.adf/orchestration`
+/// by default (legacy `.cursor/orchestration` still resolves). See OrchestrationPaths.
 class FeatureStore {
   FeatureStore(this.repoRoot) : paths = OrchestrationPaths(repoRoot);
 

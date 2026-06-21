@@ -1,16 +1,21 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'orchestration_paths.dart';
+
 /// Self-evolution memory: every autopilot outcome (success, failure, heal)
-/// is appended to `.cursor/orchestration/learnings.jsonl`. Future runs
-/// consult it to avoid repeating past failures — the framework gets
-/// measurably better with every feature it builds.
+/// is appended to `<orchestration>/learnings.jsonl` (`.adf/orchestration` by
+/// default; legacy `.cursor/orchestration` still resolves). Future runs consult
+/// it to avoid repeating past failures — the framework gets measurably better
+/// with every feature it builds.
 class LearningStore {
   LearningStore(this.repoRoot);
 
   final String repoRoot;
 
-  String get path => '$repoRoot/.cursor/orchestration/learnings.jsonl';
+  // CURSOR-6: follow the resolver instead of hardcoding .cursor/orchestration.
+  String get path =>
+      '${OrchestrationPaths(repoRoot).orchestrationRoot}/learnings.jsonl';
 
   void record({
     required String featureId,

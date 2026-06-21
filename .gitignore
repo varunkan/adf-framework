@@ -20,6 +20,7 @@ orchestration/features/**/otel-traces.jsonl
 # Generated when the server/studio/tests run against the framework repo itself:
 # orchestration runtime state, spec-kit state, and per-feature spec output.
 .cursor/orchestration/
+.adf/orchestration/
 .specify/
 specs/
 

@@ -24,7 +24,9 @@ ROOT="${ORCH_REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 if [[ "$EXPLICIT_MODE" -eq 0 ]] && declare -f adf_is_micro >/dev/null 2>&1 && adf_is_micro; then
   MODE="micro"
 fi
-FEAT_DIR="$ROOT/.cursor/orchestration/features/$FEATURE_ID"
+# CURSOR-6: prefer the new .adf/orchestration; fall back to legacy .cursor.
+FEAT_DIR="$ROOT/.adf/orchestration/features/$FEATURE_ID"
+[ -d "$FEAT_DIR" ] || FEAT_DIR="$ROOT/.cursor/orchestration/features/$FEATURE_ID"
 STATE_FILE="$FEAT_DIR/state.json"
 LCOV="$ROOT/coverage/lcov.info"
 BASELINE="$ROOT/scripts/orch/coverage_baseline.json"

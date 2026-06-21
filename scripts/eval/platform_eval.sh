@@ -42,6 +42,19 @@ c5=$(grep -c "ADF_REQUIREMENTS_CREW" scripts/orch/run_server_local_llm.sh 2>/dev
 c8=$(grep -c "@orch-orchestrator" "$LIB/pipeline_planner.dart" 2>/dev/null || true)
 [ "$c8" -eq 0 ] && pass "C8 no @orch-orchestrator in planner (got $c8)" || miss "C8 no @orch-orchestrator in planner (got $c8, want 0)"
 
+# C11 — the resolver defaults to .adf/orchestration (CURSOR-6)
+c11=$(grep -c 'return .\$repoRoot/\$_genericRelative' "$LIB/orchestration_paths.dart" 2>/dev/null || true)
+g11=$(grep -c "_genericRelative = '.adf/orchestration'" "$LIB/orchestration_paths.dart" 2>/dev/null || true)
+{ [ "${c11:-0}" -ge 1 ] && [ "${g11:-0}" -ge 1 ]; } && pass "C11 resolver defaults to .adf/orchestration" || miss "C11 resolver defaults to .adf (got default=$c11 generic=$g11)"
+
+# C12 — the live data is migrated to .adf/orchestration (no-loss; legacy kept)
+if [ -d .adf/orchestration/features ]; then
+  n=$(ls -1 .adf/orchestration/features 2>/dev/null | wc -l | tr -d ' ')
+  [ "${n:-0}" -ge 1 ] && pass "C12 .adf/orchestration migrated ($n features)" || miss "C12 .adf/orchestration empty"
+else
+  miss "C12 .adf/orchestration not present"
+fi
+
 echo "-----"
 if [ "$fail" -eq 0 ]; then echo "EVAL: ALL MEASURED CRITERIA MET ✅"; else echo "EVAL: criteria unmet ❌"; fi
 exit $fail

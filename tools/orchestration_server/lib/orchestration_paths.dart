@@ -55,12 +55,41 @@ class OrchestrationPaths {
       }
     }
 
-    for (final rel in [_legacyRelative, _packageRelative, _genericRelative]) {
+    // CURSOR-6: prefer the new `.adf/orchestration` default; `.cursor/orchestration`
+    // remains a legacy fallback so an un-migrated install still resolves (no data loss).
+    for (final rel in [_genericRelative, _legacyRelative, _packageRelative]) {
       final abs = '$repoRoot/$rel';
       if (Directory(abs).existsSync()) return abs;
     }
 
-    return '$repoRoot/$_legacyRelative';
+    return '$repoRoot/$_genericRelative';
+  }
+
+  /// CURSOR-6: one-time, NO-LOSS migration of the legacy `.cursor/orchestration`
+  /// data dir to the new default `.adf/orchestration`. Non-destructive: it COPIES
+  /// (the legacy dir is left in place as a backup) and is idempotent — a no-op when
+  /// `.adf/orchestration` already exists or there is no legacy dir. Returns true if
+  /// it migrated. Wired into the server startup so existing installs move forward
+  /// automatically without the operator's 28 features ever appearing to vanish.
+  static bool migrateLegacyIfNeeded(String repoRoot) {
+    final adf = Directory('$repoRoot/$_genericRelative');
+    final legacy = Directory('$repoRoot/$_legacyRelative');
+    if (adf.existsSync() || !legacy.existsSync()) return false;
+    _copyDir(legacy, adf);
+    return true;
+  }
+
+  static void _copyDir(Directory src, Directory dst) {
+    dst.createSync(recursive: true);
+    for (final e in src.listSync()) {
+      final name = e.path.split(Platform.pathSeparator).last;
+      if (e is Directory) {
+        _copyDir(e, Directory('${dst.path}/$name'));
+      } else if (e is File) {
+        e.copySync('${dst.path}/$name');
+      }
+      // symlinks intentionally skipped
+    }
   }
 
   Map<String, dynamic>? _readInstallManifest() {

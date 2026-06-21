@@ -15,7 +15,7 @@
 # All settings are read from $FRAMEWORK_ROOT/.env (git-ignored).
 set -euo pipefail
 FRAMEWORK_ROOT="${ORCH_REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
-# The repo root IS the framework dir: the feature store (.cursor/orchestration),
+# The repo root IS the framework dir: the feature store (.adf/orchestration),
 # specs/, and apps/ all live under adf-framework. Defaulting to its PARENT made a
 # plain restart point at a stale, unrelated feature set — the user's features
 # "vanished". An explicit ORCH_REPO_ROOT still overrides this.
