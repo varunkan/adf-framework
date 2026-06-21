@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'artifact_validator.dart';
 import 'deterministic_artifacts.dart';
+import 'requirements_crew_runner.dart';
 import 'feature_store.dart';
 import 'integrity_chain.dart';
 import 'learning_store.dart';
@@ -46,6 +47,7 @@ class CrewAgent {
     required this.phase,
     this.needs = const [],
     required this.run,
+    this.budget,
   });
 
   final String name;
@@ -53,6 +55,11 @@ class CrewAgent {
   final int phase;
   final List<String> needs;
   final Future<List<String>> Function() run;
+
+  /// Optional per-agent wall-clock budget overriding the crew default. The
+  /// deterministic agents finish in milliseconds; the model-backed requirements
+  /// crew needs minutes, so it carries its own (long) budget.
+  final Duration? budget;
 }
 
 /// Multi-agent harness: product analyst, spec writer, architect, task
@@ -92,6 +99,23 @@ class AgentCrew {
   /// Deterministic-brain tasks finish in milliseconds and never come close.
   final Duration agentBudget;
 
+  /// Phase 2 (the requirements spec). With the multi-agent crew enabled
+  /// (`ADF_REQUIREMENTS_CREW=1`) it writes a research-grounded spec + a REAL PO
+  /// verdict; on ANY failure we fall back to the deterministic engine so the
+  /// pipeline never blocks on the crew (P2).
+  Future<List<String>> _specPhase(String id) async {
+    if (RequirementsCrewRunner.isEnabled()) {
+      final ok = await RequirementsCrewRunner(store).run(id);
+      if (ok) return ['specs/$id/spec.md'];
+    }
+    return engine.generatePhase(id, 2);
+  }
+
+  static Duration _crewBudgetFromEnv([Map<String, String>? env]) {
+    final raw = (env ?? Platform.environment)['ORCH_CREW_TIMEOUT_SEC'];
+    return Duration(seconds: int.tryParse(raw ?? '') ?? 600);
+  }
+
   List<CrewAgent> buildCrew(String id) => [
         CrewAgent(
           name: 'product-analyst',
@@ -104,7 +128,11 @@ class AgentCrew {
           role: 'EARS requirements & acceptance criteria',
           phase: 2,
           needs: ['product-analyst'],
-          run: () => engine.generatePhase(id, 2),
+          run: () => _specPhase(id),
+          // The model-backed crew needs minutes, not the 30s deterministic budget.
+          budget: RequirementsCrewRunner.isEnabled()
+              ? _crewBudgetFromEnv()
+              : null,
         ),
         CrewAgent(
           name: 'architect',
@@ -284,6 +312,7 @@ class AgentCrew {
   /// [escalation], then return a `blocked` entry if the retry also breaches
   /// (or no escalation hook is wired).
   Future<Map<String, dynamic>> _runWithBudget(String id, CrewAgent agent) async {
+    final budget = agent.budget ?? agentBudget; // per-agent override (slow crew)
     final sw = Stopwatch()..start();
     Map<String, dynamic> entry(String status, {String? escalatedTo}) => {
           'agent': agent.name,
@@ -291,12 +320,12 @@ class AgentCrew {
           'phase': agent.phase,
           'status': status,
           'elapsed_ms': sw.elapsedMilliseconds,
-          'budget_ms': agentBudget.inMilliseconds,
+          'budget_ms': budget.inMilliseconds,
           if (escalatedTo != null) 'escalated_to': escalatedTo,
         };
 
     try {
-      final artifacts = await agent.run().timeout(agentBudget);
+      final artifacts = await agent.run().timeout(budget);
       sw.stop();
       return {
         ...entry('ok'),
@@ -315,7 +344,7 @@ class AgentCrew {
       }
       try {
         final artifacts =
-            await escalation!.run(id, agent.phase).timeout(agentBudget);
+            await escalation!.run(id, agent.phase).timeout(budget);
         sw.stop();
         return {
           ...entry('escalated', escalatedTo: escalatedTo),
