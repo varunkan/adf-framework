@@ -93,7 +93,8 @@ class PhaseRunner {
     // uses its own login/config. (Harmless to strip for argv runners too.)
     if (_health.backend.buildsAppDirectly) {
       env.removeWhere((k, _) =>
-          k.startsWith('CLAUDE_CODE_') ||
+          // keep the long-lived headless auth token (`claude setup-token`)
+          (k.startsWith('CLAUDE_CODE_') && k != 'CLAUDE_CODE_OAUTH_TOKEN') ||
           k.startsWith('CLAUDE_AGENT_SDK') ||
           k == 'CLAUDECODE' ||
           k == 'ANTHROPIC_BASE_URL');
