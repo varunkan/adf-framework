@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:orchestration_server/feature_store.dart';
@@ -53,6 +54,40 @@ void main() {
       // …and the feature-detail payload surfaces them to the dashboard.
       expect(store.featureSummary('feat-q')['requirements_open_questions'],
           ['Which eCTD modules: 1 or 1-5?', 'Single tenant?']);
+    });
+
+    test('passes --sources to the crew when a sources file exists (P4)', () async {
+      late List<String> gotArgs;
+      final runner = RequirementsCrewRunner(store, run: (e, a, c) async {
+        gotArgs = a;
+        File(runner_verdict(store, 'feat-s'))
+          ..createSync(recursive: true)
+          ..writeAsStringSync('# PO verdict (phase 2): REVISE');
+        return ProcessResult(0, 0, '{}', '');
+      });
+      // no sources file → no --sources
+      await runner.run('feat-s');
+      expect(gotArgs.contains('--sources'), isFalse);
+      // write a sources file → --sources <path> is passed
+      File(runner.sourcesPath('feat-s2'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('[{"url":"https://x/ref"}]');
+      File(runner_verdict(store, 'feat-s2')).createSync(recursive: true);
+      await runner.run('feat-s2');
+      expect(gotArgs, containsAllInOrder(['--sources', runner.sourcesPath('feat-s2')]));
+    });
+
+    test('store.writeSources writes exactly where the runner reads (P4)', () {
+      store.writeSources('feat-w', [
+        {'url': 'https://x/ref'},
+        {'path': '/docs/spec.pdf'}
+      ]);
+      final f = File(RequirementsCrewRunner(store).sourcesPath('feat-w'));
+      expect(f.existsSync(), isTrue);
+      expect(jsonDecode(f.readAsStringSync()), [
+        {'url': 'https://x/ref'},
+        {'path': '/docs/spec.pdf'}
+      ]);
     });
 
     test('NEVER fakes a pass: exit!=0 or no verdict file → false', () async {

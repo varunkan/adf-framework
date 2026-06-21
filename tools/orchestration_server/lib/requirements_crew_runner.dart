@@ -27,21 +27,28 @@ class RequirementsCrewRunner {
   String verdictPath(String featureId) =>
       '${store.repoRoot}/${store.paths.featureRel(featureId, 'judge-verdicts/phase-2.md')}';
 
+  /// The multimodal-sources file (links + ingested docs) the crew reads (P4). The
+  /// server writes it on feature create from the user's uploads/links.
+  String sourcesPath(String featureId) =>
+      '${store.repoRoot}/${store.paths.featureRel(featureId, 'sources.json')}';
+
   /// Runs the crew for [featureId]. Returns true ONLY if exit 0 AND a real phase-2
   /// verdict now exists at [verdictPath] — otherwise the gate stays un-passed.
   Future<bool> run(String featureId) async {
+    final args = [
+      'scripts/orch/requirements_crew.py',
+      featureId,
+      '--workspace',
+      store.repoRoot,
+    ];
+    // Pass the user's multimodal sources (links/docs) when present so the crew
+    // grounds the spec in them and traces every requirement back (P4).
+    if (File(sourcesPath(featureId)).existsSync()) {
+      args.addAll(['--sources', sourcesPath(featureId)]);
+    }
     final ProcessResult result;
     try {
-      result = await _run(
-        'python3',
-        [
-          'scripts/orch/requirements_crew.py',
-          featureId,
-          '--workspace',
-          store.repoRoot,
-        ],
-        store.repoRoot,
-      );
+      result = await _run('python3', args, store.repoRoot);
     } on Object {
       return false; // process couldn't start → never fake a pass
     }

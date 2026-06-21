@@ -208,6 +208,15 @@ class FeatureStore {
     return copy;
   }
 
+  /// Persist the user's multimodal sources (links + ingested docs) for a feature so
+  /// the requirements crew can GROUND + trace the spec to them (P4). Written to the
+  /// exact path RequirementsCrewRunner reads via --sources.
+  void writeSources(String id, List<dynamic> sources) {
+    final file = File('$repoRoot/${paths.featureRel(id, 'sources.json')}');
+    file.parent.createSync(recursive: true);
+    writeFileAtomic(file, jsonEncode(sources));
+  }
+
   void writeState(String id, Map<String, dynamic> state, {bool skipRepair = false}) {
     final toWrite = skipRepair ? state : Map<String, dynamic>.from(state);
     if (!skipRepair) {

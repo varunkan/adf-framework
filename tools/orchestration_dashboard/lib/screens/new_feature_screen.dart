@@ -12,9 +12,19 @@ class NewFeatureScreen extends StatefulWidget {
   State<NewFeatureScreen> createState() => _NewFeatureScreenState();
 }
 
+/// Parses reference links from free text (newline/comma separated), keeping only
+/// http(s) URLs. Pure + top-level so the new-feature form's source handling is
+/// testable (P4).
+List<String> parseSourceLinks(String raw) => raw
+    .split(RegExp(r'[\n,]'))
+    .map((s) => s.trim())
+    .where((s) => s.startsWith('http://') || s.startsWith('https://'))
+    .toList();
+
 class _NewFeatureScreenState extends State<NewFeatureScreen> {
   final _idController = TextEditingController();
   final _reqController = TextEditingController();
+  final _linksController = TextEditingController();
   String _track = 'M';
   String _stack = 'react-vite-sqlite';
   bool _saving = false;
@@ -23,6 +33,7 @@ class _NewFeatureScreenState extends State<NewFeatureScreen> {
   void dispose() {
     _idController.dispose();
     _reqController.dispose();
+    _linksController.dispose();
     super.dispose();
   }
 
@@ -39,6 +50,7 @@ class _NewFeatureScreenState extends State<NewFeatureScreen> {
         requirement: _reqController.text.trim(),
         track: _track,
         stack: _stack,
+        sourceLinks: parseSourceLinks(_linksController.text),
       );
       if (!mounted) return;
       final mode = detail['mode'] as String?;
@@ -122,6 +134,7 @@ class _NewFeatureScreenState extends State<NewFeatureScreen> {
             const SizedBox(height: 12),
             Expanded(
               child: TextField(
+                key: const Key('requirement-field'),
                 controller: _reqController,
                 maxLines: null,
                 expands: true,
@@ -130,6 +143,17 @@ class _NewFeatureScreenState extends State<NewFeatureScreen> {
                   alignLabelWithHint: true,
                   border: OutlineInputBorder(),
                 ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              key: const Key('source-links'),
+              controller: _linksController,
+              maxLines: 2,
+              decoration: const InputDecoration(
+                labelText: 'Reference links (optional)',
+                hintText: 'https://… — one per line; the crew grounds the spec in these',
+                border: OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 12),

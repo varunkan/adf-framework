@@ -48,7 +48,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: NewFeatureScreen(api: api)));
 
     await tester.enterText(find.byType(TextField).first, 'demo-app');
-    await tester.enterText(find.byType(TextField).last, 'A demo requirement');
+    await tester.enterText(find.byKey(const Key('requirement-field')), 'A demo requirement');
     await tester.tap(find.text('Create feature'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));

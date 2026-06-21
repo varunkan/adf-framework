@@ -183,12 +183,17 @@ class ApiClient {
     required String requirement,
     required String track,
     String stack = 'react-vite-sqlite',
+    List<String> sourceLinks = const [],
   }) async {
     final r = await _post('/features', {
       'id': id,
       'requirement': requirement,
       'track': track,
       'stack': stack,
+      // Multimodal sources for the requirements crew (P4) — reference links the
+      // user wants the spec grounded in. Server shape: [{"url": "..."}].
+      if (sourceLinks.isNotEmpty)
+        'sources': [for (final u in sourceLinks) {'url': u}],
     });
     if (r.statusCode != 201 && r.statusCode != 200) {
       throw Exception(_formatError(r));

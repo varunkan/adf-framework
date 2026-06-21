@@ -918,6 +918,13 @@ Future<void> main(List<String> args) async {
       }
       store.createFeature(
           id: id, requirement: requirement, track: track, stack: stack);
+      // Multimodal sources (P4): links + doc paths the user provided. Persisted so
+      // the requirements crew grounds + traces the spec to them. Shape per entry:
+      // {"url": "..."} (a reference link) or {"path": "..."} (an ingested doc).
+      final srcs = body['sources'];
+      if (srcs is List && srcs.isNotEmpty) {
+        store.writeSources(id, srcs);
+      }
       // Persist the per-feature "proceed without approval" choice so the crew
       // handoff knows whether to pause for review or build straight through.
       if (body['auto_approve'] == true) {
