@@ -11,6 +11,23 @@ import 'trace_writer.dart';
 
 enum CancelReason { user, replaced }
 
+/// B3: the human-readable phase-completion line shown in the durable chat. It must
+/// NEVER claim "tests passed" unless the tests_green gate is actually set — the
+/// runner can exit 0 with tests still red (it self-heals but may not converge), and
+/// the old code keyed only on `awaiting`, so a failed phase-7 build read as success.
+/// Pure + unit-testable.
+String phaseOutcomeLine(int phase,
+    {required bool awaiting, required bool testsGreen}) {
+  if (awaiting) {
+    return 'Build complete — Phase $phase is ready for your review and approval.';
+  }
+  if (phase >= 7 && !testsGreen) {
+    return 'Build ran, but tests are NOT green yet — Phase $phase is not '
+        'complete. See run-log.jsonl for the failing tests.';
+  }
+  return 'Build complete — Phase $phase finished; the build ran and tests passed.';
+}
+
 /// Runs orchestration phases via headless `cursor-agent` (or CURSOR_API_KEY).
 class PhaseRunner {
   PhaseRunner(
@@ -878,14 +895,24 @@ class PhaseRunner {
       final after = store.readState(featureId);
       final nowAwaiting = after['awaiting_user'] == true;
       final verdict = after['last_judge_verdict'] as String?;
+      // B2/B3: a phase-7 build that exits 0 but leaves tests_green=false is NOT a
+      // success — it must read as blocked (with a cause), not idle, so the banner
+      // and the chat stop contradicting reality ("tests passed" while blocked).
+      final gatesAfter = after['gates'] as Map<String, dynamic>? ?? {};
+      final testsGreen = gatesAfter['tests_green'] == true;
+      final testsFailedAtImpl = phase >= 7 && !nowAwaiting && !testsGreen;
       store.writeRunStatus(featureId, {
-        'status': nowAwaiting ? 'awaiting_approval' : 'idle',
+        'status': nowAwaiting
+            ? 'awaiting_approval'
+            : (testsFailedAtImpl ? 'blocked' : 'idle'),
         'agent_active': false,
         'phase': phase,
         'finished_at': DateTime.now().toUtc().toIso8601String(),
         'exit_code': code,
-        'error': null,
-        'error_code': null,
+        'error': testsFailedAtImpl
+            ? 'Build ran but tests are not green at phase $phase'
+            : null,
+        'error_code': testsFailedAtImpl ? 'tests_not_green' : null,
         if (verdict != null) 'last_judge_verdict': verdict,
       });
       _traces.append(
@@ -899,9 +926,8 @@ class PhaseRunner {
       );
       // Durable, scrollable record of the outcome — so the chat doesn't go blank
       // when the live trace ends. (The user: "looks like nothing was built.")
-      final outcomeHead = nowAwaiting
-          ? 'Build complete — Phase $phase is ready for your review and approval.'
-          : 'Build complete — Phase $phase finished; the build ran and tests passed.';
+      final outcomeHead =
+          phaseOutcomeLine(phase, awaiting: nowAwaiting, testsGreen: testsGreen);
       // Strip emoji from the agent's verbatim tail — the dashboard's CanvasKit
       // build has no emoji font, so they render as tofu boxes (▯).
       final emoji = RegExp(
