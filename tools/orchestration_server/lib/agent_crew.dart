@@ -127,7 +127,14 @@ class AgentCrew {
   /// provenance only — the seal/gate/validator behaviour is unchanged, and the
   /// never-block resilience policy is preserved.
   Future<List<String>> _specPhase(String id) async {
-    if (RequirementsCrewRunner.isEnabled(_env)) {
+    // Read the track defensively: state.json may not be persisted this early in a
+    // run, and readState throws when absent. Default to 'M' (crew-on) — the track
+    // only downgrades the crew to OFF for a track-S micro-fix.
+    var track = 'M';
+    try {
+      track = (store.readState(id)['track'] as String?) ?? 'M';
+    } catch (_) {/* state not written yet → default M */}
+    if (RequirementsCrewRunner.isEnabled(_env, track)) {
       final runner =
           _requirementsRunnerFactory?.call(store) ?? RequirementsCrewRunner(store);
       final ok = await runner.run(id);

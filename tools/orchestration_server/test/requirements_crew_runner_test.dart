@@ -17,7 +17,10 @@ void main() {
 
     test('isEnabled reads the ADF_REQUIREMENTS_CREW flag', () {
       expect(RequirementsCrewRunner.isEnabled({'ADF_REQUIREMENTS_CREW': '1'}), isTrue);
-      expect(RequirementsCrewRunner.isEnabled({}), isFalse);
+      expect(RequirementsCrewRunner.isEnabled({'ADF_REQUIREMENTS_CREW': '0'}), isFalse);
+      // CREW-1: the crew is now the DEFAULT (on for M/L/XL) — was opt-in/off.
+      // Track-aware defaults are covered in crew_default_test.dart.
+      expect(RequirementsCrewRunner.isEnabled({}), isTrue);
     });
 
     test('scriptPath honors the override seam (P5 server E2E)', () {

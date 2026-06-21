@@ -77,6 +77,10 @@ void main() {
         'ORCH_REPO_ROOT': repoRoot,
         'ORCH_AUTO_RUNNER': 'false', // no headless-runner probes
         'ORCH_AUTO_AUTOPILOT': 'false', // create does NOT auto-kick the crew
+        // CREW-1: these tests exercise the autopilot in-flight GUARD with the fast
+        // deterministic engine; pin the crew off so the server doesn't shell the
+        // real (multi-minute) python crew now that it is default-on for M/L/XL.
+        'ADF_REQUIREMENTS_CREW': '0',
       },
       workingDirectory: '$repoRoot/tools/orchestration_server',
     );

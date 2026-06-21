@@ -82,6 +82,7 @@ void main() {
         LearningStore(tempLearnings.path),
         agentBudget: budget,
         escalation: escalation,
+        env: const {'ADF_REQUIREMENTS_CREW': '0'}, // CREW-1: deterministic suite
       );
 
   AgentEscalation fastEscalation() {
@@ -274,7 +275,7 @@ void main() {
         DeterministicArtifactEngine(store, brain: DeterministicBrain()),
         ArtifactValidator(repoRoot),
         LearningStore(tempLearnings.path),
-        env: {'ORCH_AGENT_TIMEOUT_SEC': '9'},
+        env: {'ORCH_AGENT_TIMEOUT_SEC': '9', 'ADF_REQUIREMENTS_CREW': '0'},
       );
       expect(crew.agentBudget, const Duration(seconds: 9));
     });

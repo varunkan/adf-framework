@@ -69,6 +69,7 @@ void main() {
           ArtifactValidator(repoRoot),
           LearningStore(tempLearnings.path),
           integrity: integrity,
+          env: const {'ADF_REQUIREMENTS_CREW': '0'}, // CREW-1: deterministic suite
         );
 
     Map<int, int> phaseSealCounts(IntegrityChain integrity) {

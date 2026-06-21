@@ -114,6 +114,18 @@ export ORCH_AUTO_APPROVE="${ORCH_AUTO_APPROVE:-true}"
 # ADF_DEFAULT_STACK=stdlib.
 export ADF_DEFAULT_STACK="${ADF_DEFAULT_STACK:-react-vite-sqlite}"
 
+# --- Requirements crew: the DEFAULT spec engine (CREW-1) ----------------------
+# ADF researches the prompt + any reference links and drafts REAL EARS requirements
+# via the multi-agent crew (free NVIDIA NIM by default; Claude/Ollama fallback),
+# instead of the zero-token deterministic template engine that produced garbage
+# "SHALL <verbatim prompt>" specs. ON by default for net-new / cross-cutting tracks
+# (M/L/XL), OFF for a track-S micro-fix; when no model is reachable the run falls
+# back to the deterministic engine (DISCLOSED via spec_source, never silent).
+# Override (else the server resolves the track-aware default):
+#   ADF_REQUIREMENTS_CREW=0  → force the deterministic engine (no model calls)
+#   ADF_REQUIREMENTS_CREW=1  → force the crew on EVERY track (including S)
+if [[ -n "${ADF_REQUIREMENTS_CREW:-}" ]]; then export ADF_REQUIREMENTS_CREW; fi
+
 # --- Shared Ollama endpoint + model ---------------------------------------
 DEFAULT_MODEL='hf.co/nvidia/NVIDIA-Nemotron-3-Nano-4B-GGUF:Q4_K_M'
 export OLLAMA_HOST="${OLLAMA_HOST:-${ORCH_OLLAMA_HOST:-http://127.0.0.1:11434}}"

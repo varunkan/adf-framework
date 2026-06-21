@@ -23,8 +23,21 @@ class RequirementsCrewRunner {
   final FeatureStore store;
   final ProcessRun _run;
 
-  static bool isEnabled([Map<String, String>? env]) =>
-      (env ?? Platform.environment)['ADF_REQUIREMENTS_CREW'] == '1';
+  /// Whether the model-backed requirements crew runs (vs the deterministic
+  /// fallback). CREW-1: the crew is now the DEFAULT for net-new / cross-cutting
+  /// work — explicit `ADF_REQUIREMENTS_CREW=1/true` forces it on, `=0/false`
+  /// forces it off; absent, it defaults ON for tracks M/L/XL and OFF for a
+  /// track-S micro-fix (≤1 file), where the full research crew is overkill.
+  /// (When on but no model is reachable, the run fails and _specPhase falls back
+  /// to the deterministic engine — disclosed via spec_source, never silent.)
+  static bool isEnabled([Map<String, String>? env, String? track]) {
+    final v = (env ?? Platform.environment)['ADF_REQUIREMENTS_CREW']
+        ?.trim()
+        .toLowerCase();
+    if (v == '0' || v == 'false') return false; // explicit opt-out wins
+    if (v == '1' || v == 'true') return true; // explicit opt-in wins
+    return (track ?? 'M').toUpperCase() != 'S'; // default: on for M/L/XL
+  }
 
   /// The crew script to invoke. Overridable via ADF_REQUIREMENTS_CREW_SCRIPT so a
   /// server E2E can point at a fast deterministic stub (the real crew's quality is

@@ -47,6 +47,9 @@ void main() {
         DeterministicArtifactEngine(store, brain: DeterministicBrain()),
         ArtifactValidator(repoRoot),
         LearningStore(tempLearnings.path),
+        // CREW-1: this suite exercises the DETERMINISTIC engine; pin the crew off
+        // so _specPhase doesn't shell the real python crew (now default-on for M).
+        env: const {'ADF_REQUIREMENTS_CREW': '0'},
       );
 
   CrewAgent agent(String name, {List<String> needs = const []}) => CrewAgent(

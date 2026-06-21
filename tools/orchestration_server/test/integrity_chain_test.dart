@@ -48,6 +48,7 @@ void main() {
         ArtifactValidator(repoRoot),
         LearningStore(Directory.systemTemp.createTempSync('adf-ic').path),
         integrity: chain,
+        env: const {'ADF_REQUIREMENTS_CREW': '0'}, // CREW-1: deterministic suite
       ).run(id);
 
   test('crew run produces a valid sealed chain over the full manifest',

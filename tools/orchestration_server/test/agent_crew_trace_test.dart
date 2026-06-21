@@ -61,6 +61,7 @@ void main() {
       ArtifactValidator(repoRoot),
       LearningStore(tempLearnings.path),
       traces: traces,
+      env: const {'ADF_REQUIREMENTS_CREW': '0'}, // CREW-1: deterministic narration suite
     );
     await crew.run(id);
 
@@ -116,7 +117,7 @@ void main() {
 
   test('crew-disabled run records spec_source=deterministic (no fallback)',
       () async {
-    await crewWith(env: const {}).run(id);
+    await crewWith(env: const {'ADF_REQUIREMENTS_CREW': '0'}).run(id);
 
     expect(store.readState(id)['spec_source'], 'deterministic');
     expect(
