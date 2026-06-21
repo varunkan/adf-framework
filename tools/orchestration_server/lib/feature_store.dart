@@ -244,8 +244,37 @@ class FeatureStore {
     return file.readAsStringSync();
   }
 
+  // G2/I4/I7: lines that are orchestrator/builder control commands (not
+  // requirement content). The user types these to drive the pipeline (e.g.
+  // `@orch-orchestrator resume <id>`); they belong in commands.jsonl, never in
+  // requirement.md — where the deterministic engine would synthesize them into
+  // bogus "The system SHALL @orch-orchestrator resume…" EARS requirements (the
+  // exact contamination that permanently blocked the regulatory-affairs spec).
+  static final RegExp _controlLine = RegExp(
+    r'^\s*(@orch-orchestrator\b|#\s*Builder:|resume\s+\S+\s*$)',
+    caseSensitive: false,
+  );
+  static final RegExp _bareAffirmative = RegExp(
+    r'^(yes|yep|yeah|ok|okay|sure|proceed|go ahead|continue|do it)[.!]*$',
+    caseSensitive: false,
+  );
+
+  /// Strip control-command lines and return the requirement-bearing prose
+  /// (trimmed). Returns '' when the turn carried no requirement content (it was
+  /// only control commands, or a bare affirmative like "yes"/"proceed" — those
+  /// update execution state, not the spec). Static so it is unit-testable.
+  static String sanitizeClarification(String text) {
+    final kept = text
+        .split('\n')
+        .where((l) => !_controlLine.hasMatch(l))
+        .join('\n')
+        .trim();
+    if (kept.isEmpty || _bareAffirmative.hasMatch(kept)) return '';
+    return kept;
+  }
+
   void appendClientClarification(String id, String text) {
-    final t = text.trim();
+    final t = sanitizeClarification(text); // G2/I4/I7: never ingest control spam
     if (t.isEmpty) return;
     final file = File('${featurePath(id)}/requirement.md');
     file.parent.createSync(recursive: true);
