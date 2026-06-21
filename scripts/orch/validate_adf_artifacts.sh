@@ -65,7 +65,7 @@ if [[ -f "$SPECS/spec.md" ]]; then
   # A SHALL statement that is a bare 1–2 word fragment (e.g. 'SHALL guidelines from
   # best website') is not a testable requirement — flag the templated-chop smell.
   if grep -oiE 'SHALL +[a-z]+( +[a-z]+)?[.[:space:]]*$' "$SPECS/spec.md" | grep -q .; then
-    warn "spec.md has SHALL statements that are sentence fragments — likely templated prompt chops, not requirements"
+    fail "spec.md has SHALL statements that are sentence fragments — templated prompt chops, not testable requirements (the crew emits full EARS, so this only trips the garbage engine)"
   fi
 fi
 

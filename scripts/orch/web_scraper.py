@@ -130,7 +130,7 @@ def fetch_text(url, env=None, fetch=None):
     elif scraper == "firecrawl" and (env.get("FIRECRAWL_API_KEY") or "").strip():
         # firecrawl is POST-based; callers can inject; default GET path used in tests
         md = fetch("https://api.firecrawl.dev/v0/scrape?url=" + urllib.parse.quote(url))
-        if md and md.strip():
+        if md and not _is_thin(md):   # same thin/blocked-stub guard as jina → fall back
             return {"url": url, "title": url, "markdown": md.strip()}
 
     raw = fetch(url)                              # fallback: plain GET + de-boilerplate

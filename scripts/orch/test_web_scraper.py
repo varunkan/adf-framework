@@ -45,6 +45,17 @@ class FetchText(unittest.TestCase):
         self.assertEqual(page["title"], "Real")
         self.assertIn("full eCTD content", page["markdown"])   # got it via fallback
 
+    def test_firecrawl_thin_stub_also_falls_back(self):
+        # the Firecrawl branch must guard with _is_thin too (not just jina).
+        def fetch(u, timeout=20):
+            if "firecrawl" in u:
+                return "403 Forbidden"                         # thin block stub
+            return "<title>Real</title><body>" + ("full content " * 200) + "</body>"
+        page = ws.fetch_text("https://x.test",
+                             {"ADF_SCRAPER": "firecrawl", "FIRECRAWL_API_KEY": "k"}, fetch)
+        self.assertEqual(page["title"], "Real")
+        self.assertIn("full content", page["markdown"])
+
     def test_fallback_plain_get_when_no_service(self):
         def fetch(u, timeout=20):
             return "<title>T</title><p>plain body text</p>"

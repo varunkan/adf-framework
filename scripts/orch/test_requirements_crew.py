@@ -137,6 +137,16 @@ class CleanRequirement(unittest.TestCase):
         self.assertNotIn("## Client clarification", out)  # heading stripped
         self.assertNotIn("@orch-orchestrator", out)       # spam stripped
 
+    def test_conflict_policy_is_ASK_not_auto_resolve(self):
+        # the plan's conflict policy = ASK ME: the synthesis head must NOT silently
+        # resolve source disagreements; the PO must flag conflicts as gaps.
+        head = rc._HEAD_SYS.lower()
+        self.assertNotIn("resolve conflicts", head)     # the old permissive wording
+        self.assertIn("conflict", head)
+        self.assertIn("open_question", head)
+        self.assertIn("do not", head)                   # forbids auto-resolution
+        self.assertIn("conflict", rc._PO_SYS.lower())   # PO flags conflicts
+
     def test_renders_dict_or_string_gaps(self):
         self.assertEqual(rc._g("plain gap"), "plain gap")
         self.assertEqual(rc._g({"question": "Which modules?"}), "Which modules?")

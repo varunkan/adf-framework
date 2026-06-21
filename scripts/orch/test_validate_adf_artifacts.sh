@@ -90,4 +90,22 @@ sys.exit(0 if len(o)==len(ids) else 1)
 fi
 
 rm -rf "$TMP"
+
+# --- garbage floor (requirements quality): assert the SPECIFIC garbage messages
+# fire (not just a non-zero exit, which missing plan/tasks would cause anyway). ---
+VAL="$(dirname "$0")/validate_adf_artifacts.sh"
+GROOT="$(mktemp -d)"; mkdir -p "$GROOT/specs/gfeat"
+_gout() { ORCH_REPO_ROOT="$GROOT" bash "$VAL" gfeat 2>&1 || true; }
+
+printf '## Requirements\n- The system SHALL @orch-orchestrator resume regulatory-affairs\n' > "$GROOT/specs/gfeat/spec.md"
+_gout | grep -q "command spam" || { echo "FAIL: @orch-orchestrator leak not caught by garbage floor" >&2; rm -rf "$GROOT"; exit 1; }
+
+printf '## Requirements\n- The system SHALL guidelines\n' > "$GROOT/specs/gfeat/spec.md"
+_gout | grep -q "sentence fragments" || { echo "FAIL: SHALL-fragment chop not caught by garbage floor" >&2; rm -rf "$GROOT"; exit 1; }
+
+printf '## Requirements\n- The system SHALL persist each URL mapping. GIVEN a short code WHEN requested THEN the original URL is returned.\n' > "$GROOT/specs/gfeat/spec.md"
+if _gout | grep -qE "command spam|sentence fragments"; then echo "FAIL: clean EARS spec wrongly flagged as garbage" >&2; rm -rf "$GROOT"; exit 1; fi
+rm -rf "$GROOT"
+echo "garbage floor: PASS"
+
 echo "validate_adf_artifacts tests: PASS"

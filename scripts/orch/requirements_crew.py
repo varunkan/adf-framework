@@ -76,7 +76,8 @@ _DRAFT_SYS = ("You are a product manager (BMAD PM) writing PRECISE, TESTABLE EAR
               ". Every requirement must cite a source. Do NOT invent domain facts.")
 
 _PO_SYS = ("You are the BMAD Product Owner / Validation Architect. Rigorously check the "
-           "draft for the given lens. Reply ONLY JSON: "
+           "draft for the given lens. Flag any SOURCE CONFLICT (two sources disagree) as a "
+           "gap — never let it pass silently. Reply ONLY JSON: "
            '{"pass":bool,"gaps":[..specific issues..]}')
 
 _Q_SYS = ("You are the BMAD PO facilitating requirements confirmation. From the draft + "
@@ -84,10 +85,11 @@ _Q_SYS = ("You are the BMAD PO facilitating requirements confirmation. From the 
           'improvement suggestions. Reply ONLY JSON: {"questions":[..],"improvements":[..]}')
 
 _HEAD_SYS = ("You are a principal engineer synthesizing ONE coherent PRD from many "
-             "fragments (BMAD create-prd discipline): consolidate, DEDUPE, resolve "
-             "conflicts, ensure every requirement is measurable + testable + traceable + "
-             "cited, integrate the PO gaps, and rank source authority (user docs/mockups "
-             "> web). Reply ONLY JSON: "
+             "fragments (BMAD create-prd discipline): consolidate, DEDUPE, ensure every "
+             "requirement is measurable + testable + traceable + cited, integrate the PO "
+             "gaps, and rank source authority (user docs/mockups > web). CONFLICT POLICY = "
+             "ASK: when sources DISAGREE, do NOT silently pick a winner — surface the "
+             "conflict verbatim as an open_question for the user to decide. Reply ONLY JSON: "
              '{"problem_statement","requirements":[{"id","shall","acceptance","source"}],'
              '"assumptions":[],"out_of_scope":[],"open_questions":[]}')
 
