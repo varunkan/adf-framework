@@ -104,7 +104,7 @@ class Headroom(unittest.TestCase):
         big = ["x" * 1000] * 100  # ~100k chars fed toward a head
         out = rc._headroom(big, limit=3000)
         self.assertLessEqual(len(out), 3100)
-        self.assertIn("truncated", out)
+        self.assertIn("compacted", out)  # head+tail compaction (not a blind truncate)
 
     def test_small_input_passes_through(self):
         self.assertEqual(rc._headroom(["a"], limit=3000), json.dumps(["a"]))

@@ -210,17 +210,22 @@ def run(requirement, complete=None, gather=None, areas=None, tasks_per_area=None
     def run_reduce(agent, prior):
         items = [(by_id[i]["task"], _json(o, {"finding": o}))
                  for i, o in work["files"].items() if by_id[i]["area"] == agent.name]
-        blob = "\n".join(
+        import compaction
+        blob = compaction.clip("\n".join(
             f"- {q}: {f.get('finding','')} {('[CLARIFY: '+f['clarify']+']') if f.get('clarify') else ''}"
-            for q, f in items)[:7000]
+            for q, f in items), 7000)
         out = complete(f"AREA: {agent.name}\nFINDINGS:\n{blob}", "draft", _REDUCE_SYS)
         return True, [(agent.name, out)], agent.name
     red = build_crew.run_crew(
         [build_crew.BuildAgent(a["area"], a["area"]) for a in _uniq(area_list)],
         run_reduce, parallelism=par)
 
-    # 5) CONVERGE (Opus head) → final
-    findings = "\n\n".join(f"## {a}\n{o}" for a, o in red["files"].items())[:12000]
+    # 5) CONVERGE (Opus head) → final. Head+tail compaction so the converger sees
+    # the FIRST and LAST area findings, not a blind front-slice (compaction at the
+    # final wave boundary).
+    import compaction
+    findings = compaction.clip(
+        "\n\n".join(f"## {a}\n{o}" for a, o in red["files"].items()), 12000)
     final = _json(complete(
         f"REQUEST: {requirement}\n\nAREA FINDINGS:\n{findings}", "converge", _CONVERGE_SYS),
         {"requirements": [], "open_questions": [], "risks": []})

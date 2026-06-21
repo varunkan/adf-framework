@@ -300,5 +300,33 @@ class Cli(unittest.TestCase):
         self.assertTrue(os.path.isdir(os.path.join(self.app, ".adf-context")))
 
 
+class Clip(unittest.TestCase):
+    """The canonical wave-boundary compaction primitive (requirements crew + swarm)."""
+
+    def test_under_limit_is_unchanged(self):
+        self.assertEqual(cx.clip("hello", 100), "hello")
+        self.assertEqual(cx.clip(["a", "b"], 100), json.dumps(["a", "b"]))
+
+    def test_over_limit_keeps_head_AND_tail(self):
+        # the tail often holds the conclusion / risks a blind head-truncate loses
+        text = "HEAD_MARKER" + ("x" * 8000) + "TAIL_MARKER"
+        out = cx.clip(text, 300)
+        self.assertLessEqual(len(out), 360)
+        self.assertTrue(out.startswith("HEAD_MARKER"))
+        self.assertTrue(out.endswith("TAIL_MARKER"))
+        self.assertIn("compacted", out)
+
+    def test_head_only_mode(self):
+        out = cx.clip("A" + "x" * 2000, 100, keep_tail=False)
+        self.assertTrue(out.startswith("A"))
+        self.assertIn("truncated", out)
+        self.assertLessEqual(len(out), 130)
+
+    def test_non_string_is_json_encoded(self):
+        out = cx.clip({"k": "v" * 5000}, 200)
+        self.assertLessEqual(len(out), 260)
+        self.assertTrue(out.startswith('{"k"'))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

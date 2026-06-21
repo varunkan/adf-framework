@@ -28,7 +28,7 @@ import sys
 from dataclasses import dataclass, field
 
 __all__ = [
-    "estimate_tokens", "context_budget", "should_compact",
+    "estimate_tokens", "context_budget", "should_compact", "clip",
     "compact_messages", "compact_files", "compact_conversation",
     "write_context_card", "CompactionResult",
 ]
@@ -179,6 +179,22 @@ def _head_tail(text, head=400, tail=400) -> str:
     if len(text) <= head + tail:
         return text
     return f"{text[:head]} … {text[-tail:]}"
+
+
+def clip(value, max_chars, keep_tail=True):
+    """Compact a value (str, or any JSON-encodable) to ~max_chars for a context /
+    wave boundary. THE canonical primitive the requirements crew + swarm use instead
+    of a blind `text[:N]` — which silently drops the TAIL, where the conclusion /
+    risks / open questions live. keep_tail preserves head AND tail; else head-only."""
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+    if len(text) <= max_chars:
+        return text
+    dropped = len(text) - max_chars
+    if not keep_tail:
+        return text[:max_chars].rstrip() + " …(truncated)"
+    head = (max_chars * 2) // 3
+    tail = max_chars - head
+    return f"{text[:head]} …[+{dropped} compacted]… {text[-tail:]}"
 
 
 def _structured_digest(msgs, carried="") -> str:

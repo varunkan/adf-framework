@@ -97,17 +97,20 @@ _XCHECK_SYS = ("You are an adversarial reviewer (different model than the author
 
 
 def _corpus_text(corpus, limit=9000):
+    import compaction
     out = []
     for n in corpus:
         out.append(f"### {n.get('title','')} ({n.get('url','')})\n{n.get('facts','')}")
-    return "\n\n".join(out)[:limit]
+    # head+tail compaction so the LAST scraped sources aren't silently dropped.
+    return compaction.clip("\n\n".join(out), limit)
 
 
 def _headroom(value, limit=3000):
     """Bound any list/text fed into a HEAD (synthesis/questions) so a large run can't
-    blow the context window — context compaction at the wave boundary."""
-    text = value if isinstance(value, str) else json.dumps(value)
-    return text if len(text) <= limit else text[:limit] + " …(truncated)"
+    blow the context window — context compaction at the wave boundary. Delegates to
+    the canonical compaction.clip (head+tail), not a blind truncate."""
+    import compaction
+    return compaction.clip(value, limit)
 
 
 def run(feature_id, requirement, sources=None, specs_dir=None, verdict_dir=None,
@@ -152,7 +155,7 @@ def run(feature_id, requirement, sources=None, specs_dir=None, verdict_dir=None,
     draft_res = build_crew.run_crew(draft_agents, run_draft, parallelism=parallelism)
     drafts = {k: _json(v, {"requirements": []}) for k, v in draft_res["files"].items()}
     all_reqs = [r for d in drafts.values() for r in (d.get("requirements") or [])]
-    draft_text = json.dumps(all_reqs)[:9000]
+    draft_text = _headroom(all_reqs, 9000)
 
     # Wave 3a — PO validation (perspective-diverse: R1 rigor ∥ Ultra judge, parallel)
     def run_po(agent, prior):
@@ -187,7 +190,7 @@ def run(feature_id, requirement, sources=None, specs_dir=None, verdict_dir=None,
         "synthesis", _HEAD_SYS),
         {"problem_statement": requirement, "requirements": all_reqs,
          "assumptions": [], "out_of_scope": [], "open_questions": []})
-    xcheck = _json(complete(f"PRD:\n{json.dumps(head)[:9000]}", "cross_check", _XCHECK_SYS),
+    xcheck = _json(complete(f"PRD:\n{_headroom(head, 9000)}", "cross_check", _XCHECK_SYS),
                    {"issues": []})
 
     open_questions = list(qs.get("questions") or []) + list(head.get("open_questions") or [])
