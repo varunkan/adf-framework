@@ -23,6 +23,13 @@ class RequirementsCrewRunner {
   static bool isEnabled([Map<String, String>? env]) =>
       (env ?? Platform.environment)['ADF_REQUIREMENTS_CREW'] == '1';
 
+  /// The crew script to invoke. Overridable via ADF_REQUIREMENTS_CREW_SCRIPT so a
+  /// server E2E can point at a fast deterministic stub (the real crew's quality is
+  /// proven by the live run; this lets the SERVER path be tested without a ~10min run).
+  static String scriptPath([Map<String, String>? env]) =>
+      (env ?? Platform.environment)['ADF_REQUIREMENTS_CREW_SCRIPT'] ??
+      'scripts/orch/requirements_crew.py';
+
   /// The path the approval gate reads the PO verdict from.
   String verdictPath(String featureId) =>
       '${store.repoRoot}/${store.paths.featureRel(featureId, 'judge-verdicts/phase-2.md')}';
@@ -36,7 +43,7 @@ class RequirementsCrewRunner {
   /// verdict now exists at [verdictPath] — otherwise the gate stays un-passed.
   Future<bool> run(String featureId) async {
     final args = [
-      'scripts/orch/requirements_crew.py',
+      scriptPath(),
       featureId,
       '--workspace',
       store.repoRoot,

@@ -20,6 +20,15 @@ void main() {
       expect(RequirementsCrewRunner.isEnabled({}), isFalse);
     });
 
+    test('scriptPath honors the override seam (P5 server E2E)', () {
+      expect(RequirementsCrewRunner.scriptPath({}),
+          'scripts/orch/requirements_crew.py');
+      expect(
+          RequirementsCrewRunner.scriptPath(
+              {'ADF_REQUIREMENTS_CREW_SCRIPT': '/tmp/stub.py'}),
+          '/tmp/stub.py');
+    });
+
     test('invokes the crew CLI and reports success when a real verdict lands', () async {
       late List<String> gotArgs;
       final runner = RequirementsCrewRunner(store, run: (exe, args, cwd) async {
