@@ -20,6 +20,29 @@ class TraceWriter {
       StreamController<Map<String, dynamic>>.broadcast();
   static Stream<Map<String, dynamic>> get events => _events.stream;
 
+  /// S3: span_ids this process already broadcast via [append] (server-side spans).
+  /// The [TraceTailer] dedups against this so a span the server wrote AND tailed
+  /// from the file is pushed once. Bounded (last 512) so it can't grow unbounded.
+  static final Set<String> _serverPushedIds = <String>{};
+  static final List<String> _serverPushedOrder = <String>[];
+  static void _rememberServerPush(String spanId) {
+    if (spanId.isEmpty || !_serverPushedIds.add(spanId)) return;
+    _serverPushedOrder.add(spanId);
+    if (_serverPushedOrder.length > 512) {
+      _serverPushedIds.remove(_serverPushedOrder.removeAt(0));
+    }
+  }
+
+  /// True if [spanId] was already broadcast by this server (so the tailer skips it).
+  static bool pushedByServer(String spanId) => _serverPushedIds.contains(spanId);
+
+  /// Push a span the TAILER read from the file (an out-of-process runner span) to
+  /// the live SSE broadcast. Distinct from [append] (which also writes the file).
+  static void pushLive(Map<String, dynamic> record) {
+    _events.add(record);
+    spansPushed++;
+  }
+
   /// Streaming observability counters, surfaced on /metrics so SSE health is
   /// monitorable: how many spans have been pushed live, how many SSE clients are
   /// connected now, and how many connections have been opened in total.
@@ -82,6 +105,7 @@ class TraceWriter {
     // Push the span live to any SSE subscriber (broadcast → dropped if none).
     _events.add(record);
     spansPushed++;
+    _rememberServerPush(spanId); // S3: so the file tailer doesn't double-push this
   }
 
   void _appendLine(String path, String line) {

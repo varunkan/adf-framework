@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:orchestration_server/adf_brain.dart';
 import 'package:orchestration_server/agent_crew.dart';
 import 'package:orchestration_server/orchestration_paths.dart';
+import 'package:orchestration_server/trace_tailer.dart';
 import 'package:orchestration_server/app_runner.dart';
 import 'package:orchestration_server/approval_gate.dart';
 import 'package:orchestration_server/proof_check.dart';
@@ -1626,6 +1627,11 @@ Future<void> main(List<String> args) async {
             (r['attributes'] as Map?)?['orch.feature_id'] == id)
         .listen(emit);
 
+    // S3: also tail the per-feature otel-traces FILE so the out-of-process build
+    // runner's spans flow live (not just the 1.5s poll). Refcounted: one tailer per
+    // feature shared across SSE clients; released in onCancel below.
+    TraceTailer.subscribe(store.repoRoot, id);
+
     // Heartbeat keeps the socket alive and surfaces a dead client (onCancel fires).
     final hb = Timer.periodic(const Duration(seconds: 15), (_) {
       if (!controller.isClosed) controller.add(utf8.encode(': ping\n\n'));
@@ -1633,6 +1639,7 @@ Future<void> main(List<String> args) async {
     controller.onCancel = () {
       sub.cancel();
       hb.cancel();
+      TraceTailer.release(id); // S3: stop the file tailer when the last client leaves
       if (TraceWriter.sseClientsActive > 0) TraceWriter.sseClientsActive--;
     };
 
