@@ -167,6 +167,24 @@ class ConversationBuilder {
 
 
   /// Dashboard chat panel: commands + orchestrator replies (no run-log noise).
+  /// C1: internal control commands (crew / @orch-orchestrator / resume <id> /
+  /// "# Builder:") are MACHINE triggers, not human input — they must not render as
+  /// "You" bubbles in the chat. Returns a friendly status label for an internal
+  /// trigger, or null for a genuine human prompt. Pure + testable.
+  static String? internalTriggerLabel(String prompt) {
+    final p = prompt.trim();
+    if (p.isEmpty) return null;
+    if (p.toLowerCase() == 'crew') {
+      return 'Crew building the spec, plan & tests…';
+    }
+    if (RegExp(r'^(@orch-orchestrator\b|resume\s+\S+\s*$|#\s*Builder:)',
+            caseSensitive: false)
+        .hasMatch(p)) {
+      return 'Resuming the pipeline…';
+    }
+    return null;
+  }
+
   List<Map<String, dynamic>> buildChatView(String featureId, {int limit = 100}) {
     final messages = <Map<String, dynamic>>[];
     for (final cmd in store.listCommands(featureId, limit: 200)) {
@@ -178,10 +196,13 @@ class ConversationBuilder {
       final hasPrompt = prompt.trim().isNotEmpty;
       if (!hasPrompt && (ar == null || ar.trim().isEmpty)) continue;
       if (hasPrompt) {
+        // C1: an internal trigger renders as a compact system status line, never a
+        // "You" bubble; only genuine human prompts are user messages.
+        final label = internalTriggerLabel(prompt);
         messages.add({
-          'role': 'user',
-          'type': 'command',
-          'text': prompt.trim(),
+          'role': label != null ? 'system' : 'user',
+          'type': label != null ? 'status' : 'command',
+          'text': label ?? prompt.trim(),
           'timestamp': cmd['created_at'] as String?,
           'command_id': cmd['id'],
           'status': cmd['status'],

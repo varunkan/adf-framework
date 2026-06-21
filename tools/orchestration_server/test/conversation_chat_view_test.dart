@@ -43,4 +43,35 @@ void main() {
     expect(chat[1]['llm_source'], 'state');
     expect(chat.any((m) => m['type'] == 'result'), isFalse);
   });
+
+  test('C1: internalTriggerLabel classifies machine triggers vs human prompts',
+      () {
+    expect(ConversationBuilder.internalTriggerLabel('crew'), isNotNull);
+    expect(ConversationBuilder.internalTriggerLabel('@orch-orchestrator resume x'),
+        isNotNull);
+    expect(ConversationBuilder.internalTriggerLabel('resume my-feature'), isNotNull);
+    expect(ConversationBuilder.internalTriggerLabel('# Builder: speckit phase 7'),
+        isNotNull);
+    expect(ConversationBuilder.internalTriggerLabel('Add a dark mode toggle'),
+        isNull);
+  });
+
+  test('C1: internal triggers render as system status, not "You" bubbles', () {
+    store.appendCommand('f1', prompt: 'crew', execute: false);
+    store.appendCommand('f1', prompt: '@orch-orchestrator resume f1', execute: false);
+    store.appendCommand('f1', prompt: 'Add a dark mode toggle', execute: false); // human
+    final chat = builder.buildChatView('f1');
+    final userTexts =
+        chat.where((m) => m['role'] == 'user').map((m) => '${m['text']}').toList();
+    expect(userTexts, isNot(contains('crew')),
+        reason: 'an internal trigger must never be a user bubble');
+    expect(userTexts.any((t) => t.contains('@orch-orchestrator')), isFalse);
+    expect(userTexts, contains('Add a dark mode toggle'),
+        reason: 'a genuine human prompt is still a user bubble');
+    final statusTexts = chat
+        .where((m) => m['role'] == 'system' && m['type'] == 'status')
+        .map((m) => '${m['text']}')
+        .toList();
+    expect(statusTexts.any((t) => t.contains('Crew building')), isTrue);
+  });
 }
