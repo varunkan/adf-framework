@@ -4,11 +4,34 @@ import 'feature_store.dart';
 
 /// After headless cursor-agent run, sync state.json from artifacts on disk.
 class RunPostSync {
-  RunPostSync(this.store);
+  RunPostSync(this.store, {bool? crewEnabled})
+      : crewEnabled = crewEnabled ??
+            (Platform.environment['ADF_REQUIREMENTS_CREW'] == '1');
 
   final FeatureStore store;
 
+  /// When the requirements CREW is enabled the PO verdict is REAL (the crew writes
+  /// it), so we must NOT fabricate "completed reviewers" as a fallback — that faked a
+  /// passing PO review, the exact dishonesty this replaces (P2).
+  final bool crewEnabled;
+
   static const int _backfillMaxChars = 8000;
+
+  /// The reviewers to record for a phase when none are in state yet:
+  ///  - real reviewers parsed from the verdict, if any;
+  ///  - else the legacy canonical pair ONLY when the crew is OFF (back-compat);
+  ///  - else null when the crew is ON — never fabricate a passing PO review (P2).
+  /// Pure + static → unit-testable without the state-pruning machinery.
+  static List<String>? resolveReviewers({
+    required List<String>? fromVerdict,
+    required bool crewEnabled,
+  }) {
+    if (fromVerdict != null && fromVerdict.isNotEmpty) return fromVerdict;
+    if (!crewEnabled) {
+      return const ['bmad-agent-analyst', 'bmad-review-adversarial-general'];
+    }
+    return null;
+  }
 
   /// Returns true if state was updated to awaiting approval.
   bool syncAfterRun(String featureId, int phase) {
@@ -52,16 +75,15 @@ class RunPostSync {
       );
       final rlist = (reviewers['$phase'] as List<dynamic>?)?.toList() ?? [];
       if (rlist.isEmpty) {
-        final fromVerdict =
-            store.parseReviewerSkills(verdictFile.readAsStringSync());
-        reviewers['$phase'] = fromVerdict != null && fromVerdict.isNotEmpty
-            ? fromVerdict
-            : [
-                'bmad-agent-analyst',
-                'bmad-review-adversarial-general',
-              ];
-        state['completed_reviewers'] = reviewers;
-        changed = true;
+        final resolved = resolveReviewers(
+          fromVerdict: store.parseReviewerSkills(verdictFile.readAsStringSync()),
+          crewEnabled: crewEnabled,
+        );
+        if (resolved != null) {
+          reviewers['$phase'] = resolved;
+          state['completed_reviewers'] = reviewers;
+          changed = true;
+        }
       }
     }
 
