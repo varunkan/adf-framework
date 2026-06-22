@@ -153,19 +153,29 @@ class ClaudeBackend extends RunnerBackend {
     );
   }
 
-  @override
-  List<String> streamArgs(String prompt, String workspace,
-      {bool partial = true}) {
-    // The prompt MUST precede `--add-dir`: claude's `--add-dir <directories...>` is
-    // VARIADIC and will otherwise swallow the prompt as a directory, leaving claude
-    // with no prompt ("Input must be provided … when using --print"). `--add-dir`
-    // grants tool access to the repo; cwd is set by the caller.
+  /// Model id for `claude --model`, or null to use the CLI's default. The Claude
+  /// Code SUBSCRIPTION defaults to Sonnet, so unless ADF pins a model here a build
+  /// silently runs on Sonnet instead of the requested Opus. Driven by
+  /// ADF_RUNNER_CLAUDE_MODEL (e.g. `opus`, `claude-opus-4-8`).
+  String? get model {
+    final m = Platform.environment['ADF_RUNNER_CLAUDE_MODEL']?.trim();
+    return (m == null || m.isEmpty) ? null : m;
+  }
+
+  /// Shared argv builder. Both `--model` (when set) and the VARIADIC `--add-dir`
+  /// sit AFTER `-p <prompt>`, and `--add-dir` is kept LAST, so claude never
+  /// mistakes the prompt for a flag value or swallows it as a directory
+  /// ("Input must be provided … when using --print"). cwd is set by the caller.
+  List<String> _args(String prompt, String workspace, String outputFormat,
+      {bool verbose = false}) {
+    final m = model;
     return [
       '-p',
       prompt,
+      if (m != null) ...['--model', m],
       '--output-format',
-      'stream-json',
-      '--verbose',
+      outputFormat,
+      if (verbose) '--verbose',
       '--dangerously-skip-permissions',
       '--add-dir',
       workspace,
@@ -173,18 +183,13 @@ class ClaudeBackend extends RunnerBackend {
   }
 
   @override
-  List<String> textArgs(String prompt, String workspace) {
-    // Prompt before --add-dir (variadic) — see streamArgs.
-    return [
-      '-p',
-      prompt,
-      '--output-format',
-      'text',
-      '--dangerously-skip-permissions',
-      '--add-dir',
-      workspace,
-    ];
-  }
+  List<String> streamArgs(String prompt, String workspace,
+          {bool partial = true}) =>
+      _args(prompt, workspace, 'stream-json', verbose: true);
+
+  @override
+  List<String> textArgs(String prompt, String workspace) =>
+      _args(prompt, workspace, 'text');
 
   @override
   List<String>? statusArgs() => null; // Claude Code has no `status` verb.

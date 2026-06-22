@@ -66,7 +66,10 @@ claude_token_ok() {
 if [ "$PREF" = claude ] || { [ "$PREF" = auto ] && claude_token_ok; }; then
   export ADF_RUNNER=claude
   export ADF_CLAUDE_PATH="$CLAUDE_BIN"
-  RUNNER_DESC="Claude Code subscription (Opus, \$0/token) — most efficient"
+  # The subscription CLI defaults to Sonnet — pin Opus so builds use the model
+  # the user asked for. Override with ADF_RUNNER_CLAUDE_MODEL=sonnet|haiku|<id>.
+  export ADF_RUNNER_CLAUDE_MODEL="${ADF_RUNNER_CLAUDE_MODEL:-opus}"
+  RUNNER_DESC="Claude Code subscription (model=$ADF_RUNNER_CLAUDE_MODEL, \$0/token) — most efficient"
 else
   export ADF_RUNNER=custom
   export ADF_RUNNER_BIN="$FW/scripts/orch/agent_runner_headroom.sh"

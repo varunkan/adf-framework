@@ -22,6 +22,28 @@ void main() {
       expect(args, isNot(contains('--print')));
     });
 
+    test('claude pins --model (before the variadic --add-dir) when set', () {
+      final b = _OpusClaude();
+      final args = b.streamArgs('hi', '/repo');
+      final mi = args.indexOf('--model');
+      expect(mi, greaterThanOrEqualTo(0), reason: 'must pass --model when pinned');
+      expect(args[mi + 1], 'opus');
+      expect(mi < args.indexOf('--add-dir'), isTrue,
+          reason: '--model must precede the variadic --add-dir');
+      expect(args[1], 'hi', reason: 'prompt still sits right after -p');
+      // textArgs carries the model too (no --verbose there).
+      final t = _OpusClaude().textArgs('hi', '/repo');
+      expect(t, containsAllInOrder(['--model', 'opus']));
+      expect(t, isNot(contains('--verbose')));
+    });
+
+    test('claude omits --model when unset (uses CLI default)', () {
+      // No ADF_RUNNER_CLAUDE_MODEL in the test env → no --model flag.
+      final args = ClaudeBackend().streamArgs('hi', '/repo');
+      expect(args, isNot(contains('--model')));
+      expect(args[1], 'hi');
+    });
+
     test('claude builds app directly (real prompt); custom uses ADF protocol', () {
       expect(ClaudeBackend().buildsAppDirectly, isTrue,
           reason: 'Claude Code writes files via its own tools — needs a real prompt');
@@ -51,6 +73,13 @@ void main() {
           reason: 'default/auto resolution must fall back to custom, not cursor');
     });
   });
+}
+
+/// Pins a model without mutating the process env, so --model placement can be
+/// asserted deterministically.
+class _OpusClaude extends ClaudeBackend {
+  @override
+  String? get model => 'opus';
 }
 
 /// Test shim that overrides the env-derived template so the expansion logic can
