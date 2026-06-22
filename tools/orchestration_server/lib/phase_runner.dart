@@ -41,16 +41,16 @@ class PhaseRunner {
     _traces = TraceWriter(store.repoRoot);
   }
 
-  /// Outer self-heal attempts the Dart layer makes after a runner failure. The
-  /// file-writing runner ALREADY self-heals internally (ADF_RUNNER_FIX_ITERS,
-  /// default 3), so a hardcoded 3 here meant up to ~9 cold rebuilds per phase.
-  /// Configurable via ORCH_MAX_HEAL_ATTEMPTS; the local-LLM launcher now defaults
-  /// it to 3 (matching the hardcoded fallback) so a transient runner failure
-  /// retries instead of giving up after one attempt — see the "build stopped
-  /// after 1 attempt" fix in run_server_local_llm.sh.
+  /// Outer self-heal attempts the Dart layer makes after a runner failure.
+  /// RELENTLESS by design — the north star is "embrace failure and keep fighting
+  /// until the app is actually green", so the default is generous (12) rather
+  /// than the old 3 that gave up while a fixable build was one diagnosis away.
+  /// Each attempt is diagnosis-driven (see [_healPrompt]); on a $0/token
+  /// subscription runner the cost of fighting on is just wall-clock. Tune via
+  /// ORCH_MAX_HEAL_ATTEMPTS (0 = never retry; set very high for unattended runs).
   int get maxHealAttempts {
     final raw = int.tryParse(_env['ORCH_MAX_HEAL_ATTEMPTS']?.trim() ?? '');
-    return raw != null && raw >= 0 ? raw : 3;
+    return raw != null && raw >= 0 ? raw : 12;
   }
 
   /// The "fixing and retrying (attempt N of M)" line — or null when attempts are
@@ -60,6 +60,18 @@ class PhaseRunner {
     if (healSoFar >= maxAttempts) return null;
     return 'Build hit a problem — fixing and retrying automatically '
         '(attempt ${healSoFar + 1} of $maxAttempts)…';
+  }
+
+  /// Parse `python -m unittest -v` output into (count, passed). Pure → testable.
+  /// unittest prints "Ran N tests" then a trailing "OK" (success) or
+  /// "FAILED (…)" / "ERROR" (failure); a run that crashes before any test has
+  /// exitCode != 0 and is never "passed".
+  static ({int count, bool passed}) parseUnittestResult(
+      String output, int exitCode) {
+    final m = RegExp(r'Ran (\d+) test').firstMatch(output);
+    final count = int.tryParse(m?.group(1) ?? '') ?? 0;
+    final failed = RegExp(r'^(FAILED|ERROR)', multiLine: true).hasMatch(output);
+    return (count: count, passed: exitCode == 0 && count > 0 && !failed);
   }
 
   final FeatureStore store;
@@ -691,6 +703,66 @@ class PhaseRunner {
   static const int contextBudgetWarnTokens = 400;
   static const int contextBudgetHardCapTokens = 800;
 
+  /// Run the built app's unit tests OURSELVES (stdlib/python stack) and return
+  /// (count, passed) — or null when there are no tests to run. ADF verifying the
+  /// tests is what lets the pipeline advance honestly (never the agent's claim).
+  Future<({int count, bool passed})?> _runAppTests(String appDir) async {
+    final dir = Directory(appDir);
+    if (!dir.existsSync()) return null;
+    final hasPyTests = dir.listSync().any((e) {
+      final n = e.uri.pathSegments.where((s) => s.isNotEmpty).last;
+      return n.startsWith('test_') && n.endsWith('.py');
+    });
+    if (!hasPyTests) return null;
+    try {
+      final r = await Process.run('python3', const ['-m', 'unittest', '-v'],
+              workingDirectory: appDir)
+          .timeout(const Duration(seconds: 180));
+      return parseUnittestResult('${r.stdout}\n${r.stderr}', r.exitCode);
+    } catch (_) {
+      return (count: 0, passed: false);
+    }
+  }
+
+  /// After a one-shot agentic build (buildsAppDirectly), advance the gated
+  /// pipeline to match the VERIFIED app: ADF runs the tests; on green it marks
+  /// the implementation gates the agentic build subsumed (plan→tests_green) and
+  /// moves to phase 7, so the pipeline stops contradicting the working app. A
+  /// `build_mode: agentic_direct` marker records that those phases were done
+  /// holistically by the agent rather than as separate artifacts.
+  ///
+  /// Returns true only when ADF itself verified the tests are green. A false
+  /// return means the caller must engage the relentless heal loop instead of
+  /// going quietly idle on a build whose tests don't pass.
+  Future<bool> _reconcileDirectBuild(String featureId) async {
+    final res = await _runAppTests('${store.repoRoot}/apps/$featureId');
+    final state = store.readState(featureId);
+    if (res != null && res.passed) {
+      for (final p in const [3, 4, 5, 6, 7]) {
+        store.setGateForPhase(state, p, true);
+      }
+      final cur = (state['current_phase'] as num?)?.toInt() ?? 0;
+      if (cur < 7) state['current_phase'] = 7;
+      state['build_mode'] = 'agentic_direct';
+      store.writeState(featureId, state);
+      store.appendSystemMessage(
+        featureId,
+        'ADF verified the build: ${res.count} tests, all passing. '
+        'Implementation is complete — pipeline advanced to phase 7 (tests green).',
+      );
+      return true;
+    }
+    final detail = res == null
+        ? 'no runnable tests found in the app'
+        : '${res.count} tests ran, not all green';
+    store.appendSystemMessage(
+      featureId,
+      'ADF ran the build’s tests itself — NOT green ($detail). '
+      'Self-healing: diagnosing the failure and driving it to green…',
+    );
+    return false;
+  }
+
   /// The build instruction handed to a coding-agent backend (Claude Code), which
   /// builds files via its own tools. Points it at the verified spec and tells it to
   /// write + self-test a runnable app under apps/<id>/. (agent_runner.py instead
@@ -974,6 +1046,16 @@ class PhaseRunner {
 
       _postSync.syncAfterRun(featureId, phase);
 
+      // buildsAppDirectly (Claude/Opus one-shot): the agent wrote the entire app,
+      // but the gated pipeline does not advance on its own — leaving it frozen at
+      // the kickoff phase while a working app exists. Reconcile against the BUILT
+      // APP, verifying the tests OURSELVES (never trust the agent's "tests pass",
+      // per B2/B3) before advancing.
+      var directBuildGreen = false;
+      if (_health.backend.buildsAppDirectly && code == 0) {
+        directBuildGreen = await _reconcileDirectBuild(featureId);
+      }
+
       final after = store.readState(featureId);
       final nowAwaiting = after['awaiting_user'] == true;
       final verdict = after['last_judge_verdict'] as String?;
@@ -982,19 +1064,30 @@ class PhaseRunner {
       // and the chat stop contradicting reality ("tests passed" while blocked).
       final gatesAfter = after['gates'] as Map<String, dynamic>? ?? {};
       final testsGreen = gatesAfter['tests_green'] == true;
+      // RELENTLESS: a direct (Claude/Opus) build that finished but whose tests
+      // ADF could not verify green must ENGAGE the heal loop (status=error →
+      // poller heals), not go quietly idle on a half-built app.
+      final directBuildNeedsHeal =
+          _health.backend.buildsAppDirectly && code == 0 && !directBuildGreen;
       final testsFailedAtImpl = phase >= 7 && !nowAwaiting && !testsGreen;
       store.writeRunStatus(featureId, {
         'status': nowAwaiting
             ? 'awaiting_approval'
-            : (testsFailedAtImpl ? 'blocked' : 'idle'),
+            : directBuildNeedsHeal
+                ? 'error' // engage the relentless heal loop, keep fighting to green
+                : (testsFailedAtImpl ? 'blocked' : 'idle'),
         'agent_active': false,
         'phase': phase,
         'finished_at': DateTime.now().toUtc().toIso8601String(),
         'exit_code': code,
-        'error': testsFailedAtImpl
-            ? 'Build ran but tests are not green at phase $phase'
+        'error': directBuildNeedsHeal
+            ? 'Built app tests are not green yet — self-healing'
+            : (testsFailedAtImpl
+                ? 'Build ran but tests are not green at phase $phase'
+                : null),
+        'error_code': (directBuildNeedsHeal || testsFailedAtImpl)
+            ? 'tests_not_green'
             : null,
-        'error_code': testsFailedAtImpl ? 'tests_not_green' : null,
         if (verdict != null) 'last_judge_verdict': verdict,
       });
       _traces.append(
@@ -1205,14 +1298,51 @@ Instructions:
     }
   }
 
+  /// A rich failure diagnosis for the heal prompt: the caller's error PLUS the
+  /// tail of the last build output (where the traceback / failing assertions
+  /// live), so the agent root-causes instead of blind-regenerating.
+  String _healDiagnosis(String featureId, String error) {
+    final b = StringBuffer()..writeln(error.trim());
+    final last = store.readLastAgentResponse(featureId);
+    if (last != null && last.trim().isNotEmpty) {
+      final tail =
+          last.length > 1800 ? last.substring(last.length - 1800) : last;
+      b
+        ..writeln('\n--- tail of the last build output ---')
+        ..writeln(tail.trim());
+    }
+    return b.toString().trim();
+  }
+
   String _healPrompt(String featureId, int phase, String error, int attempt) {
+    final diagnosis = _healDiagnosis(featureId, error);
+    // CRITICAL: a buildsAppDirectly backend (Claude/Opus) CANNOT parse
+    // `@orch-orchestrator` — feeding it that control command was a no-op that
+    // burned a heal attempt. Hand it a real fix prompt with the actual failure
+    // and a concrete verify command so each attempt is diagnosis-driven.
+    if (_health.backend.buildsAppDirectly) {
+      return '''
+SELF-HEAL attempt $attempt of $maxHealAttempts — the build of `apps/$featureId` is not all-green yet. Keep fighting; do NOT start over and do NOT weaken, skip, or delete tests.
+
+What went wrong last time:
+$diagnosis
+
+Fix it, methodically:
+1. Read the existing app in `apps/$featureId/` (server.py, domain.py, test_app.py, …) and the spec in `specs/$featureId/`.
+2. Re-run `python3 -m unittest -v` in `apps/$featureId/` and READ the actual failing assertions / tracebacks — find the ROOT CAUSE, do not guess.
+3. Apply the smallest change that makes the failing tests pass while keeping every existing test passing.
+4. Re-run the tests and iterate until it prints `OK` with 0 failures and 0 errors.
+5. Confirm the app still boots: `python3 server.py` must start and serve `GET /`.
+Finish with one line: the final test count, e.g. "30 tests, all passing".
+''';
+    }
     return '''
 @orch-orchestrator resume $featureId
 
 AUTOMATED SELF-HEAL ($attempt/$maxHealAttempts): Orchestration runner failed on phase $phase.
 
 Error:
-$error
+$diagnosis
 
 Instructions:
 1. Diagnose root cause (do not weaken tests or gates)
