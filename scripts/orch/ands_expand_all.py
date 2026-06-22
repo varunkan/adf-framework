@@ -120,22 +120,37 @@ def kick():
     return http("POST", f"/features/{ID}/run", {})
 
 
-def wait_green(start_finished):
-    """Poll until ADF reconciles a fresh build to tests_green, or it blocks."""
+def _settled(status):
+    # The build agent is NOT actively working (safe to run the suite as truth).
+    return status in ("idle", "awaiting_approval", "blocked", None)
+
+
+def wait_green(prev_count):
+    """Poll until the build SETTLES, then let the ACTUAL test suite decide.
+
+    The gate+finished_at heuristic missed the green window and burned the full
+    budget on false timeouts. The real suite is the only truth (B2/B3): a slice
+    is green when the build is settled AND `python3 -m unittest` passes with at
+    least as many tests as before (additive — coverage only grows)."""
     deadline = time.time() + SLICE_BUDGET_SEC
+    stable = 0
     while time.time() < deadline:
         time.sleep(POLL)
-        rs = load(RUNST)
-        st = load(STATE)
-        status = rs.get("status")
-        green = (st.get("gates", {}) or {}).get("tests_green") is True
-        finished = rs.get("finished_at")
-        fresh = finished and finished != start_finished
+        status = load(RUNST).get("status")
+        if not _settled(status):
+            stable = 0
+            continue
+        stable += 1
+        if stable < 2:        # 2 consecutive settled polls → not a mid-heal blip
+            continue
+        n, ok = ntests()
+        if ok and n >= prev_count:
+            return ("green", n)
         if status == "blocked":
-            return "blocked"
-        if fresh and status in ("idle", "awaiting_approval") and green:
-            return "green"
-    return "timeout"
+            return ("blocked", n)
+        # settled, not green, not blocked → the relentless loop will re-kick; wait
+    n, ok = ntests()
+    return (("green", n) if ok and n >= prev_count else ("timeout", n))
 
 
 def ntests():
@@ -151,31 +166,43 @@ def ntests():
         return (0, False)
 
 
+def wait_idle(budget=1800):
+    """Resume cleanly after an interruption: never start kicking while a prior
+    build is still in flight (the campaign supervisor may relaunch us mid-build)."""
+    deadline = time.time() + budget
+    while time.time() < deadline:
+        if _settled(load(RUNST).get("status")):
+            return
+        time.sleep(POLL)
+
+
 def main():
     ledger = load(LEDGER, {"done": [], "log": []})
     print(f"[driver] ANDS expansion — {len(SLICES)} slices, base={BASE}", flush=True)
+    wait_idle()  # interruption-safe resume: let any in-flight build settle first
+    print(f"[driver] server settled; resuming with done={ledger.get('done')}", flush=True)
     for name, desc, rids in SLICES:
         if name in ledger["done"]:
             print(f"[driver] SKIP {name} (already done)", flush=True)
             continue
         print(f"\n[driver] === SLICE {name}: {desc} ({len(rids)} reqs) ===", flush=True)
-        outcome = None
+        prev_count, _ = ntests()
+        outcome, n = None, prev_count
         for attempt in range(1, SLICE_RETRIES + 2):
             write_scope(name, desc, rids)
-            start_finished = load(RUNST).get("finished_at")
             kick()
-            print(f"[driver] kicked build for {name} (attempt {attempt})", flush=True)
-            outcome = wait_green(start_finished)
-            print(f"[driver] {name} attempt {attempt} -> {outcome}", flush=True)
+            print(f"[driver] kicked build for {name} (attempt {attempt}, from {prev_count} tests)", flush=True)
+            outcome, n = wait_green(prev_count)
+            print(f"[driver] {name} attempt {attempt} -> {outcome} ({n} tests)", flush=True)
             if outcome == "green":
                 break
             # relentless: reset heal and try the slice again
             set_state(status="active", heal_attempts=0)
             time.sleep(5)
-        n, ok = ntests()
-        rec = {"slice": name, "outcome": outcome, "tests": n, "tests_ok": ok}
+        n2, ok = ntests()
+        rec = {"slice": name, "outcome": outcome, "tests": n2, "delta": n2 - prev_count, "tests_ok": ok}
         ledger["log"].append(rec)
-        if outcome == "green":
+        if outcome == "green" and ok:
             ledger["done"].append(name)
         json.dump(ledger, open(LEDGER, "w"), indent=2)
         # compaction at every phase
