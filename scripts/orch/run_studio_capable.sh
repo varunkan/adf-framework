@@ -32,10 +32,38 @@ export ORCH_NVIDIA_MODEL_BALANCED="$NEMOTRON"
 #   2. else the custom runner (agent_runner.py): Anthropic API Opus when ADF_USE_OPUS=1
 #      + credits, otherwise the free NVIDIA Nemotron Super 49B.
 # Override the auto-pick with ADF_RUNNER_PREF=claude|custom.
-CLAUDE_BIN="$HOME/Library/Application Support/Claude/claude-code/2.1.181/claude.app/Contents/MacOS/claude"
+# Discover the claude binary WITHOUT pinning a version: explicit override
+# ($ADF_CLAUDE_PATH) -> PATH -> the newest installed Claude Code app bundle. This
+# survives Claude Code upgrades (2.1.181 -> 2.2+ -> …) on a fresh checkout. A
+# missing binary is fine — the token probe below fails closed and we fall back to
+# the custom runner.
+CLAUDE_BIN="${ADF_CLAUDE_PATH:-}"
+if [ -z "$CLAUDE_BIN" ] || [ ! -x "$CLAUDE_BIN" ]; then
+  CLAUDE_BIN="$(command -v claude 2>/dev/null || true)"
+fi
+if [ -z "$CLAUDE_BIN" ] || [ ! -x "$CLAUDE_BIN" ]; then
+  CLAUDE_BIN="$(ls -t "$HOME/Library/Application Support/Claude/claude-code/"*/claude.app/Contents/MacOS/claude 2>/dev/null | head -1 || true)"
+fi
 PREF="${ADF_RUNNER_PREF:-auto}"
-if { [ "$PREF" = auto ] && [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -x "$CLAUDE_BIN" ]; } \
-   || [ "$PREF" = claude ]; then
+
+# Auth-probe the subscription token in a CLEAN env (the way the runner invokes
+# claude). A token that is merely PRESENT but expired/revoked returns
+# "401 Invalid bearer token" — picking it would silently brick every build. Only
+# trust the claude runner if the probe actually authenticates. Skipped when the
+# operator forces PREF=claude (then we trust their choice) or there is no token.
+claude_token_ok() {
+  [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -x "$CLAUDE_BIN" ] || return 1
+  local out
+  out="$(env -i HOME="$HOME" PATH="$PATH" TERM=dumb \
+        CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" \
+        "$CLAUDE_BIN" -p "Reply with exactly: AUTH_OK" --output-format text 2>&1)" || true
+  case "$out" in
+    *AUTH_OK*) return 0;;
+    *) echo "  (subscription token rejected: ${out%%$'\n'*} — falling back)" >&2; return 1;;
+  esac
+}
+
+if [ "$PREF" = claude ] || { [ "$PREF" = auto ] && claude_token_ok; }; then
   export ADF_RUNNER=claude
   export ADF_CLAUDE_PATH="$CLAUDE_BIN"
   RUNNER_DESC="Claude Code subscription (Opus, \$0/token) — most efficient"
