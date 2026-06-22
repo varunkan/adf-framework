@@ -697,8 +697,25 @@ class PhaseRunner {
   /// gets the `@orch-orchestrator` command, which only it understands.)
   String _buildAgentBuildPrompt(String featureId) {
     final specDir = 'specs/$featureId';
+    // A focused MVP scope file BOUNDS the build: when present it is authoritative
+    // and the agent must build ONLY that slice (the full spec is reference for
+    // detail). Without it, a large spec makes a single build pass run past the
+    // timeout — exactly what happened on the 91-requirement ANDS spec.
+    final hasMvp = File('$repoRoot/$specDir/mvp-scope.md').existsSync();
+    final scopeBlock = hasMvp
+        ? '0. SCOPE — AUTHORITATIVE. Build EXACTLY this slice and nothing beyond it; '
+            'treat the full spec below as reference detail only:\n'
+            '   - $specDir/mvp-scope.md\n\n'
+        : '';
+    final implLine = hasMvp
+        ? '   - Implement the CORE DOMAIN LOGIC named in mvp-scope.md for real, not stubs '
+            '(use the full spec for the exact rule details). Do NOT expand beyond the MVP scope.\n'
+        : '   - Implement the CORE DOMAIN LOGIC for real, not stubs — especially the rules in the spec '
+            '(for this ANDS/eCTD portal: dossier-ID validation, the eCTD validation rules, sequence/lifecycle, '
+            'REP identifiers, CESG packaging model). Prioritize MUST requirements; COULD items may be scoped down.\n';
     return 'You are the ADF build agent. Build a complete, runnable, well-tested '
         'application for the feature "$featureId" in THIS repository.\n\n'
+        '$scopeBlock'
         '1. READ THE SPEC FIRST (authoritative):\n'
         '   - $specDir/requirements.md      (verified EARS requirements — implement the MUST items)\n'
         '   - $specDir/problem-statement.md (vision, screens, workflows, integration design)\n'
@@ -708,9 +725,7 @@ class PhaseRunner {
         '   - Python 3 standard library ONLY (http.server, json, sqlite3, unittest, html). '
         'No pip installs, no external packages, no outbound network — it must run with `python3 server.py`.\n'
         '   - server.py: an HTTP server exposing a JSON API and serving a single-page HTML/JS UI.\n'
-        '   - Implement the CORE DOMAIN LOGIC for real, not stubs — especially the rules in the spec '
-        '(for this ANDS/eCTD portal: dossier-ID validation, the eCTD validation rules, sequence/lifecycle, '
-        'REP identifiers, CESG packaging model). Prioritize MUST requirements; COULD items may be scoped down.\n'
+        '$implLine'
         '   - test_app.py: a unittest suite covering the core domain logic AND the API endpoints.\n'
         '   - README.md: how to run it.\n\n'
         '3. VERIFY YOURSELF — do NOT finish with failing tests:\n'
