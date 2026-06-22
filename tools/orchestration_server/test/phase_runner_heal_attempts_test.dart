@@ -43,6 +43,28 @@ void main() {
     expect(PhaseRunner.retryNarration(0, 0), isNull);
   });
 
+  group('interruption resilience (orphaned-run watchdog)', () {
+    test('staleRunSec defaults to 180, honors env, 0 disables', () {
+      expect(runnerWith(<String, String>{}).staleRunSec, 180);
+      expect(runnerWith({'ORCH_STALE_RUN_SEC': '60'}).staleRunSec, 60);
+      expect(runnerWith({'ORCH_STALE_RUN_SEC': '0'}).staleRunSec, 0);
+      expect(runnerWith({'ORCH_STALE_RUN_SEC': 'x'}).staleRunSec, 180);
+    });
+
+    test('maxOrphanResumes defaults to 8 and honors env', () {
+      expect(runnerWith(<String, String>{}).maxOrphanResumes, 8);
+      expect(runnerWith({'ORCH_MAX_ORPHAN_RESUMES': '3'}).maxOrphanResumes, 3);
+    });
+
+    test('ageSeconds measures staleness and tolerates junk/absent timestamps', () {
+      final now = DateTime.parse('2026-06-22T12:00:00Z');
+      expect(PhaseRunner.ageSeconds('2026-06-22T11:55:00Z', now), 300);
+      expect(PhaseRunner.ageSeconds('2026-06-22T12:00:00Z', now), 0);
+      expect(PhaseRunner.ageSeconds(null, now), isNull);
+      expect(PhaseRunner.ageSeconds('not-a-date', now), isNull);
+    });
+  });
+
   group('parseUnittestResult (ADF verifies tests itself, never trusts the agent)',
       () {
     test('a clean pass is recognized', () {

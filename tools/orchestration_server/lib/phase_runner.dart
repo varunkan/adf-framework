@@ -53,6 +53,33 @@ class PhaseRunner {
     return raw != null && raw >= 0 ? raw : 12;
   }
 
+  /// INTERRUPTION RESILIENCE. Seconds after which a non-terminal run that this
+  /// server process is NOT tracking (the orphan signature of a crash/restart) is
+  /// resumed from where it left off. 0 disables the watchdog. Tune via
+  /// ORCH_STALE_RUN_SEC.
+  int get staleRunSec {
+    final raw = int.tryParse(_env['ORCH_STALE_RUN_SEC']?.trim() ?? '');
+    return raw != null && raw >= 0 ? raw : 180;
+  }
+
+  /// Cap on automatic resumes of a repeatedly-interrupted run before it is marked
+  /// blocked for human attention — so a crash-looping run escalates, not spins.
+  int get maxOrphanResumes {
+    final raw = int.tryParse(_env['ORCH_MAX_ORPHAN_RESUMES']?.trim() ?? '');
+    return raw != null && raw > 0 ? raw : 8;
+  }
+
+  /// Age in seconds of an ISO-8601 timestamp relative to [now], or null if absent
+  /// / unparseable. Static → unit-testable without the wall clock.
+  static int? ageSeconds(String? iso, DateTime now) {
+    if (iso == null || iso.isEmpty) return null;
+    try {
+      return now.toUtc().difference(DateTime.parse(iso).toUtc()).inSeconds;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// The "fixing and retrying (attempt N of M)" line — or null when attempts are
   /// already exhausted and no retry will happen, so we never narrate a retry
   /// that won't occur (the "attempt 4 of 3" off-by-one).
@@ -1147,8 +1174,10 @@ class PhaseRunner {
             ? outcomeHead
             : '$outcomeHead\n\n${resultTail.length > 600 ? resultTail.substring(resultTail.length - 600) : resultTail}',
       );
-      if (((after['heal_attempts'] as num?)?.toInt() ?? 0) > 0) {
+      if (((after['heal_attempts'] as num?)?.toInt() ?? 0) > 0 ||
+          ((after['orphan_resumes'] as num?)?.toInt() ?? 0) > 0) {
         after['heal_attempts'] = 0;
+        after['orphan_resumes'] = 0; // a clean finish clears the interruption counter
         store.writeState(featureId, after);
       }
       return {
@@ -1211,12 +1240,64 @@ Instructions:
           if (h['ready'] == true) {
             unawaited(enqueue(id, phase: (run?['phase'] as num?)?.toInt()));
           }
+        } else if (staleRunSec > 0 &&
+            (status == 'running' || status == 'queued' || status == 'healing')) {
+          // Reaching here means run-status is non-terminal but this server is NOT
+          // tracking the run (it passed the _active/_healing guard above) — the
+          // orphan signature of a crash/restart that cut a build off mid-flight.
+          // Resume it from where it left off instead of leaving it stuck forever.
+          await _resumeOrphanedRun(id, run);
         }
       } catch (e) {
         stderr.writeln('self-heal: skipping feature $id — $e');
         continue;
       }
     }
+  }
+
+  /// Resume a run orphaned by an interruption (server crash/restart/kill). Only
+  /// acts once the run is genuinely STALE (so we never fight a run mid-handoff),
+  /// and escalates to blocked after [maxOrphanResumes] so a crash-looping run
+  /// gets human attention rather than spinning forever.
+  Future<void> _resumeOrphanedRun(String featureId, Map<String, dynamic>? run) async {
+    if (_userCancelled.contains(featureId)) return;
+    final ts = (run?['started_at'] ?? run?['queued_at'] ?? run?['finished_at'])
+        as String?;
+    final age = ageSeconds(ts, DateTime.now().toUtc());
+    if (age != null && age < staleRunSec) return; // not stale yet — leave it be
+
+    final phase = (run?['phase'] as num?)?.toInt() ?? _resolveRunPhase(featureId);
+    final state = store.readState(featureId);
+    final resumes = ((state['orphan_resumes'] as num?)?.toInt() ?? 0) + 1;
+    if (resumes > maxOrphanResumes) {
+      store.writeRunStatus(featureId, {
+        'status': 'blocked',
+        'phase': phase,
+        'error': 'Run was interrupted and resumed $maxOrphanResumes times without '
+            'completing — needs attention',
+        'error_code': 'orphan_resume_exhausted',
+        'recovery_steps': const [
+          'Check the server/runner logs for why the run keeps dying',
+          'Reset orphan_resumes in state.json and Retry',
+        ],
+      });
+      return;
+    }
+    state['orphan_resumes'] = resumes;
+    store.writeState(featureId, state);
+    store.appendSystemMessage(
+      featureId,
+      'Resuming an interrupted build — the previous run was cut off mid-flight '
+      '(resume #$resumes). Picking up from phase $phase; no progress is lost.',
+    );
+    _traces.append(
+      featureId: featureId,
+      name: 'runner.resume_orphan',
+      event: 'runner',
+      phase: phase,
+      message: 'Resuming interrupted run (#$resumes) from phase $phase',
+    );
+    unawaited(enqueue(featureId, phase: phase));
   }
 
   Future<void> _scheduleSelfHeal(
