@@ -53,6 +53,15 @@ class PhaseRunner {
     return raw != null && raw >= 0 ? raw : 3;
   }
 
+  /// The "fixing and retrying (attempt N of M)" line — or null when attempts are
+  /// already exhausted and no retry will happen, so we never narrate a retry
+  /// that won't occur (the "attempt 4 of 3" off-by-one).
+  static String? retryNarration(int healSoFar, int maxAttempts) {
+    if (healSoFar >= maxAttempts) return null;
+    return 'Build hit a problem — fixing and retrying automatically '
+        '(attempt ${healSoFar + 1} of $maxAttempts)…';
+  }
+
   final FeatureStore store;
   final Duration pollInterval;
   final RunnerHealth _health;
@@ -930,15 +939,15 @@ class PhaseRunner {
             'run. Complete the runner sign-in, then send your message again.',
           );
         } else {
-          final attempt =
-              ((store.readState(featureId)['heal_attempts'] as num?)?.toInt() ??
-                      0) +
-                  1;
-          store.appendSystemMessage(
-            featureId,
-            'Build hit a problem — fixing and retrying automatically '
-            '(attempt $attempt of $maxHealAttempts)…',
-          );
+          final healSoFar =
+              (store.readState(featureId)['heal_attempts'] as num?)?.toInt() ??
+                  0;
+          // Only narrate a retry that will ACTUALLY happen. Once attempts are
+          // exhausted, _scheduleSelfHeal emits the terminal "stopped after N
+          // attempts" message instead — narrating "attempt 4 of 3" here was the
+          // off-by-one the user saw.
+          final msg = retryNarration(healSoFar, maxHealAttempts);
+          if (msg != null) store.appendSystemMessage(featureId, msg);
           unawaited(_scheduleSelfHeal(featureId, phase, errorMsg, lastPrompt: prompt));
         }
         return {'success': false, 'exit_code': code, 'error': errText};

@@ -30,4 +30,16 @@ void main() {
     expect(runnerWith({'ORCH_MAX_HEAL_ATTEMPTS': '-2'}).maxHealAttempts, 3);
     expect(runnerWith({'ORCH_MAX_HEAL_ATTEMPTS': 'abc'}).maxHealAttempts, 3);
   });
+
+  test('retryNarration never announces a retry past the cap ("attempt 4 of 3")', () {
+    // Before each retry, healSoFar is the count already used.
+    expect(PhaseRunner.retryNarration(0, 3), contains('attempt 1 of 3'));
+    expect(PhaseRunner.retryNarration(1, 3), contains('attempt 2 of 3'));
+    expect(PhaseRunner.retryNarration(2, 3), contains('attempt 3 of 3'));
+    // Exhausted → no retry will happen → no narration (the off-by-one bug fix).
+    expect(PhaseRunner.retryNarration(3, 3), isNull);
+    expect(PhaseRunner.retryNarration(4, 3), isNull);
+    // Cap of 0 means never retry.
+    expect(PhaseRunner.retryNarration(0, 0), isNull);
+  });
 }

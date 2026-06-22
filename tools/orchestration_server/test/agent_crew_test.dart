@@ -179,4 +179,75 @@ void main() {
     expect(announce['assistant_reply'], contains('Captured requirements'),
         reason: 'the hold message must show WHAT will be built, for confirmation');
   });
+
+  // PHASE-SYNC: the chat announcement must never claim more than what landed on
+  // disk — the "conversation says phases 1-6 done, pipeline says plan" bug.
+  group('crew announcement honesty', () {
+    test('crewProgressSummary does NOT say "start implementation" when plan/tasks/tests are missing',
+        () {
+      // Exactly the ANDS state: requirements + spec exist, nothing else.
+      final s = AgentCrew.crewProgressSummary({
+        'requirements': true,
+        'spec': true,
+        'plan': false,
+        'tasks': false,
+        'tests': false,
+      });
+      expect(s, contains('Produced: requirements, spec'));
+      expect(s, contains('Still to do before implementation: plan, tasks, tests'));
+      expect(s, contains('approve to continue'));
+      expect(s, isNot(contains('approve to start implementation')),
+          reason: 'must not invite implementation when plan/tasks/tests do not exist');
+    });
+
+    test('crewProgressSummary invites implementation only when plan+tasks+tests exist',
+        () {
+      final s = AgentCrew.crewProgressSummary({
+        'requirements': true,
+        'spec': true,
+        'plan': true,
+        'tasks': true,
+        'tests': true,
+      });
+      expect(s, contains('approve to start implementation'));
+      expect(s, isNot(contains('Still to do')));
+    });
+
+    test('crewProgressSummary tells the user to reset when nothing persisted', () {
+      final s = AgentCrew.crewProgressSummary({
+        'requirements': false,
+        'spec': false,
+        'plan': false,
+        'tasks': false,
+        'tests': false,
+      });
+      expect(s, contains('nothing persisted'));
+      expect(s, contains('Reset & retry'));
+    });
+
+    test('crewDeliverables reflects on-disk truth (reproduces the ANDS case)', () {
+      final tmp = Directory.systemTemp.createTempSync('crew-deliv-');
+      addTearDown(() => tmp.deleteSync(recursive: true));
+      final specDir = Directory('${tmp.path}/specs/x')..createSync(recursive: true);
+      final appDir = '${tmp.path}/apps/x';
+      // Only requirements + spec land (non-trivial); plan/tasks/tests absent.
+      File('${specDir.path}/requirements.md').writeAsStringSync('x' * 500);
+      File('${specDir.path}/spec.md').writeAsStringSync('y' * 500);
+      final d = AgentCrew.crewDeliverables(specDir.path, appDir);
+      expect(d['requirements'], isTrue);
+      expect(d['spec'], isTrue);
+      expect(d['plan'], isFalse);
+      expect(d['tasks'], isFalse);
+      expect(d['tests'], isFalse);
+    });
+
+    test('crewDeliverables ignores a stub file below the non-trivial threshold', () {
+      final tmp = Directory.systemTemp.createTempSync('crew-deliv2-');
+      addTearDown(() => tmp.deleteSync(recursive: true));
+      final specDir = Directory('${tmp.path}/specs/x')..createSync(recursive: true);
+      File('${specDir.path}/plan.md').writeAsStringSync('TODO'); // < 200 bytes
+      final d = AgentCrew.crewDeliverables(specDir.path, '${tmp.path}/apps/x');
+      expect(d['plan'], isFalse, reason: 'a near-empty stub is not a real deliverable');
+    });
+  });
 }

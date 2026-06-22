@@ -482,25 +482,88 @@ class AgentCrew {
     return '\n\n**Captured requirements — confirm before I build:**\n$shown$more';
   }
 
+  /// Which crew deliverables actually landed on disk as non-trivial artifacts.
+  /// This is the SINGLE source of truth the chat announcement reads, so the chat
+  /// can never claim more progress than the pipeline gates reflect — the exact
+  /// divergence behind "conversation says phases 1-6 done, pipeline says plan".
+  static Map<String, bool> crewDeliverables(String specDir, String appDir) {
+    bool nonTrivial(String path, {int min = 200}) {
+      final f = File(path);
+      return f.existsSync() && f.lengthSync() >= min;
+    }
+
+    bool hasTests() {
+      final app = Directory(appDir);
+      if (app.existsSync()) {
+        for (final e in app.listSync()) {
+          final name =
+              e.uri.pathSegments.where((s) => s.isNotEmpty).last.toLowerCase();
+          if ((name.startsWith('test_') && name.endsWith('.py')) ||
+              name.endsWith('_test.dart') ||
+              name.endsWith('.test.js') ||
+              name.endsWith('.spec.ts')) return true;
+        }
+      }
+      final t = Directory('$specDir/tests');
+      return t.existsSync() && t.listSync().isNotEmpty;
+    }
+
+    return {
+      'requirements': nonTrivial('$specDir/requirements.md'),
+      'spec': nonTrivial('$specDir/spec.md'),
+      'plan': nonTrivial('$specDir/plan.md'),
+      'tasks': nonTrivial('$specDir/tasks.md'),
+      'tests': hasTests(),
+    };
+  }
+
+  /// Honest, reality-checked status lines for the crew announcement: what
+  /// actually landed, what is still pending, and a call-to-action that MATCHES
+  /// the pipeline gates — never "approve to start implementation" when plan,
+  /// tasks or tests do not exist on disk.
+  static String crewProgressSummary(Map<String, bool> d) {
+    const order = ['requirements', 'spec', 'plan', 'tasks', 'tests'];
+    final produced = order.where((k) => d[k] == true).toList();
+    final missing = order.where((k) => d[k] != true).toList();
+    final b = StringBuffer();
+    b.writeln('- Produced: '
+        '${produced.isEmpty ? '(nothing persisted)' : produced.join(', ')}');
+    if (missing.isNotEmpty) {
+      b.writeln('- Still to do before implementation: ${missing.join(', ')}');
+    }
+    final readyToImplement =
+        d['plan'] == true && d['tasks'] == true && d['tests'] == true;
+    if (readyToImplement) {
+      b.write('- Spec, plan & tests are ready — review and approve to start '
+          'implementation.');
+    } else if (d['requirements'] == true || d['spec'] == true) {
+      b.write('- Requirements & spec are ready to review. Plan, tasks and tests '
+          'still need to be generated — approve to continue (not yet at '
+          'implementation).');
+    } else {
+      b.write('- No usable artifacts were persisted — Reset & retry.');
+    }
+    return b.toString();
+  }
+
   void _announce(String id, Map<String, dynamic> summary) {
     final agents = summary['agents'] as List;
     final waves = summary['waves'] as List;
     final text = StringBuffer('**Multi-agent crew finished.**\n\n');
     for (final w in waves) {
-      text.writeln('- Wave: ${(w as List).join(' + ')}');
+      text.writeln('- Ran: ${(w as List).join(' + ')}');
     }
-    text
-      ..writeln('- ${agents.length} subagents, max parallelism '
-          '${summary['parallelism']}, ${summary['duration_ms']}ms total, '
-          'token cost: ${summary['token_cost']}')
-      ..writeln(switch (summary['stop_reason']) {
-        'implementation_handoff' =>
-          '- Next: phase 7 implementation against the red tests.',
-        'awaiting_approval' =>
-          '- Verified requirements & spec are ready — review and approve to '
-              'start implementation.',
-        _ => '- Blocked: ${(summary['blockers'] as List).join('; ')}',
-      });
+    text.writeln('- ${agents.length} subagents, max parallelism '
+        '${summary['parallelism']}, ${summary['duration_ms']}ms total, '
+        'token cost: ${summary['token_cost']}');
+    if (summary['stop_reason'] == 'blocked') {
+      text.writeln('- Blocked: ${(summary['blockers'] as List).join('; ')}');
+    } else {
+      // Reality-check the CTA against what actually landed on disk, so the chat
+      // and the pipeline phase view can never contradict each other.
+      text.writeln(crewProgressSummary(crewDeliverables(
+          '${store.repoRoot}/specs/$id', '${store.repoRoot}/apps/$id')));
+    }
     // G5/C6: when holding for approval, PRESENT the captured requirements so the
     // user can confirm WHAT will be built (the "it should have presented the
     // requirements" gap), not just that something is ready.
