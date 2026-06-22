@@ -779,6 +779,34 @@ class PhaseRunner {
             'treat the full spec below as reference detail only:\n'
             '   - $specDir/mvp-scope.md\n\n'
         : '';
+
+    // ADDITIVE EXPANSION: when an app already exists we are GROWING coverage
+    // slice-by-slice toward the full spec — never rebuilding from scratch, which
+    // shrinks coverage (the domain.py 40KB->128 lines regression). Coverage may
+    // only grow; every existing test must keep passing.
+    final appDir = Directory('$repoRoot/apps/$featureId');
+    final appExists = appDir.existsSync() &&
+        appDir.listSync().any((e) => e.path.endsWith('.py'));
+    if (appExists) {
+      return 'You are the ADF build agent. An application ALREADY EXISTS at '
+          'apps/$featureId/ and passes its current tests. EXTEND it to cover the '
+          'scope below — do NOT start over and do NOT rewrite it from scratch.\n\n'
+          '$scopeBlock'
+          '1. READ what already exists in apps/$featureId/ (server.py, domain.py, '
+          'test_app.py, README.md) and the spec in $specDir/ (requirements.md, '
+          'problem-statement.md, spec.md). Understand the current surface before changing it.\n\n'
+          '2. EXTEND ADDITIVELY — Python 3 standard library ONLY, must still run with `python3 server.py`:\n'
+          '   - ADD the new domain logic, API endpoints, UI, and tests required by the scope above, '
+          'implemented for REAL (no stubs).\n'
+          '   - KEEP every existing file, feature, endpoint, and test. NEVER delete, weaken, skip, or '
+          'shrink existing functionality or tests — coverage must only GROW.\n\n'
+          '3. VERIFY YOURSELF — the FULL suite (old + new) must be green:\n'
+          '   - Run: cd apps/$featureId && python3 -m unittest -v\n'
+          '   - Fix until ALL tests pass; confirm `python3 server.py` still boots and serves, then stop it.\n\n'
+          '4. FINISH with a short summary: what you ADDED and the final test count '
+          '(e.g. "grew from 30 to 47 tests, all passing").';
+    }
+
     final implLine = hasMvp
         ? '   - Implement the CORE DOMAIN LOGIC named in mvp-scope.md for real, not stubs '
             '(use the full spec for the exact rule details). Do NOT expand beyond the MVP scope.\n'
