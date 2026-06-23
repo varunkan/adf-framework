@@ -125,13 +125,17 @@ def _settled(status):
     return status in ("idle", "awaiting_approval", "blocked", None)
 
 
-def wait_green(prev_count):
-    """Poll until the build SETTLES, then let the ACTUAL test suite decide.
+def _gate_green():
+    # The server's tests_green gate is now AUTHORITATIVE: reconcile sets it only
+    # when unit tests pass AND the running-app UI verification is clean. So the
+    # driver trusts it rather than unit tests alone (which miss UI defects).
+    return (load(STATE).get("gates", {}) or {}).get("tests_green") is True
 
-    The gate+finished_at heuristic missed the green window and burned the full
-    budget on false timeouts. The real suite is the only truth (B2/B3): a slice
-    is green when the build is settled AND `python3 -m unittest` passes with at
-    least as many tests as before (additive — coverage only grows)."""
+
+def wait_green(prev_count):
+    """Poll until the build SETTLES, then trust the server's full gate (unit tests
+    AND the running-app UI verification). The driver does NOT run its own tests in
+    the loop — that races the gate's app boot on :8000 — it reads the gate."""
     deadline = time.time() + SLICE_BUDGET_SEC
     stable = 0
     while time.time() < deadline:
@@ -143,14 +147,12 @@ def wait_green(prev_count):
         stable += 1
         if stable < 2:        # 2 consecutive settled polls → not a mid-heal blip
             continue
-        n, ok = ntests()
-        if ok and n >= prev_count:
-            return ("green", n)
+        if _gate_green():
+            return ("green", ntests()[0])
         if status == "blocked":
-            return ("blocked", n)
-        # settled, not green, not blocked → the relentless loop will re-kick; wait
-    n, ok = ntests()
-    return (("green", n) if ok and n >= prev_count else ("timeout", n))
+            return ("blocked", ntests()[0])
+        # settled, gate not green, not blocked → the relentless loop is healing; wait
+    return (("green", ntests()[0]) if _gate_green() else ("timeout", ntests()[0]))
 
 
 def ntests():

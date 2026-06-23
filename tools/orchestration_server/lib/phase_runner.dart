@@ -758,27 +758,82 @@ class PhaseRunner {
   /// `build_mode: agentic_direct` marker records that those phases were done
   /// holistically by the agent rather than as separate artifacts.
   ///
-  /// Returns true only when ADF itself verified the tests are green. A false
+  /// Runtime UI/route verification of the BUILT app via scripts/orch/app_verify.py
+  /// — boots the app and checks the routes the UI calls AND (headless Chrome) the
+  /// browser console/network, the defects unit tests and the reviewer never saw.
+  /// Returns the defect list ([] = clean), or null when verification can't run.
+  Future<List<String>?> _runUiVerify(String featureId) async {
+    if ((_env['ADF_UI_VERIFY'] ?? '1') == '0') return null;
+    final script = '$repoRoot/scripts/orch/app_verify.py';
+    if (!File(script).existsSync()) return null;
+    try {
+      final r = await Process.run(
+              'python3', [script, '$repoRoot/apps/$featureId'],
+              workingDirectory: repoRoot)
+          .timeout(const Duration(seconds: 240));
+      final out = (r.stdout as String).trim();
+      if (out.isEmpty) return ['app_verify produced no output'];
+      final parsed = jsonDecode(out) as Map<String, dynamic>;
+      if (parsed['ok'] == true) return const [];
+      return ((parsed['defects'] as List?) ?? const [])
+          .map((e) => e.toString())
+          .toList();
+    } catch (e) {
+      // A harness failure must not be a silent pass — surface it as a defect.
+      return ['UI verification could not run: $e'];
+    }
+  }
+
+  /// Returns true only when ADF itself verified the app is green AND the RUNNING
+  /// app is defect-free (HTTP routes + headless-browser console/network). A false
   /// return means the caller must engage the relentless heal loop instead of
-  /// going quietly idle on a build whose tests don't pass.
+  /// going quietly idle on a build whose tests pass but whose UI is broken.
   Future<bool> _reconcileDirectBuild(String featureId) async {
     final res = await _runAppTests('${store.repoRoot}/apps/$featureId');
     final state = store.readState(featureId);
-    if (res != null && res.passed) {
+    final testsOk = res != null && res.passed;
+    // Unit tests are necessary but NOT sufficient — the running app must verify.
+    final uiDefects = testsOk ? await _runUiVerify(featureId) : null;
+    final uiClean = uiDefects == null || uiDefects.isEmpty;
+
+    if (testsOk && uiClean) {
       for (final p in const [3, 4, 5, 6, 7]) {
         store.setGateForPhase(state, p, true);
       }
       final cur = (state['current_phase'] as num?)?.toInt() ?? 0;
       if (cur < 7) state['current_phase'] = 7;
       state['build_mode'] = 'agentic_direct';
+      state.remove('ui_defects');
       store.writeState(featureId, state);
       store.appendSystemMessage(
         featureId,
-        'ADF verified the build: ${res.count} tests, all passing. '
-        'Implementation is complete — pipeline advanced to phase 7 (tests green).',
+        'ADF verified the build end-to-end: ${res.count} tests pass AND the '
+        'running app is clean (routes + browser console/network). Implementation '
+        'complete — pipeline advanced to phase 7.',
       );
       return true;
     }
+
+    // Any failed verification: clear tests_green so the gate reflects THIS build,
+    // never a stale green carried over from an earlier slice.
+    store.setGateForPhase(state, 7, false);
+
+    if (testsOk && !uiClean) {
+      // The blind spot the reviewer missed: tests green but the live UI errors.
+      state['ui_defects'] = uiDefects;
+      store.writeState(featureId, state);
+      final shown = uiDefects!.take(6).join('; ');
+      store.appendSystemMessage(
+        featureId,
+        'Tests pass (${res.count}) but the RUNNING APP has ${uiDefects.length} '
+        'UI/runtime defect(s) — not complete. Self-healing to fix them: $shown'
+        '${uiDefects.length > 6 ? ' …' : ''}',
+      );
+      return false;
+    }
+
+    state.remove('ui_defects');
+    store.writeState(featureId, state);
     final detail = res == null
         ? 'no runnable tests found in the app'
         : '${res.count} tests ran, not all green';
@@ -1412,6 +1467,16 @@ Instructions:
   /// live), so the agent root-causes instead of blind-regenerating.
   String _healDiagnosis(String featureId, String error) {
     final b = StringBuffer()..writeln(error.trim());
+    // The RUNNING-APP defects (routes + browser console/network) the UI gate
+    // found — the exact things to fix that unit tests never surface. Listed
+    // first because they are the most actionable.
+    final ui = (store.readState(featureId)['ui_defects'] as List?) ?? const [];
+    if (ui.isNotEmpty) {
+      b.writeln('\n--- RUNNING-APP defects to fix (from the UI verification gate) ---');
+      for (final d in ui.take(25)) {
+        b.writeln('• $d');
+      }
+    }
     final last = store.readLastAgentResponse(featureId);
     if (last != null && last.trim().isNotEmpty) {
       final tail =
@@ -1441,8 +1506,8 @@ Fix it, methodically:
 2. Re-run `python3 -m unittest -v` in `apps/$featureId/` and READ the actual failing assertions / tracebacks — find the ROOT CAUSE, do not guess.
 3. Apply the smallest change that makes the failing tests pass while keeping every existing test passing.
 4. Re-run the tests and iterate until it prints `OK` with 0 failures and 0 errors.
-5. Confirm the app still boots: `python3 server.py` must start and serve `GET /`.
-Finish with one line: the final test count, e.g. "30 tests, all passing".
+5. VERIFY THE RUNNING APP, not just the tests (this is the gate that was failing): boot `python3 server.py`, then in a browser/curl exercise the UI — load `/`, and for EVERY `/api/...` route the page's JS calls, confirm it responds without a 5xx or traceback; fix any "RUNNING-APP defect" listed above (e.g. a missing route the UI calls, a 404/500, a JS console error, a missing favicon). The browser console and network tab must be clean on load AND when buttons are clicked.
+Finish with one line: the final test count AND "running app verified clean".
 ''';
     }
     return '''
