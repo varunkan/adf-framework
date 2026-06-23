@@ -8,6 +8,15 @@
 # campaign level: a dead driver is simply restarted, not the end of the run.
 set -uo pipefail
 FW="$(cd "$(dirname "$0")/../.." && pwd)"
+
+# SLEEP RESILIENCE: re-exec the whole campaign under caffeinate so the Mac never
+# idle-sleeps mid-run (idle sleep suspended builds and burned the watchdog's
+# resume budget). One-shot guard so we don't fork caffeinate repeatedly.
+if [ "${ADF_NO_CAFFEINATE:-0}" != "1" ] && [ -z "${ANDS_CAFFEINATED:-}" ] && command -v caffeinate >/dev/null 2>&1; then
+  export ANDS_CAFFEINATED=1
+  exec caffeinate -i -d -m -s bash "$0" "$@"
+fi
+
 ID="${ANDS_FEATURE_ID:-ands-submission-portal}"
 LEDGER="$FW/.adf/orchestration/features/$ID/coverage-ledger.json"
 LOG="${ANDS_CAMPAIGN_LOG:-/tmp/ands-expand.log}"

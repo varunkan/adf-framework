@@ -111,4 +111,14 @@ export ORCH_PORT="${ORCH_PORT:-3847}"
 export ORCH_AUTO_APPROVE=false               # track M holds at every gate (you watch + approve)
 
 echo "ADF Studio: workhorse=$NEMOTRON | deep=$([ "$USE_OPUS" = 1 ] && echo 'Opus-4.8(ultra)' || echo "$NEMOTRON") | port $ORCH_PORT"
-exec "$FW/tools/orchestration_server/build/server-fix"
+
+# SLEEP RESILIENCE: a long unattended build must NOT be suspended when the Mac
+# idle-sleeps (display off). caffeinate holds the system, display, and disk awake
+# for as long as the server runs (-i idle, -d display, -m disk, -s on AC). Without
+# it, idle sleep froze in-flight builds and the watchdog churned its resume budget.
+# Disable with ADF_NO_CAFFEINATE=1.
+if [ "${ADF_NO_CAFFEINATE:-0}" != "1" ] && command -v caffeinate >/dev/null 2>&1; then
+  exec caffeinate -i -d -m -s "$FW/tools/orchestration_server/build/server-fix"
+else
+  exec "$FW/tools/orchestration_server/build/server-fix"
+fi
