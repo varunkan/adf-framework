@@ -764,23 +764,31 @@ class PhaseRunner {
   /// Returns the defect list ([] = clean), or null when verification can't run.
   Future<List<String>?> _runUiVerify(String featureId) async {
     if ((_env['ADF_UI_VERIFY'] ?? '1') == '0') return null;
-    final script = '$repoRoot/scripts/orch/app_verify.py';
+    // Run the whole TEST-AGENT ECOSYSTEM (registry-driven: ui-visual, accessibility,
+    // duplicate-components, security, functional, e2e, integration, black/white-box).
+    // Falls back to the standalone UI gate if the orchestrator isn't present.
+    final orchestrator = '$repoRoot/scripts/orch/run_test_agents.py';
+    final script = File(orchestrator).existsSync()
+        ? orchestrator
+        : '$repoRoot/scripts/orch/app_verify.py';
     if (!File(script).existsSync()) return null;
     try {
       final r = await Process.run(
               'python3', [script, '$repoRoot/apps/$featureId'],
               workingDirectory: repoRoot)
-          .timeout(const Duration(seconds: 660)); // full visual crawl takes minutes
+          .timeout(const Duration(seconds: 1200)); // ecosystem of agents takes minutes
       final out = (r.stdout as String).trim();
-      if (out.isEmpty) return ['app_verify produced no output'];
-      final parsed = jsonDecode(out) as Map<String, dynamic>;
+      if (out.isEmpty) return ['test-agent gate produced no output'];
+      final parsed =
+          jsonDecode(out.substring(out.indexOf('{'), out.lastIndexOf('}') + 1))
+              as Map<String, dynamic>;
       if (parsed['ok'] == true) return const [];
       return ((parsed['defects'] as List?) ?? const [])
           .map((e) => e.toString())
           .toList();
     } catch (e) {
       // A harness failure must not be a silent pass — surface it as a defect.
-      return ['UI verification could not run: $e'];
+      return ['test-agent verification could not run: $e'];
     }
   }
 

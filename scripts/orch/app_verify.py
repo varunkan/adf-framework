@@ -108,8 +108,10 @@ def _browser_defects(app_dir):
     blob = (r.stdout or "").strip()
     if not blob:
         return ["visual validation produced no output: " + (r.stderr or "")[-200:]]
+    # The validator prints one pretty-printed (multi-line) JSON object; parse the
+    # whole object (first '{' .. last '}'), not just the last line.
     try:
-        res = json.loads(blob.splitlines()[-1])
+        res = json.loads(blob[blob.index("{"): blob.rindex("}") + 1])
     except Exception:
         return ["visual validation output unparseable: " + blob[-200:]]
     # NOTE: lines are informational (caps/budget), not defects.
