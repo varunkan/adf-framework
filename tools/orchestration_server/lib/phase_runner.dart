@@ -770,7 +770,7 @@ class PhaseRunner {
       final r = await Process.run(
               'python3', [script, '$repoRoot/apps/$featureId'],
               workingDirectory: repoRoot)
-          .timeout(const Duration(seconds: 240));
+          .timeout(const Duration(seconds: 660)); // full visual crawl takes minutes
       final out = (r.stdout as String).trim();
       if (out.isEmpty) return ['app_verify produced no output'];
       final parsed = jsonDecode(out) as Map<String, dynamic>;

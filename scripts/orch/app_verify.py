@@ -83,26 +83,38 @@ def _http_defects():
     return defects
 
 
-def _browser_defects():
-    mjs = os.path.join(HERE, "browser_smoke.mjs")
-    if not os.path.exists(mjs):
-        return []
+def _browser_defects(app_dir):
+    """Full visual validation (visual_verify.mjs) — crawl every view + form on
+    desktop AND mobile, screenshot each, flag blank renders / on-screen error text
+    / JS exceptions / console.error / failed network calls. Falls back to the
+    lighter browser_smoke.mjs, then to nothing if node/Chrome is unavailable."""
     node = os.environ.get("ADF_NODE", "node")
+    visual = os.path.join(HERE, "visual_verify.mjs")
+    smoke = os.path.join(HERE, "browser_smoke.mjs")
+    if os.path.exists(visual):
+        shot = os.path.join(app_dir, ".adf-visual")
+        mjs, args, timeout = visual, [BASE + "/", shot], 600
+    elif os.path.exists(smoke):
+        mjs, args, timeout = smoke, [BASE + "/"], 120
+    else:
+        return []
     try:
-        r = subprocess.run([node, mjs, BASE + "/"], capture_output=True,
-                           text=True, timeout=120)
+        r = subprocess.run([node, mjs, *args], capture_output=True,
+                           text=True, timeout=timeout)
     except FileNotFoundError:
         return []  # node unavailable → skip browser layer (HTTP still gates)
     except subprocess.TimeoutExpired:
-        return ["browser smoke timed out (the page may hang)"]
+        return ["visual validation timed out (a view may hang)"]
     blob = (r.stdout or "").strip()
     if not blob:
-        return ["browser smoke produced no output: " + (r.stderr or "")[-200:]]
+        return ["visual validation produced no output: " + (r.stderr or "")[-200:]]
     try:
         res = json.loads(blob.splitlines()[-1])
     except Exception:
-        return ["browser smoke output unparseable: " + blob[-200:]]
-    return [] if res.get("ok", True) else res.get("defects", [])
+        return ["visual validation output unparseable: " + blob[-200:]]
+    # NOTE: lines are informational (caps/budget), not defects.
+    return [] if res.get("ok", True) else [
+        d for d in res.get("defects", []) if not str(d).startswith("NOTE:")]
 
 
 def verify(app_dir):
@@ -133,7 +145,7 @@ def verify(app_dir):
             return {"ok": False,
                     "defects": [f"server.py did not boot on :{PORT}. {log.strip()[:500]}"]}
         defects += _http_defects()
-        defects += _browser_defects()
+        defects += _browser_defects(app_dir)
     finally:
         try:
             os.killpg(os.getpgid(proc.pid), signal.SIGKILL)

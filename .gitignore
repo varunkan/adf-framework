@@ -54,3 +54,9 @@ apps/*/*.db
 .adf-keys/
 *.adf-signing.key
 adf-signing.key
+
+# local API keys for ADF (never commit)
+.adf/secrets.env
+
+# ADF visual-validation screenshots (evidence, regenerated each run)
+apps/*/.adf-visual/
