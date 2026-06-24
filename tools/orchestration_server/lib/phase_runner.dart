@@ -1362,6 +1362,26 @@ Instructions:
               (run?['phase'] as num?)?.toInt() ?? _resolveRunPhase(id);
           final err = run?['error'] as String? ?? 'unknown error';
           await _scheduleSelfHeal(id, phase, err);
+        } else if (status == 'idle') {
+          // RELENTLESS SAFETY NET: a build that went 'idle' but is NOT actually
+          // complete must never just sit there (some exit/resume paths leave an
+          // unfinished direct build idle instead of 'error'). Re-engage the heal
+          // loop so it keeps fighting to green — unless the user must act (an
+          // approval gate), the user cancelled, or the build is genuinely done.
+          if (_userCancelled.contains(id)) continue;
+          final st = store.readState(id);
+          if (st['awaiting_user'] == true) continue;
+          final gates = (st['gates'] as Map<String, dynamic>?) ?? const {};
+          final phase = (st['current_phase'] as num?)?.toInt() ??
+              (run?['phase'] as num?)?.toInt() ?? 0;
+          final complete = gates['review_approved'] == true ||
+              (gates['tests_green'] == true && phase >= 7);
+          if (!complete &&
+              _health.backend.buildsAppDirectly &&
+              phase >= 5) {
+            await _scheduleSelfHeal(
+                id, phase, 'build is idle but not complete — resuming the loop');
+          }
         } else if (status == 'needs_login') {
           final h = await getHealth(refresh: true);
           if (h['ready'] == true) {

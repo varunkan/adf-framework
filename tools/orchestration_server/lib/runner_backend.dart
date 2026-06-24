@@ -162,6 +162,16 @@ class ClaudeBackend extends RunnerBackend {
     return (m == null || m.isEmpty) ? null : m;
   }
 
+  /// Whether to load the project's MCP servers + settings/hooks into the headless
+  /// build agent. Default OFF: the ephemeral builder does NOT need the repo's
+  /// code-review knowledge-graph MCP, and loading it spawned a `code-review-graph
+  /// serve` child per agent and (because CLAUDE.md mandates calling its tools)
+  /// made the agent BLOCK at 0% CPU on a hung graph query / a slow PostToolUse
+  /// graph-update hook — the "claude is hanging" stall. Re-enable with
+  /// ADF_RUNNER_LOAD_PROJECT_MCP=1 if a build genuinely needs project MCP/hooks.
+  bool get _loadProjectMcp =>
+      (Platform.environment['ADF_RUNNER_LOAD_PROJECT_MCP']?.trim() ?? '0') == '1';
+
   /// Shared argv builder. Both `--model` (when set) and the VARIADIC `--add-dir`
   /// sit AFTER `-p <prompt>`, and `--add-dir` is kept LAST, so claude never
   /// mistakes the prompt for a flag value or swallows it as a directory
@@ -177,6 +187,16 @@ class ClaudeBackend extends RunnerBackend {
       outputFormat,
       if (verbose) '--verbose',
       '--dangerously-skip-permissions',
+      // Isolate the headless builder from project MCP + hooks (the hang source):
+      // load NO MCP servers and only user-level settings, so no graph-MCP child
+      // is spawned and no PostToolUse graph-update hook fires after every edit.
+      if (!_loadProjectMcp) ...[
+        '--strict-mcp-config',
+        '--mcp-config',
+        '{"mcpServers":{}}',
+        '--setting-sources',
+        'user',
+      ],
       '--add-dir',
       workspace,
     ];
