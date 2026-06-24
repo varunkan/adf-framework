@@ -43,6 +43,15 @@ def convert(value, direction):
     raise ValueError("'direction' must be 'm2f' or 'f2m'")
 
 
+# Minimal SVG favicon (a "⇄" conversion glyph) served at /favicon.ico so the
+# browser's implicit request doesn't 404.
+FAVICON_SVG = (
+    b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
+    b'<rect width="32" height="32" rx="6" fill="#2563eb"/>'
+    b'<text x="16" y="22" font-size="18" text-anchor="middle" '
+    b'fill="#fff" font-family="sans-serif">\xe2\x87\x84</text></svg>'
+)
+
 # Default decimal places for the general/JSON conversion responses.
 DEFAULT_PRECISION = 6
 MAX_PRECISION = 12
@@ -88,6 +97,17 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(html_bytes)
 
+    def _send_favicon(self):
+        # A tiny inline SVG so the browser's automatic /favicon.ico request
+        # resolves with 200 instead of a 404 console error.
+        body = FAVICON_SVG
+        self.send_response(200)
+        self.send_header("Content-Type", "image/svg+xml")
+        self.send_header("Cache-Control", "max-age=86400")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
         if self.path == "/" or self.path == "/index.html":
             try:
@@ -97,6 +117,9 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._send_json(500, {"error": "index.html not found"})
                 return
             self._send_html(200, html)
+            return
+        if self.path == "/favicon.ico" or self.path == "/favicon.svg":
+            self._send_favicon()
             return
         if self.path == "/api/health":
             self._send_json(200, {"status": "ok"})
@@ -391,6 +414,9 @@ class RequestHandler(BaseHTTPRequestHandler):
         if self.path == "/api/moving-average":
             self._handle_moving_average()
             return
+        if self.path == "/api/ema":
+            self._handle_ema()
+            return
         if self.path == "/api/covariance":
             self._handle_covariance()
             return
@@ -400,8 +426,23 @@ class RequestHandler(BaseHTTPRequestHandler):
         if self.path == "/api/regression":
             self._handle_regression()
             return
+        if self.path == "/api/theil-sen":
+            self._handle_theil_sen()
+            return
+        if self.path == "/api/spearman":
+            self._handle_spearman()
+            return
+        if self.path == "/api/kendall":
+            self._handle_kendall()
+            return
         if self.path == "/api/gini":
             self._handle_gini()
+            return
+        if self.path == "/api/entropy":
+            self._handle_entropy()
+            return
+        if self.path == "/api/trimmed-mean":
+            self._handle_trimmed_mean()
             return
         if self.path != "/api/convert":
             self._send_json(404, {"error": "not found"})
@@ -1378,6 +1419,42 @@ class RequestHandler(BaseHTTPRequestHandler):
             ],
         })
 
+    def _handle_ema(self):
+        """POST /api/ema — {items: [{value, unit}, ...], alpha?, span?, to?} ->
+        the exponential moving average (exponential smoothing) over each item on a
+        common unit. The smoothing factor is given as 'alpha' (in (0, 1]) OR as a
+        'span' (>= 1, mapped to alpha = 2/(span+1)); supply at most one, defaulting
+        to alpha 0.5. The exponentially-weighted, reactive companion to the simple
+        /api/moving-average. Additive: reuses ``domain.ema`` and never touches the
+        other convert paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        parsed = self._items_request(data)
+        if parsed is None:
+            return
+        items, to_unit, precision = parsed
+        # alpha and span are optional; the domain layer defaults/validates them
+        # and rejects supplying both.
+        try:
+            result = domain.ema(items, data.get("alpha"), data.get("span"), to_unit)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "category": result["category"],
+            "unit": result["unit"],
+            "count": result["count"],
+            "alpha": round(result["alpha"], precision),
+            "span": self._round_opt(result["span"], precision),
+            "items": [
+                {"index": r["index"],
+                 "value": round(r["value"], precision),
+                 "ema": round(r["ema"], precision)}
+                for r in result["items"]
+            ],
+        })
+
     def _handle_convert_delta(self):
         """POST /api/convert-delta — {value, from, to} -> an INTERVAL conversion
         (e.g. a 10 C change is an 18 F change, not 50 F). Additive: reuses
@@ -1498,6 +1575,112 @@ class RequestHandler(BaseHTTPRequestHandler):
             "mean_y": round(result["mean_y"], precision),
         })
 
+    def _handle_theil_sen(self):
+        """POST /api/theil-sen — {x:[{value,unit},...], y:[...], to_x?, to_y?}
+        -> the Theil--Sen robust linear fit y = slope*x + intercept of two paired
+        quantity series. The outlier-resistant companion to /api/regression
+        (ordinary least squares): the slope is the median of every pairwise slope
+        and the intercept the median of (y - slope*x), so up to ~29% of the data
+        can be corrupted without swinging the line. Additive: reuses
+        ``domain.theil_sen`` and never touches the convert paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        parsed = self._paired_request(data)
+        if parsed is None:
+            return
+        x, y, to_x, to_y, precision = parsed
+        try:
+            result = domain.theil_sen(x, y, to_x, to_y)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "x_category": result["x_category"],
+            "y_category": result["y_category"],
+            "x_unit": result["x_unit"],
+            "y_unit": result["y_unit"],
+            "count": result["count"],
+            "pairs": result["pairs"],
+            "used_pairs": result["used_pairs"],
+            "tied_pairs": result["tied_pairs"],
+            "slope": round(result["slope"], precision),
+            "intercept": round(result["intercept"], precision),
+            "median_x": round(result["median_x"], precision),
+            "median_y": round(result["median_y"], precision),
+            "mean_x": round(result["mean_x"], precision),
+            "mean_y": round(result["mean_y"], precision),
+        })
+
+    def _handle_spearman(self):
+        """POST /api/spearman — {x:[{value,unit},...], y:[...], to_x?, to_y?}
+        -> the (dimensionless) Spearman rank correlation coefficient of two
+        paired quantity series. The rank-based, monotonic-association companion
+        to /api/correlation (which reports the linear Pearson r): Spearman is
+        robust to outliers and invariant under any monotonic rescaling of either
+        series. Additive: reuses ``domain.spearman`` and never touches the
+        convert paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        parsed = self._paired_request(data)
+        if parsed is None:
+            return
+        x, y, to_x, to_y, precision = parsed
+        try:
+            result = domain.spearman(x, y, to_x, to_y)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "x_category": result["x_category"],
+            "y_category": result["y_category"],
+            "x_unit": result["x_unit"],
+            "y_unit": result["y_unit"],
+            "count": result["count"],
+            "mean_rank_x": round(result["mean_rank_x"], precision),
+            "mean_rank_y": round(result["mean_rank_y"], precision),
+            "has_ties": result["has_ties"],
+            "spearman": self._round_opt(result["spearman"], precision),
+        })
+
+    def _handle_kendall(self):
+        """POST /api/kendall — {x:[{value,unit},...], y:[...], to_x?, to_y?}
+        -> Kendall's tau-b rank correlation of two paired quantity series. The
+        third member of the paired-series correlation family alongside
+        /api/correlation (linear Pearson r) and /api/spearman (Pearson-on-ranks):
+        Kendall's tau is built from the concordant/discordant agreement of every
+        pair of observations, so like Spearman it is dimensionless, monotonic and
+        outlier-robust, but interpreted as a probability of concordance. Additive:
+        reuses ``domain.kendall`` and never touches the convert paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        parsed = self._paired_request(data)
+        if parsed is None:
+            return
+        x, y, to_x, to_y, precision = parsed
+        try:
+            result = domain.kendall(x, y, to_x, to_y)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "x_category": result["x_category"],
+            "y_category": result["y_category"],
+            "x_unit": result["x_unit"],
+            "y_unit": result["y_unit"],
+            "count": result["count"],
+            "pairs": result["pairs"],
+            "concordant": result["concordant"],
+            "discordant": result["discordant"],
+            "ties_x": result["ties_x"],
+            "ties_y": result["ties_y"],
+            "has_ties": result["has_ties"],
+            "tau_a": self._round_opt(result["tau_a"], precision),
+            "tau": self._round_opt(result["tau"], precision),
+        })
+
     def _handle_gini(self):
         """POST /api/gini — {items: [{value, unit}, ...], to?} -> the Gini
         inequality coefficient (in [0, 1]) of a list of same-category quantities,
@@ -1527,6 +1710,79 @@ class RequestHandler(BaseHTTPRequestHandler):
             "gini": round(result["gini"], precision),
             "rmad": round(result["rmad"], precision),
             "mean_abs_difference": round(result["mean_abs_difference"], precision),
+        })
+
+    def _handle_entropy(self):
+        """POST /api/entropy — {items: [{value, unit}, ...], to?} -> the Shannon
+        entropy (in nats and bits), the Pielou evenness (normalised entropy), the
+        Simpson concentration and Gini-Simpson diversity indices, and the
+        effective number of categories (Hill number) of a list of same-category
+        quantities treated as a distribution, restated in 'to' (or the first
+        item's unit). The information-theoretic diversity companion to /api/gini
+        (inequality) and /api/proportions (per-item share). Additive: reuses
+        ``domain.entropy_quantities`` and never touches the other convert
+        paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        parsed = self._items_request(data)
+        if parsed is None:
+            return
+        items, to_unit, precision = parsed
+        try:
+            result = domain.entropy_quantities(items, to_unit)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "category": result["category"],
+            "unit": result["unit"],
+            "count": result["count"],
+            "total": round(result["total"], precision),
+            "mean": round(result["mean"], precision),
+            "shannon": round(result["shannon"], precision),
+            "shannon_bits": round(result["shannon_bits"], precision),
+            "normalized_entropy": self._round_opt(
+                result["normalized_entropy"], precision),
+            "simpson": round(result["simpson"], precision),
+            "gini_simpson": round(result["gini_simpson"], precision),
+            "effective_count": round(result["effective_count"], precision),
+        })
+
+    def _handle_trimmed_mean(self):
+        """POST /api/trimmed-mean — {items: [{value, unit}, ...], proportion?, to?}
+        -> the robust trimmed and winsorized means of a list of same-category
+        quantities, restated in 'to' (or the first item's unit). 'proportion' is
+        the fraction trimmed from each tail (default 0.1, in [0, 0.5)). The
+        outlier-resistant location companion to /api/means (the classical means)
+        and /api/mad (robust spread). Additive: reuses ``domain.trimmed_mean`` and
+        never touches the other convert paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        parsed = self._items_request(data)
+        if parsed is None:
+            return
+        items, to_unit, precision = parsed
+        # proportion is optional; the domain layer defaults and validates it.
+        proportion = data.get("proportion", 0.1)
+        try:
+            result = domain.trimmed_mean(items, proportion, to_unit)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "category": result["category"],
+            "unit": result["unit"],
+            "count": result["count"],
+            "proportion": result["proportion"],
+            "trimmed_each_side": result["trimmed_each_side"],
+            "kept": result["kept"],
+            "mean": round(result["mean"], precision),
+            "trimmed_mean": round(result["trimmed_mean"], precision),
+            "winsorized_mean": round(result["winsorized_mean"], precision),
+            "lower": round(result["lower"], precision),
+            "upper": round(result["upper"], precision),
         })
 
 

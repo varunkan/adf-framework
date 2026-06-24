@@ -943,6 +943,58 @@ class TestLegacyHelpers(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
+# Requirements traceability — every functional REQ id from the spec is
+# exercised here so the coverage gate can trace spec -> test.
+#   REQ-001: convert between meters
+#   REQ-002: feet, both directions
+# (see specs/unit-converter-convert-between-2/spec.md)
+# --------------------------------------------------------------------------- #
+class TestRequirementsTraceability(unittest.TestCase):
+    """Traces each EARS requirement to a concrete, executed assertion."""
+
+    def test_req_001_meters_to_feet_happy(self):
+        """REQ-001 / TC-1.1 — the system converts a length expressed in meters
+        to feet (1 m == 3.280839895 ft)."""
+        self.assertAlmostEqual(server.meters_to_feet(1), 3.280839895, places=6)
+        result, unit = server.convert(2, "m2f")
+        self.assertAlmostEqual(result, 6.56167979, places=6)
+        self.assertEqual(unit, "ft")
+        # General domain path agrees with the legacy meters->feet helper.
+        domain_ft, _ = domain.convert_units(1, "m", "ft")
+        self.assertAlmostEqual(domain_ft,
+                               server.meters_to_feet(1), places=9)
+
+    def test_req_001_meters_edge_invalid(self):
+        """REQ-001 / TC-1.2 — an unknown source unit fails safe with an error."""
+        with self.assertRaises(ValueError):
+            domain.convert_units(1, "notaunit", "ft")
+
+    def test_req_002_feet_to_meters_happy(self):
+        """REQ-002 / TC-2.1 — feet convert back to meters (the reverse
+        direction): 10 ft == 3.048 m."""
+        self.assertAlmostEqual(server.feet_to_meters(10), 3.048, places=9)
+        result, unit = server.convert(10, "f2m")
+        self.assertAlmostEqual(result, 3.048, places=6)
+        self.assertEqual(unit, "m")
+        domain_m, _ = domain.convert_units(10, "ft", "m")
+        self.assertAlmostEqual(domain_m,
+                               server.feet_to_meters(10), places=9)
+
+    def test_req_002_both_directions_roundtrip(self):
+        """REQ-002 / TC-2.1 — both directions are supported and invert each
+        other: m -> ft -> m returns the original value."""
+        meters = 12.5
+        feet, _ = server.convert(meters, "m2f")
+        back, _ = server.convert(feet, "f2m")
+        self.assertAlmostEqual(back, meters, places=9)
+
+    def test_req_002_invalid_direction_edge(self):
+        """REQ-002 / TC-2.2 — an unsupported direction fails safe."""
+        with self.assertRaises(ValueError):
+            server.convert(1, "sideways")
+
+
+# --------------------------------------------------------------------------- #
 # Live HTTP API
 # --------------------------------------------------------------------------- #
 class TestHttpApi(unittest.TestCase):
@@ -4782,6 +4834,282 @@ class TestDomainLinearRegression(unittest.TestCase):
         self.assertIsNone(r["r_squared"])
 
 
+class TestDomainTheilSen(unittest.TestCase):
+    X = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+    Y = [{"value": v, "unit": "s"} for v in (2, 4, 6, 8, 10)]
+
+    def test_perfect_line(self):
+        r = domain.theil_sen(self.X, self.Y)
+        self.assertAlmostEqual(r["slope"], 2.0, places=9)
+        self.assertAlmostEqual(r["intercept"], 0.0, places=9)
+        self.assertEqual((r["x_unit"], r["y_unit"]), ("m", "s"))
+        self.assertEqual(r["count"], 5)
+
+    def test_intercept_and_slope(self):
+        # y = 3x + 1 over x = 0..3.
+        x = [{"value": v, "unit": "m"} for v in (0, 1, 2, 3)]
+        y = [{"value": 3 * v + 1, "unit": "s"} for v in (0, 1, 2, 3)]
+        r = domain.theil_sen(x, y)
+        self.assertAlmostEqual(r["slope"], 3.0, places=9)
+        self.assertAlmostEqual(r["intercept"], 1.0, places=9)
+
+    def test_pair_counts(self):
+        # n=5 -> 10 candidate pairs, all with distinct x (no ties).
+        r = domain.theil_sen(self.X, self.Y)
+        self.assertEqual(r["pairs"], 10)
+        self.assertEqual(r["used_pairs"], 10)
+        self.assertEqual(r["tied_pairs"], 0)
+
+    def test_robust_to_outlier(self):
+        # An OLS fit is dragged by a wild final point; Theil--Sen ignores it.
+        x = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+        y = [{"value": v, "unit": "s"} for v in (2, 4, 6, 8, 100)]
+        ts = domain.theil_sen(x, y)
+        ols = domain.linear_regression(x, y)
+        # The median pairwise slope stays near the clean slope of 2 ...
+        self.assertAlmostEqual(ts["slope"], 2.0, places=6)
+        # ... while least squares is pulled far above it by the outlier.
+        self.assertGreater(ols["slope"], ts["slope"] + 1.0)
+
+    def test_tied_x_pairs_skipped(self):
+        # Two points share x=1 (a vertical pair) -> one tied pair, still fits.
+        x = [{"value": v, "unit": "m"} for v in (1, 1, 2, 3)]
+        y = [{"value": v, "unit": "s"} for v in (1, 3, 4, 6)]
+        r = domain.theil_sen(x, y)
+        self.assertEqual(r["pairs"], 6)
+        self.assertEqual(r["tied_pairs"], 1)
+        self.assertEqual(r["used_pairs"], 5)
+
+    def test_medians_reported(self):
+        r = domain.theil_sen(self.X, self.Y)
+        self.assertAlmostEqual(r["median_x"], 3.0, places=9)
+        self.assertAlmostEqual(r["median_y"], 6.0, places=9)
+
+    def test_negative_slope(self):
+        x = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)]
+        y = [{"value": v, "unit": "s"} for v in (8, 6, 4, 2)]
+        r = domain.theil_sen(x, y)
+        self.assertAlmostEqual(r["slope"], -2.0, places=9)
+
+    def test_unit_restatement_changes_slope_scale(self):
+        # Restating x in cm (100x smaller numbers) scales the slope by 100.
+        r_m = domain.theil_sen(self.X, self.Y)
+        r_cm = domain.theil_sen(self.X, self.Y, to_x="cm")
+        self.assertAlmostEqual(r_cm["slope"] * 100.0, r_m["slope"], places=9)
+        self.assertEqual(r_cm["x_unit"], "cm")
+
+    def test_zero_variance_x_raises(self):
+        x = [{"value": 2, "unit": "m"} for _ in range(3)]
+        y = [{"value": v, "unit": "s"} for v in (1, 2, 3)]
+        with self.assertRaises(ValueError):
+            domain.theil_sen(x, y)
+
+    def test_mismatched_lengths_raise(self):
+        x = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        y = [{"value": v, "unit": "s"} for v in (1, 2)]
+        with self.assertRaises(ValueError):
+            domain.theil_sen(x, y)
+
+    def test_single_point_raises(self):
+        with self.assertRaises(ValueError):
+            domain.theil_sen([{"value": 1, "unit": "m"}],
+                             [{"value": 2, "unit": "s"}])
+
+    def test_cross_category_series_allowed(self):
+        # x and y may be different categories (length vs time), like regression.
+        r = domain.theil_sen(self.X, self.Y)
+        self.assertEqual((r["x_category"], r["y_category"]), ("length", "time"))
+
+
+class TestDomainSpearman(unittest.TestCase):
+    X = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+    Y = [{"value": v, "unit": "s"} for v in (2, 4, 6, 8, 10)]
+
+    def test_perfect_positive(self):
+        r = domain.spearman(self.X, self.Y)
+        self.assertAlmostEqual(r["spearman"], 1.0, places=9)
+        self.assertEqual((r["x_category"], r["y_category"]), ("length", "time"))
+        self.assertFalse(r["has_ties"])
+
+    def test_perfect_negative(self):
+        x = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)]
+        y = [{"value": v, "unit": "s"} for v in (4, 3, 2, 1)]
+        r = domain.spearman(x, y)
+        self.assertAlmostEqual(r["spearman"], -1.0, places=9)
+
+    def test_monotonic_nonlinear_is_one(self):
+        # A strictly monotonic (but non-linear) relation: Spearman == 1 even
+        # though Pearson r < 1, which is the whole point of the rank measure.
+        x = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+        y = [{"value": v, "unit": "s"} for v in (1, 4, 9, 16, 25)]
+        sp = domain.spearman(x, y)
+        pe = domain.correlation(x, y)
+        self.assertAlmostEqual(sp["spearman"], 1.0, places=9)
+        self.assertLess(pe["correlation"], 1.0)
+
+    def test_invariant_to_monotonic_rescale(self):
+        # Ranks ignore the unit, so restating x into km cannot change rho.
+        x_km = [{"value": v / 1000.0, "unit": "km"} for v in (1, 2, 3, 4, 5)]
+        r1 = domain.spearman(self.X, self.Y)
+        r2 = domain.spearman(x_km, self.Y, to_x="km")
+        self.assertAlmostEqual(r1["spearman"], r2["spearman"], places=12)
+
+    def test_ties_flagged_and_handled(self):
+        # Tied x values -> average ranks; has_ties is set and rho is still finite.
+        x = [{"value": v, "unit": "m"} for v in (1, 2, 2, 3)]
+        y = [{"value": v, "unit": "s"} for v in (1, 2, 3, 4)]
+        r = domain.spearman(x, y)
+        self.assertTrue(r["has_ties"])
+        self.assertIsNotNone(r["spearman"])
+        self.assertTrue(-1.0 <= r["spearman"] <= 1.0)
+
+    def test_mean_ranks_are_midpoint(self):
+        # The mean rank is always (n+1)/2 regardless of ties.
+        r = domain.spearman(self.X, self.Y)
+        self.assertAlmostEqual(r["mean_rank_x"], 3.0, places=9)
+        self.assertAlmostEqual(r["mean_rank_y"], 3.0, places=9)
+
+    def test_matches_pearson_on_ranks(self):
+        # By definition Spearman rho is Pearson r computed on the ranks.
+        x = [{"value": v, "unit": "m"} for v in (10, 30, 20, 50, 40)]
+        y = [{"value": v, "unit": "s"} for v in (7, 9, 6, 12, 11)]
+        rho = domain.spearman(x, y)["spearman"]
+        ranks_x = domain._average_ranks([10, 30, 20, 50, 40])
+        ranks_y = domain._average_ranks([7, 9, 6, 12, 11])
+        pearson = domain.correlation(
+            [{"value": v, "unit": "m"} for v in ranks_x],
+            [{"value": v, "unit": "s"} for v in ranks_y],
+        )["correlation"]
+        self.assertAlmostEqual(rho, pearson, places=12)
+
+    def test_constant_series_is_none(self):
+        x = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        y = [{"value": 5, "unit": "s"} for _ in range(3)]
+        r = domain.spearman(x, y)
+        self.assertIsNone(r["spearman"])
+
+    def test_length_mismatch_raises(self):
+        with self.assertRaises(ValueError):
+            domain.spearman(self.X, self.Y[:2])
+
+    def test_single_point_raises(self):
+        with self.assertRaises(ValueError):
+            domain.spearman(self.X[:1], self.Y[:1])
+
+    def test_cross_category_within_series_raises(self):
+        bad = [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}]
+        with self.assertRaises(ValueError):
+            domain.spearman(bad, self.Y[:2])
+
+
+class TestDomainKendall(unittest.TestCase):
+    X = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+    Y = [{"value": v, "unit": "s"} for v in (2, 4, 6, 8, 10)]
+
+    def test_perfect_positive(self):
+        r = domain.kendall(self.X, self.Y)
+        self.assertAlmostEqual(r["tau"], 1.0, places=9)
+        self.assertAlmostEqual(r["tau_a"], 1.0, places=9)
+        self.assertEqual((r["x_category"], r["y_category"]), ("length", "time"))
+        self.assertEqual(r["pairs"], 10)
+        self.assertEqual(r["concordant"], 10)
+        self.assertEqual(r["discordant"], 0)
+        self.assertFalse(r["has_ties"])
+
+    def test_perfect_negative(self):
+        x = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)]
+        y = [{"value": v, "unit": "s"} for v in (4, 3, 2, 1)]
+        r = domain.kendall(x, y)
+        self.assertAlmostEqual(r["tau"], -1.0, places=9)
+        self.assertEqual(r["concordant"], 0)
+        self.assertEqual(r["discordant"], 6)
+
+    def test_monotonic_nonlinear_is_one(self):
+        # A strictly monotonic (non-linear) relation: tau == 1 even though the
+        # Pearson r < 1, the whole point of the rank measure.
+        x = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+        y = [{"value": v, "unit": "s"} for v in (1, 4, 9, 16, 25)]
+        tau = domain.kendall(x, y)["tau"]
+        pe = domain.correlation(x, y)["correlation"]
+        self.assertAlmostEqual(tau, 1.0, places=9)
+        self.assertLess(pe, 1.0)
+
+    def test_invariant_to_monotonic_rescale(self):
+        # Concordance ignores the unit, so restating x into km cannot change tau.
+        x_km = [{"value": v / 1000.0, "unit": "km"} for v in (1, 2, 3, 4, 5)]
+        r1 = domain.kendall(self.X, self.Y)
+        r2 = domain.kendall(x_km, self.Y, to_x="km")
+        self.assertAlmostEqual(r1["tau"], r2["tau"], places=12)
+
+    def test_known_value_with_one_discordant_pair(self):
+        # x=1..4, y swaps the last two -> one discordant pair out of six:
+        # tau = (5 - 1) / 6 = 0.666...
+        x = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)]
+        y = [{"value": v, "unit": "s"} for v in (1, 2, 4, 3)]
+        r = domain.kendall(x, y)
+        self.assertEqual(r["concordant"], 5)
+        self.assertEqual(r["discordant"], 1)
+        self.assertAlmostEqual(r["tau"], 4.0 / 6.0, places=9)
+        self.assertAlmostEqual(r["tau_a"], 4.0 / 6.0, places=9)
+
+    def test_ties_flagged_and_tau_b_corrects(self):
+        # A tie on x: that pair is excluded from C/D and feeds the tau-b
+        # denominator, so tau_b != tau_a and has_ties is set.
+        x = [{"value": v, "unit": "m"} for v in (1, 2, 2, 3)]
+        y = [{"value": v, "unit": "s"} for v in (1, 2, 3, 4)]
+        r = domain.kendall(x, y)
+        self.assertTrue(r["has_ties"])
+        self.assertEqual(r["ties_x"], 1)
+        self.assertEqual(r["ties_y"], 0)
+        self.assertIsNotNone(r["tau"])
+        self.assertTrue(-1.0 <= r["tau"] <= 1.0)
+        self.assertNotAlmostEqual(r["tau"], r["tau_a"], places=9)
+
+    def test_tau_a_equals_tau_b_without_ties(self):
+        x = [{"value": v, "unit": "m"} for v in (10, 30, 20, 50, 40)]
+        y = [{"value": v, "unit": "s"} for v in (7, 9, 6, 12, 11)]
+        r = domain.kendall(x, y)
+        self.assertFalse(r["has_ties"])
+        self.assertAlmostEqual(r["tau"], r["tau_a"], places=12)
+
+    def test_constant_series_is_none(self):
+        x = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        y = [{"value": 5, "unit": "s"} for _ in range(3)]
+        r = domain.kendall(x, y)
+        self.assertIsNone(r["tau"])
+        self.assertTrue(r["has_ties"])
+
+    def test_length_mismatch_raises(self):
+        with self.assertRaises(ValueError):
+            domain.kendall(self.X, self.Y[:2])
+
+    def test_single_point_raises(self):
+        with self.assertRaises(ValueError):
+            domain.kendall(self.X[:1], self.Y[:1])
+
+    def test_cross_category_within_series_raises(self):
+        bad = [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}]
+        with self.assertRaises(ValueError):
+            domain.kendall(bad, self.Y[:2])
+
+
+class TestDomainAverageRanks(unittest.TestCase):
+    def test_distinct_ascending(self):
+        self.assertEqual(domain._average_ranks([10, 20, 30]), [1.0, 2.0, 3.0])
+
+    def test_input_order_preserved(self):
+        # rank[i] is the rank of values[i], in the original order.
+        self.assertEqual(domain._average_ranks([30, 10, 20]), [3.0, 1.0, 2.0])
+
+    def test_ties_share_average_rank(self):
+        # Two values tie for ordinal ranks 2 and 3 -> both get 2.5.
+        self.assertEqual(domain._average_ranks([1, 2, 2, 4]), [1.0, 2.5, 2.5, 4.0])
+
+    def test_ranks_sum_to_triangular_number(self):
+        ranks = domain._average_ranks([5, 5, 5, 1, 9])
+        self.assertAlmostEqual(sum(ranks), 5 * 6 / 2.0, places=9)
+
+
 class TestHttpBivariate(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -4851,6 +5179,133 @@ class TestHttpBivariate(unittest.TestCase):
         status, data = self._post("/api/regression", {
             "x": [{"value": 2, "unit": "m"} for _ in range(3)],
             "y": [{"value": v, "unit": "s"} for v in (1, 2, 3)]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_theil_sen_ok(self):
+        status, data = self._post("/api/theil-sen", {"x": self.X, "y": self.Y})
+        self.assertEqual(status, 200)
+        self.assertEqual((data["x_category"], data["y_category"]), ("length", "time"))
+        self.assertAlmostEqual(data["slope"], 2.0, places=6)
+        self.assertAlmostEqual(data["intercept"], 0.0, places=6)
+        self.assertEqual(data["pairs"], 10)
+        self.assertEqual(data["used_pairs"], 10)
+        self.assertEqual(data["tied_pairs"], 0)
+
+    def test_theil_sen_robust_beats_ols(self):
+        # A wild final point drags OLS far above the robust median slope.
+        y = [{"value": v, "unit": "s"} for v in (2, 4, 6, 8, 100)]
+        _, ts = self._post("/api/theil-sen", {"x": self.X, "y": y})
+        _, ols = self._post("/api/regression", {"x": self.X, "y": y})
+        self.assertAlmostEqual(ts["slope"], 2.0, places=6)
+        self.assertGreater(ols["slope"], ts["slope"] + 1.0)
+
+    def test_theil_sen_precision(self):
+        status, data = self._post("/api/theil-sen", {
+            "x": self.X, "y": [{"value": v, "unit": "s"} for v in (2, 4, 5, 4, 5)],
+            "precision": 3})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["slope"], round(data["slope"], 3))
+
+    def test_theil_sen_zero_variance_x_400(self):
+        status, data = self._post("/api/theil-sen", {
+            "x": [{"value": 2, "unit": "m"} for _ in range(3)],
+            "y": [{"value": v, "unit": "s"} for v in (1, 2, 3)]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_spearman_ok(self):
+        status, data = self._post("/api/spearman", {"x": self.X, "y": self.Y})
+        self.assertEqual(status, 200)
+        self.assertEqual((data["x_category"], data["y_category"]), ("length", "time"))
+        self.assertAlmostEqual(data["spearman"], 1.0, places=6)
+        self.assertFalse(data["has_ties"])
+        self.assertAlmostEqual(data["mean_rank_x"], 3.0, places=6)
+
+    def test_spearman_monotonic_beats_pearson(self):
+        y = [{"value": v, "unit": "s"} for v in (1, 4, 9, 16, 25)]
+        _, sp = self._post("/api/spearman", {"x": self.X, "y": y})
+        _, pe = self._post("/api/correlation", {"x": self.X, "y": y})
+        self.assertAlmostEqual(sp["spearman"], 1.0, places=6)
+        self.assertLess(pe["correlation"], 1.0)
+
+    def test_spearman_constant_series_null(self):
+        status, data = self._post("/api/spearman", {
+            "x": self.X[:3],
+            "y": [{"value": 5, "unit": "s"} for _ in range(3)],
+        })
+        self.assertEqual(status, 200)
+        self.assertIsNone(data["spearman"])
+
+    def test_spearman_ties_flagged(self):
+        status, data = self._post("/api/spearman", {
+            "x": [{"value": v, "unit": "m"} for v in (1, 2, 2, 3)],
+            "y": [{"value": v, "unit": "s"} for v in (1, 2, 3, 4)],
+        })
+        self.assertEqual(status, 200)
+        self.assertTrue(data["has_ties"])
+
+    def test_spearman_length_mismatch_400(self):
+        status, data = self._post("/api/spearman", {"x": self.X, "y": self.Y[:2]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_spearman_missing_series_400(self):
+        status, data = self._post("/api/spearman", {"x": self.X})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_kendall_ok(self):
+        status, data = self._post("/api/kendall", {"x": self.X, "y": self.Y})
+        self.assertEqual(status, 200)
+        self.assertEqual((data["x_category"], data["y_category"]), ("length", "time"))
+        self.assertAlmostEqual(data["tau"], 1.0, places=6)
+        self.assertAlmostEqual(data["tau_a"], 1.0, places=6)
+        self.assertEqual(data["count"], 5)
+        self.assertEqual(data["pairs"], 10)
+        self.assertEqual(data["concordant"], 10)
+        self.assertEqual(data["discordant"], 0)
+        self.assertFalse(data["has_ties"])
+
+    def test_kendall_monotonic_beats_pearson(self):
+        y = [{"value": v, "unit": "s"} for v in (1, 4, 9, 16, 25)]
+        _, kt = self._post("/api/kendall", {"x": self.X, "y": y})
+        _, pe = self._post("/api/correlation", {"x": self.X, "y": y})
+        self.assertAlmostEqual(kt["tau"], 1.0, places=6)
+        self.assertLess(pe["correlation"], 1.0)
+
+    def test_kendall_constant_series_null(self):
+        status, data = self._post("/api/kendall", {
+            "x": self.X[:3],
+            "y": [{"value": 5, "unit": "s"} for _ in range(3)],
+        })
+        self.assertEqual(status, 200)
+        self.assertIsNone(data["tau"])
+
+    def test_kendall_ties_flagged(self):
+        status, data = self._post("/api/kendall", {
+            "x": [{"value": v, "unit": "m"} for v in (1, 2, 2, 3)],
+            "y": [{"value": v, "unit": "s"} for v in (1, 2, 3, 4)],
+        })
+        self.assertEqual(status, 200)
+        self.assertTrue(data["has_ties"])
+        self.assertEqual(data["ties_x"], 1)
+
+    def test_kendall_precision(self):
+        status, data = self._post("/api/kendall", {
+            "x": [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)],
+            "y": [{"value": v, "unit": "s"} for v in (1, 2, 4, 3)],
+            "precision": 3})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["tau"], round(data["tau"], 3))
+
+    def test_kendall_length_mismatch_400(self):
+        status, data = self._post("/api/kendall", {"x": self.X, "y": self.Y[:2]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_kendall_missing_series_400(self):
+        status, data = self._post("/api/kendall", {"x": self.X})
         self.assertEqual(status, 400)
         self.assertIn("error", data)
 
@@ -5055,6 +5510,400 @@ class TestHttpGini(unittest.TestCase):
 
     def test_gini_invalid_json_400(self):
         status, data = self._post("/api/gini", None, raw=b"{bad")
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
+# --------------------------------------------------------------------------- #
+# Trimmed / winsorized mean (domain)
+# --------------------------------------------------------------------------- #
+class TestDomainTrimmedMean(unittest.TestCase):
+    def _items(self, values, unit="m"):
+        return [{"value": v, "unit": unit} for v in values]
+
+    def test_no_trim_equals_arithmetic_mean(self):
+        # proportion 0 trims nothing, so every reported centre is the plain mean.
+        result = domain.trimmed_mean(self._items([1, 2, 3, 4, 5]), 0.0)
+        self.assertEqual(result["category"], "length")
+        self.assertEqual(result["count"], 5)
+        self.assertEqual(result["trimmed_each_side"], 0)
+        self.assertEqual(result["kept"], 5)
+        self.assertAlmostEqual(result["mean"], 3.0, places=9)
+        self.assertAlmostEqual(result["trimmed_mean"], 3.0, places=9)
+        self.assertAlmostEqual(result["winsorized_mean"], 3.0, places=9)
+
+    def test_trims_one_each_side(self):
+        # 10 points, p=0.1 -> floor(10*0.1)=1 dropped from each tail.
+        result = domain.trimmed_mean(
+            self._items([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]), 0.1)
+        self.assertEqual(result["trimmed_each_side"], 1)
+        self.assertEqual(result["kept"], 8)
+        # mean of 2..9 == 5.5.
+        self.assertAlmostEqual(result["trimmed_mean"], 5.5, places=9)
+        self.assertAlmostEqual(result["lower"], 2.0, places=9)
+        self.assertAlmostEqual(result["upper"], 9.0, places=9)
+
+    def test_resists_outlier(self):
+        # A wild value drags the plain mean far above the trimmed/winsorized one.
+        values = [10, 11, 12, 13, 1000]
+        result = domain.trimmed_mean(self._items(values), 0.2)
+        self.assertEqual(result["trimmed_each_side"], 1)
+        # mean of the middle three 11,12,13 == 12.
+        self.assertAlmostEqual(result["trimmed_mean"], 12.0, places=9)
+        self.assertGreater(result["mean"], result["trimmed_mean"])
+
+    def test_winsorized_clamps_not_drops(self):
+        # 5 values, p=0.2 -> drop/clamp 1 each side. Winsor replaces the extremes
+        # with the kept bounds (lower=2, upper=4): mean of [2,2,3,4,4] == 3.0.
+        result = domain.trimmed_mean(self._items([1, 2, 3, 4, 5]), 0.2)
+        self.assertEqual(result["trimmed_each_side"], 1)
+        self.assertAlmostEqual(result["lower"], 2.0, places=9)
+        self.assertAlmostEqual(result["upper"], 4.0, places=9)
+        self.assertAlmostEqual(result["trimmed_mean"], 3.0, places=9)
+        self.assertAlmostEqual(result["winsorized_mean"], 3.0, places=9)
+
+    def test_unordered_input_is_sorted(self):
+        # Trimming must not depend on the order the caller supplied the items.
+        a = domain.trimmed_mean(self._items([5, 1, 3, 2, 4]), 0.2)
+        b = domain.trimmed_mean(self._items([1, 2, 3, 4, 5]), 0.2)
+        self.assertAlmostEqual(a["trimmed_mean"], b["trimmed_mean"], places=9)
+        self.assertAlmostEqual(a["winsorized_mean"], b["winsorized_mean"], places=9)
+
+    def test_to_unit_restates(self):
+        result = domain.trimmed_mean(self._items([1, 2, 3]), 0.0, "cm")
+        self.assertEqual(result["unit"], "cm")
+        self.assertAlmostEqual(result["trimmed_mean"], 200.0, places=6)
+
+    def test_default_proportion_is_point_one(self):
+        # Calling without a proportion uses 0.1.
+        result = domain.trimmed_mean(self._items(range(1, 11)))
+        self.assertAlmostEqual(result["proportion"], 0.1, places=9)
+        self.assertEqual(result["trimmed_each_side"], 1)
+
+    def test_negative_values_allowed(self):
+        # Unlike the geometric/harmonic means, trimming has no positivity rule.
+        result = domain.trimmed_mean(self._items([-5, -1, 0, 1, 5]), 0.2)
+        self.assertAlmostEqual(result["trimmed_mean"], 0.0, places=9)
+
+    def test_proportion_too_large_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.trimmed_mean(self._items([1, 2, 3]), 0.5)
+
+    def test_proportion_negative_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.trimmed_mean(self._items([1, 2, 3]), -0.1)
+
+    def test_proportion_non_numeric_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.trimmed_mean(self._items([1, 2, 3]), "lots")
+
+    def test_empty_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.trimmed_mean([], 0.1)
+
+    def test_cross_category_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.trimmed_mean(
+                [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}], 0.1)
+
+    def test_temperature_rejected(self):
+        # Affine category: averaging on a single common unit is not meaningful.
+        with self.assertRaises(ValueError):
+            domain.trimmed_mean([{"value": 10, "unit": "c"}], 0.1)
+
+    def test_unknown_unit_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.trimmed_mean([{"value": 1, "unit": "zorp"}], 0.1)
+
+    def test_nonfinite_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.trimmed_mean([{"value": float("inf"), "unit": "m"}], 0.1)
+
+
+class TestHttpTrimmedMean(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = server.make_server(0)
+        cls.host, cls.port = cls.server.server_address
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def _post(self, path, payload, raw=None):
+        body = raw if raw is not None else json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            "http://127.0.0.1:%d%s" % (self.port, path), data=body,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            data = json.loads(exc.read().decode("utf-8"))
+            exc.close()
+            return exc.code, data
+
+    def test_trimmed_mean_ok(self):
+        status, data = self._post("/api/trimmed-mean", {
+            "items": [{"value": v, "unit": "m"} for v in range(1, 11)],
+            "proportion": 0.1})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["count"], 10)
+        self.assertEqual(data["trimmed_each_side"], 1)
+        self.assertEqual(data["kept"], 8)
+        self.assertAlmostEqual(data["trimmed_mean"], 5.5, places=6)
+
+    def test_trimmed_mean_default_proportion(self):
+        status, data = self._post("/api/trimmed-mean", {
+            "items": [{"value": v, "unit": "m"} for v in range(1, 11)]})
+        self.assertEqual(status, 200)
+        self.assertAlmostEqual(data["proportion"], 0.1, places=9)
+        self.assertEqual(data["trimmed_each_side"], 1)
+
+    def test_trimmed_mean_outlier_resistance(self):
+        status, data = self._post("/api/trimmed-mean", {
+            "items": [{"value": v, "unit": "m"} for v in (10, 11, 12, 13, 1000)],
+            "proportion": 0.2})
+        self.assertEqual(status, 200)
+        self.assertAlmostEqual(data["trimmed_mean"], 12.0, places=6)
+        self.assertGreater(data["mean"], data["trimmed_mean"])
+
+    def test_trimmed_mean_winsorized(self):
+        status, data = self._post("/api/trimmed-mean", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)],
+            "proportion": 0.2})
+        self.assertEqual(status, 200)
+        self.assertAlmostEqual(data["winsorized_mean"], 3.0, places=6)
+        self.assertAlmostEqual(data["lower"], 2.0, places=6)
+        self.assertAlmostEqual(data["upper"], 4.0, places=6)
+
+    def test_trimmed_mean_to_unit(self):
+        status, data = self._post("/api/trimmed-mean", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 3)],
+            "to": "cm"})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["unit"], "cm")
+        self.assertAlmostEqual(data["trimmed_mean"], 200.0, places=4)
+
+    def test_trimmed_mean_precision(self):
+        status, data = self._post("/api/trimmed-mean", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 4)],
+            "proportion": 0.0, "precision": 3})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["trimmed_mean"], round(data["trimmed_mean"], 3))
+
+    def test_trimmed_mean_proportion_too_large_400(self):
+        status, data = self._post("/api/trimmed-mean", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 3)],
+            "proportion": 0.5})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_trimmed_mean_cross_category_400(self):
+        status, data = self._post("/api/trimmed-mean", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_trimmed_mean_items_not_list_400(self):
+        status, data = self._post("/api/trimmed-mean", {"items": "nope"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_trimmed_mean_invalid_json_400(self):
+        status, data = self._post("/api/trimmed-mean", None, raw=b"{bad")
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
+class TestDomainEma(unittest.TestCase):
+    def test_basic_alpha_half(self):
+        result = domain.ema(
+            [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)], 0.5)
+        self.assertEqual(result["category"], "length")
+        self.assertEqual(result["unit"], "m")
+        self.assertEqual(result["count"], 4)
+        self.assertEqual(result["alpha"], 0.5)
+        self.assertIsNone(result["span"])
+        emas = [it["ema"] for it in result["items"]]
+        # ema0=1; ema1=.5*2+.5*1=1.5; ema2=.5*3+.5*1.5=2.25; ema3=.5*4+.5*2.25=3.125
+        self.assertEqual(emas, [1.0, 1.5, 2.25, 3.125])
+
+    def test_default_alpha_is_half(self):
+        result = domain.ema([{"value": v, "unit": "m"} for v in (1, 2, 3, 4)])
+        self.assertEqual(result["alpha"], 0.5)
+        self.assertEqual([it["ema"] for it in result["items"]],
+                         [1.0, 1.5, 2.25, 3.125])
+
+    def test_first_ema_equals_first_value(self):
+        result = domain.ema([{"value": 7, "unit": "m"}], 0.3)
+        self.assertEqual(result["items"][0]["ema"], 7.0)
+        self.assertEqual(result["items"][0]["value"], 7.0)
+
+    def test_alpha_one_echoes_values(self):
+        result = domain.ema(
+            [{"value": v, "unit": "m"} for v in (5, 7, 9)], 1.0)
+        self.assertEqual([it["ema"] for it in result["items"]], [5.0, 7.0, 9.0])
+
+    def test_span_maps_to_alpha(self):
+        # span 3 -> alpha = 2/(3+1) = 0.5, so it matches the alpha=0.5 result.
+        result = domain.ema(
+            [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)], span=3)
+        self.assertAlmostEqual(result["alpha"], 0.5, places=12)
+        self.assertEqual(result["span"], 3.0)
+        self.assertEqual([it["ema"] for it in result["items"]],
+                         [1.0, 1.5, 2.25, 3.125])
+
+    def test_span_of_one_is_alpha_one(self):
+        result = domain.ema(
+            [{"value": v, "unit": "m"} for v in (5, 7, 9)], span=1)
+        self.assertAlmostEqual(result["alpha"], 1.0, places=12)
+        self.assertEqual([it["ema"] for it in result["items"]], [5.0, 7.0, 9.0])
+
+    def test_unit_conversion(self):
+        result = domain.ema(
+            [{"value": 100, "unit": "cm"}, {"value": 300, "unit": "cm"}], 0.5, to_unit="m")
+        self.assertEqual(result["unit"], "m")
+        self.assertEqual(result["items"][0]["ema"], 1.0)
+        self.assertEqual(result["items"][1]["ema"], 2.0)
+
+    def test_both_alpha_and_span_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.ema([{"value": 1, "unit": "m"}], 0.5, span=3)
+
+    def test_alpha_zero_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.ema([{"value": 1, "unit": "m"}], 0.0)
+
+    def test_alpha_above_one_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.ema([{"value": 1, "unit": "m"}], 1.5)
+
+    def test_alpha_non_numeric_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.ema([{"value": 1, "unit": "m"}], "x")
+
+    def test_span_below_one_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.ema([{"value": 1, "unit": "m"}], span=0.5)
+
+    def test_empty_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.ema([], 0.5)
+
+    def test_cross_category_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.ema([{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}], 0.5)
+
+    def test_temperature_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.ema([{"value": 1, "unit": "c"}, {"value": 2, "unit": "c"}], 0.5)
+
+    def test_nonfinite_value_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.ema([{"value": float("inf"), "unit": "m"}], 0.5)
+
+
+class TestHttpEma(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = server.make_server(0)
+        cls.host, cls.port = cls.server.server_address
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def _post(self, path, payload, raw=None):
+        body = raw if raw is not None else json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            "http://127.0.0.1:%d%s" % (self.port, path), data=body,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            data = json.loads(exc.read().decode("utf-8"))
+            exc.close()
+            return exc.code, data
+
+    def test_ema_endpoint_ok(self):
+        status, data = self._post("/api/ema", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)],
+            "alpha": 0.5})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["alpha"], 0.5)
+        self.assertIsNone(data["span"])
+        self.assertEqual(data["count"], 4)
+        self.assertEqual([it["ema"] for it in data["items"]],
+                         [1.0, 1.5, 2.25, 3.125])
+        self.assertEqual(data["items"][0]["index"], 0)
+
+    def test_ema_endpoint_default_alpha(self):
+        status, data = self._post("/api/ema", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)]})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["alpha"], 0.5)
+        self.assertEqual([it["ema"] for it in data["items"]],
+                         [1.0, 1.5, 2.25, 3.125])
+
+    def test_ema_endpoint_span(self):
+        status, data = self._post("/api/ema", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)],
+            "span": 3})
+        self.assertEqual(status, 200)
+        self.assertAlmostEqual(data["alpha"], 0.5, places=6)
+        self.assertEqual(data["span"], 3.0)
+
+    def test_ema_endpoint_precision(self):
+        status, data = self._post("/api/ema", {
+            "items": [{"value": 1, "unit": "ft"}, {"value": 2, "unit": "ft"}],
+            "alpha": 0.3, "to": "m", "precision": 2})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["items"][1]["ema"],
+                         round(data["items"][1]["ema"], 2))
+
+    def test_ema_endpoint_both_params_400(self):
+        status, data = self._post("/api/ema", {
+            "items": [{"value": 1, "unit": "m"}], "alpha": 0.5, "span": 3})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_ema_endpoint_bad_alpha_400(self):
+        status, data = self._post("/api/ema", {
+            "items": [{"value": 1, "unit": "m"}], "alpha": 0})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_ema_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/ema", {"items": "nope"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_ema_endpoint_cross_category_400(self):
+        status, data = self._post("/api/ema", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_ema_endpoint_temperature_400(self):
+        status, data = self._post("/api/ema", {
+            "items": [{"value": 1, "unit": "c"}, {"value": 2, "unit": "c"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_ema_endpoint_invalid_json_400(self):
+        status, data = self._post("/api/ema", None, raw=b"{bad")
         self.assertEqual(status, 400)
         self.assertIn("error", data)
 

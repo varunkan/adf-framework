@@ -657,11 +657,11 @@ def _l100km_to_fuel(value_l100, kind):
     raise ValueError("unknown fuel unit: %r" % kind)
 
 
-def convert_units(value, from_unit, to_unit):
-    """Convert ``value`` from ``from_unit`` to ``to_unit``.
+def _coerce_finite(value):
+    """Parse ``value`` as a finite float, raising the canonical ValueErrors.
 
-    Returns (result, category). Raises ValueError for unknown units,
-    cross-category mismatches, or non-finite values.
+    Shared by every entry point that accepts a numeric quantity so the accepted
+    inputs and error messages stay identical in one place.
     """
     try:
         numeric = float(value)
@@ -669,10 +669,18 @@ def convert_units(value, from_unit, to_unit):
         raise ValueError("'value' must be a number")
     if numeric != numeric or numeric in (float("inf"), float("-inf")):
         raise ValueError("'value' must be finite")
+    return numeric
 
+
+def _resolve_category_pair(from_unit, to_unit):
+    """Normalize a unit pair and return ``(f, t, category)``.
+
+    Raises the canonical ValueErrors for an unknown unit or a cross-category
+    pair. Shared by :func:`convert_units`, :func:`conversion_factor` and
+    :func:`convert_delta` so the validation lives in exactly one place.
+    """
     f = normalize_unit(from_unit)
     t = normalize_unit(to_unit)
-
     from_cat = category_of(f)
     to_cat = category_of(t)
     if from_cat is None:
@@ -684,6 +692,17 @@ def convert_units(value, from_unit, to_unit):
             "cannot convert between %s (%s) and %s (%s)"
             % (from_unit, from_cat, to_unit, to_cat)
         )
+    return f, t, from_cat
+
+
+def convert_units(value, from_unit, to_unit):
+    """Convert ``value`` from ``from_unit`` to ``to_unit``.
+
+    Returns (result, category). Raises ValueError for unknown units,
+    cross-category mismatches, or non-finite values.
+    """
+    numeric = _coerce_finite(value)
+    f, t, from_cat = _resolve_category_pair(from_unit, to_unit)
 
     if from_cat == "temperature":
         celsius = _temp_to_celsius(numeric, _TEMP_UNITS[f])
@@ -903,19 +922,7 @@ def conversion_factor(from_unit, to_unit):
     multiplicative (temperature is affine; fuel economy is reciprocal), since no
     single factor can describe those.
     """
-    f = normalize_unit(from_unit)
-    t = normalize_unit(to_unit)
-    from_cat = category_of(f)
-    to_cat = category_of(t)
-    if from_cat is None:
-        raise ValueError("unknown unit: %r" % from_unit)
-    if to_cat is None:
-        raise ValueError("unknown unit: %r" % to_unit)
-    if from_cat != to_cat:
-        raise ValueError(
-            "cannot convert between %s (%s) and %s (%s)"
-            % (from_unit, from_cat, to_unit, to_cat)
-        )
+    f, t, from_cat = _resolve_category_pair(from_unit, to_unit)
     if from_cat not in _LINEAR:
         raise ValueError(
             "%s conversions are not a single multiplicative factor" % from_cat
@@ -1270,26 +1277,8 @@ def convert_delta(value, from_unit, to_unit):
     cross-category pair, a non-finite value, or the fuel-economy category (a
     reciprocal scale has no meaningful linear interval).
     """
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError):
-        raise ValueError("'value' must be a number")
-    if numeric != numeric or numeric in (float("inf"), float("-inf")):
-        raise ValueError("'value' must be finite")
-
-    f = normalize_unit(from_unit)
-    t = normalize_unit(to_unit)
-    from_cat = category_of(f)
-    to_cat = category_of(t)
-    if from_cat is None:
-        raise ValueError("unknown unit: %r" % from_unit)
-    if to_cat is None:
-        raise ValueError("unknown unit: %r" % to_unit)
-    if from_cat != to_cat:
-        raise ValueError(
-            "cannot convert between %s (%s) and %s (%s)"
-            % (from_unit, from_cat, to_unit, to_cat)
-        )
+    numeric = _coerce_finite(value)
+    f, t, from_cat = _resolve_category_pair(from_unit, to_unit)
 
     if from_cat == "temperature":
         return numeric * _TEMP_DELTA_SCALE[_TEMP_UNITS[f]] / _TEMP_DELTA_SCALE[_TEMP_UNITS[t]], from_cat
@@ -1336,16 +1325,9 @@ def aggregate_quantities(items, to_unit=None):
     # resolved target unit, so a bad input fails here before any statistics run.
     total, unit, category = sum_quantities(items, to_unit)
 
-    # Re-express every item in the resolved target unit. The category/units were
-    # already proven valid above, so convert_units cannot fail here.
-    converted = []
-    for item in items:
-        if isinstance(item, dict):
-            value, item_unit = item.get("value"), item.get("unit")
-        else:
-            value, item_unit = item
-        restated, _ = convert_units(value, item_unit, unit)
-        converted.append(restated)
+    # Re-express every item in the resolved target unit (shared helper). The
+    # category/units were already proven valid above, so it cannot fail here.
+    converted = _restate_items(items, unit)
 
     count = len(converted)
     min_index = min(range(count), key=lambda i: converted[i])
@@ -1401,17 +1383,10 @@ def sort_quantities(items, to_unit=None, descending=False):
     # target unit, so a bad input fails here before any ordering runs.
     _, unit, category = sum_quantities(items, to_unit)
 
-    # Re-express every item in the resolved target unit, tagged with its original
-    # input position. The category/units were already proven valid above, so
-    # convert_units cannot fail here.
-    ranked = []
-    for index, item in enumerate(items):
-        if isinstance(item, dict):
-            value, item_unit = item.get("value"), item.get("unit")
-        else:
-            value, item_unit = item
-        restated, _ = convert_units(value, item_unit, unit)
-        ranked.append({"index": index, "value": restated})
+    # Re-express every item in the resolved target unit (shared helper), tagged
+    # with its original input position.
+    ranked = [{"index": index, "value": value}
+              for index, value in enumerate(_restate_items(items, unit))]
 
     # ``sorted`` is stable, so equal magnitudes preserve their input order; for a
     # descending sort we negate the key (rather than reverse=True) to keep that
@@ -1476,16 +1451,9 @@ def describe_quantities(items, to_unit=None):
     # statistics run.
     total, unit, category = sum_quantities(items, to_unit)
 
-    # Re-express every item in the resolved target unit. The category/units were
-    # already proven valid above, so convert_units cannot fail here.
-    converted = []
-    for item in items:
-        if isinstance(item, dict):
-            value, item_unit = item.get("value"), item.get("unit")
-        else:
-            value, item_unit = item
-        restated, _ = convert_units(value, item_unit, unit)
-        converted.append(restated)
+    # Re-express every item in the resolved target unit (shared helper). The
+    # category/units were already proven valid above, so it cannot fail here.
+    converted = _restate_items(items, unit)
 
     count = len(converted)
     mean = total / count
@@ -2762,6 +2730,107 @@ def moving_average(items, window, to_unit=None):
     }
 
 
+def ema(items, alpha=None, span=None, to_unit=None):
+    """Exponential moving average (exponential smoothing) over SAME-category
+    quantities.
+
+    The exponentially-weighted companion to :func:`moving_average` (a *simple*
+    moving average, which weights every item in its window equally and only
+    starts once a full window exists). An EMA instead produces one smoothed value
+    per item — over the *whole* history so far — but weights recent items more
+    heavily, with the influence of older items decaying geometrically. Walking the
+    list *in input order* it applies the standard recurrence
+
+        ema[0] = value[0]
+        ema[i] = alpha * value[i] + (1 - alpha) * ema[i - 1]   (i > 0)
+
+    so a larger ``alpha`` (nearer 1) tracks the latest value closely while a
+    smaller ``alpha`` (nearer 0) smooths more heavily. This is the
+    reactive/trend-following companion to :func:`cumulative_quantities`,
+    :func:`differences` and :func:`moving_average` (e.g. an exponentially-smoothed
+    series of daily readings).
+
+    The smoothing factor can be given **either** directly as ``alpha`` (a number
+    in ``(0, 1]``) **or** as a ``span`` ``s`` (a number ``>= 1``, the common
+    "N-period EMA" parameter), which maps to ``alpha = 2 / (s + 1)`` — so a span
+    of 1 is ``alpha = 1`` (no smoothing) and larger spans smooth more. Exactly one
+    of ``alpha``/``span`` may be supplied; when neither is given ``alpha`` defaults
+    to 0.5. Supplying both is an error.
+
+    Every quantity is first restated in a single common ``to_unit`` (or, when
+    omitted, the first item's unit) so the smoothing is apples-to-apples — exactly
+    like :func:`sum_quantities` and the rest of the aggregate family. ``items`` is
+    a list of {"value": <number>, "unit": <token>} dicts (a ``(value, unit)``
+    tuple is also accepted), identical to ``sum_quantities``.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,
+            "alpha": <float>,            # the smoothing factor actually used
+            "span": <float|None>,        # the span, when given (else None)
+            "items": [{"index": <int>, "value": <float>, "ema": <float>}, ...],
+        }
+
+    where ``items`` is in the original input order, ``value`` is that item restated
+    in the target unit and ``ema`` is the smoothed value up to and including it.
+    Raises ValueError for supplying both ``alpha`` and ``span``, a non-finite or
+    out-of-range ``alpha`` (must be in ``(0, 1]``) / ``span`` (must be ``>= 1``),
+    an empty/non-list input, a malformed item, an unknown or cross-category unit, a
+    non-finite value, or a non-linear category (temperature is affine and fuel
+    economy is reciprocal). Item validation is delegated to :func:`_series_values`
+    so the accepted inputs stay identical to the rest of the aggregate family.
+    """
+    if alpha is not None and span is not None:
+        raise ValueError("supply only one of 'alpha' or 'span', not both")
+
+    span_value = None
+    if span is not None:
+        try:
+            span_value = float(span)
+        except (TypeError, ValueError):
+            raise ValueError("'span' must be a number")
+        if span_value != span_value or span_value in (float("inf"), float("-inf")):
+            raise ValueError("'span' must be finite")
+        if span_value < 1.0:
+            raise ValueError("'span' must be at least 1")
+        a = 2.0 / (span_value + 1.0)
+    elif alpha is not None:
+        try:
+            a = float(alpha)
+        except (TypeError, ValueError):
+            raise ValueError("'alpha' must be a number")
+        if a != a or a in (float("inf"), float("-inf")):
+            raise ValueError("'alpha' must be finite")
+        if a <= 0.0 or a > 1.0:
+            raise ValueError("'alpha' must be in (0, 1]")
+    else:
+        a = 0.5
+
+    # _series_values does the full validation and resolves the common target
+    # unit, so a bad input fails here before any smoothing runs.
+    converted, unit, category = _series_values(items, to_unit)
+
+    out = []
+    current = None
+    for index, value in enumerate(converted):
+        if index == 0:
+            current = value
+        else:
+            current = a * value + (1.0 - a) * current
+        out.append({"index": index, "value": value, "ema": current})
+    return {
+        "category": category,
+        "unit": unit,
+        "count": len(converted),
+        "alpha": a,
+        "span": span_value,
+        "items": out,
+    }
+
+
 # --------------------------------------------------------------------------- #
 # Bivariate statistics — two paired series of quantities
 # --------------------------------------------------------------------------- #
@@ -3045,4 +3114,457 @@ def gini_quantities(items, to_unit=None):
         "gini": gini,
         "rmad": rmad,
         "mean_abs_difference": rmad * mean,
+    }
+
+
+def entropy_quantities(items, to_unit=None):
+    """The Shannon entropy and diversity/concentration indices of a list of
+    SAME-category quantities, treated as a distribution.
+
+    The information-theoretic companion to :func:`gini_quantities` and
+    :func:`proportions`. Where the Gini coefficient measures inequality and
+    ``proportions`` reports each quantity's *share* of the total, the entropy
+    answers "how *spread out* (diverse) versus *concentrated* is the whole?" —
+    maximal when every quantity is identical, falling towards zero as one
+    quantity dominates (e.g. how diversified a portfolio, a set of file sizes,
+    or a budget is across its parts).
+
+    Every quantity is first restated in a single common ``to_unit`` (or, when
+    omitted, the first item's unit) so the shares are apples-to-apples — exactly
+    like :func:`proportions` and the rest of the aggregate family. Each item's
+    share ``pᵢ = xᵢ / Σx`` then drives:
+
+        shannon       = −Σ pᵢ·ln pᵢ                (nats; a zero share adds 0)
+        shannon_bits  = shannon / ln 2             (the same entropy in bits)
+        simpson       = Σ pᵢ²                       (concentration; == the HHI)
+        gini_simpson  = 1 − Σ pᵢ²                   (Simpson diversity index)
+        effective_count = exp(shannon)             (Hill number / perplexity —
+                                                     the equivalent count of
+                                                     equal-sized parts)
+        normalized_entropy = shannon / ln n        (Pielou evenness in [0, 1];
+                                                     None for a single item,
+                                                     where ln n == 0)
+
+    For a single item (or any all-equal list of n) the distribution is one of
+    perfect evenness: ``simpson == 1/n``, ``gini_simpson == 1 − 1/n``,
+    ``effective_count == n`` and ``normalized_entropy == 1`` (or None when
+    n == 1, since evenness is undefined for one category).
+
+    ``items`` is a list of {"value": <number>, "unit": <token>} dicts (a
+    ``(value, unit)`` tuple is also accepted), identical to ``sum_quantities``.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,
+            "total": <float>,               # the group total, in the target unit
+            "mean": <float>,                # the arithmetic mean
+            "shannon": <float>,             # Shannon entropy in nats
+            "shannon_bits": <float>,        # Shannon entropy in bits
+            "normalized_entropy": <float>,  # Pielou evenness in [0, 1], or None
+            "simpson": <float>,             # Σ pᵢ² concentration (HHI)
+            "gini_simpson": <float>,        # 1 − Σ pᵢ² diversity
+            "effective_count": <float>,     # exp(shannon) Hill number / perplexity
+        }
+
+    Raises ValueError for an empty/non-list input, a malformed item, an unknown
+    or cross-category unit, a non-finite value, a non-linear category
+    (temperature is affine and fuel economy is reciprocal — neither sums, so
+    neither has shares), any negative restated value (a probability share is
+    only defined for a non-negative distribution), or a zero total (the shares —
+    and so the entropy — are undefined when there is nothing to distribute, just
+    as in :func:`proportions`). Validation is delegated to ``sum_quantities`` so
+    the accepted inputs stay identical to the rest of the aggregate family.
+    """
+    # sum_quantities does the full validation (list shape, item shape, finite
+    # values, single linear category, valid target) and resolves both the group
+    # total and the common target unit, so a bad input fails here first.
+    total, unit, category = sum_quantities(items, to_unit)
+    values = _restate_items(items, unit)
+
+    if any(v < 0 for v in values):
+        raise ValueError(
+            "entropy is only defined for non-negative quantities")
+    if total == 0:
+        raise ValueError("cannot compute entropy when the total is zero")
+
+    n = len(values)
+    mean = total / n
+
+    shannon = 0.0
+    simpson = 0.0
+    for v in values:
+        p = v / total
+        if p > 0.0:
+            shannon -= p * math.log(p)
+        simpson += p * p
+
+    return {
+        "category": category,
+        "unit": unit,
+        "count": n,
+        "total": total,
+        "mean": mean,
+        "shannon": shannon,
+        "shannon_bits": shannon / math.log(2.0),
+        # Pielou evenness needs ln(n); a single category has no spread to
+        # normalise against, so evenness is reported as undefined (None).
+        "normalized_entropy": (shannon / math.log(n)) if n > 1 else None,
+        "simpson": simpson,
+        "gini_simpson": 1.0 - simpson,
+        "effective_count": math.exp(shannon),
+    }
+
+
+def _average_ranks(values):
+    """Return fractional (average-tie) ascending ranks for a list of floats.
+
+    Ties share the average of the ordinal ranks they span, so the ranks always
+    sum to ``n*(n+1)/2`` regardless of ties — the same fractional-ranking rule
+    used by :func:`rank_quantities`. Ranks are returned in the original input
+    order (rank[i] is the rank of values[i]).
+    """
+    n = len(values)
+    order = sorted(range(n), key=lambda i: values[i])
+    ranks = [0.0] * n
+    i = 0
+    while i < n:
+        j = i
+        while j + 1 < n and values[order[j + 1]] == values[order[i]]:
+            j += 1
+        avg_rank = (i + j) / 2.0 + 1.0  # ordinal positions i..j -> 1-based mean
+        for k in range(i, j + 1):
+            ranks[order[k]] = avg_rank
+        i = j + 1
+    return ranks
+
+
+def spearman(x_items, y_items, to_x=None, to_y=None):
+    """Spearman rank correlation coefficient (rho) of two paired series.
+
+    The rank-based, monotonic companion to the Pearson :func:`correlation`:
+    where Pearson measures *linear* association on the raw values, Spearman
+    measures *monotonic* association — it is Pearson's r computed on the
+    fractional ranks of each series rather than on the values themselves. Each
+    series is independently restated on its own common unit (``to_x`` / ``to_y``,
+    or each series' first unit when omitted), then converted to average-tie
+    ranks (the same fractional ranking as :func:`rank_quantities`), and the
+    Pearson correlation of those rank vectors is returned.
+
+    ``rho`` lies in ``[-1, 1]``: +1 a perfectly increasing monotonic relation,
+    -1 a perfectly decreasing one, 0 no monotonic relation. Because it works on
+    ranks it is invariant under any monotonic re-scaling of either series (so the
+    choice of ``to_x``/``to_y`` never changes it) and is robust to outliers.
+    Computing rho as Pearson-on-ranks (rather than the ``1 - 6Σd²/(n(n²-1))``
+    shortcut) keeps it correct in the presence of tied ranks; ``has_ties`` flags
+    whether either series contained ties. When either series has zero rank spread
+    (every value identical) rho is undefined and reported as ``None``.
+
+    Returns a dict::
+
+        {
+            "x_category", "y_category",
+            "x_unit", "y_unit",
+            "count",
+            "mean_rank_x", "mean_rank_y",   # always (n+1)/2 for both
+            "has_ties",                      # True if either series had ties
+            "spearman",                      # rho, or None when undefined
+        }
+
+    Raises ValueError for mismatched lengths, fewer than two paired points, or
+    any malformed/cross-category series (delegated to ``sum_quantities``).
+    """
+    s = _paired_series(x_items, y_items, to_x, to_y)
+    xs, ys, n = s["x"], s["y"], s["n"]
+    rx = _average_ranks(xs)
+    ry = _average_ranks(ys)
+    mean_rx, mean_ry, sxy, sxx, syy = _co_moments(rx, ry)
+    denom = math.sqrt(sxx * syy)
+    rho = (sxy / denom) if denom != 0 else None
+    has_ties = (len(set(xs)) != n) or (len(set(ys)) != n)
+    return {
+        "x_category": s["x_category"], "y_category": s["y_category"],
+        "x_unit": s["x_unit"], "y_unit": s["y_unit"],
+        "count": n,
+        "mean_rank_x": mean_rx, "mean_rank_y": mean_ry,
+        "has_ties": has_ties,
+        "spearman": rho,
+    }
+
+
+def kendall(x_items, y_items, to_x=None, to_y=None):
+    """Kendall's tau-b rank correlation coefficient of two paired series.
+
+    The third member of the paired-series correlation family, alongside the
+    linear Pearson :func:`correlation` and the rank-based Spearman
+    :func:`spearman`. Like Spearman it measures *monotonic* association on the
+    ordering of the two series rather than their raw magnitudes, so it is
+    dimensionless, invariant under any monotonic rescaling of either series (the
+    choice of ``to_x``/``to_y`` never changes it) and robust to outliers. Where
+    Spearman is Pearson-r-on-ranks, Kendall's tau is built directly from the
+    agreement of *every pair* of observations: a pair ``(i, j)`` is
+    **concordant** when the two series order it the same way (``xᵢ<xⱼ`` and
+    ``yᵢ<yⱼ``, or both reversed) and **discordant** when they order it oppositely;
+    pairs tied on x or on y count toward neither.
+
+    With ``C`` concordant and ``D`` discordant pairs out of the
+    ``n0 = n(n-1)/2`` total, the **tau-b** coefficient (which corrects for ties)
+    is
+
+        tau_b = (C − D) / √((n0 − Tx)·(n0 − Ty)),
+
+    where ``Tx = Σ tₖ(tₖ−1)/2`` over each group of ``tₖ`` equal x values (and
+    ``Ty`` likewise for y; a pair tied in *both* counts toward both). The simpler
+    **tau-a** ``(C − D)/n0`` is reported alongside and agrees with tau-b when
+    there are no ties. ``tau_b`` lies in ``[-1, 1]``: +1 a perfectly increasing
+    monotonic relation, -1 a perfectly decreasing one, 0 no monotonic
+    association. When either series has no spread (every value identical, so
+    ``n0 − Tx`` or ``n0 − Ty`` is zero) tau-b is undefined and reported as
+    ``None``. ``has_ties`` flags whether either series contained ties.
+
+    Returns a dict::
+
+        {
+            "x_category", "y_category",
+            "x_unit", "y_unit",
+            "count",
+            "pairs",             # n0 = n(n-1)/2, the unordered pair count
+            "concordant",        # C
+            "discordant",        # D
+            "ties_x", "ties_y",  # pairs tied on x / on y (Tx / Ty)
+            "has_ties",
+            "tau_a",             # (C - D) / n0
+            "tau",               # tau-b, or None when undefined
+        }
+
+    Raises ValueError for mismatched lengths, fewer than two paired points, or
+    any malformed/cross-category series (delegated to ``sum_quantities``).
+    """
+    s = _paired_series(x_items, y_items, to_x, to_y)
+    xs, ys, n = s["x"], s["y"], s["n"]
+    concordant = discordant = ties_x = ties_y = 0
+    for i in range(n):
+        xi, yi = xs[i], ys[i]
+        for j in range(i + 1, n):
+            dx = xi - xs[j]
+            dy = yi - ys[j]
+            tx = (dx == 0)
+            ty = (dy == 0)
+            if tx or ty:
+                # A pair tied on either axis is excluded from C/D and counts
+                # toward that axis' tie correction (both, when tied on both).
+                if tx:
+                    ties_x += 1
+                if ty:
+                    ties_y += 1
+            elif (dx > 0) == (dy > 0):
+                concordant += 1
+            else:
+                discordant += 1
+    n0 = n * (n - 1) // 2
+    tau_a = (concordant - discordant) / n0
+    denom = math.sqrt((n0 - ties_x) * (n0 - ties_y))
+    tau_b = ((concordant - discordant) / denom) if denom != 0 else None
+    has_ties = (len(set(xs)) != n) or (len(set(ys)) != n)
+    return {
+        "x_category": s["x_category"], "y_category": s["y_category"],
+        "x_unit": s["x_unit"], "y_unit": s["y_unit"],
+        "count": n,
+        "pairs": n0,
+        "concordant": concordant,
+        "discordant": discordant,
+        "ties_x": ties_x,
+        "ties_y": ties_y,
+        "has_ties": has_ties,
+        "tau_a": tau_a,
+        "tau": tau_b,
+    }
+
+
+def trimmed_mean(items, proportion=0.1, to_unit=None):
+    """Robust trimmed and winsorized means of SAME-category quantities.
+
+    The outlier-resistant location companion to :func:`means` (the four classical
+    means) and :func:`mad_quantities` (robust spread): both the trimmed and the
+    winsorized mean damp the influence of extreme values, so a single wild
+    measurement cannot drag the centre the way it drags the plain arithmetic
+    ``mean`` reported by :func:`describe_quantities`. Every quantity is first
+    restated in a single common ``to_unit`` (or, when omitted, the first item's
+    unit) so the result is apples-to-apples — exactly like :func:`sum_quantities`
+    and the rest of the aggregate family.
+
+    ``proportion`` is the fraction trimmed from EACH tail, so a proportion ``p``
+    discards a total of ``2p`` of the data. The count removed from each end is
+    ``g = floor(n * p)`` (the standard floor convention), which is symmetric, so
+    the two tails always lose the same number of points. With the values sorted
+    ascending:
+
+    * ``trimmed_mean`` — the arithmetic mean of the ``n - 2g`` values that remain
+      after dropping the ``g`` smallest and ``g`` largest. With ``p == 0`` nothing
+      is trimmed and this equals the plain arithmetic mean; as ``p`` approaches
+      ``0.5`` it approaches the median.
+    * ``winsorized_mean`` — instead of *dropping* the ``g`` extreme values on each
+      side they are *clamped* to the nearest kept value (the ``g`` smallest become
+      the smallest kept value ``lower``, the ``g`` largest become the largest kept
+      value ``upper``); the mean is then taken over all ``n`` points. Winsorizing
+      keeps the full sample size while still limiting the leverage of the tails.
+
+    ``lower`` / ``upper`` are the smallest and largest values that survive the
+    trim (the clamp bounds used by the winsorized mean), and ``trimmed_each_side``
+    / ``kept`` are ``g`` and ``n - 2g``. ``mean`` is the untrimmed arithmetic mean,
+    reported alongside so the robust centres can be read against it.
+
+    ``items`` is a list of {"value": <number>, "unit": <token>} dicts (a
+    ``(value, unit)`` tuple is also accepted), identical to ``sum_quantities``.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int n>,
+            "proportion": <float p>,
+            "trimmed_each_side": <int g>,
+            "kept": <int n - 2g>,
+            "mean": <float>,
+            "trimmed_mean": <float>,
+            "winsorized_mean": <float>,
+            "lower": <float>,
+            "upper": <float>,
+        }
+
+    Raises ValueError for an empty/non-list input, a malformed item, an unknown
+    or cross-category unit, a non-finite value, a non-linear category
+    (temperature is affine and fuel economy is reciprocal — neither averages
+    meaningfully on a single common unit), or a ``proportion`` that is not a
+    finite number in ``[0, 0.5)``. Item validation is delegated to
+    :func:`_series_values` so the accepted inputs stay identical to the rest of
+    the aggregate family.
+    """
+    try:
+        p = float(proportion)
+    except (TypeError, ValueError):
+        raise ValueError("'proportion' must be a number")
+    if p != p or p in (float("inf"), float("-inf")):
+        raise ValueError("'proportion' must be finite")
+    if p < 0.0 or p >= 0.5:
+        raise ValueError("'proportion' must be in [0, 0.5)")
+
+    values, unit, category = _series_values(items, to_unit)
+    n = len(values)
+    ordered = sorted(values)
+
+    # Symmetric floor trim: drop g from each tail. p < 0.5 guarantees 2g < n, so
+    # at least one value always survives the trim.
+    g = int(math.floor(n * p))
+    kept = ordered[g:n - g] if g else ordered
+    lower = kept[0]
+    upper = kept[-1]
+
+    mean = sum(ordered) / n
+    trimmed = sum(kept) / len(kept)
+    # Winsorize: clamp the g extreme values on each side to the kept bounds,
+    # then average over all n points (the middle block is unchanged).
+    winsorized = (g * lower + sum(kept) + g * upper) / n
+    return {
+        "category": category,
+        "unit": unit,
+        "count": n,
+        "proportion": p,
+        "trimmed_each_side": g,
+        "kept": len(kept),
+        "mean": mean,
+        "trimmed_mean": trimmed,
+        "winsorized_mean": winsorized,
+        "lower": lower,
+        "upper": upper,
+    }
+
+
+def _median_sorted(ordered):
+    """Median of an already-ascending list (length >= 1)."""
+    m = len(ordered)
+    mid = m // 2
+    if m % 2:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) / 2.0
+
+
+def theil_sen(x_items, y_items, to_x=None, to_y=None):
+    """Theil--Sen robust linear fit ``y = slope·x + intercept`` of two paired
+    series of quantities.
+
+    The outlier-resistant companion to :func:`linear_regression` (ordinary least
+    squares), mirroring how :func:`spearman` / :func:`kendall` are the robust
+    companions to :func:`correlation` and :func:`trimmed_mean` is to
+    :func:`means`. Where OLS minimises squared residuals — so a single wild point
+    can swing the line — Theil--Sen takes the **median of the pairwise slopes**
+    ``(y_j - y_i)/(x_j - x_i)`` over every pair of points with distinct ``x``,
+    then sets ``intercept = median(y_i - slope·x_i)`` over all points. The median
+    has a ~29% breakdown point, so up to roughly a quarter of the data can be
+    arbitrarily corrupted without dragging the fit.
+
+    Each series is restated on its own common unit (``to_x`` / ``to_y``, or each
+    series' first unit when omitted), exactly like the rest of the paired-series
+    family, so the slope carries ``y_unit/x_unit`` and the intercept ``y_unit``.
+
+    Pairs that share an ``x`` value (a vertical connecting line, an infinite
+    slope) are skipped and counted in ``tied_pairs``; ``used_pairs`` is the
+    number of finite-slope pairs the median is taken over and ``pairs`` is the
+    total ``n·(n-1)/2`` candidate pairs.
+
+    Returns a dict::
+
+        {
+            "x_category", "y_category",
+            "x_unit", "y_unit",
+            "count",
+            "pairs",        # total candidate pairs n(n-1)/2
+            "used_pairs",   # pairs with distinct x (finite slope)
+            "tied_pairs",   # pairs skipped for sharing an x value
+            "slope",        # median pairwise slope, in y_unit per x_unit
+            "intercept",    # median(y - slope·x), in y_unit
+            "median_x", "median_y",
+            "mean_x", "mean_y",
+        }
+
+    Raises ValueError for mismatched lengths, fewer than two paired points, any
+    malformed/cross-category series (delegated to ``sum_quantities``), or an
+    ``x`` series in which every pair shares its ``x`` value (all x equal — a
+    vertical line has no finite slope), matching the OLS guard in
+    :func:`linear_regression`.
+    """
+    s = _paired_series(x_items, y_items, to_x, to_y)
+    xs, ys, n = s["x"], s["y"], s["n"]
+
+    slopes = []
+    tied = 0
+    for i in range(n):
+        for j in range(i + 1, n):
+            dx = xs[j] - xs[i]
+            if dx == 0:
+                tied += 1
+                continue
+            slopes.append((ys[j] - ys[i]) / dx)
+    if not slopes:
+        raise ValueError("'x' values have zero spread; the slope is undefined")
+
+    slope = _median_sorted(sorted(slopes))
+    intercept = _median_sorted(sorted(y - slope * x for x, y in zip(xs, ys)))
+    total_pairs = n * (n - 1) // 2
+    return {
+        "x_category": s["x_category"], "y_category": s["y_category"],
+        "x_unit": s["x_unit"], "y_unit": s["y_unit"],
+        "count": n,
+        "pairs": total_pairs,
+        "used_pairs": len(slopes),
+        "tied_pairs": tied,
+        "slope": slope,
+        "intercept": intercept,
+        "median_x": _median_sorted(sorted(xs)),
+        "median_y": _median_sorted(sorted(ys)),
+        "mean_x": sum(xs) / n,
+        "mean_y": sum(ys) / n,
     }

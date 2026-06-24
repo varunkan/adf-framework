@@ -96,3 +96,47 @@ POST routes:
   absolute difference, `2·gini`) and `mean_abs_difference` (its absolute form).
   The inequality/concentration companion to `/api/proportions`; rejects negative
   values (an all-equal or all-zero list is `gini = 0`).
+- `/api/spearman` — `{x:[{value,unit},...], y:[...], to_x?, to_y?}` → the
+  **Spearman rank correlation** `rho` (in `[-1, 1]`) of two paired quantity
+  series: Pearson's `r` computed on the fractional ranks of each series, so it
+  measures *monotonic* (not merely linear) association, is robust to outliers and
+  invariant under any monotonic rescaling of either series. The rank-based
+  companion to `/api/correlation` (linear Pearson `r`); reports `has_ties` and is
+  `null` when either series has zero spread.
+- `/api/kendall` — `{x:[{value,unit},...], y:[...], to_x?, to_y?}` → **Kendall's
+  tau-b** rank correlation (in `[-1, 1]`), the third member of the paired-series
+  correlation family alongside Pearson `/api/correlation` and Spearman
+  `/api/spearman`. Built from the **concordant**/**discordant** agreement of
+  *every pair* of observations rather than ranks-then-Pearson, so it reads as a
+  probability of concordance; reports `concordant`, `discordant`, the simpler
+  `tau_a` `(C−D)/n0`, the per-axis tie counts (`ties_x`/`ties_y`), `has_ties`,
+  and is `null` when either series has zero spread. Dimensionless and invariant
+  under any monotonic rescaling of either series.
+- `/api/theil-sen` — `{x:[{value,unit},...], y:[...], to_x?, to_y?}` → the
+  **Theil–Sen robust linear fit** `y = slope·x + intercept`, the
+  outlier-resistant companion to least-squares `/api/regression`. The slope is
+  the **median of every pairwise slope** `(yj−yi)/(xj−xi)` and the intercept the
+  median of `(y − slope·x)`, so up to ~29% of the data can be corrupted without
+  swinging the line. The slope carries `y_unit/x_unit`, the intercept `y_unit`;
+  reports the total `pairs`, the `used_pairs` (distinct-`x` finite slopes), the
+  `tied_pairs` skipped for sharing an `x`, plus each series' `median`/`mean`. A
+  series whose every `x` is equal (no finite slope) is a `400`.
+- `/api/trimmed-mean` — `{items:[{value,unit},...], proportion?, to?}` → the
+  robust **trimmed mean** and **winsorized mean** of same-category quantities,
+  restated in `to` (or the first item's unit). `proportion` is the fraction
+  trimmed from *each* tail (default `0.1`, must be in `[0, 0.5)`): the trimmed
+  mean drops the `floor(n·proportion)` smallest and largest values and averages
+  the rest, while the winsorized mean instead *clamps* those extremes to the
+  nearest kept value (`lower`/`upper`) before averaging all `n`. Reports the
+  plain `mean` alongside, plus `trimmed_each_side` and `kept`. The
+  outlier-resistant location companion to `/api/means` (classical means) and
+  `/api/mad` (robust spread); rejects a `proportion` outside `[0, 0.5)`.
+- `/api/ema` — `{items:[{value,unit},...], alpha?, span?, to?}` → the
+  **exponential moving average** (exponential smoothing) over each item on a
+  common unit (`ema[0] = value[0]`, `ema[i] = α·value[i] + (1−α)·ema[i−1]`). The
+  smoothing factor is given as `alpha` (in `(0, 1]`) **or** as a `span` `s`
+  (`≥ 1`, mapped to `α = 2/(s+1)`); supply at most one, defaulting to `alpha`
+  0.5. Unlike the equal-weighted, full-window `/api/moving-average`, an EMA emits
+  one smoothed value per item over the whole history and weights recent items
+  more heavily — the reactive smoothing companion to `/api/cumsum` and
+  `/api/diff`.
