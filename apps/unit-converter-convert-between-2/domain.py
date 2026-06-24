@@ -3147,6 +3147,84 @@ def linear_regression(x_items, y_items, to_x=None, to_y=None):
     }
 
 
+def residuals(x_items, y_items, to_x=None, to_y=None):
+    """Per-point residuals of the ordinary least-squares fit ``y = slope·x + b``.
+
+    The diagnostic companion to :func:`linear_regression`: where that returns the
+    summary fit (slope, intercept, r²), this returns the line *evaluated at every
+    point* so the caller can see where the model is right and where it is off.
+
+    Each series is restated on its own common unit (``to_x`` / ``to_y``, or each
+    series' first unit when omitted). For every paired point it reports the fitted
+    value ``ŷ = slope·x + intercept`` and the residual ``e = y - ŷ`` (both in
+    ``y_unit``). The decomposition of variance is reported alongside: the total
+    sum of squares ``sst = Σ(y-my)²``, the regression (explained) sum of squares
+    ``ssr``, the residual (unexplained) sum of squares ``sse = Σe²`` (with
+    ``ssr + sse == sst``), and ``r_squared = ssr/sst``. The **residual standard
+    error** ``√(sse/(n-2))`` — the typical size of a residual, with the two
+    degrees of freedom spent on the slope and intercept removed — is reported when
+    ``n > 2`` and ``None`` for exactly two points (a line through both leaves no
+    residual degrees of freedom). ``r_squared`` is ``None`` when ``y`` has zero
+    spread (``sst == 0``: no variance to explain).
+
+    Returns a dict::
+
+        {
+            "x_category", "y_category",
+            "x_unit", "y_unit",
+            "count",
+            "slope",                  # in y_unit per x_unit
+            "intercept",              # in y_unit
+            "sst", "ssr", "sse",      # variance decomposition (y_unit²)
+            "r_squared",              # ssr/sst, or None when sst == 0
+            "residual_std_error",     # √(sse/(n-2)) in y_unit, or None when n == 2
+            "mean_x", "mean_y",
+            "items": [{"index", "x", "y", "fitted", "residual"}, ...],
+        }
+
+    Raises ValueError for mismatched lengths, fewer than two paired points, any
+    malformed/cross-category series (delegated to ``sum_quantities``), or an ``x``
+    series with zero spread (a vertical line has no finite slope).
+    """
+    s = _paired_series(x_items, y_items, to_x, to_y)
+    xs, ys, n = s["x"], s["y"], s["n"]
+    mean_x, mean_y, sxy, sxx, syy = _co_moments(xs, ys)
+    if sxx == 0:
+        raise ValueError("'x' values have zero spread; the slope is undefined")
+    slope = sxy / sxx
+    intercept = mean_y - slope * mean_x
+
+    items = []
+    sse = 0.0
+    for i, (x, y) in enumerate(zip(xs, ys)):
+        fitted = slope * x + intercept
+        residual = y - fitted
+        sse += residual * residual
+        items.append({
+            "index": i, "x": x, "y": y,
+            "fitted": fitted, "residual": residual,
+        })
+
+    sst = syy
+    ssr = sst - sse
+    r_squared = (ssr / sst) if sst != 0 else None
+    # n - 2 degrees of freedom: one each for the slope and the intercept. With
+    # exactly two points the line is exact (sse == 0) and there is no spare DOF.
+    residual_std_error = math.sqrt(sse / (n - 2)) if n > 2 else None
+    return {
+        "x_category": s["x_category"], "y_category": s["y_category"],
+        "x_unit": s["x_unit"], "y_unit": s["y_unit"],
+        "count": n,
+        "slope": slope,
+        "intercept": intercept,
+        "sst": sst, "ssr": ssr, "sse": sse,
+        "r_squared": r_squared,
+        "residual_std_error": residual_std_error,
+        "mean_x": mean_x, "mean_y": mean_y,
+        "items": items,
+    }
+
+
 def gini_quantities(items, to_unit=None):
     """The Gini inequality coefficient of a list of SAME-category quantities.
 
@@ -3225,6 +3303,125 @@ def gini_quantities(items, to_unit=None):
         "gini": gini,
         "rmad": rmad,
         "mean_abs_difference": rmad * mean,
+    }
+
+
+def lorenz_quantities(items, to_unit=None):
+    """The Lorenz curve of a list of SAME-category quantities.
+
+    The per-point dataset companion to the scalar :func:`gini_quantities` —
+    exactly as :func:`winsorize_quantities` is the per-item companion to the
+    scalar :func:`trimmed_mean`. Where the Gini coefficient collapses the
+    distribution to a single inequality number, the Lorenz curve returns the
+    whole shape behind it: with the values sorted ascending, it plots the
+    *cumulative population share* (what fraction of the items, the poorest
+    first) against the *cumulative value share* (what fraction of the total
+    those items hold). Perfect equality is the 45° diagonal (the smallest k% of
+    items hold k% of the total); the more the curve sags below the diagonal,
+    the more unequal the distribution.
+
+    Every quantity is first restated in a single common ``to_unit`` (or, when
+    omitted, the first item's unit) so the shares are apples-to-apples — exactly
+    like :func:`gini_quantities` and the rest of the aggregate family.
+
+    The curve is returned as ``n + 1`` points, starting at the origin
+    ``(0, 0)`` and ending at ``(1, 1)``. Point ``i`` (after folding in the ``i``
+    smallest values) carries::
+
+        {
+            "count": <int>,                 # i — how many of the smallest items
+            "population_fraction": <float>, # i / n
+            "cumulative_value": <float>,    # Σ of the i smallest, in the unit
+            "value_fraction": <float>,      # cumulative_value / total
+        }
+
+    The ``gini`` reported here is recovered geometrically from the curve as
+    ``1 − 2·area_under_curve`` (the area between the curve and the diagonal,
+    doubled) and is identical to the one :func:`gini_quantities` computes from
+    the same data. ``area_under_curve`` is the trapezoidal area below the Lorenz
+    curve, in ``[0, 0.5]`` (0.5 is perfect equality, the diagonal). An all-zero
+    (zero-total) list is treated as perfectly equal — the curve is the diagonal,
+    so ``gini == 0`` — matching :func:`gini_quantities`.
+
+    ``items`` is a list of {"value": <number>, "unit": <token>} dicts (a
+    ``(value, unit)`` tuple is also accepted), identical to ``sum_quantities``.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,
+            "total": <float>,            # the group total, in the target unit
+            "mean": <float>,             # the arithmetic mean
+            "gini": <float>,             # Gini coefficient in [0, 1]
+            "area_under_curve": <float>, # trapezoidal area below the curve
+            "points": [<point>, ...],    # n + 1 points, (0,0) .. (1,1)
+        }
+
+    Raises ValueError for an empty/non-list input, a malformed item, an unknown
+    or cross-category unit, a non-finite value, a non-linear category
+    (temperature is affine and fuel economy is reciprocal — neither sums, so
+    neither has a Lorenz curve), or any negative restated value (the Lorenz
+    curve is only defined for a non-negative distribution). Validation is
+    delegated to ``sum_quantities`` so the accepted inputs stay identical to the
+    rest of the aggregate family.
+    """
+    # sum_quantities does the full validation (list shape, item shape, finite
+    # values, single linear category, valid target) and resolves both the group
+    # total and the common target unit, so a bad input fails here first.
+    total, unit, category = sum_quantities(items, to_unit)
+    values = _restate_items(items, unit)
+
+    if any(v < 0 for v in values):
+        raise ValueError(
+            "the Lorenz curve is only defined for non-negative quantities")
+
+    n = len(values)
+    mean = total / n
+    ordered = sorted(values)
+
+    # The curve starts at the origin: zero items hold zero of the total.
+    points = [{
+        "count": 0,
+        "population_fraction": 0.0,
+        "cumulative_value": 0.0,
+        "value_fraction": 0.0,
+    }]
+    cumulative = 0.0
+    for i, x in enumerate(ordered, start=1):
+        cumulative += x
+        # An all-zero distribution has nothing to share unevenly: pin the value
+        # share to the population share so the curve is the equality diagonal
+        # (area 0.5, gini 0), matching gini_quantities' zero-total handling.
+        value_fraction = (cumulative / total) if total != 0 else (i / n)
+        points.append({
+            "count": i,
+            "population_fraction": i / n,
+            "cumulative_value": cumulative,
+            "value_fraction": value_fraction,
+        })
+
+    # Trapezoidal area below the Lorenz curve, then the geometric Gini. The
+    # diagonal (perfect equality) encloses area 0.5, so gini == 1 − 2·area; a
+    # tiny negative from float error is clamped to 0.
+    area = 0.0
+    for prev, cur in zip(points, points[1:]):
+        width = cur["population_fraction"] - prev["population_fraction"]
+        area += width * (cur["value_fraction"] + prev["value_fraction"]) / 2.0
+    gini = 1.0 - 2.0 * area
+    if gini < 0.0:
+        gini = 0.0
+
+    return {
+        "category": category,
+        "unit": unit,
+        "count": n,
+        "total": total,
+        "mean": mean,
+        "gini": gini,
+        "area_under_curve": area,
+        "points": points,
     }
 
 
@@ -4172,4 +4369,498 @@ def confidence_interval(items, confidence=None, to_unit=None):
         "margin_of_error": margin,
         "lower": mean - margin,
         "upper": mean + margin,
+    }
+
+
+# A Jarque-Bera statistic at or above this threshold rejects normality at the
+# conventional 5% level: it is the upper 5% point of the chi-square distribution
+# with two degrees of freedom (the reference distribution of the JB statistic).
+# Because that distribution has a closed form (its survival function is simply
+# ``exp(-x/2)``), the critical value is exactly ``-2 * ln(0.05)``.
+JB_CHI2_2DF_5PCT = 5.991464547107979  # -2 * ln(0.05)
+
+
+def jarque_bera(items, to_unit=None):
+    """Jarque-Bera goodness-of-fit test for normality.
+
+    The inferential, normality-testing companion to :func:`shape_quantities`:
+    where ``shape`` merely *describes* how skewed and heavy-tailed a sample is,
+    this asks whether those departures are large enough to *reject* the
+    hypothesis that the data were drawn from a normal distribution — exactly as
+    :func:`confidence_interval` is the inferential companion to the descriptive
+    :func:`describe_quantities`.
+
+    The statistic combines the sample skewness ``S`` (the population estimator
+    ``g1``) and the excess kurtosis ``K`` (the population estimator ``g2``) into
+
+        JB = (n / 6) * (S**2 + K**2 / 4)
+
+    which, under the null hypothesis of normality, is asymptotically
+    chi-square distributed with two degrees of freedom. That reference
+    distribution has the closed-form survival function ``P(X > x) == exp(-x/2)``,
+    so the two-sided **p-value** is ``exp(-JB / 2)`` — no special-function or
+    third-party dependency is required. A small p-value (conventionally below
+    0.05) is evidence *against* normality; ``is_normal`` reports the 5%-level
+    verdict (true when ``JB`` stays below :data:`JB_CHI2_2DF_5PCT`). A perfectly
+    symmetric, mesokurtic sample yields ``JB == 0`` and ``p_value == 1``.
+
+    Like the rest of the aggregate family, every quantity is first restated in a
+    single common ``to_unit`` (or, when omitted, the first item's unit). Both the
+    skewness and the kurtosis are dimensionless standardised moments, so — as in
+    :func:`shape_quantities` and :func:`correlation` — the statistic, p-value and
+    verdict do not depend on the chosen unit; the unit only labels the reported
+    ``mean`` and ``stdev``. ``items`` is a list of {"value": <number>,
+    "unit": <token>} dicts (a ``(value, unit)`` tuple is also accepted).
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,
+            "mean": <float>,                 # in the target unit
+            "stdev": <float>,                # population (/ N), in the target unit
+            "skewness": <float>,             # population g1 (dimensionless)
+            "kurtosis": <float>,             # population EXCESS kurtosis g2
+            "statistic": <float>,            # the JB statistic (>= 0)
+            "df": 2,                         # chi-square degrees of freedom
+            "p_value": <float>,              # exp(-JB / 2), in (0, 1]
+            "is_normal": <bool>,             # JB < the 5% chi-square(2) point
+        }
+
+    Raises ValueError for an empty/non-list input, a malformed item, an unknown
+    or cross-category unit, a non-finite value, a non-linear category
+    (temperature is affine and fuel economy is reciprocal — neither has a
+    meaningful distribution shape), a series of fewer than two values, or a
+    constant series (zero variance leaves the skewness and kurtosis — and hence
+    the statistic — undefined, exactly as :func:`shape_quantities` reports them
+    as ``None``). Item validation is delegated through ``shape_quantities`` to
+    ``sum_quantities`` so the accepted inputs stay identical to the rest of the
+    aggregate family.
+    """
+    # shape_quantities runs the full validation (list shape, item shape, finite
+    # values, single linear category, valid target) and computes the population
+    # skewness / excess kurtosis, so a bad input fails here before the test runs.
+    shape = shape_quantities(items, to_unit)
+    count = shape["count"]
+    if count < 2:
+        raise ValueError(
+            "Jarque-Bera test requires at least two values "
+            "(skewness and kurtosis are undefined for a single observation)"
+        )
+    skewness = shape["skewness"]
+    kurtosis = shape["kurtosis"]
+    if skewness is None or kurtosis is None:
+        # A constant series has zero variance, so its shape — and the test built
+        # on it — is undefined, mirroring the ``None`` shape_quantities reports.
+        raise ValueError(
+            "Jarque-Bera test is undefined for a constant series (zero variance)"
+        )
+
+    statistic = (count / 6.0) * (skewness ** 2 + (kurtosis ** 2) / 4.0)
+    # Survival function of chi-square with two degrees of freedom: exp(-x/2).
+    p_value = math.exp(-statistic / 2.0)
+    return {
+        "category": shape["category"],
+        "unit": shape["unit"],
+        "count": count,
+        "mean": shape["mean"],
+        "stdev": shape["stdev"],
+        "skewness": skewness,
+        "kurtosis": kurtosis,
+        "statistic": statistic,
+        "df": 2,
+        "p_value": p_value,
+        "is_normal": statistic < JB_CHI2_2DF_5PCT,
+    }
+
+
+def _betacf(a, b, x):
+    """Continued-fraction core of the regularized incomplete beta function.
+
+    The Lentz evaluation of the continued fraction in Numerical Recipes'
+    ``betacf`` — the workhorse behind :func:`_regularized_incomplete_beta`.
+    Converges rapidly for ``x < (a + 1) / (a + b + 2)``; the caller arranges
+    that by reflecting the arguments when necessary. Standard-library only.
+    """
+    MAXIT = 400
+    EPS = 3.0e-16
+    FPMIN = 1.0e-300
+    qab = a + b
+    qap = a + 1.0
+    qam = a - 1.0
+    c = 1.0
+    d = 1.0 - qab * x / qap
+    if abs(d) < FPMIN:
+        d = FPMIN
+    d = 1.0 / d
+    h = d
+    for m in range(1, MAXIT + 1):
+        m2 = 2 * m
+        aa = m * (b - m) * x / ((qam + m2) * (a + m2))
+        d = 1.0 + aa * d
+        if abs(d) < FPMIN:
+            d = FPMIN
+        c = 1.0 + aa / c
+        if abs(c) < FPMIN:
+            c = FPMIN
+        d = 1.0 / d
+        h *= d * c
+        aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))
+        d = 1.0 + aa * d
+        if abs(d) < FPMIN:
+            d = FPMIN
+        c = 1.0 + aa / c
+        if abs(c) < FPMIN:
+            c = FPMIN
+        d = 1.0 / d
+        delta = d * c
+        h *= delta
+        if abs(delta - 1.0) < EPS:
+            break
+    return h
+
+
+def _regularized_incomplete_beta(a, b, x):
+    """The regularized incomplete beta function ``I_x(a, b)``.
+
+    Equals ``B(x; a, b) / B(a, b)`` and rises monotonically from
+    ``I_0 == 0`` to ``I_1 == 1``. The prefactor is formed in log space via
+    :func:`math.lgamma` (so it never overflows), and the continued fraction
+    :func:`_betacf` is evaluated on whichever of ``x`` / ``1 - x`` converges
+    fastest. This is the special function underpinning the Student-t CDF used by
+    :func:`t_interval`; standard-library only — no scipy/statistics dependency.
+    """
+    if x <= 0.0:
+        return 0.0
+    if x >= 1.0:
+        return 1.0
+    log_beta = math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b)
+    bt = math.exp(log_beta + a * math.log(x) + b * math.log(1.0 - x))
+    if x < (a + 1.0) / (a + b + 2.0):
+        return bt * _betacf(a, b, x) / a
+    return 1.0 - bt * _betacf(b, a, 1.0 - x) / b
+
+
+def _inv_regularized_incomplete_beta(a, b, target):
+    """Inverse of :func:`_regularized_incomplete_beta` in ``x`` for fixed a, b.
+
+    Returns the ``x`` in ``[0, 1]`` with ``I_x(a, b) == target`` (``target`` in
+    ``(0, 1)``). Because ``I_x`` is continuous and strictly increasing in ``x``,
+    a plain bisection on ``[0, 1]`` is unconditionally convergent; ~80 halvings
+    pin ``x`` to full double precision. Used by :func:`_inv_student_t_cdf`.
+    """
+    lo = 0.0
+    hi = 1.0
+    for _ in range(100):
+        mid = 0.5 * (lo + hi)
+        if _regularized_incomplete_beta(a, b, mid) < target:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
+
+
+def _inv_student_t_cdf(p, df):
+    """Inverse CDF (quantile) of Student's t-distribution with ``df`` d.o.f.
+
+    Returns the ``t`` such that ``F(t; df) == p`` for ``0 < p < 1``. Built on the
+    standard identity linking the t CDF to the regularized incomplete beta: with
+    ``x = df / (df + t**2)``, the two-tailed mass beyond ``|t|`` is exactly
+    ``I_x(df/2, 1/2)``. So for a target lower-tail ``p`` we invert
+    ``I_x(df/2, 1/2) == 2 * min(p, 1 - p)`` for ``x`` (see
+    :func:`_inv_regularized_incomplete_beta`) and recover
+    ``|t| = sqrt(df * (1 - x) / x)``, signing it by which side of the median ``p``
+    falls on. ``_inv_student_t_cdf(0.975, 1)`` returns the Cauchy ``12.706...``;
+    as ``df -> inf`` the result converges to the normal quantile
+    :func:`_inv_normal_cdf`. Standard-library only.
+
+    Raises ValueError when ``p`` is not strictly inside ``(0, 1)`` or ``df`` is
+    not a positive number.
+    """
+    if not (0.0 < p < 1.0):
+        raise ValueError("probability must be strictly between 0 and 1")
+    if isinstance(df, bool) or not isinstance(df, (int, float)):
+        raise ValueError("degrees of freedom must be a number")
+    if df != df or df in (float("inf"), float("-inf")) or df <= 0:
+        raise ValueError("degrees of freedom must be a finite positive number")
+    if p == 0.5:
+        return 0.0
+    tail = p if p < 0.5 else 1.0 - p
+    x = _inv_regularized_incomplete_beta(df / 2.0, 0.5, 2.0 * tail)
+    if x <= 0.0:
+        # Numerically saturated tail; clamp to the largest representable x so the
+        # magnitude stays finite rather than dividing by zero.
+        x = 1.0e-300
+    magnitude = math.sqrt(df * (1.0 - x) / x)
+    return magnitude if p > 0.5 else -magnitude
+
+
+def t_interval(items, confidence=None, to_unit=None):
+    """Student's t confidence interval for the population MEAN of a list of quantities.
+
+    The small-sample companion to :func:`confidence_interval`: that function uses
+    the large-sample **normal (z) approximation**, which understates the margin
+    when the population standard deviation is itself estimated from only a handful
+    of observations. This function instead uses the exact **Student's t** critical
+    value with ``df = n - 1`` degrees of freedom, so the interval is correctly
+    *wider* for small ``n`` and converges to the z-interval as ``n`` grows. Every
+    quantity is first restated in a single common ``to_unit`` (or, when omitted,
+    the first item's unit), exactly like :func:`sum_quantities` and the rest of
+    the aggregate family.
+
+    With the sample mean ``xbar``, the unbiased sample standard deviation ``s``
+    (the ``/(n-1)`` estimator) and ``n`` observations, the **standard error of
+    the mean** is ``SE = s / sqrt(n)``, the two-sided critical value is the t
+    quantile ``t = F^-1((1 + confidence) / 2; n - 1)`` (see
+    :func:`_inv_student_t_cdf`), the **margin of error** is ``t * SE`` and the
+    interval is ``[xbar - margin, xbar + margin]``. ``confidence`` defaults to
+    0.95 and must lie strictly inside ``(0, 1)``.
+
+    ``items`` is a list of {"value": <number>, "unit": <token>} dicts (a
+    ``(value, unit)`` tuple is also accepted), identical to ``sum_quantities``.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,
+            "df": <int>,                      # degrees of freedom (count - 1)
+            "confidence": <float>,            # the requested level, e.g. 0.95
+            "mean": <float>,                  # sample mean, in the target unit
+            "sample_stdev": <float>,          # unbiased (/(n-1)) stdev
+            "standard_error": <float>,        # s / sqrt(n)
+            "critical_value": <float>,        # the two-sided t quantile
+            "margin_of_error": <float>,       # t * standard_error
+            "lower": <float>,                 # mean - margin_of_error
+            "upper": <float>,                 # mean + margin_of_error
+        }
+
+    Raises ValueError for an empty/non-list input, a malformed item, an unknown
+    or cross-category unit, a non-finite value, a non-linear category
+    (temperature is affine and fuel economy is reciprocal — neither has a
+    meaningful mean to bound), a ``confidence`` that is not a number strictly in
+    ``(0, 1)``, or a series of fewer than two values (the sample standard
+    deviation — and hence the standard error — is undefined for a single
+    observation). Item validation is delegated to ``sum_quantities`` so the
+    accepted inputs stay identical to the rest of the aggregate family.
+    """
+    if confidence is None:
+        confidence = CI_DEFAULT_CONFIDENCE
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+        raise ValueError("'confidence' must be a number")
+    confidence = float(confidence)
+    if confidence != confidence or confidence in (float("inf"), float("-inf")):
+        raise ValueError("'confidence' must be finite")
+    if not (0.0 < confidence < 1.0):
+        raise ValueError("'confidence' must be strictly between 0 and 1")
+
+    # sum_quantities does the full validation (list shape, item shape, finite
+    # values, single linear category, valid target) and resolves both the running
+    # total and the common target unit, so a bad input fails here before any
+    # statistics run.
+    total, unit, category = sum_quantities(items, to_unit)
+    converted = _restate_items(items, unit)
+    count = len(converted)
+    if count < 2:
+        raise ValueError(
+            "t interval requires at least two values "
+            "(the sample standard error is undefined for one observation)"
+        )
+
+    df = count - 1
+    mean = total / count
+    sample_variance = sum((x - mean) ** 2 for x in converted) / df
+    sample_stdev = math.sqrt(sample_variance)
+    standard_error = sample_stdev / math.sqrt(count)
+
+    critical_value = _inv_student_t_cdf((1.0 + confidence) / 2.0, df)
+    margin = critical_value * standard_error
+    return {
+        "category": category,
+        "unit": unit,
+        "count": count,
+        "df": df,
+        "confidence": confidence,
+        "mean": mean,
+        "sample_stdev": sample_stdev,
+        "standard_error": standard_error,
+        "critical_value": critical_value,
+        "margin_of_error": margin,
+        "lower": mean - margin,
+        "upper": mean + margin,
+    }
+
+
+def _student_t_two_sided_p(t, df):
+    """Two-sided p-value ``P(|T| >= |t|)`` for Student's t with ``df`` d.o.f.
+
+    The forward companion to :func:`_inv_student_t_cdf` (which inverts the CDF):
+    this evaluates the two-tailed mass directly. Built on the same identity
+    linking the t tail to the regularized incomplete beta — with
+    ``x = df / (df + t**2)`` the probability beyond ``|t|`` in both tails is
+    exactly ``I_x(df/2, 1/2)`` (see :func:`_regularized_incomplete_beta`). It
+    returns ``1.0`` at ``t == 0`` (all the mass is beyond zero) and decays
+    monotonically to ``0`` as ``|t| -> inf``; the result is symmetric in the sign
+    of ``t``. Standard-library only — no scipy/statistics dependency.
+    """
+    if t == 0.0:
+        return 1.0
+    x = df / (df + t * t)
+    return _regularized_incomplete_beta(df / 2.0, 0.5, x)
+
+
+# Default significance level for the two-sample t-test verdict. 0.05 is the
+# conventional 5% threshold; ``significant`` is true when the two-sided p-value
+# falls below it (i.e. the difference in means is judged statistically real).
+T_TEST_DEFAULT_ALPHA = 0.05
+
+
+def two_sample_t_test(a_items, b_items, equal_var=False, alpha=None, to_unit=None):
+    """Two-sample t-test for the difference between two population MEANS.
+
+    The two-group companion to :func:`t_interval` / :func:`confidence_interval`
+    (which bound a *single* mean) and to the paired bivariate family
+    (:func:`correlation`, :func:`linear_regression`, ... — all of which pair
+    ``x`` with ``y`` point for point). This instead takes two **independent**
+    samples ``a`` and ``b`` — which may have *different* lengths — and tests the
+    null hypothesis that they were drawn from populations with the same mean.
+
+    Both samples must belong to the SAME linear category; sample ``a`` is first
+    restated in a single common ``to_unit`` (or, when omitted, ``a``'s first
+    item's unit) and sample ``b`` is restated into that very same unit, so the
+    difference in means is apples-to-apples — exactly like :func:`sum_quantities`
+    and the rest of the aggregate family. With the sample means ``xbar_a`` /
+    ``xbar_b`` and the unbiased sample variances ``s_a**2`` / ``s_b**2`` (the
+    ``/(n-1)`` estimator):
+
+    * **Welch's t-test** (the default, ``equal_var=False``) does NOT assume the
+      two variances are equal: ``SE = sqrt(s_a**2/n_a + s_b**2/n_b)`` and the
+      degrees of freedom are the Welch-Satterthwaite approximation.
+    * **Student's pooled t-test** (``equal_var=True``) assumes a common variance:
+      the pooled variance ``s_p**2`` weights the two by their d.o.f.,
+      ``SE = sqrt(s_p**2 * (1/n_a + 1/n_b))`` and ``df = n_a + n_b - 2``.
+
+    In both cases the statistic is ``t = (xbar_a - xbar_b) / SE`` and the
+    two-sided **p-value** is ``P(|T| >= |t|)`` under the t distribution with the
+    chosen ``df`` (see :func:`_student_t_two_sided_p`). ``significant`` reports
+    the verdict at the ``alpha`` level (default 0.05): true when the p-value is
+    strictly below ``alpha``, i.e. the means differ by more than sampling noise
+    can comfortably explain.
+
+    Each of ``a_items`` / ``b_items`` is a list of {"value": <number>,
+    "unit": <token>} dicts (a ``(value, unit)`` tuple is also accepted).
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised common unit>,
+            "n_a": <int>, "n_b": <int>,
+            "mean_a": <float>, "mean_b": <float>,   # in the common unit
+            "var_a": <float>, "var_b": <float>,     # unbiased (/(n-1)) variances
+            "stdev_a": <float>, "stdev_b": <float>, # unbiased sample stdevs
+            "difference": <float>,                  # mean_a - mean_b
+            "equal_var": <bool>,                    # which test was run
+            "method": "welch" | "pooled",
+            "standard_error": <float>,
+            "statistic": <float>,                   # the t-statistic
+            "df": <float>,                          # degrees of freedom
+            "alpha": <float>,                       # the requested level
+            "p_value": <float>,                     # two-sided, in (0, 1]
+            "significant": <bool>,                  # p_value < alpha
+        }
+
+    Raises ValueError for an empty/non-list sample, a malformed item, an unknown
+    or cross-category unit (either within a sample or between the two samples), a
+    non-finite value, a non-linear category (temperature is affine and fuel
+    economy is reciprocal — neither has a meaningful mean to compare), an
+    ``alpha`` that is not a number strictly in ``(0, 1)``, an ``equal_var`` that
+    is not a boolean, either sample having fewer than two values (the sample
+    variance is undefined for one observation), or two samples that are BOTH
+    constant (zero combined variance leaves the t-statistic undefined). Item
+    validation is delegated through ``_series_values`` to ``sum_quantities`` so
+    the accepted inputs stay identical to the rest of the aggregate family.
+    """
+    if alpha is None:
+        alpha = T_TEST_DEFAULT_ALPHA
+    if isinstance(alpha, bool) or not isinstance(alpha, (int, float)):
+        raise ValueError("'alpha' must be a number")
+    alpha = float(alpha)
+    if alpha != alpha or alpha in (float("inf"), float("-inf")):
+        raise ValueError("'alpha' must be finite")
+    if not (0.0 < alpha < 1.0):
+        raise ValueError("'alpha' must be strictly between 0 and 1")
+
+    if equal_var is None:
+        equal_var = False
+    if not isinstance(equal_var, bool):
+        raise ValueError("'equal_var' must be a boolean")
+
+    # _series_values runs the full per-sample validation (list shape, item shape,
+    # finite values, single linear category, valid target) via sum_quantities and
+    # restates the values. Sample a fixes the common unit; sample b is forced into
+    # that same unit, which also rejects a cross-category second sample (the target
+    # belongs to a's category, so a mismatched b raises in sum_quantities).
+    a_vals, unit, category = _series_values(a_items, to_unit)
+    b_vals, _, _ = _series_values(b_items, unit)
+
+    n_a = len(a_vals)
+    n_b = len(b_vals)
+    if n_a < 2 or n_b < 2:
+        raise ValueError(
+            "each sample needs at least two values "
+            "(the sample variance is undefined for one observation)"
+        )
+
+    mean_a = sum(a_vals) / n_a
+    mean_b = sum(b_vals) / n_b
+    var_a = sum((x - mean_a) ** 2 for x in a_vals) / (n_a - 1)
+    var_b = sum((x - mean_b) ** 2 for x in b_vals) / (n_b - 1)
+
+    if equal_var:
+        df = float(n_a + n_b - 2)
+        pooled_var = ((n_a - 1) * var_a + (n_b - 1) * var_b) / df
+        standard_error = math.sqrt(pooled_var * (1.0 / n_a + 1.0 / n_b))
+        method = "pooled"
+    else:
+        sa = var_a / n_a
+        sb = var_b / n_b
+        standard_error = math.sqrt(sa + sb)
+        method = "welch"
+
+    if standard_error == 0.0:
+        # Both samples are constant (zero variance), so there is no spread to test
+        # against and the t-statistic would divide by zero.
+        raise ValueError(
+            "both samples are constant (zero variance); the t-statistic is undefined"
+        )
+
+    if not equal_var:
+        # Welch-Satterthwaite effective degrees of freedom.
+        df = (sa + sb) ** 2 / ((sa ** 2) / (n_a - 1) + (sb ** 2) / (n_b - 1))
+
+    statistic = (mean_a - mean_b) / standard_error
+    p_value = _student_t_two_sided_p(statistic, df)
+    return {
+        "category": category,
+        "unit": unit,
+        "n_a": n_a,
+        "n_b": n_b,
+        "mean_a": mean_a,
+        "mean_b": mean_b,
+        "var_a": var_a,
+        "var_b": var_b,
+        "stdev_a": math.sqrt(var_a),
+        "stdev_b": math.sqrt(var_b),
+        "difference": mean_a - mean_b,
+        "equal_var": equal_var,
+        "method": method,
+        "standard_error": standard_error,
+        "statistic": statistic,
+        "df": df,
+        "alpha": alpha,
+        "p_value": p_value,
+        "significant": p_value < alpha,
     }

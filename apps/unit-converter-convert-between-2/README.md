@@ -96,6 +96,18 @@ POST routes:
   absolute difference, `2·gini`) and `mean_abs_difference` (its absolute form).
   The inequality/concentration companion to `/api/proportions`; rejects negative
   values (an all-equal or all-zero list is `gini = 0`).
+- `/api/lorenz` — `{items:[{value,unit},...], to?}` → the **Lorenz curve** of
+  same-category quantities: with the values sorted ascending, each of the `n+1`
+  points (from `(0,0)` to `(1,1)`) pairs the cumulative **population share**
+  (`population_fraction = i/n`, the smallest `i` items) with the cumulative
+  **value share** (`value_fraction`, the fraction of the total those items hold,
+  plus the running `cumulative_value`). The per-point dataset companion to the
+  scalar `/api/gini` — exactly as `/api/winsorize` is to `/api/trimmed-mean`:
+  where the Gini collapses inequality to one number, the curve returns the whole
+  shape behind it. Reports the `area_under_curve` (trapezoidal, in `[0, 0.5]`;
+  0.5 = the perfect-equality diagonal) and the `gini` recovered geometrically as
+  `1 − 2·area_under_curve`, identical to `/api/gini`. Rejects negative values; an
+  all-equal or all-zero list is the diagonal (`gini = 0`).
 - `/api/spearman` — `{x:[{value,unit},...], y:[...], to_x?, to_y?}` → the
   **Spearman rank correlation** `rho` (in `[-1, 1]`) of two paired quantity
   series: Pearson's `r` computed on the fractional ranks of each series, so it
@@ -121,6 +133,15 @@ POST routes:
   reports the total `pairs`, the `used_pairs` (distinct-`x` finite slopes), the
   `tied_pairs` skipped for sharing an `x`, plus each series' `median`/`mean`. A
   series whose every `x` is equal (no finite slope) is a `400`.
+- `/api/residuals` — `{x:[{value,unit},...], y:[...], to_x?, to_y?}` → the
+  **per-point diagnostic** companion to `/api/regression`: the least-squares line
+  evaluated at every paired point, reporting each point's `fitted` value
+  `ŷ = slope·x + intercept` and `residual` `y − ŷ` (both in `y_unit`). Adds the
+  variance decomposition `sst = ssr + sse` (total = explained + residual sum of
+  squares), `r_squared` `= ssr/sst` (`null` when `y` has zero spread), and the
+  **residual standard error** `√(sse/(n−2))` — the typical residual size — which
+  is `null` for exactly two points (no residual degrees of freedom). A series
+  whose every `x` is equal (no finite slope) is a `400`.
 - `/api/trimmed-mean` — `{items:[{value,unit},...], proportion?, to?}` → the
   robust **trimmed mean** and **winsorized mean** of same-category quantities,
   restated in `to` (or the first item's unit). `proportion` is the fraction

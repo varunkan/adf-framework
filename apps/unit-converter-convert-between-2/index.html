@@ -245,45 +245,71 @@
       <button id="ci" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">CI</button>
     </div>
 
+    <label for="tiExpr" style="margin-top:0.9rem;">Student's t interval for the mean — small-sample CI using the exact t critical value (df = n−1); wider than the z CI for small n (confidence in (0,1), default 0.95)</label>
+    <div class="row">
+      <div><input id="tiExpr" type="text" placeholder="e.g. 10 m, 12 m, 14 m, 16 m, 18 m" style="margin-bottom:0;" /></div>
+      <div style="flex:0 0 auto;"><input id="tiConf" type="number" step="any" min="0" max="1" placeholder="0.95" title="confidence level in (0, 1)" style="margin-bottom:0;width:7rem;" /></div>
+      <button id="ti" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">t-CI</button>
+    </div>
+
+    <label for="jbExpr" style="margin-top:0.9rem;">Jarque-Bera normality test — is the sample shape (skew + kurtosis) consistent with a normal distribution? (small p rejects)</label>
+    <div class="row">
+      <div><input id="jbExpr" type="text" placeholder="e.g. 10 m, 12 m, 14 m, 16 m, 18 m" style="margin-bottom:0;" /></div>
+      <button id="jb" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">JB</button>
+    </div>
+
     <label for="giniExpr" style="margin-top:0.9rem;">Gini inequality coefficient — how evenly the total is shared (0 = equal, →1 = concentrated)</label>
     <div class="row">
       <div><input id="giniExpr" type="text" placeholder="e.g. 1 m, 2 m, 3 m, 4 m" style="margin-bottom:0;" /></div>
       <button id="gini" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Gini</button>
     </div>
 
+    <label for="lorenzExpr" style="margin-top:0.9rem;">Lorenz curve — cumulative share of the total held by the smallest k% (the shape behind the Gini)</label>
+    <div class="row">
+      <div><input id="lorenzExpr" type="text" placeholder="e.g. 1 m, 2 m, 3 m, 4 m" style="margin-bottom:0;" /></div>
+      <button id="lorenz" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Lorenz</button>
+    </div>
+
     <label for="trimExpr" style="margin-top:0.9rem;">Trimmed &amp; winsorized mean — robust average that resists outliers (proportion trimmed per tail)</label>
     <div class="row">
       <div><input id="trimExpr" type="text" placeholder="e.g. 10 m, 11 m, 12 m, 13 m, 1000 m" style="margin-bottom:0;" /></div>
-      <div><input id="trimProp" type="number" step="0.05" min="0" max="0.49" placeholder="0.1" style="margin-bottom:0;width:5rem;" /></div>
+      <div><input id="trimProp" type="number" step="0.05" min="0" max="0.49" placeholder="0.1" aria-label="Proportion trimmed per tail" style="margin-bottom:0;width:5rem;" /></div>
       <button id="trim" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Trimmed</button>
     </div>
 
     <label for="winsorExpr" style="margin-top:0.9rem;">Winsorize &mdash; clamp the extreme values to the trim bounds, returning the whole transformed series (proportion clamped per tail)</label>
     <div class="row">
       <div><input id="winsorExpr" type="text" placeholder="e.g. 10 m, 11 m, 12 m, 13 m, 1000 m" style="margin-bottom:0;" /></div>
-      <div><input id="winsorProp" type="number" step="0.05" min="0" max="0.49" placeholder="0.1" style="margin-bottom:0;width:5rem;" /></div>
+      <div><input id="winsorProp" type="number" step="0.05" min="0" max="0.49" placeholder="0.1" aria-label="Proportion clamped per tail" style="margin-bottom:0;width:5rem;" /></div>
       <button id="winsorize" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Winsorize</button>
     </div>
 
     <label for="spearmanX" style="margin-top:0.9rem;">Spearman rank correlation — monotonic association between two paired series (−1…1)</label>
     <div class="row">
       <div><input id="spearmanX" type="text" placeholder="x: e.g. 1 m, 2 m, 3 m, 4 m" style="margin-bottom:0;" /></div>
-      <div><input id="spearmanY" type="text" placeholder="y: e.g. 1 s, 4 s, 9 s, 16 s" style="margin-bottom:0;" /></div>
+      <div><input id="spearmanY" type="text" placeholder="y: e.g. 1 s, 4 s, 9 s, 16 s" aria-label="Spearman y series" style="margin-bottom:0;" /></div>
       <button id="spearman" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Spearman</button>
     </div>
 
     <label for="kendallX" style="margin-top:0.9rem;">Kendall&rsquo;s &tau; rank correlation — concordance of every pair of two series (−1…1)</label>
     <div class="row">
       <div><input id="kendallX" type="text" placeholder="x: e.g. 1 m, 2 m, 3 m, 4 m" style="margin-bottom:0;" /></div>
-      <div><input id="kendallY" type="text" placeholder="y: e.g. 1 s, 4 s, 9 s, 16 s" style="margin-bottom:0;" /></div>
+      <div><input id="kendallY" type="text" placeholder="y: e.g. 1 s, 4 s, 9 s, 16 s" aria-label="Kendall y series" style="margin-bottom:0;" /></div>
       <button id="kendall" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Kendall</button>
     </div>
 
     <label for="theilsenX" style="margin-top:0.9rem;">Theil&ndash;Sen robust fit &mdash; outlier-resistant line (median of pairwise slopes)</label>
     <div class="row">
       <div><input id="theilsenX" type="text" placeholder="x: e.g. 1 m, 2 m, 3 m, 4 m, 5 m" style="margin-bottom:0;" /></div>
-      <div><input id="theilsenY" type="text" placeholder="y: e.g. 2 s, 4 s, 6 s, 8 s, 100 s" style="margin-bottom:0;" /></div>
+      <div><input id="theilsenY" type="text" placeholder="y: e.g. 2 s, 4 s, 6 s, 8 s, 100 s" aria-label="Theil–Sen y series" style="margin-bottom:0;" /></div>
       <button id="theilsen" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Theil&ndash;Sen</button>
+    </div>
+
+    <label for="residualsX" style="margin-top:0.9rem;">Residuals &mdash; the least-squares line evaluated at every point (fitted, residual, R&sup2;)</label>
+    <div class="row">
+      <div><input id="residualsX" type="text" placeholder="x: e.g. 1 m, 2 m, 3 m, 4 m, 5 m" style="margin-bottom:0;" /></div>
+      <div><input id="residualsY" type="text" placeholder="y: e.g. 2 s, 4 s, 5 s, 4 s, 5 s" aria-label="Residuals y series" style="margin-bottom:0;" /></div>
+      <button id="residuals" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Residuals</button>
     </div>
 
     <div id="result" role="status" aria-live="polite" style="margin-top:1.5rem;">Pick units and press Convert.</div>
@@ -1212,6 +1238,66 @@
     }
   }
 
+  async function tInterval() {
+    const items = parseQuantityList(document.getElementById("tiExpr").value);
+    if (!items) return;
+    allResultsEl.innerHTML = "";
+    const confRaw = document.getElementById("tiConf").value;
+    const body = { items: items, to: toEl.value };
+    if (confRaw !== "") body.confidence = Number(confRaw);
+    try {
+      const resp = await fetch("/api/t-interval", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "t interval failed") + "</span>";
+        return;
+      }
+      const pct = (data.confidence * 100);
+      resultEl.innerHTML =
+        "<strong>" + pct + "%</strong> t-CI for the mean of " + data.count + " " + data.category + " quantities (df " + data.df + ")" +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' +
+        "mean " + data.mean + " " + data.unit + "<br>" +
+        "interval [" + data.lower + ", " + data.upper + "] " + data.unit + "<br>" +
+        "margin ±" + data.margin_of_error + " (t = " + data.critical_value +
+        ", SE = " + data.standard_error + ")</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function jarqueBera() {
+    const items = parseQuantityList(document.getElementById("jbExpr").value);
+    if (!items) return;
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/jarque-bera", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: items, to: toEl.value }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Jarque-Bera failed") + "</span>";
+        return;
+      }
+      const verdict = data.is_normal
+        ? "consistent with normal (fail to reject at 5%)"
+        : "not normal (reject at 5%)";
+      resultEl.innerHTML =
+        "<strong>JB " + data.statistic + "</strong> (p = " + data.p_value + ", df " + data.df + ")" +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' +
+        data.count + " " + data.category + " quantities &middot; " + verdict + "<br>" +
+        "skewness " + data.skewness + ", excess kurtosis " + data.kurtosis + "<br>" +
+        "mean " + data.mean + " " + data.unit + ", stdev " + data.stdev + " " + data.unit + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
   async function gini() {
     const items = parseQuantityList(document.getElementById("giniExpr").value);
     if (!items) return;
@@ -1233,6 +1319,35 @@
         data.count + " " + data.category + " quantities, mean " + data.mean + " " + data.unit + "<br>" +
         "relative mean abs. difference (rmad) " + data.rmad + "<br>" +
         "mean abs. difference " + data.mean_abs_difference + " " + data.unit + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function lorenz() {
+    const items = parseQuantityList(document.getElementById("lorenzExpr").value);
+    if (!items) return;
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/lorenz", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: items, to: toEl.value }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Lorenz failed") + "</span>";
+        return;
+      }
+      const pts = data.points.map(function (p) {
+        return "&nbsp;&nbsp;" + Math.round(p.population_fraction * 100) + "% of items → " +
+          Math.round(p.value_fraction * 100) + "% of total";
+      }).join("<br>");
+      resultEl.innerHTML =
+        "<strong>Gini " + data.gini + "</strong>" +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' +
+        data.count + " " + data.category + " quantities, mean " + data.mean + " " + data.unit + "<br>" +
+        "area under curve " + data.area_under_curve + "<br>" + pts + "</div>";
     } catch (e) {
       resultEl.innerHTML = '<span class="err">Network error.</span>';
     }
@@ -1399,8 +1514,54 @@
   document.getElementById("theilsen").addEventListener("click", theilsen);
   document.getElementById("theilsenX").addEventListener("keydown", function (e) { if (e.key === "Enter") theilsen(); });
   document.getElementById("theilsenY").addEventListener("keydown", function (e) { if (e.key === "Enter") theilsen(); });
+
+  async function residuals() {
+    const x = parseQuantityList(document.getElementById("residualsX").value);
+    if (!x) return;
+    const y = parseQuantityList(document.getElementById("residualsY").value);
+    if (!y) return;
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/residuals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ x: x, y: y }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Residuals failed") + "</span>";
+        return;
+      }
+      const sign = data.intercept < 0 ? "&minus; " + Math.abs(data.intercept) : "+ " + data.intercept;
+      const rse = data.residual_std_error === null ? "n/a" : data.residual_std_error + " " + data.y_unit;
+      const r2 = data.r_squared === null ? "n/a" : data.r_squared;
+      const rows = data.items.map(function (it) {
+        return "<tr><td>" + it.index + "</td><td>" + it.x + " " + data.x_unit +
+          "</td><td>" + it.y + " " + data.y_unit + "</td><td>" + it.fitted +
+          "</td><td>" + it.residual + "</td></tr>";
+      }).join("");
+      resultEl.innerHTML =
+        "<strong>y = " + data.slope + "&middot;x " + sign + "</strong>" +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' +
+        "R&sup2; " + r2 + " &middot; residual std error " + rse + "<br>" +
+        "SST " + data.sst + " = SSR " + data.ssr + " + SSE " + data.sse + "</div>" +
+        '<table style="margin-top:0.6rem;width:100%;font-size:0.9rem;border-collapse:collapse;">' +
+        "<tr><th>#</th><th>x</th><th>y</th><th>fitted</th><th>residual</th></tr>" +
+        rows + "</table>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  document.getElementById("residuals").addEventListener("click", residuals);
+  document.getElementById("residualsX").addEventListener("keydown", function (e) { if (e.key === "Enter") residuals(); });
+  document.getElementById("residualsY").addEventListener("keydown", function (e) { if (e.key === "Enter") residuals(); });
   document.getElementById("gini").addEventListener("click", gini);
+  document.getElementById("lorenz").addEventListener("click", lorenz);
+  document.getElementById("jb").addEventListener("click", jarqueBera);
+  document.getElementById("jbExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") jarqueBera(); });
   document.getElementById("giniExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") gini(); });
+  document.getElementById("lorenzExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") lorenz(); });
   document.getElementById("trim").addEventListener("click", trimmedMean);
   document.getElementById("winsorize").addEventListener("click", winsorize);
   document.getElementById("trimExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") trimmedMean(); });
@@ -1423,6 +1584,8 @@
   document.getElementById("acfExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") autocorrelation(); });
   document.getElementById("ci").addEventListener("click", confidenceInterval);
   document.getElementById("ciExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") confidenceInterval(); });
+  document.getElementById("ti").addEventListener("click", tInterval);
+  document.getElementById("tiExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") tInterval(); });
   document.getElementById("means").addEventListener("click", means);
   document.getElementById("meansExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") means(); });
   document.getElementById("rankAsc").addEventListener("click", function () { rank(false); });

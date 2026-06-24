@@ -292,6 +292,23 @@ class RequestHandler(BaseHTTPRequestHandler):
             return None
         return x, y, data.get("to_x"), data.get("to_y"), precision
 
+    def _two_sample_request(self, data):
+        """Validate the shared two-independent-sample ``{a:[...], b:[...], to?}``
+        body. Returns (a, b, to_unit, precision) or None after emitting a 400.
+
+        Distinct from :meth:`_paired_request`: the two samples are *independent*
+        (they may have different lengths), not paired point-for-point, so they are
+        named ``a`` / ``b`` rather than ``x`` / ``y`` and share one target unit."""
+        a = data.get("a")
+        b = data.get("b")
+        if not isinstance(a, list) or not isinstance(b, list):
+            self._send_json(400, {"error": "'a' and 'b' must be lists"})
+            return None
+        precision = self._precision_or_400(data)
+        if precision is None:
+            return None
+        return a, b, data.get("to"), precision
+
     def _round_opt(self, value, places):
         """Round ``value`` to ``places``, passing ``None`` straight through.
 
@@ -432,6 +449,9 @@ class RequestHandler(BaseHTTPRequestHandler):
         if self.path == "/api/theil-sen":
             self._handle_theil_sen()
             return
+        if self.path == "/api/residuals":
+            self._handle_residuals()
+            return
         if self.path == "/api/spearman":
             self._handle_spearman()
             return
@@ -440,6 +460,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/gini":
             self._handle_gini()
+            return
+        if self.path == "/api/lorenz":
+            self._handle_lorenz()
             return
         if self.path == "/api/entropy":
             self._handle_entropy()
@@ -458,6 +481,15 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/confidence-interval":
             self._handle_confidence_interval()
+            return
+        if self.path == "/api/jarque-bera":
+            self._handle_jarque_bera()
+            return
+        if self.path == "/api/t-interval":
+            self._handle_t_interval()
+            return
+        if self.path == "/api/t-test":
+            self._handle_t_test()
             return
         if self.path != "/api/convert":
             self._send_json(404, {"error": "not found"})
@@ -1631,6 +1663,51 @@ class RequestHandler(BaseHTTPRequestHandler):
             "mean_y": round(result["mean_y"], precision),
         })
 
+    def _handle_residuals(self):
+        """POST /api/residuals — {x:[{value,unit},...], y:[...], to_x?, to_y?}
+        -> the ordinary least-squares fit evaluated at every paired point: the
+        fitted value and residual (y - fitted) per point, the variance
+        decomposition (sst, ssr, sse), r-squared and the residual standard error.
+        The per-point diagnostic companion to /api/regression. Additive: reuses
+        ``domain.residuals`` and never touches the convert paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        parsed = self._paired_request(data)
+        if parsed is None:
+            return
+        x, y, to_x, to_y, precision = parsed
+        try:
+            result = domain.residuals(x, y, to_x, to_y)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "x_category": result["x_category"],
+            "y_category": result["y_category"],
+            "x_unit": result["x_unit"],
+            "y_unit": result["y_unit"],
+            "count": result["count"],
+            "slope": round(result["slope"], precision),
+            "intercept": round(result["intercept"], precision),
+            "sst": round(result["sst"], precision),
+            "ssr": round(result["ssr"], precision),
+            "sse": round(result["sse"], precision),
+            "r_squared": self._round_opt(result["r_squared"], precision),
+            "residual_std_error": self._round_opt(
+                result["residual_std_error"], precision),
+            "mean_x": round(result["mean_x"], precision),
+            "mean_y": round(result["mean_y"], precision),
+            "items": [
+                {"index": r["index"],
+                 "x": round(r["x"], precision),
+                 "y": round(r["y"], precision),
+                 "fitted": round(r["fitted"], precision),
+                 "residual": round(r["residual"], precision)}
+                for r in result["items"]
+            ],
+        })
+
     def _handle_theil_sen(self):
         """POST /api/theil-sen — {x:[{value,unit},...], y:[...], to_x?, to_y?}
         -> the Theil--Sen robust linear fit y = slope*x + intercept of two paired
@@ -1766,6 +1843,44 @@ class RequestHandler(BaseHTTPRequestHandler):
             "gini": round(result["gini"], precision),
             "rmad": round(result["rmad"], precision),
             "mean_abs_difference": round(result["mean_abs_difference"], precision),
+        })
+
+    def _handle_lorenz(self):
+        """POST /api/lorenz — {items: [{value, unit}, ...], to?} -> the Lorenz
+        curve (cumulative population share vs cumulative value share, smallest
+        first) of a list of same-category quantities, plus the geometric Gini
+        recovered from it, all restated in 'to' (or the first item's unit). The
+        per-point dataset companion to the scalar /api/gini (just as
+        /api/winsorize is the per-item companion to /api/trimmed-mean). Additive:
+        reuses ``domain.lorenz_quantities`` and never touches the other convert
+        paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        parsed = self._items_request(data)
+        if parsed is None:
+            return
+        items, to_unit, precision = parsed
+        try:
+            result = domain.lorenz_quantities(items, to_unit)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "category": result["category"],
+            "unit": result["unit"],
+            "count": result["count"],
+            "total": round(result["total"], precision),
+            "mean": round(result["mean"], precision),
+            "gini": round(result["gini"], precision),
+            "area_under_curve": round(result["area_under_curve"], precision),
+            "points": [
+                {"count": p["count"],
+                 "population_fraction": round(p["population_fraction"], precision),
+                 "cumulative_value": round(p["cumulative_value"], precision),
+                 "value_fraction": round(p["value_fraction"], precision)}
+                for p in result["points"]
+            ],
         })
 
     def _handle_entropy(self):
@@ -2006,6 +2121,128 @@ class RequestHandler(BaseHTTPRequestHandler):
             "margin_of_error": round(result["margin_of_error"], precision),
             "lower": round(result["lower"], precision),
             "upper": round(result["upper"], precision),
+        })
+
+    def _handle_jarque_bera(self):
+        """POST /api/jarque-bera — {items: [{value, unit}, ...], to?} -> the
+        Jarque-Bera normality-test statistic (built from the sample skewness and
+        excess kurtosis), its chi-square(2) p-value and a 5%-level verdict, all on
+        a common unit. The inferential, normality-testing companion to /api/shape
+        (just as /api/confidence-interval is to /api/describe). Additive: reuses
+        ``domain.jarque_bera`` and never touches the other convert paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        parsed = self._items_request(data)
+        if parsed is None:
+            return
+        items, to_unit, precision = parsed
+        try:
+            result = domain.jarque_bera(items, to_unit)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "category": result["category"],
+            "unit": result["unit"],
+            "count": result["count"],
+            "mean": round(result["mean"], precision),
+            "stdev": round(result["stdev"], precision),
+            "skewness": round(result["skewness"], precision),
+            "kurtosis": round(result["kurtosis"], precision),
+            "statistic": round(result["statistic"], precision),
+            "df": result["df"],
+            "p_value": round(result["p_value"], precision),
+            "is_normal": result["is_normal"],
+        })
+
+    def _handle_t_interval(self):
+        """POST /api/t-interval — {items: [{value, unit}, ...], confidence?, to?} ->
+        a two-sided confidence interval for the population MEAN using the exact
+        Student's t critical value with df = n - 1 degrees of freedom. The
+        small-sample companion to /api/confidence-interval (which uses the
+        large-sample normal z approximation): for small n the t interval is
+        correctly wider, converging to the z interval as n grows. Reports the
+        standard error of the mean, the two-sided critical t value, df, the margin
+        of error and the lower/upper bounds. 'confidence' is optional (default
+        0.95, strictly in (0, 1)) and validated by the domain layer, which also
+        requires at least two values. Additive: reuses ``domain.t_interval`` and
+        never touches the other convert paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        parsed = self._items_request(data)
+        if parsed is None:
+            return
+        items, to_unit, precision = parsed
+        # confidence is optional; the domain layer defaults it to 0.95 and validates.
+        try:
+            result = domain.t_interval(items, data.get("confidence"), to_unit)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "category": result["category"],
+            "unit": result["unit"],
+            "count": result["count"],
+            "df": result["df"],
+            "confidence": result["confidence"],
+            "mean": round(result["mean"], precision),
+            "sample_stdev": round(result["sample_stdev"], precision),
+            "standard_error": round(result["standard_error"], precision),
+            "critical_value": round(result["critical_value"], precision),
+            "margin_of_error": round(result["margin_of_error"], precision),
+            "lower": round(result["lower"], precision),
+            "upper": round(result["upper"], precision),
+        })
+
+    def _handle_t_test(self):
+        """POST /api/t-test — {a:[{value,unit},...], b:[...], equal_var?, alpha?,
+        to?} -> a two-sample t-test for the difference between two population
+        MEANS. The two-group companion to /api/t-interval and /api/confidence-
+        interval (which bound a single mean): the two samples are independent and
+        may differ in length. Defaults to Welch's t-test (unequal variances);
+        pass equal_var=true for Student's pooled t-test. Reports both sample
+        means/variances, the difference, the standard error, the t-statistic,
+        the (possibly fractional) degrees of freedom, the two-sided p-value and a
+        verdict at the 'alpha' level (default 0.05). 'equal_var' and 'alpha' are
+        optional and validated by the domain layer, which also requires at least
+        two values per sample and a common category. Additive: reuses
+        ``domain.two_sample_t_test`` and never touches the other convert paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        parsed = self._two_sample_request(data)
+        if parsed is None:
+            return
+        a, b, to_unit, precision = parsed
+        # equal_var and alpha are optional; the domain layer defaults and validates.
+        try:
+            result = domain.two_sample_t_test(
+                a, b, data.get("equal_var"), data.get("alpha"), to_unit)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "category": result["category"],
+            "unit": result["unit"],
+            "n_a": result["n_a"],
+            "n_b": result["n_b"],
+            "mean_a": round(result["mean_a"], precision),
+            "mean_b": round(result["mean_b"], precision),
+            "var_a": round(result["var_a"], precision),
+            "var_b": round(result["var_b"], precision),
+            "stdev_a": round(result["stdev_a"], precision),
+            "stdev_b": round(result["stdev_b"], precision),
+            "difference": round(result["difference"], precision),
+            "equal_var": result["equal_var"],
+            "method": result["method"],
+            "standard_error": round(result["standard_error"], precision),
+            "statistic": round(result["statistic"], precision),
+            "df": round(result["df"], precision),
+            "alpha": result["alpha"],
+            "p_value": round(result["p_value"], precision),
+            "significant": result["significant"],
         })
 
 

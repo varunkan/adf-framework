@@ -4834,6 +4834,110 @@ class TestDomainLinearRegression(unittest.TestCase):
         self.assertIsNone(r["r_squared"])
 
 
+class TestDomainResiduals(unittest.TestCase):
+    X = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+    Y = [{"value": v, "unit": "s"} for v in (2, 4, 6, 8, 10)]
+
+    def test_perfect_line_zero_residuals(self):
+        r = domain.residuals(self.X, self.Y)
+        self.assertEqual(r["count"], 5)
+        self.assertEqual((r["x_unit"], r["y_unit"]), ("m", "s"))
+        for item in r["items"]:
+            self.assertAlmostEqual(item["fitted"], item["y"], places=9)
+            self.assertAlmostEqual(item["residual"], 0.0, places=9)
+        self.assertAlmostEqual(r["sse"], 0.0, places=9)
+        self.assertAlmostEqual(r["r_squared"], 1.0, places=9)
+        self.assertAlmostEqual(r["residual_std_error"], 0.0, places=9)
+
+    def test_items_carry_original_index_and_inputs(self):
+        r = domain.residuals(self.X, self.Y)
+        self.assertEqual([it["index"] for it in r["items"]], [0, 1, 2, 3, 4])
+        self.assertEqual([it["x"] for it in r["items"]], [1, 2, 3, 4, 5])
+        self.assertEqual([it["y"] for it in r["items"]], [2, 4, 6, 8, 10])
+
+    def test_fitted_equals_regression_line(self):
+        # The fitted values must match slope*x + intercept from the OLS fit.
+        x = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+        y = [{"value": v, "unit": "s"} for v in (2, 4, 5, 4, 5)]
+        reg = domain.linear_regression(x, y)
+        r = domain.residuals(x, y)
+        self.assertAlmostEqual(r["slope"], reg["slope"], places=12)
+        self.assertAlmostEqual(r["intercept"], reg["intercept"], places=12)
+        for it in r["items"]:
+            expected = reg["slope"] * it["x"] + reg["intercept"]
+            self.assertAlmostEqual(it["fitted"], expected, places=12)
+
+    def test_variance_decomposition_adds_up(self):
+        # ssr + sse == sst, and r_squared == ssr/sst.
+        x = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+        y = [{"value": v, "unit": "s"} for v in (2, 4, 5, 4, 5)]
+        r = domain.residuals(x, y)
+        self.assertAlmostEqual(r["ssr"] + r["sse"], r["sst"], places=9)
+        self.assertAlmostEqual(r["r_squared"], r["ssr"] / r["sst"], places=9)
+        self.assertTrue(0.0 < r["r_squared"] < 1.0)
+
+    def test_r_squared_matches_regression(self):
+        x = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+        y = [{"value": v, "unit": "s"} for v in (2, 4, 5, 4, 5)]
+        self.assertAlmostEqual(
+            domain.residuals(x, y)["r_squared"],
+            domain.linear_regression(x, y)["r_squared"], places=12)
+
+    def test_residuals_sum_to_zero(self):
+        # An OLS fit with an intercept always leaves residuals summing to zero.
+        x = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+        y = [{"value": v, "unit": "s"} for v in (2, 4, 5, 4, 5)]
+        r = domain.residuals(x, y)
+        self.assertAlmostEqual(sum(it["residual"] for it in r["items"]),
+                               0.0, places=9)
+
+    def test_residual_std_error_known_value(self):
+        # sse known by hand: residuals are 0,0,1,-2,1 over y=2,4,5,4,5 vs the
+        # fit y = 0.7x + 2.1 -> sse = 0+0.04+0.64+2.56+... use the formula check.
+        x = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+        y = [{"value": v, "unit": "s"} for v in (2, 4, 5, 4, 5)]
+        r = domain.residuals(x, y)
+        import math as _m
+        self.assertAlmostEqual(
+            r["residual_std_error"], _m.sqrt(r["sse"] / (5 - 2)), places=9)
+
+    def test_two_points_residual_std_error_none(self):
+        x = [{"value": v, "unit": "m"} for v in (1, 2)]
+        y = [{"value": v, "unit": "s"} for v in (3, 7)]
+        r = domain.residuals(x, y)
+        self.assertIsNone(r["residual_std_error"])
+        self.assertAlmostEqual(r["sse"], 0.0, places=9)
+
+    def test_constant_y_r_squared_none(self):
+        x = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        y = [{"value": 5, "unit": "s"} for _ in range(3)]
+        r = domain.residuals(x, y)
+        self.assertIsNone(r["r_squared"])
+        self.assertAlmostEqual(r["slope"], 0.0, places=9)
+
+    def test_unit_choice_invariant_residual_pattern(self):
+        # Restating x in cm leaves the residuals (in y_unit) unchanged.
+        r_m = domain.residuals(self.X, self.Y)
+        r_cm = domain.residuals(self.X, self.Y, to_x="cm")
+        for a, b in zip(r_m["items"], r_cm["items"]):
+            self.assertAlmostEqual(a["residual"], b["residual"], places=9)
+
+    def test_zero_variance_x_raises(self):
+        x = [{"value": 2, "unit": "m"} for _ in range(3)]
+        y = [{"value": v, "unit": "s"} for v in (1, 2, 3)]
+        with self.assertRaises(ValueError):
+            domain.residuals(x, y)
+
+    def test_length_mismatch_raises(self):
+        with self.assertRaises(ValueError):
+            domain.residuals(self.X, self.Y[:2])
+
+    def test_single_point_raises(self):
+        with self.assertRaises(ValueError):
+            domain.residuals([{"value": 1, "unit": "m"}],
+                             [{"value": 2, "unit": "s"}])
+
+
 class TestDomainTheilSen(unittest.TestCase):
     X = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
     Y = [{"value": v, "unit": "s"} for v in (2, 4, 6, 8, 10)]
@@ -5182,6 +5286,49 @@ class TestHttpBivariate(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertIn("error", data)
 
+    def test_residuals_ok(self):
+        status, data = self._post("/api/residuals", {"x": self.X, "y": self.Y})
+        self.assertEqual(status, 200)
+        self.assertEqual((data["x_category"], data["y_category"]), ("length", "time"))
+        self.assertEqual(data["count"], 5)
+        self.assertEqual(len(data["items"]), 5)
+        self.assertAlmostEqual(data["slope"], 2.0, places=6)
+        self.assertAlmostEqual(data["sse"], 0.0, places=6)
+        self.assertAlmostEqual(data["r_squared"], 1.0, places=6)
+        for it in data["items"]:
+            self.assertAlmostEqual(it["residual"], 0.0, places=6)
+
+    def test_residuals_decomposition_and_rse(self):
+        status, data = self._post("/api/residuals", {
+            "x": self.X, "y": [{"value": v, "unit": "s"} for v in (2, 4, 5, 4, 5)]})
+        self.assertEqual(status, 200)
+        self.assertAlmostEqual(data["ssr"] + data["sse"], data["sst"], places=6)
+        self.assertTrue(0.0 < data["r_squared"] < 1.0)
+        self.assertIsNotNone(data["residual_std_error"])
+
+    def test_residuals_precision(self):
+        status, data = self._post("/api/residuals", {
+            "x": self.X, "y": [{"value": v, "unit": "s"} for v in (2, 4, 5, 4, 5)],
+            "precision": 3})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["slope"], round(data["slope"], 3))
+        self.assertEqual(data["items"][2]["residual"],
+                         round(data["items"][2]["residual"], 3))
+
+    def test_residuals_two_points_rse_null(self):
+        status, data = self._post("/api/residuals", {
+            "x": [{"value": v, "unit": "m"} for v in (1, 2)],
+            "y": [{"value": v, "unit": "s"} for v in (3, 7)]})
+        self.assertEqual(status, 200)
+        self.assertIsNone(data["residual_std_error"])
+
+    def test_residuals_zero_variance_x_400(self):
+        status, data = self._post("/api/residuals", {
+            "x": [{"value": 2, "unit": "m"} for _ in range(3)],
+            "y": [{"value": v, "unit": "s"} for v in (1, 2, 3)]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
     def test_theil_sen_ok(self):
         status, data = self._post("/api/theil-sen", {"x": self.X, "y": self.Y})
         self.assertEqual(status, 200)
@@ -5510,6 +5657,234 @@ class TestHttpGini(unittest.TestCase):
 
     def test_gini_invalid_json_400(self):
         status, data = self._post("/api/gini", None, raw=b"{bad")
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
+# --------------------------------------------------------------------------- #
+# Lorenz curve (domain) — the per-point companion to the scalar Gini
+# --------------------------------------------------------------------------- #
+class TestDomainLorenz(unittest.TestCase):
+    def test_known_curve_shape(self):
+        # [1, 2, 3, 4]: total 10, sorted cumulative 1, 3, 6, 10.
+        result = domain.lorenz_quantities(
+            [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)])
+        self.assertEqual(result["category"], "length")
+        self.assertEqual(result["count"], 4)
+        # n + 1 points, starting at the origin and ending at (1, 1).
+        self.assertEqual(len(result["points"]), 5)
+        first, last = result["points"][0], result["points"][-1]
+        self.assertEqual(first["count"], 0)
+        self.assertAlmostEqual(first["population_fraction"], 0.0, places=12)
+        self.assertAlmostEqual(first["value_fraction"], 0.0, places=12)
+        self.assertEqual(last["count"], 4)
+        self.assertAlmostEqual(last["population_fraction"], 1.0, places=12)
+        self.assertAlmostEqual(last["value_fraction"], 1.0, places=12)
+        self.assertAlmostEqual(last["cumulative_value"], 10.0, places=9)
+        # value shares track the sorted cumulative totals / 10.
+        self.assertAlmostEqual(
+            result["points"][1]["value_fraction"], 0.1, places=9)
+        self.assertAlmostEqual(
+            result["points"][2]["value_fraction"], 0.3, places=9)
+        self.assertAlmostEqual(
+            result["points"][3]["value_fraction"], 0.6, places=9)
+
+    def test_gini_matches_scalar_endpoint(self):
+        # The geometric Gini recovered from the curve must equal gini_quantities.
+        for values in ((1, 2, 3, 4), (1, 1, 1, 5, 9), (3, 7, 7, 12, 40)):
+            items = [{"value": v, "unit": "m"} for v in values]
+            lorenz = domain.lorenz_quantities(items)
+            scalar = domain.gini_quantities(items)
+            self.assertAlmostEqual(lorenz["gini"], scalar["gini"], places=9)
+        # And the textbook value for [1,2,3,4] is 0.25.
+        self.assertAlmostEqual(
+            domain.lorenz_quantities(
+                [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)])["gini"],
+            0.25, places=9)
+
+    def test_gini_is_one_minus_twice_area(self):
+        result = domain.lorenz_quantities(
+            [{"value": v, "unit": "m"} for v in (2, 4, 6, 8)])
+        self.assertAlmostEqual(
+            result["gini"], 1.0 - 2.0 * result["area_under_curve"], places=12)
+        # Area below the curve is in [0, 0.5] (0.5 == perfect equality).
+        self.assertGreaterEqual(result["area_under_curve"], 0.0)
+        self.assertLessEqual(result["area_under_curve"], 0.5 + 1e-12)
+
+    def test_curve_below_diagonal_and_monotonic(self):
+        # The Lorenz curve never rises above the equality diagonal and its
+        # value share is non-decreasing.
+        result = domain.lorenz_quantities(
+            [{"value": v, "unit": "m"} for v in (5, 1, 9, 2, 7)])
+        prev = -1.0
+        for p in result["points"]:
+            self.assertLessEqual(p["value_fraction"], p["population_fraction"] + 1e-12)
+            self.assertGreaterEqual(p["value_fraction"], prev - 1e-12)
+            prev = p["value_fraction"]
+
+    def test_perfect_equality_is_diagonal(self):
+        result = domain.lorenz_quantities(
+            [{"value": 5, "unit": "m"} for _ in range(4)])
+        self.assertAlmostEqual(result["gini"], 0.0, places=12)
+        self.assertAlmostEqual(result["area_under_curve"], 0.5, places=12)
+        for p in result["points"]:
+            self.assertAlmostEqual(
+                p["value_fraction"], p["population_fraction"], places=12)
+
+    def test_single_item(self):
+        result = domain.lorenz_quantities([{"value": 42, "unit": "kg"}])
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(len(result["points"]), 2)
+        self.assertAlmostEqual(result["gini"], 0.0, places=12)
+
+    def test_all_zero_is_diagonal(self):
+        # A zero total is perfectly equal, not a division-by-zero error.
+        result = domain.lorenz_quantities(
+            [{"value": 0, "unit": "m"} for _ in range(3)])
+        self.assertEqual(result["total"], 0.0)
+        self.assertAlmostEqual(result["gini"], 0.0, places=12)
+        for p in result["points"]:
+            self.assertAlmostEqual(
+                p["value_fraction"], p["population_fraction"], places=12)
+
+    def test_max_inequality(self):
+        # One large value among nine zeros: G -> (n-1)/n == 0.9.
+        items = [{"value": 0, "unit": "m"} for _ in range(9)]
+        items.append({"value": 100, "unit": "m"})
+        result = domain.lorenz_quantities(items)
+        self.assertAlmostEqual(result["gini"], 0.9, places=9)
+
+    def test_unit_independent(self):
+        a = domain.lorenz_quantities(
+            [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)])
+        b = domain.lorenz_quantities(
+            [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)], "cm")
+        self.assertAlmostEqual(a["gini"], b["gini"], places=12)
+        self.assertEqual(b["unit"], "cm")
+
+    def test_mixed_units_restated(self):
+        # 1 m + 100 cm == two equal quantities -> diagonal.
+        result = domain.lorenz_quantities(
+            [{"value": 1, "unit": "m"}, {"value": 100, "unit": "cm"}])
+        self.assertAlmostEqual(result["gini"], 0.0, places=12)
+
+    def test_cumulative_value_reaches_total(self):
+        result = domain.lorenz_quantities(
+            [{"value": v, "unit": "m"} for v in (3, 1, 6)])
+        self.assertAlmostEqual(
+            result["points"][-1]["cumulative_value"], result["total"], places=9)
+        self.assertAlmostEqual(result["total"], 10.0, places=9)
+
+    def test_negative_value_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.lorenz_quantities(
+                [{"value": 1, "unit": "m"}, {"value": -2, "unit": "m"}])
+
+    def test_empty_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.lorenz_quantities([])
+
+    def test_cross_category_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.lorenz_quantities(
+                [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}])
+
+    def test_temperature_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.lorenz_quantities([{"value": 10, "unit": "c"}])
+
+    def test_fuel_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.lorenz_quantities([{"value": 30, "unit": "mpg"}])
+
+    def test_unknown_unit_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.lorenz_quantities([{"value": 1, "unit": "zorp"}])
+
+    def test_nonfinite_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.lorenz_quantities([{"value": float("inf"), "unit": "m"}])
+
+
+class TestHttpLorenz(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = server.make_server(0)
+        cls.host, cls.port = cls.server.server_address
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def _post(self, path, payload, raw=None):
+        body = raw if raw is not None else json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            "http://127.0.0.1:%d%s" % (self.port, path), data=body,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            data = json.loads(exc.read().decode("utf-8"))
+            exc.close()
+            return exc.code, data
+
+    def test_lorenz_ok(self):
+        status, data = self._post("/api/lorenz", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)]})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["count"], 4)
+        self.assertEqual(len(data["points"]), 5)
+        self.assertAlmostEqual(data["gini"], 0.25, places=6)
+        self.assertAlmostEqual(data["points"][0]["value_fraction"], 0.0, places=6)
+        self.assertAlmostEqual(data["points"][-1]["value_fraction"], 1.0, places=6)
+
+    def test_lorenz_perfect_equality(self):
+        status, data = self._post("/api/lorenz", {
+            "items": [{"value": 5, "unit": "m"} for _ in range(3)]})
+        self.assertEqual(status, 200)
+        self.assertAlmostEqual(data["gini"], 0.0, places=9)
+        self.assertAlmostEqual(data["area_under_curve"], 0.5, places=9)
+
+    def test_lorenz_to_unit(self):
+        status, data = self._post("/api/lorenz", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)],
+            "to": "cm"})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["unit"], "cm")
+        self.assertAlmostEqual(data["gini"], 0.25, places=6)
+
+    def test_lorenz_precision(self):
+        status, data = self._post("/api/lorenz", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 3, 5)],
+            "precision": 3})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["gini"], round(data["gini"], 3))
+
+    def test_lorenz_negative_400(self):
+        status, data = self._post("/api/lorenz", {
+            "items": [{"value": 1, "unit": "m"}, {"value": -1, "unit": "m"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_lorenz_cross_category_400(self):
+        status, data = self._post("/api/lorenz", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_lorenz_items_not_list_400(self):
+        status, data = self._post("/api/lorenz", {"items": "nope"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_lorenz_invalid_json_400(self):
+        status, data = self._post("/api/lorenz", None, raw=b"{bad")
         self.assertEqual(status, 400)
         self.assertIn("error", data)
 
@@ -6808,6 +7183,828 @@ class TestHttpConfidenceInterval(unittest.TestCase):
 
     def test_endpoint_invalid_json_400(self):
         status, data = self._post("/api/confidence-interval", None, raw=b"{bad")
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
+class TestDomainJarqueBera(unittest.TestCase):
+    """Jarque-Bera normality test, built on the population skew/kurtosis."""
+
+    def test_symmetric_sample(self):
+        # 1..5 is perfectly symmetric (skewness exactly 0) but platykurtic.
+        result = domain.jarque_bera([{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)])
+        self.assertEqual(result["category"], "length")
+        self.assertEqual(result["unit"], "m")
+        self.assertEqual(result["count"], 5)
+        self.assertEqual(result["df"], 2)
+        self.assertAlmostEqual(result["mean"], 3.0, places=12)
+        self.assertAlmostEqual(result["skewness"], 0.0, places=12)
+        # excess kurtosis = m4/m2^2 - 3 = 6.8/4 - 3 = -1.3
+        self.assertAlmostEqual(result["kurtosis"], -1.3, places=12)
+        # JB = (5/6)*(0 + (-1.3)^2/4) = (5/6)*0.4225
+        expected_jb = (5.0 / 6.0) * (1.69 / 4.0)
+        self.assertAlmostEqual(result["statistic"], expected_jb, places=12)
+        self.assertAlmostEqual(result["p_value"], math.exp(-expected_jb / 2.0), places=12)
+        self.assertTrue(result["is_normal"])
+
+    def test_statistic_matches_shape_moments(self):
+        # The statistic must equal (n/6)*(S^2 + K^2/4) using exactly the
+        # population skewness/kurtosis that shape_quantities reports, so the two
+        # endpoints stay internally consistent.
+        items = [{"value": v, "unit": "m"} for v in (2, 3, 3, 5, 8, 13, 21)]
+        shape = domain.shape_quantities(items)
+        result = domain.jarque_bera(items)
+        self.assertAlmostEqual(result["skewness"], shape["skewness"], places=12)
+        self.assertAlmostEqual(result["kurtosis"], shape["kurtosis"], places=12)
+        n = shape["count"]
+        expected = (n / 6.0) * (shape["skewness"] ** 2 + shape["kurtosis"] ** 2 / 4.0)
+        self.assertAlmostEqual(result["statistic"], expected, places=12)
+        self.assertAlmostEqual(result["p_value"], math.exp(-expected / 2.0), places=12)
+
+    def test_skewed_heavy_tailed_sample_rejects(self):
+        result = domain.jarque_bera(
+            [{"value": v, "unit": "m"} for v in (1, 1, 1, 1, 1, 1, 1, 1, 1, 100)])
+        self.assertFalse(result["is_normal"])
+        self.assertGreater(result["statistic"], domain.JB_CHI2_2DF_5PCT)
+        self.assertLess(result["p_value"], 0.05)
+        self.assertGreater(result["skewness"], 0.0)  # long right tail
+        self.assertGreater(result["kurtosis"], 0.0)  # heavy-tailed
+
+    def test_statistic_is_unit_invariant(self):
+        # The same physical sample expressed in cm but reported in m: the statistic
+        # and p-value are dimensionless, while the mean / stdev carry the unit.
+        in_m = domain.jarque_bera([{"value": v, "unit": "m"} for v in (1, 2, 4, 8)])
+        in_cm = domain.jarque_bera(
+            [{"value": v * 100, "unit": "cm"} for v in (1, 2, 4, 8)], to_unit="m")
+        self.assertEqual(in_cm["unit"], "m")
+        self.assertAlmostEqual(in_cm["statistic"], in_m["statistic"], places=12)
+        self.assertAlmostEqual(in_cm["p_value"], in_m["p_value"], places=12)
+        self.assertAlmostEqual(in_cm["skewness"], in_m["skewness"], places=12)
+        self.assertAlmostEqual(in_cm["kurtosis"], in_m["kurtosis"], places=12)
+        self.assertAlmostEqual(in_cm["mean"], in_m["mean"], places=10)
+
+    def test_p_value_in_unit_interval(self):
+        result = domain.jarque_bera([{"value": v, "unit": "kg"} for v in (2, 3, 5, 7, 11)])
+        self.assertGreater(result["p_value"], 0.0)
+        self.assertLessEqual(result["p_value"], 1.0)
+
+    def test_tuple_items_accepted(self):
+        result = domain.jarque_bera([(1, "kg"), (2, "kg"), (3, "kg"), (4, "kg")])
+        self.assertEqual(result["category"], "mass")
+        self.assertEqual(result["count"], 4)
+
+    def test_single_value_raises(self):
+        with self.assertRaises(ValueError):
+            domain.jarque_bera([{"value": 5, "unit": "m"}])
+
+    def test_empty_raises(self):
+        with self.assertRaises(ValueError):
+            domain.jarque_bera([])
+
+    def test_constant_series_raises(self):
+        with self.assertRaises(ValueError):
+            domain.jarque_bera([{"value": 5, "unit": "m"} for _ in range(4)])
+
+    def test_cross_category_raises(self):
+        with self.assertRaises(ValueError):
+            domain.jarque_bera(
+                [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}])
+
+    def test_temperature_raises(self):
+        with self.assertRaises(ValueError):
+            domain.jarque_bera(
+                [{"value": v, "unit": "c"} for v in (1, 2, 3, 4)])
+
+    def test_fuel_raises(self):
+        with self.assertRaises(ValueError):
+            domain.jarque_bera(
+                [{"value": v, "unit": "mpg"} for v in (30, 35, 40, 45)])
+
+
+class TestHttpJarqueBera(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = server.make_server(0)
+        cls.host, cls.port = cls.server.server_address
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def _post(self, path, payload, raw=None):
+        body = raw if raw is not None else json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            "http://127.0.0.1:%d%s" % (self.port, path), data=body,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            data = json.loads(exc.read().decode("utf-8"))
+            exc.close()
+            return exc.code, data
+
+    def test_endpoint_ok(self):
+        status, data = self._post("/api/jarque-bera", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["count"], 5)
+        self.assertEqual(data["df"], 2)
+        self.assertAlmostEqual(data["skewness"], 0.0, places=6)
+        self.assertAlmostEqual(data["kurtosis"], -1.3, places=6)
+        self.assertTrue(data["is_normal"])
+        self.assertGreater(data["p_value"], 0.0)
+        self.assertLessEqual(data["p_value"], 1.0)
+
+    def test_endpoint_rejects_skewed(self):
+        status, data = self._post("/api/jarque-bera", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 1, 1, 1, 1, 1, 1, 1, 1, 100)]})
+        self.assertEqual(status, 200)
+        self.assertFalse(data["is_normal"])
+        self.assertLess(data["p_value"], 0.05)
+
+    def test_endpoint_precision_and_unit(self):
+        status, data = self._post("/api/jarque-bera", {
+            "items": [{"value": v, "unit": "cm"} for v in (100, 200, 400, 800)],
+            "to": "m", "precision": 3})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["mean"], round(data["mean"], 3))
+        self.assertEqual(data["statistic"], round(data["statistic"], 3))
+
+    def test_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/jarque-bera", {"items": "nope"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_single_value_400(self):
+        status, data = self._post("/api/jarque-bera", {
+            "items": [{"value": 5, "unit": "m"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_constant_series_400(self):
+        status, data = self._post("/api/jarque-bera", {
+            "items": [{"value": 5, "unit": "m"} for _ in range(4)]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_cross_category_400(self):
+        status, data = self._post("/api/jarque-bera", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_temperature_400(self):
+        status, data = self._post("/api/jarque-bera", {
+            "items": [{"value": v, "unit": "c"} for v in (1, 2, 3, 4)]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_invalid_json_400(self):
+        status, data = self._post("/api/jarque-bera", None, raw=b"{bad")
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
+class TestDomainRegularizedIncompleteBeta(unittest.TestCase):
+    """The incomplete-beta special function underpinning the Student-t CDF."""
+
+    def test_endpoints(self):
+        self.assertEqual(domain._regularized_incomplete_beta(2.0, 3.0, 0.0), 0.0)
+        self.assertEqual(domain._regularized_incomplete_beta(2.0, 3.0, 1.0), 1.0)
+
+    def test_uniform_special_case(self):
+        # I_x(1, 1) == x exactly (Beta(1,1) is the uniform distribution).
+        for x in (0.1, 0.25, 0.5, 0.8, 0.95):
+            self.assertAlmostEqual(
+                domain._regularized_incomplete_beta(1.0, 1.0, x), x, places=12)
+
+    def test_arcsine_special_case(self):
+        # I_x(1/2, 1/2) == (2/pi) * arcsin(sqrt(x)) (the arcsine distribution).
+        for x in (0.05, 0.2, 0.5, 0.9):
+            expected = (2.0 / math.pi) * math.asin(math.sqrt(x))
+            self.assertAlmostEqual(
+                domain._regularized_incomplete_beta(0.5, 0.5, x), expected, places=12)
+
+    def test_monotonic_increasing_in_x(self):
+        prev = -1.0
+        for i in range(1, 20):
+            x = i / 20.0
+            val = domain._regularized_incomplete_beta(2.5, 1.5, x)
+            self.assertGreater(val, prev)
+            prev = val
+
+    def test_symmetry_relation(self):
+        # I_x(a, b) == 1 - I_{1-x}(b, a).
+        a, b, x = 3.0, 5.0, 0.37
+        self.assertAlmostEqual(
+            domain._regularized_incomplete_beta(a, b, x),
+            1.0 - domain._regularized_incomplete_beta(b, a, 1.0 - x), places=12)
+
+    def test_inverse_round_trips(self):
+        a, b = 2.5, 4.0
+        for target in (0.05, 0.3, 0.5, 0.8, 0.97):
+            x = domain._inv_regularized_incomplete_beta(a, b, target)
+            self.assertAlmostEqual(
+                domain._regularized_incomplete_beta(a, b, x), target, places=10)
+
+
+class TestDomainInvStudentTCdf(unittest.TestCase):
+    """The Student-t quantile helper underpinning the t interval."""
+
+    def test_median_is_zero(self):
+        self.assertEqual(domain._inv_student_t_cdf(0.5, 5), 0.0)
+
+    def test_textbook_two_sided_95(self):
+        # Familiar 95% two-sided critical values (upper tail p = 0.975).
+        cases = {1: 12.706204736, 2: 4.302652730, 5: 2.570581836,
+                 10: 2.228138852, 30: 2.042272456}
+        for df, expected in cases.items():
+            self.assertAlmostEqual(
+                domain._inv_student_t_cdf(0.975, df), expected, places=6)
+
+    def test_textbook_two_sided_99(self):
+        self.assertAlmostEqual(
+            domain._inv_student_t_cdf(0.995, 3), 5.840909310, places=6)
+        self.assertAlmostEqual(
+            domain._inv_student_t_cdf(0.995, 10), 3.169272673, places=6)
+
+    def test_converges_to_normal_for_large_df(self):
+        # As df -> infinity the t quantile approaches the normal (z) quantile.
+        self.assertAlmostEqual(
+            domain._inv_student_t_cdf(0.975, 1.0e6),
+            domain._inv_normal_cdf(0.975), places=4)
+
+    def test_symmetry(self):
+        self.assertAlmostEqual(
+            domain._inv_student_t_cdf(0.1, 7), -domain._inv_student_t_cdf(0.9, 7),
+            places=10)
+
+    def test_round_trips_against_cdf(self):
+        # Build the t CDF from the incomplete beta and invert it back.
+        df = 8
+        for t in (-3.1, -1.2, 0.6, 2.3):
+            x = df / (df + t * t)
+            half = 0.5 * domain._regularized_incomplete_beta(df / 2.0, 0.5, x)
+            cdf = half if t <= 0 else 1.0 - half
+            self.assertAlmostEqual(domain._inv_student_t_cdf(cdf, df), t, places=8)
+
+    def test_t_critical_exceeds_z_for_finite_df(self):
+        # The whole point of the t interval: heavier tails -> larger critical value.
+        for df in (1, 3, 10, 50):
+            self.assertGreater(
+                domain._inv_student_t_cdf(0.975, df), domain._inv_normal_cdf(0.975))
+
+    def test_out_of_range_probability_raises(self):
+        for bad in (0.0, 1.0, -0.1, 1.5):
+            with self.assertRaises(ValueError):
+                domain._inv_student_t_cdf(bad, 5)
+
+    def test_bad_df_raises(self):
+        for bad in (0, -1, float("inf"), float("nan"), True):
+            with self.assertRaises(ValueError):
+                domain._inv_student_t_cdf(0.975, bad)
+
+
+class TestDomainTInterval(unittest.TestCase):
+    """Student's t confidence interval for the population mean (small samples)."""
+
+    def test_basic_interval(self):
+        result = domain.t_interval(
+            [{"value": v, "unit": "m"} for v in (10, 12, 14, 16, 18)])
+        self.assertEqual(result["category"], "length")
+        self.assertEqual(result["unit"], "m")
+        self.assertEqual(result["count"], 5)
+        self.assertEqual(result["df"], 4)
+        self.assertEqual(result["confidence"], 0.95)
+        self.assertAlmostEqual(result["mean"], 14.0, places=12)
+        # sample stdev == sqrt(40/4) == sqrt(10); SE == sqrt(10)/sqrt(5) == sqrt(2).
+        self.assertAlmostEqual(result["sample_stdev"], math.sqrt(10.0), places=12)
+        self.assertAlmostEqual(result["standard_error"], math.sqrt(2.0), places=12)
+        # Two-sided t critical value for df=4 at 95% is 2.776445105.
+        self.assertAlmostEqual(result["critical_value"], 2.776445105, places=7)
+        expected_margin = 2.776445105 * math.sqrt(2.0)
+        self.assertAlmostEqual(result["margin_of_error"], expected_margin, places=7)
+        self.assertAlmostEqual(result["lower"], 14.0 - expected_margin, places=7)
+        self.assertAlmostEqual(result["upper"], 14.0 + expected_margin, places=7)
+
+    def test_interval_is_symmetric_about_the_mean(self):
+        result = domain.t_interval(
+            [{"value": v, "unit": "m"} for v in (3, 7, 11, 19)])
+        self.assertAlmostEqual(
+            (result["lower"] + result["upper"]) / 2.0, result["mean"], places=12)
+        self.assertAlmostEqual(
+            result["upper"] - result["mean"], result["margin_of_error"], places=12)
+
+    def test_wider_than_normal_interval(self):
+        # For the same small sample the t interval must be wider than the z one;
+        # the point estimate and standard error are identical.
+        data = [{"value": v, "unit": "m"} for v in (10, 12, 14, 16, 18)]
+        t = domain.t_interval(data)
+        z = domain.confidence_interval(data)
+        self.assertAlmostEqual(t["mean"], z["mean"], places=12)
+        self.assertAlmostEqual(t["standard_error"], z["standard_error"], places=12)
+        self.assertGreater(t["critical_value"], z["critical_value"])
+        self.assertGreater(t["margin_of_error"], z["margin_of_error"])
+        self.assertLess(t["lower"], z["lower"])
+        self.assertGreater(t["upper"], z["upper"])
+
+    def test_default_confidence_is_95_percent(self):
+        explicit = domain.t_interval(
+            [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)], confidence=0.95)
+        default = domain.t_interval(
+            [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)])
+        self.assertEqual(default["confidence"], 0.95)
+        self.assertAlmostEqual(
+            default["margin_of_error"], explicit["margin_of_error"], places=12)
+
+    def test_higher_confidence_widens_the_interval(self):
+        data = [{"value": v, "unit": "m"} for v in (5, 10, 15, 20, 25)]
+        narrow = domain.t_interval(data, confidence=0.90)
+        wide = domain.t_interval(data, confidence=0.99)
+        self.assertGreater(wide["critical_value"], narrow["critical_value"])
+        self.assertGreater(wide["margin_of_error"], narrow["margin_of_error"])
+        self.assertAlmostEqual(narrow["mean"], wide["mean"], places=12)
+        self.assertAlmostEqual(
+            narrow["standard_error"], wide["standard_error"], places=12)
+
+    def test_unit_conversion_scales_the_interval(self):
+        # The same physical sample in cm but reported in m: the critical value is
+        # dimensionless, while the mean / SE / bounds carry the unit.
+        in_m = domain.t_interval(
+            [{"value": v, "unit": "m"} for v in (1, 2, 3)])
+        in_cm = domain.t_interval(
+            [{"value": v * 100, "unit": "cm"} for v in (1, 2, 3)], to_unit="m")
+        self.assertEqual(in_cm["unit"], "m")
+        self.assertAlmostEqual(
+            in_cm["critical_value"], in_m["critical_value"], places=12)
+        self.assertAlmostEqual(in_cm["mean"], in_m["mean"], places=10)
+        self.assertAlmostEqual(in_cm["lower"], in_m["lower"], places=10)
+        self.assertAlmostEqual(in_cm["upper"], in_m["upper"], places=10)
+
+    def test_tuple_items_accepted(self):
+        result = domain.t_interval([(2, "kg"), (4, "kg"), (6, "kg")])
+        self.assertEqual(result["category"], "mass")
+        self.assertEqual(result["df"], 2)
+        self.assertAlmostEqual(result["mean"], 4.0, places=12)
+
+    def test_single_value_raises(self):
+        with self.assertRaises(ValueError):
+            domain.t_interval([{"value": 5, "unit": "m"}])
+
+    def test_empty_raises(self):
+        with self.assertRaises(ValueError):
+            domain.t_interval([])
+
+    def test_confidence_out_of_range_raises(self):
+        data = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        for bad in (0.0, 1.0, -0.5, 1.5):
+            with self.assertRaises(ValueError):
+                domain.t_interval(data, confidence=bad)
+
+    def test_non_numeric_confidence_raises(self):
+        data = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        with self.assertRaises(ValueError):
+            domain.t_interval(data, confidence="lots")
+        with self.assertRaises(ValueError):
+            domain.t_interval(data, confidence=True)
+
+    def test_cross_category_raises(self):
+        with self.assertRaises(ValueError):
+            domain.t_interval(
+                [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}])
+
+    def test_temperature_raises(self):
+        with self.assertRaises(ValueError):
+            domain.t_interval(
+                [{"value": 1, "unit": "c"}, {"value": 2, "unit": "c"}])
+
+    def test_fuel_raises(self):
+        with self.assertRaises(ValueError):
+            domain.t_interval(
+                [{"value": 30, "unit": "mpg"}, {"value": 40, "unit": "mpg"}])
+
+
+class TestHttpTInterval(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = server.make_server(0)
+        cls.host, cls.port = cls.server.server_address
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def _post(self, path, payload, raw=None):
+        body = raw if raw is not None else json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            "http://127.0.0.1:%d%s" % (self.port, path), data=body,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            data = json.loads(exc.read().decode("utf-8"))
+            exc.close()
+            return exc.code, data
+
+    def test_endpoint_ok(self):
+        status, data = self._post("/api/t-interval", {
+            "items": [{"value": v, "unit": "m"} for v in (10, 12, 14, 16, 18)]})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["count"], 5)
+        self.assertEqual(data["df"], 4)
+        self.assertEqual(data["confidence"], 0.95)
+        self.assertAlmostEqual(data["mean"], 14.0, places=6)
+        self.assertAlmostEqual(data["critical_value"], 2.776445, places=5)
+        self.assertLess(data["lower"], data["mean"])
+        self.assertGreater(data["upper"], data["mean"])
+        self.assertAlmostEqual(
+            (data["lower"] + data["upper"]) / 2.0, data["mean"], places=6)
+
+    def test_endpoint_custom_confidence(self):
+        status, data = self._post("/api/t-interval", {
+            "items": [{"value": v, "unit": "m"} for v in (5, 10, 15, 20, 25)],
+            "confidence": 0.99})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["confidence"], 0.99)
+        # df=4 at 99% two-sided: 4.604094871.
+        self.assertAlmostEqual(data["critical_value"], 4.604095, places=5)
+
+    def test_endpoint_wider_than_z(self):
+        items = [{"value": v, "unit": "m"} for v in (10, 12, 14, 16, 18)]
+        _, t = self._post("/api/t-interval", {"items": items})
+        _, z = self._post("/api/confidence-interval", {"items": items})
+        self.assertGreater(t["critical_value"], z["critical_value"])
+        self.assertGreater(t["margin_of_error"], z["margin_of_error"])
+
+    def test_endpoint_precision_and_unit(self):
+        status, data = self._post("/api/t-interval", {
+            "items": [{"value": v, "unit": "cm"} for v in (100, 200, 300)],
+            "to": "m", "precision": 3})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["mean"], round(data["mean"], 3))
+        self.assertEqual(data["margin_of_error"], round(data["margin_of_error"], 3))
+
+    def test_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/t-interval", {"items": "nope"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_single_value_400(self):
+        status, data = self._post("/api/t-interval", {
+            "items": [{"value": 5, "unit": "m"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_bad_confidence_400(self):
+        status, data = self._post("/api/t-interval", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 3)],
+            "confidence": 1.5})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_cross_category_400(self):
+        status, data = self._post("/api/t-interval", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_temperature_400(self):
+        status, data = self._post("/api/t-interval", {
+            "items": [{"value": 1, "unit": "c"}, {"value": 2, "unit": "c"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_invalid_json_400(self):
+        status, data = self._post("/api/t-interval", None, raw=b"{bad")
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
+class TestDomainStudentTTwoSidedP(unittest.TestCase):
+    """The forward two-sided Student-t p-value helper."""
+
+    def test_zero_statistic_is_one(self):
+        self.assertEqual(domain._student_t_two_sided_p(0.0, 5), 1.0)
+
+    def test_symmetric_in_sign(self):
+        self.assertAlmostEqual(
+            domain._student_t_two_sided_p(2.3, 7),
+            domain._student_t_two_sided_p(-2.3, 7), places=12)
+
+    def test_monotonically_decreasing(self):
+        p1 = domain._student_t_two_sided_p(1.0, 10)
+        p2 = domain._student_t_two_sided_p(2.0, 10)
+        p3 = domain._student_t_two_sided_p(3.0, 10)
+        self.assertGreater(p1, p2)
+        self.assertGreater(p2, p3)
+
+    def test_in_unit_interval(self):
+        for t in (0.1, 1.0, 5.0, 20.0):
+            p = domain._student_t_two_sided_p(t, 4)
+            self.assertGreater(p, 0.0)
+            self.assertLessEqual(p, 1.0)
+
+    def test_round_trips_against_inverse_cdf(self):
+        # The 0.975 t-quantile leaves 0.05 in the two tails, so the forward
+        # two-sided p-value of that critical value must come back as 0.05.
+        for df in (1, 4, 8, 30):
+            crit = domain._inv_student_t_cdf(0.975, df)
+            self.assertAlmostEqual(
+                domain._student_t_two_sided_p(crit, df), 0.05, places=6)
+
+    def test_converges_to_normal_for_large_df(self):
+        # As df -> inf the t tail approaches the normal: |z|=1.96 -> p ~ 0.05.
+        self.assertAlmostEqual(
+            domain._student_t_two_sided_p(1.959963985, 100000), 0.05, places=3)
+
+
+class TestDomainTwoSampleTTest(unittest.TestCase):
+    """Welch / pooled two-sample t-test for a difference between means."""
+
+    def test_basic_welch(self):
+        a = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+        b = [{"value": v, "unit": "m"} for v in (6, 7, 8, 9, 10)]
+        r = domain.two_sample_t_test(a, b)
+        self.assertEqual(r["category"], "length")
+        self.assertEqual(r["unit"], "m")
+        self.assertEqual(r["n_a"], 5)
+        self.assertEqual(r["n_b"], 5)
+        self.assertAlmostEqual(r["mean_a"], 3.0)
+        self.assertAlmostEqual(r["mean_b"], 8.0)
+        self.assertAlmostEqual(r["difference"], -5.0)
+        # Equal n and equal variance => SE=1, t=-5, df=8 for Welch.
+        self.assertAlmostEqual(r["standard_error"], 1.0)
+        self.assertAlmostEqual(r["statistic"], -5.0)
+        self.assertAlmostEqual(r["df"], 8.0)
+        self.assertEqual(r["method"], "welch")
+        self.assertFalse(r["equal_var"])
+        self.assertLess(r["p_value"], 0.01)
+        self.assertTrue(r["significant"])
+
+    def test_pooled_matches_welch_for_equal_n_and_variance(self):
+        a = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+        b = [{"value": v, "unit": "m"} for v in (6, 7, 8, 9, 10)]
+        r = domain.two_sample_t_test(a, b, equal_var=True)
+        self.assertEqual(r["method"], "pooled")
+        self.assertTrue(r["equal_var"])
+        self.assertAlmostEqual(r["statistic"], -5.0)
+        self.assertAlmostEqual(r["df"], 8.0)  # n_a + n_b - 2
+
+    def test_welch_df_is_fractional_for_unequal_variances(self):
+        a = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+        b = [{"value": v, "unit": "m"} for v in (10, 20, 30)]
+        r = domain.two_sample_t_test(a, b)
+        # Welch-Satterthwaite df is generally not an integer.
+        self.assertGreater(abs(r["df"] - round(r["df"])), 0.01)
+
+    def test_swapping_samples_flips_sign_only(self):
+        a = [{"value": v, "unit": "m"} for v in (2, 4, 6, 8)]
+        b = [{"value": v, "unit": "m"} for v in (3, 5, 7)]
+        ab = domain.two_sample_t_test(a, b)
+        ba = domain.two_sample_t_test(b, a)
+        self.assertAlmostEqual(ab["statistic"], -ba["statistic"])
+        self.assertAlmostEqual(ab["difference"], -ba["difference"])
+        self.assertAlmostEqual(ab["df"], ba["df"])
+        self.assertAlmostEqual(ab["p_value"], ba["p_value"])
+
+    def test_not_significant_when_means_close(self):
+        a = [{"value": v, "unit": "m"} for v in (10, 11, 12, 13, 14)]
+        b = [{"value": v, "unit": "m"} for v in (10.5, 11.5, 12.5, 13.5, 14.5)]
+        r = domain.two_sample_t_test(a, b)
+        self.assertGreater(r["p_value"], 0.05)
+        self.assertFalse(r["significant"])
+
+    def test_custom_alpha_changes_verdict(self):
+        # A p-value between 0.05 and 0.20 flips when alpha crosses it.
+        a = [{"value": v, "unit": "kg"} for v in (1, 2, 3, 4, 5, 6)]
+        b = [{"value": v, "unit": "kg"} for v in (3, 4, 5, 6, 7, 8)]
+        loose = domain.two_sample_t_test(a, b, alpha=0.2)
+        strict = domain.two_sample_t_test(a, b, alpha=0.01)
+        self.assertTrue(loose["p_value"] < 0.2 or not loose["significant"])
+        self.assertEqual(loose["significant"], loose["p_value"] < 0.2)
+        self.assertEqual(strict["significant"], strict["p_value"] < 0.01)
+
+    def test_unit_conversion_is_consistent(self):
+        # Same physical data, different unit on b: the test must agree once b is
+        # restated into a's unit.
+        a = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)]
+        b_cm = [{"value": v, "unit": "cm"} for v in (600, 700, 800, 900)]
+        b_m = [{"value": v, "unit": "m"} for v in (6, 7, 8, 9)]
+        r_cm = domain.two_sample_t_test(a, b_cm)
+        r_m = domain.two_sample_t_test(a, b_m)
+        self.assertEqual(r_cm["unit"], "m")
+        self.assertAlmostEqual(r_cm["statistic"], r_m["statistic"], places=9)
+        self.assertAlmostEqual(r_cm["mean_b"], r_m["mean_b"], places=9)
+
+    def test_target_unit_override(self):
+        a = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        b = [{"value": v, "unit": "m"} for v in (4, 5, 6)]
+        r = domain.two_sample_t_test(a, b, to_unit="cm")
+        self.assertEqual(r["unit"], "cm")
+        self.assertAlmostEqual(r["mean_a"], 200.0)
+        self.assertAlmostEqual(r["mean_b"], 500.0)
+
+    def test_tuple_items_accepted(self):
+        r = domain.two_sample_t_test(
+            [(1, "m"), (2, "m"), (3, "m")], [(4, "m"), (5, "m"), (6, "m")])
+        self.assertAlmostEqual(r["difference"], -3.0)
+
+    def test_one_constant_sample_is_fine(self):
+        # Only ONE zero-variance sample still leaves a defined SE.
+        a = [{"value": 5, "unit": "m"} for _ in range(4)]
+        b = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)]
+        r = domain.two_sample_t_test(a, b)
+        self.assertEqual(r["var_a"], 0.0)
+        self.assertGreater(r["standard_error"], 0.0)
+
+    def test_both_constant_samples_raise(self):
+        a = [{"value": 5, "unit": "m"} for _ in range(3)]
+        b = [{"value": 9, "unit": "m"} for _ in range(3)]
+        with self.assertRaises(ValueError):
+            domain.two_sample_t_test(a, b)
+
+    def test_single_value_sample_raises(self):
+        with self.assertRaises(ValueError):
+            domain.two_sample_t_test(
+                [{"value": 1, "unit": "m"}],
+                [{"value": 2, "unit": "m"}, {"value": 3, "unit": "m"}])
+
+    def test_empty_sample_raises(self):
+        with self.assertRaises(ValueError):
+            domain.two_sample_t_test([], [{"value": 2, "unit": "m"}])
+
+    def test_cross_category_between_samples_raises(self):
+        with self.assertRaises(ValueError):
+            domain.two_sample_t_test(
+                [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}],
+                [{"value": 1, "unit": "kg"}, {"value": 2, "unit": "kg"}])
+
+    def test_temperature_category_raises(self):
+        with self.assertRaises(ValueError):
+            domain.two_sample_t_test(
+                [{"value": 1, "unit": "c"}, {"value": 2, "unit": "c"}],
+                [{"value": 3, "unit": "c"}, {"value": 4, "unit": "c"}])
+
+    def test_bad_alpha_raises(self):
+        a = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        b = [{"value": v, "unit": "m"} for v in (4, 5, 6)]
+        for bad in (0.0, 1.0, -0.1, 1.5, float("nan")):
+            with self.assertRaises(ValueError):
+                domain.two_sample_t_test(a, b, alpha=bad)
+        with self.assertRaises(ValueError):
+            domain.two_sample_t_test(a, b, alpha="lots")
+        with self.assertRaises(ValueError):
+            domain.two_sample_t_test(a, b, alpha=True)
+
+    def test_bad_equal_var_raises(self):
+        a = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        b = [{"value": v, "unit": "m"} for v in (4, 5, 6)]
+        with self.assertRaises(ValueError):
+            domain.two_sample_t_test(a, b, equal_var="yes")
+
+
+class TestHttpTwoSampleTTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = server.make_server(0)
+        cls.host, cls.port = cls.server.server_address
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def _post(self, path, payload, raw=None):
+        body = raw if raw is not None else json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            "http://127.0.0.1:%d%s" % (self.port, path), data=body,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            data = json.loads(exc.read().decode("utf-8"))
+            exc.close()
+            return exc.code, data
+
+    def test_endpoint_ok(self):
+        status, data = self._post("/api/t-test", {
+            "a": [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)],
+            "b": [{"value": v, "unit": "m"} for v in (6, 7, 8, 9, 10)]})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["n_a"], 5)
+        self.assertEqual(data["n_b"], 5)
+        self.assertEqual(data["method"], "welch")
+        self.assertFalse(data["equal_var"])
+        self.assertAlmostEqual(data["statistic"], -5.0)
+        self.assertAlmostEqual(data["df"], 8.0)
+        self.assertEqual(data["alpha"], 0.05)
+        self.assertTrue(data["significant"])
+        self.assertGreater(data["p_value"], 0.0)
+        self.assertLessEqual(data["p_value"], 1.0)
+
+    def test_endpoint_pooled(self):
+        status, data = self._post("/api/t-test", {
+            "a": [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)],
+            "b": [{"value": v, "unit": "m"} for v in (6, 7, 8, 9, 10)],
+            "equal_var": True})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["method"], "pooled")
+        self.assertTrue(data["equal_var"])
+        self.assertAlmostEqual(data["df"], 8.0)
+
+    def test_endpoint_custom_alpha(self):
+        status, data = self._post("/api/t-test", {
+            "a": [{"value": v, "unit": "kg"} for v in (10, 11, 12, 13, 14)],
+            "b": [{"value": v, "unit": "kg"} for v in (10.5, 11.5, 12.5, 13.5, 14.5)],
+            "alpha": 0.10})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["alpha"], 0.10)
+        self.assertEqual(data["significant"], data["p_value"] < 0.10)
+
+    def test_endpoint_precision_and_unit(self):
+        status, data = self._post("/api/t-test", {
+            "a": [{"value": v, "unit": "cm"} for v in (100, 200, 300)],
+            "b": [{"value": v, "unit": "cm"} for v in (400, 500, 600)],
+            "to": "m", "precision": 3})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["mean_a"], round(data["mean_a"], 3))
+        self.assertEqual(data["statistic"], round(data["statistic"], 3))
+
+    def test_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/t-test", {
+            "a": "nope", "b": [{"value": 1, "unit": "m"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_single_value_400(self):
+        status, data = self._post("/api/t-test", {
+            "a": [{"value": 1, "unit": "m"}],
+            "b": [{"value": 2, "unit": "m"}, {"value": 3, "unit": "m"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_both_constant_400(self):
+        status, data = self._post("/api/t-test", {
+            "a": [{"value": 5, "unit": "m"} for _ in range(3)],
+            "b": [{"value": 9, "unit": "m"} for _ in range(3)]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_cross_category_400(self):
+        status, data = self._post("/api/t-test", {
+            "a": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}],
+            "b": [{"value": 1, "unit": "kg"}, {"value": 2, "unit": "kg"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_temperature_400(self):
+        status, data = self._post("/api/t-test", {
+            "a": [{"value": 1, "unit": "c"}, {"value": 2, "unit": "c"}],
+            "b": [{"value": 3, "unit": "c"}, {"value": 4, "unit": "c"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_bad_alpha_400(self):
+        status, data = self._post("/api/t-test", {
+            "a": [{"value": v, "unit": "m"} for v in (1, 2, 3)],
+            "b": [{"value": v, "unit": "m"} for v in (4, 5, 6)],
+            "alpha": 1.5})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_bad_equal_var_400(self):
+        status, data = self._post("/api/t-test", {
+            "a": [{"value": v, "unit": "m"} for v in (1, 2, 3)],
+            "b": [{"value": v, "unit": "m"} for v in (4, 5, 6)],
+            "equal_var": "yes"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_invalid_json_400(self):
+        status, data = self._post("/api/t-test", None, raw=b"{bad")
         self.assertEqual(status, 400)
         self.assertIn("error", data)
 
