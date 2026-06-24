@@ -6,6 +6,7 @@ that still live in ``server.py``, and the live HTTP API served by
 """
 
 import json
+import math
 import os
 import sys
 import threading
@@ -1575,6 +1576,64 @@ class TestHttpApi(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertIn("error", data)
 
+    # --- /api/stats ---
+    def test_stats_endpoint_ok(self):
+        status, data = self._post("/api/stats", {
+            "items": [{"value": 5, "unit": "m"}, {"value": 300, "unit": "cm"},
+                      {"value": 2, "unit": "ft"}],
+            "to": "m",
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["count"], 3)
+        self.assertAlmostEqual(data["sum"], 8.6096, places=4)
+        self.assertAlmostEqual(data["mean"], 8.6096 / 3.0, places=4)
+        self.assertEqual(data["min"]["index"], 2)
+        self.assertEqual(data["max"]["index"], 0)
+        self.assertAlmostEqual(data["max"]["value"], 5.0, places=4)
+        self.assertAlmostEqual(data["range"], 5.0 - 0.6096, places=4)
+
+    def test_stats_endpoint_default_unit_is_first(self):
+        status, data = self._post("/api/stats", {
+            "items": [{"value": 1, "unit": "kg"}, {"value": 500, "unit": "g"}],
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["unit"], "kg")
+        self.assertAlmostEqual(data["mean"], 0.75, places=6)
+
+    def test_stats_endpoint_precision(self):
+        status, data = self._post("/api/stats", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}],
+            "precision": 2,
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["mean"], round(data["mean"], 2))
+
+    def test_stats_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/stats", {"items": "nope"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_stats_endpoint_cross_category_400(self):
+        status, data = self._post("/api/stats", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}],
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_stats_endpoint_temperature_400(self):
+        status, data = self._post("/api/stats", {
+            "items": [{"value": 10, "unit": "c"}, {"value": 5, "unit": "c"}],
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_stats_endpoint_empty_400(self):
+        status, data = self._post("/api/stats", {"items": []})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
 
 class TestDomainSum(unittest.TestCase):
     def test_length_sum(self):
@@ -1727,6 +1786,3099 @@ class TestDomainConvertDelta(unittest.TestCase):
     def test_non_finite_raises(self):
         with self.assertRaises(ValueError):
             domain.convert_delta(float("nan"), "c", "f")
+
+
+class TestDomainAggregate(unittest.TestCase):
+    def test_basic_length_stats(self):
+        stats = domain.aggregate_quantities(
+            [{"value": 5, "unit": "m"}, {"value": 300, "unit": "cm"},
+             {"value": 2, "unit": "ft"}], "m")
+        self.assertEqual(stats["category"], "length")
+        self.assertEqual(stats["unit"], "m")
+        self.assertEqual(stats["count"], 3)
+        # 5 m + 3 m + 0.6096 m
+        self.assertAlmostEqual(stats["sum"], 8.6096, places=6)
+        self.assertAlmostEqual(stats["mean"], 8.6096 / 3.0, places=6)
+
+    def test_min_and_max_with_indices(self):
+        stats = domain.aggregate_quantities(
+            [{"value": 5, "unit": "m"}, {"value": 300, "unit": "cm"},
+             {"value": 2, "unit": "ft"}], "m")
+        # smallest is 2 ft (0.6096 m) at index 2; largest is 5 m at index 0.
+        self.assertEqual(stats["min"]["index"], 2)
+        self.assertAlmostEqual(stats["min"]["value"], 0.6096, places=6)
+        self.assertEqual(stats["max"]["index"], 0)
+        self.assertAlmostEqual(stats["max"]["value"], 5.0, places=6)
+        self.assertAlmostEqual(stats["range"], 5.0 - 0.6096, places=6)
+
+    def test_default_target_is_first_unit(self):
+        stats = domain.aggregate_quantities(
+            [{"value": 1, "unit": "kg"}, {"value": 500, "unit": "g"}])
+        self.assertEqual(stats["unit"], "kg")
+        self.assertAlmostEqual(stats["sum"], 1.5, places=9)
+        self.assertAlmostEqual(stats["mean"], 0.75, places=9)
+
+    def test_tuple_items_accepted(self):
+        stats = domain.aggregate_quantities([(1, "kg"), (1000, "g")], "kg")
+        self.assertEqual(stats["count"], 2)
+        self.assertAlmostEqual(stats["sum"], 2.0, places=9)
+
+    def test_single_item(self):
+        stats = domain.aggregate_quantities([{"value": 42, "unit": "m"}])
+        self.assertEqual(stats["count"], 1)
+        self.assertAlmostEqual(stats["mean"], 42.0, places=9)
+        self.assertEqual(stats["min"]["index"], 0)
+        self.assertEqual(stats["max"]["index"], 0)
+        self.assertAlmostEqual(stats["range"], 0.0, places=9)
+
+    def test_sum_matches_sum_quantities(self):
+        items = [{"value": 2, "unit": "ft"}, {"value": 30, "unit": "cm"},
+                 {"value": 1, "unit": "m"}]
+        total, _, _ = domain.sum_quantities(items, "m")
+        stats = domain.aggregate_quantities(items, "m")
+        self.assertAlmostEqual(stats["sum"], total, places=12)
+
+    def test_empty_raises(self):
+        with self.assertRaises(ValueError):
+            domain.aggregate_quantities([])
+
+    def test_not_a_list_raises(self):
+        with self.assertRaises(ValueError):
+            domain.aggregate_quantities("nope")
+
+    def test_cross_category_raises(self):
+        with self.assertRaises(ValueError):
+            domain.aggregate_quantities(
+                [{"value": 1, "unit": "m"}, {"value": 1, "unit": "s"}])
+
+    def test_unknown_unit_raises(self):
+        with self.assertRaises(ValueError):
+            domain.aggregate_quantities([{"value": 1, "unit": "frobs"}])
+
+    def test_bad_target_unit_raises(self):
+        with self.assertRaises(ValueError):
+            domain.aggregate_quantities([{"value": 1, "unit": "m"}], "kg")
+
+    def test_temperature_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.aggregate_quantities(
+                [{"value": 10, "unit": "c"}, {"value": 5, "unit": "c"}])
+
+    def test_fuel_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.aggregate_quantities([{"value": 30, "unit": "mpg"}])
+
+    def test_non_finite_value_raises(self):
+        with self.assertRaises(ValueError):
+            domain.aggregate_quantities([{"value": float("inf"), "unit": "m"}])
+
+    def test_missing_value_raises(self):
+        with self.assertRaises(ValueError):
+            domain.aggregate_quantities([{"unit": "m"}])
+
+
+class TestDomainSort(unittest.TestCase):
+    def test_ascending_default(self):
+        result = domain.sort_quantities(
+            [{"value": 5, "unit": "m"}, {"value": 300, "unit": "cm"},
+             {"value": 2, "unit": "ft"}], "m")
+        self.assertEqual(result["category"], "length")
+        self.assertEqual(result["unit"], "m")
+        self.assertEqual(result["count"], 3)
+        self.assertFalse(result["descending"])
+        # 2 ft (0.6096 m) < 300 cm (3 m) < 5 m
+        self.assertEqual([r["index"] for r in result["items"]], [2, 1, 0])
+        self.assertAlmostEqual(result["items"][0]["value"], 0.6096, places=6)
+        self.assertAlmostEqual(result["items"][2]["value"], 5.0, places=6)
+
+    def test_descending(self):
+        result = domain.sort_quantities(
+            [{"value": 5, "unit": "m"}, {"value": 300, "unit": "cm"},
+             {"value": 2, "unit": "ft"}], "m", descending=True)
+        self.assertTrue(result["descending"])
+        self.assertEqual([r["index"] for r in result["items"]], [0, 1, 2])
+
+    def test_default_target_is_first_unit(self):
+        result = domain.sort_quantities(
+            [{"value": 1, "unit": "kg"}, {"value": 500, "unit": "g"}])
+        self.assertEqual(result["unit"], "kg")
+        # 500 g (0.5 kg) < 1 kg
+        self.assertEqual([r["index"] for r in result["items"]], [1, 0])
+
+    def test_stable_on_ties_ascending(self):
+        # Three equal magnitudes keep their original input order.
+        result = domain.sort_quantities(
+            [{"value": 100, "unit": "cm"}, {"value": 1, "unit": "m"},
+             {"value": 1000, "unit": "mm"}], "m")
+        self.assertEqual([r["index"] for r in result["items"]], [0, 1, 2])
+
+    def test_stable_on_ties_descending(self):
+        # Stable even descending: equal magnitudes are NOT flipped.
+        result = domain.sort_quantities(
+            [{"value": 100, "unit": "cm"}, {"value": 1, "unit": "m"},
+             {"value": 1000, "unit": "mm"}], "m", descending=True)
+        self.assertEqual([r["index"] for r in result["items"]], [0, 1, 2])
+
+    def test_tuple_items_accepted(self):
+        result = domain.sort_quantities([(1, "kg"), (1000, "g")], "kg")
+        self.assertEqual(result["count"], 2)
+
+    def test_single_item(self):
+        result = domain.sort_quantities([{"value": 42, "unit": "m"}])
+        self.assertEqual(result["items"], [{"index": 0, "value": 42.0}])
+
+    def test_empty_raises(self):
+        with self.assertRaises(ValueError):
+            domain.sort_quantities([])
+
+    def test_not_a_list_raises(self):
+        with self.assertRaises(ValueError):
+            domain.sort_quantities("nope")
+
+    def test_cross_category_raises(self):
+        with self.assertRaises(ValueError):
+            domain.sort_quantities(
+                [{"value": 1, "unit": "m"}, {"value": 1, "unit": "s"}])
+
+    def test_unknown_unit_raises(self):
+        with self.assertRaises(ValueError):
+            domain.sort_quantities([{"value": 1, "unit": "frobs"}])
+
+    def test_bad_target_unit_raises(self):
+        with self.assertRaises(ValueError):
+            domain.sort_quantities([{"value": 1, "unit": "m"}], "kg")
+
+    def test_temperature_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.sort_quantities(
+                [{"value": 10, "unit": "c"}, {"value": 5, "unit": "c"}])
+
+    def test_fuel_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.sort_quantities([{"value": 30, "unit": "mpg"}])
+
+    def test_non_finite_value_raises(self):
+        with self.assertRaises(ValueError):
+            domain.sort_quantities([{"value": float("inf"), "unit": "m"}])
+
+    def test_missing_value_raises(self):
+        with self.assertRaises(ValueError):
+            domain.sort_quantities([{"unit": "m"}])
+
+
+class TestDomainDescribe(unittest.TestCase):
+    def test_basic_length_stats(self):
+        stats = domain.describe_quantities(
+            [{"value": 5, "unit": "m"}, {"value": 300, "unit": "cm"},
+             {"value": 2, "unit": "ft"}], "m")
+        self.assertEqual(stats["category"], "length")
+        self.assertEqual(stats["unit"], "m")
+        self.assertEqual(stats["count"], 3)
+        # 5 m, 3 m, 0.6096 m
+        self.assertAlmostEqual(stats["sum"], 8.6096, places=6)
+        self.assertAlmostEqual(stats["mean"], 8.6096 / 3.0, places=6)
+        # ordered: 0.6096, 3, 5 -> median is the middle value, 3.
+        self.assertAlmostEqual(stats["median"], 3.0, places=6)
+
+    def test_median_even_count_averages_two_middle(self):
+        stats = domain.describe_quantities(
+            [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"},
+             {"value": 3, "unit": "m"}, {"value": 6, "unit": "m"}])
+        # ordered: 1, 2, 3, 6 -> median = (2 + 3) / 2 = 2.5
+        self.assertAlmostEqual(stats["median"], 2.5, places=9)
+
+    def test_median_unsorted_input(self):
+        stats = domain.describe_quantities(
+            [{"value": 9, "unit": "m"}, {"value": 1, "unit": "m"},
+             {"value": 5, "unit": "m"}])
+        self.assertAlmostEqual(stats["median"], 5.0, places=9)
+
+    def test_population_variance_and_stdev(self):
+        # Values 2, 4, 4, 4, 5, 5, 7, 9 (m): mean 5, population variance 4,
+        # population stdev 2 — the classic textbook example.
+        items = [{"value": v, "unit": "m"} for v in (2, 4, 4, 4, 5, 5, 7, 9)]
+        stats = domain.describe_quantities(items)
+        self.assertAlmostEqual(stats["mean"], 5.0, places=9)
+        self.assertAlmostEqual(stats["variance"], 4.0, places=9)
+        self.assertAlmostEqual(stats["stdev"], 2.0, places=9)
+
+    def test_sample_variance_and_stdev(self):
+        # Same data: sample variance is 32/7 (divides by n-1 = 7).
+        items = [{"value": v, "unit": "m"} for v in (2, 4, 4, 4, 5, 5, 7, 9)]
+        stats = domain.describe_quantities(items)
+        self.assertAlmostEqual(stats["sample_variance"], 32.0 / 7.0, places=9)
+        self.assertAlmostEqual(stats["sample_stdev"], (32.0 / 7.0) ** 0.5, places=9)
+
+    def test_single_item_sample_stats_are_none(self):
+        stats = domain.describe_quantities([{"value": 42, "unit": "m"}])
+        self.assertEqual(stats["count"], 1)
+        self.assertAlmostEqual(stats["median"], 42.0, places=9)
+        self.assertAlmostEqual(stats["variance"], 0.0, places=9)
+        self.assertAlmostEqual(stats["stdev"], 0.0, places=9)
+        self.assertIsNone(stats["sample_variance"])
+        self.assertIsNone(stats["sample_stdev"])
+
+    def test_min_max_range_match_aggregate(self):
+        items = [{"value": 5, "unit": "m"}, {"value": 300, "unit": "cm"},
+                 {"value": 2, "unit": "ft"}]
+        agg = domain.aggregate_quantities(items, "m")
+        desc = domain.describe_quantities(items, "m")
+        self.assertEqual(desc["min"], agg["min"])
+        self.assertEqual(desc["max"], agg["max"])
+        self.assertAlmostEqual(desc["range"], agg["range"], places=12)
+        self.assertAlmostEqual(desc["sum"], agg["sum"], places=12)
+        self.assertAlmostEqual(desc["mean"], agg["mean"], places=12)
+
+    def test_default_target_is_first_unit(self):
+        stats = domain.describe_quantities(
+            [{"value": 1, "unit": "kg"}, {"value": 500, "unit": "g"}])
+        self.assertEqual(stats["unit"], "kg")
+        self.assertAlmostEqual(stats["median"], 0.75, places=9)
+
+    def test_tuple_items_accepted(self):
+        stats = domain.describe_quantities([(1, "kg"), (1000, "g")], "kg")
+        self.assertEqual(stats["count"], 2)
+        self.assertAlmostEqual(stats["sum"], 2.0, places=9)
+
+    def test_empty_raises(self):
+        with self.assertRaises(ValueError):
+            domain.describe_quantities([])
+
+    def test_not_a_list_raises(self):
+        with self.assertRaises(ValueError):
+            domain.describe_quantities("nope")
+
+    def test_cross_category_raises(self):
+        with self.assertRaises(ValueError):
+            domain.describe_quantities(
+                [{"value": 1, "unit": "m"}, {"value": 1, "unit": "s"}])
+
+    def test_unknown_unit_raises(self):
+        with self.assertRaises(ValueError):
+            domain.describe_quantities([{"value": 1, "unit": "frobs"}])
+
+    def test_bad_target_unit_raises(self):
+        with self.assertRaises(ValueError):
+            domain.describe_quantities([{"value": 1, "unit": "m"}], "kg")
+
+    def test_temperature_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.describe_quantities(
+                [{"value": 10, "unit": "c"}, {"value": 5, "unit": "c"}])
+
+    def test_fuel_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.describe_quantities([{"value": 30, "unit": "mpg"}])
+
+    def test_non_finite_value_raises(self):
+        with self.assertRaises(ValueError):
+            domain.describe_quantities([{"value": float("inf"), "unit": "m"}])
+
+    def test_missing_value_raises(self):
+        with self.assertRaises(ValueError):
+            domain.describe_quantities([{"unit": "m"}])
+
+
+class TestDomainShape(unittest.TestCase):
+    def _items(self, values, unit="m"):
+        return [{"value": v, "unit": unit} for v in values]
+
+    def test_symmetric_skewness_zero(self):
+        # A perfectly symmetric set has zero skewness.
+        result = domain.shape_quantities(self._items([1, 2, 3, 4, 5]))
+        self.assertEqual(result["category"], "length")
+        self.assertEqual(result["unit"], "m")
+        self.assertEqual(result["count"], 5)
+        self.assertAlmostEqual(result["mean"], 3.0, places=9)
+        self.assertAlmostEqual(result["skewness"], 0.0, places=9)
+        self.assertAlmostEqual(result["sample_skewness"], 0.0, places=9)
+
+    def test_symmetric_excess_kurtosis(self):
+        # [1,2,3,4,5]: m2=2, m4=6.8 -> excess kurtosis 6.8/4 - 3 = -1.3.
+        result = domain.shape_quantities(self._items([1, 2, 3, 4, 5]))
+        self.assertAlmostEqual(result["kurtosis"], -1.3, places=9)
+        self.assertAlmostEqual(result["sample_kurtosis"], -1.2, places=9)
+
+    def test_right_skewed_positive(self):
+        # [0,0,0,4]: hand-computed population skewness 2/sqrt(3).
+        result = domain.shape_quantities(self._items([0, 0, 0, 4]))
+        self.assertGreater(result["skewness"], 0.0)
+        self.assertAlmostEqual(result["skewness"], 1.1547005383792515, places=9)
+        self.assertAlmostEqual(result["kurtosis"], -2.0 / 3.0, places=9)
+
+    def test_left_skewed_negative(self):
+        # The mirror image of the right-skewed set skews negative.
+        result = domain.shape_quantities(self._items([4, 4, 4, 0]))
+        self.assertLess(result["skewness"], 0.0)
+        self.assertAlmostEqual(result["skewness"], -1.1547005383792515, places=9)
+
+    def test_dimensionless_under_unit_change(self):
+        # Skewness/kurtosis are standardised moments -> unchanged by the unit.
+        a = domain.shape_quantities(self._items([1, 2, 2, 9]))
+        b = domain.shape_quantities(self._items([1, 2, 2, 9]), "cm")
+        self.assertAlmostEqual(a["skewness"], b["skewness"], places=9)
+        self.assertAlmostEqual(a["kurtosis"], b["kurtosis"], places=9)
+        self.assertAlmostEqual(a["sample_skewness"], b["sample_skewness"], places=9)
+        self.assertAlmostEqual(a["sample_kurtosis"], b["sample_kurtosis"], places=9)
+        # But the mean is restated in the chosen unit (1 m -> 100 cm).
+        self.assertAlmostEqual(b["mean"], a["mean"] * 100.0, places=6)
+
+    def test_constant_series_is_undefined(self):
+        # A flat series has zero spread -> shape is undefined (None), like r.
+        result = domain.shape_quantities(self._items([3, 3, 3, 3]))
+        self.assertEqual(result["stdev"], 0.0)
+        self.assertIsNone(result["skewness"])
+        self.assertIsNone(result["sample_skewness"])
+        self.assertIsNone(result["kurtosis"])
+        self.assertIsNone(result["sample_kurtosis"])
+
+    def test_sample_skewness_needs_three(self):
+        # Two points: population skew is defined, the sample estimator is not.
+        result = domain.shape_quantities(self._items([1, 5]))
+        self.assertIsNotNone(result["skewness"])
+        self.assertIsNone(result["sample_skewness"])
+        self.assertIsNone(result["sample_kurtosis"])
+
+    def test_sample_kurtosis_needs_four(self):
+        # Three points: sample skew is defined, sample kurtosis is not.
+        result = domain.shape_quantities(self._items([1, 2, 9]))
+        self.assertIsNotNone(result["sample_skewness"])
+        self.assertIsNone(result["sample_kurtosis"])
+
+    def test_mixed_units_restated(self):
+        # 100 cm == 1 m, so [1 m, 100 cm, 3 m] behaves like [1, 1, 3].
+        result = domain.shape_quantities(
+            [{"value": 1, "unit": "m"}, {"value": 100, "unit": "cm"},
+             {"value": 3, "unit": "m"}])
+        plain = domain.shape_quantities(self._items([1, 1, 3]))
+        self.assertAlmostEqual(result["skewness"], plain["skewness"], places=9)
+
+    def test_empty_raises(self):
+        with self.assertRaises(ValueError):
+            domain.shape_quantities([])
+
+    def test_non_list_raises(self):
+        with self.assertRaises(ValueError):
+            domain.shape_quantities("nope")
+
+    def test_cross_category_raises(self):
+        with self.assertRaises(ValueError):
+            domain.shape_quantities(
+                [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}])
+
+    def test_temperature_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.shape_quantities([{"value": v, "unit": "c"} for v in (1, 2, 3)])
+
+    def test_fuel_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.shape_quantities(
+                [{"value": v, "unit": "mpg"} for v in (30, 40, 50)])
+
+    def test_nonfinite_raises(self):
+        with self.assertRaises(ValueError):
+            domain.shape_quantities(
+                [{"value": float("inf"), "unit": "m"}, {"value": 2, "unit": "m"}])
+
+    def test_unknown_unit_raises(self):
+        with self.assertRaises(ValueError):
+            domain.shape_quantities([{"value": 1, "unit": "zorp"}])
+
+
+class TestHttpSortAndDescribe(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = server.make_server(0)
+        cls.host, cls.port = cls.server.server_address
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def _url(self, path):
+        return "http://127.0.0.1:%d%s" % (self.port, path)
+
+    def _post(self, path, payload, raw=None):
+        body = raw if raw is not None else json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            self._url(path), data=body,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            payload = json.loads(exc.read().decode("utf-8"))
+            exc.close()
+            return exc.code, payload
+
+    # --- /api/sort ---
+    def test_sort_endpoint_ascending(self):
+        status, data = self._post("/api/sort", {
+            "items": [{"value": 5, "unit": "m"}, {"value": 300, "unit": "cm"},
+                      {"value": 2, "unit": "ft"}],
+            "to": "m",
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["count"], 3)
+        self.assertFalse(data["descending"])
+        self.assertEqual([r["index"] for r in data["items"]], [2, 1, 0])
+
+    def test_sort_endpoint_descending(self):
+        status, data = self._post("/api/sort", {
+            "items": [{"value": 5, "unit": "m"}, {"value": 300, "unit": "cm"},
+                      {"value": 2, "unit": "ft"}],
+            "to": "m", "descending": True,
+        })
+        self.assertEqual(status, 200)
+        self.assertTrue(data["descending"])
+        self.assertEqual([r["index"] for r in data["items"]], [0, 1, 2])
+
+    def test_sort_endpoint_default_unit_is_first(self):
+        status, data = self._post("/api/sort", {
+            "items": [{"value": 1, "unit": "kg"}, {"value": 500, "unit": "g"}],
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["unit"], "kg")
+        self.assertEqual([r["index"] for r in data["items"]], [1, 0])
+
+    def test_sort_endpoint_precision(self):
+        status, data = self._post("/api/sort", {
+            "items": [{"value": 1, "unit": "ft"}, {"value": 2, "unit": "ft"}],
+            "to": "m", "precision": 2,
+        })
+        self.assertEqual(status, 200)
+        for r in data["items"]:
+            self.assertEqual(r["value"], round(r["value"], 2))
+
+    def test_sort_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/sort", {"items": "nope"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_sort_endpoint_cross_category_400(self):
+        status, data = self._post("/api/sort", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}],
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_sort_endpoint_temperature_400(self):
+        status, data = self._post("/api/sort", {
+            "items": [{"value": 10, "unit": "c"}, {"value": 5, "unit": "c"}],
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_sort_endpoint_empty_400(self):
+        status, data = self._post("/api/sort", {"items": []})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    # --- /api/describe ---
+    def test_describe_endpoint_ok(self):
+        status, data = self._post("/api/describe", {
+            "items": [{"value": v, "unit": "m"} for v in (2, 4, 4, 4, 5, 5, 7, 9)],
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["count"], 8)
+        self.assertAlmostEqual(data["mean"], 5.0, places=6)
+        self.assertAlmostEqual(data["median"], 4.5, places=6)
+        self.assertAlmostEqual(data["variance"], 4.0, places=6)
+        self.assertAlmostEqual(data["stdev"], 2.0, places=6)
+        self.assertAlmostEqual(data["sample_variance"], 32.0 / 7.0, places=6)
+
+    def test_describe_endpoint_single_item_sample_none(self):
+        status, data = self._post("/api/describe", {
+            "items": [{"value": 42, "unit": "m"}],
+        })
+        self.assertEqual(status, 200)
+        self.assertIsNone(data["sample_variance"])
+        self.assertIsNone(data["sample_stdev"])
+        self.assertAlmostEqual(data["stdev"], 0.0, places=9)
+
+    def test_describe_endpoint_default_unit_is_first(self):
+        status, data = self._post("/api/describe", {
+            "items": [{"value": 1, "unit": "kg"}, {"value": 500, "unit": "g"}],
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["unit"], "kg")
+        self.assertAlmostEqual(data["median"], 0.75, places=6)
+
+    def test_describe_endpoint_precision(self):
+        status, data = self._post("/api/describe", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}],
+            "precision": 2,
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["stdev"], round(data["stdev"], 2))
+
+    def test_describe_endpoint_matches_stats_shared_fields(self):
+        # /api/describe must agree with /api/stats on every field they share.
+        items = [{"value": 5, "unit": "m"}, {"value": 300, "unit": "cm"},
+                 {"value": 2, "unit": "ft"}]
+        _, stats = self._post("/api/stats", {"items": items, "to": "m"})
+        _, desc = self._post("/api/describe", {"items": items, "to": "m"})
+        for key in ("category", "unit", "count", "sum", "mean", "min", "max", "range"):
+            self.assertEqual(desc[key], stats[key], "mismatch on %r" % key)
+
+    def test_describe_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/describe", {"items": "nope"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_describe_endpoint_cross_category_400(self):
+        status, data = self._post("/api/describe", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}],
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_describe_endpoint_temperature_400(self):
+        status, data = self._post("/api/describe", {
+            "items": [{"value": 10, "unit": "c"}, {"value": 5, "unit": "c"}],
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_describe_endpoint_empty_400(self):
+        status, data = self._post("/api/describe", {"items": []})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    # --- /api/shape (POST) ---
+    def test_shape_endpoint_ok(self):
+        status, data = self._post("/api/shape", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["count"], 5)
+        self.assertAlmostEqual(data["skewness"], 0.0, places=6)
+        self.assertAlmostEqual(data["kurtosis"], -1.3, places=6)
+
+    def test_shape_endpoint_to_unit(self):
+        status, data = self._post("/api/shape", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 2, 9)],
+            "to": "cm"})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["unit"], "cm")
+        # Standardised moments are unit-independent.
+        self.assertAlmostEqual(data["skewness"], 1.097025449, places=6)
+
+    def test_shape_endpoint_precision(self):
+        status, data = self._post("/api/shape", {
+            "items": [{"value": v, "unit": "m"} for v in (0, 0, 0, 4)],
+            "precision": 3})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["skewness"], 1.155)
+
+    def test_shape_endpoint_constant_null(self):
+        status, data = self._post("/api/shape", {
+            "items": [{"value": 3, "unit": "m"} for _ in range(4)]})
+        self.assertEqual(status, 200)
+        self.assertIsNone(data["skewness"])
+        self.assertIsNone(data["kurtosis"])
+
+    def test_shape_endpoint_sample_null_small_n(self):
+        status, data = self._post("/api/shape", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 5, "unit": "m"}]})
+        self.assertEqual(status, 200)
+        self.assertIsNone(data["sample_skewness"])
+        self.assertIsNone(data["sample_kurtosis"])
+
+    def test_shape_endpoint_missing_items_400(self):
+        status, data = self._post("/api/shape", {})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_shape_endpoint_cross_category_400(self):
+        status, data = self._post("/api/shape", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_shape_endpoint_empty_400(self):
+        status, data = self._post("/api/shape", {"items": []})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
+class TestDomainCumulative(unittest.TestCase):
+    def test_running_total(self):
+        result = domain.cumulative_quantities(
+            [{"value": 5, "unit": "km"}, {"value": 3, "unit": "km"},
+             {"value": 2, "unit": "km"}], "km")
+        self.assertEqual(result["category"], "length")
+        self.assertEqual(result["unit"], "km")
+        self.assertEqual(result["count"], 3)
+        self.assertAlmostEqual(result["total"], 10.0, places=9)
+        self.assertEqual([r["cumulative"] for r in result["items"]], [5.0, 8.0, 10.0])
+        self.assertEqual([r["index"] for r in result["items"]], [0, 1, 2])
+
+    def test_mixed_units_restated(self):
+        result = domain.cumulative_quantities(
+            [{"value": 1, "unit": "m"}, {"value": 100, "unit": "cm"}], "m")
+        self.assertEqual([r["value"] for r in result["items"]], [1.0, 1.0])
+        self.assertAlmostEqual(result["items"][1]["cumulative"], 2.0, places=9)
+
+    def test_final_cumulative_equals_total(self):
+        items = [{"value": 2, "unit": "ft"}, {"value": 30, "unit": "cm"},
+                 {"value": 1, "unit": "m"}]
+        result = domain.cumulative_quantities(items, "m")
+        total, _, _ = domain.sum_quantities(items, "m")
+        self.assertAlmostEqual(result["items"][-1]["cumulative"], total, places=12)
+
+    def test_default_target_is_first_unit(self):
+        result = domain.cumulative_quantities(
+            [{"value": 1, "unit": "kg"}, {"value": 500, "unit": "g"}])
+        self.assertEqual(result["unit"], "kg")
+        self.assertAlmostEqual(result["items"][1]["cumulative"], 1.5, places=9)
+
+    def test_tuple_items_accepted(self):
+        result = domain.cumulative_quantities([(1, "kg"), (1000, "g")], "kg")
+        self.assertEqual(result["count"], 2)
+        self.assertAlmostEqual(result["total"], 2.0, places=9)
+
+    def test_single_item(self):
+        result = domain.cumulative_quantities([{"value": 42, "unit": "m"}])
+        self.assertEqual(result["items"],
+                         [{"index": 0, "value": 42.0, "cumulative": 42.0}])
+
+    def test_empty_raises(self):
+        with self.assertRaises(ValueError):
+            domain.cumulative_quantities([])
+
+    def test_not_a_list_raises(self):
+        with self.assertRaises(ValueError):
+            domain.cumulative_quantities("nope")
+
+    def test_cross_category_raises(self):
+        with self.assertRaises(ValueError):
+            domain.cumulative_quantities(
+                [{"value": 1, "unit": "m"}, {"value": 1, "unit": "s"}])
+
+    def test_unknown_unit_raises(self):
+        with self.assertRaises(ValueError):
+            domain.cumulative_quantities([{"value": 1, "unit": "frobs"}])
+
+    def test_bad_target_unit_raises(self):
+        with self.assertRaises(ValueError):
+            domain.cumulative_quantities([{"value": 1, "unit": "m"}], "kg")
+
+    def test_temperature_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.cumulative_quantities(
+                [{"value": 10, "unit": "c"}, {"value": 5, "unit": "c"}])
+
+    def test_fuel_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.cumulative_quantities([{"value": 30, "unit": "mpg"}])
+
+    def test_non_finite_value_raises(self):
+        with self.assertRaises(ValueError):
+            domain.cumulative_quantities([{"value": float("inf"), "unit": "m"}])
+
+    def test_missing_value_raises(self):
+        with self.assertRaises(ValueError):
+            domain.cumulative_quantities([{"unit": "m"}])
+
+
+class TestDomainPercentile(unittest.TestCase):
+    def test_zeroth_is_minimum(self):
+        result = domain.percentile_quantities(
+            [{"value": v, "unit": "m"} for v in (9, 1, 5)], 0)
+        self.assertEqual(result["category"], "length")
+        self.assertEqual(result["count"], 3)
+        self.assertAlmostEqual(result["value"], 1.0, places=9)
+
+    def test_hundredth_is_maximum(self):
+        result = domain.percentile_quantities(
+            [{"value": v, "unit": "m"} for v in (9, 1, 5)], 100)
+        self.assertAlmostEqual(result["value"], 9.0, places=9)
+
+    def test_fiftieth_equals_median(self):
+        items = [{"value": v, "unit": "m"} for v in (2, 4, 4, 4, 5, 5, 7, 9)]
+        p50 = domain.percentile_quantities(items, 50)["value"]
+        median = domain.describe_quantities(items)["median"]
+        self.assertAlmostEqual(p50, median, places=12)
+
+    def test_interpolation_between_ranks(self):
+        # R-7: for [1, 2, 3, 4] the 90th percentile interpolates to 3.7.
+        items = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)]
+        result = domain.percentile_quantities(items, 90)
+        self.assertAlmostEqual(result["value"], 3.7, places=9)
+
+    def test_mixed_units_restated(self):
+        result = domain.percentile_quantities(
+            [{"value": 1, "unit": "m"}, {"value": 300, "unit": "cm"}], 100, "m")
+        self.assertEqual(result["unit"], "m")
+        self.assertAlmostEqual(result["value"], 3.0, places=9)
+
+    def test_default_target_is_first_unit(self):
+        result = domain.percentile_quantities(
+            [{"value": 1, "unit": "kg"}, {"value": 500, "unit": "g"}], 0)
+        self.assertEqual(result["unit"], "kg")
+        self.assertAlmostEqual(result["value"], 0.5, places=9)
+
+    def test_percentile_echoed_back(self):
+        result = domain.percentile_quantities([{"value": 5, "unit": "m"}], 42)
+        self.assertAlmostEqual(result["percentile"], 42.0, places=9)
+
+    def test_single_item(self):
+        result = domain.percentile_quantities([{"value": 7, "unit": "m"}], 25)
+        self.assertAlmostEqual(result["value"], 7.0, places=9)
+
+    def test_tuple_items_accepted(self):
+        result = domain.percentile_quantities([(1, "kg"), (3, "kg")], 50)
+        self.assertAlmostEqual(result["value"], 2.0, places=9)
+
+    def test_out_of_range_low_raises(self):
+        with self.assertRaises(ValueError):
+            domain.percentile_quantities([{"value": 1, "unit": "m"}], -1)
+
+    def test_out_of_range_high_raises(self):
+        with self.assertRaises(ValueError):
+            domain.percentile_quantities([{"value": 1, "unit": "m"}], 101)
+
+    def test_non_numeric_percentile_raises(self):
+        with self.assertRaises(ValueError):
+            domain.percentile_quantities([{"value": 1, "unit": "m"}], "abc")
+
+    def test_non_finite_percentile_raises(self):
+        with self.assertRaises(ValueError):
+            domain.percentile_quantities([{"value": 1, "unit": "m"}], float("nan"))
+
+    def test_empty_raises(self):
+        with self.assertRaises(ValueError):
+            domain.percentile_quantities([], 50)
+
+    def test_not_a_list_raises(self):
+        with self.assertRaises(ValueError):
+            domain.percentile_quantities("nope", 50)
+
+    def test_cross_category_raises(self):
+        with self.assertRaises(ValueError):
+            domain.percentile_quantities(
+                [{"value": 1, "unit": "m"}, {"value": 1, "unit": "s"}], 50)
+
+    def test_temperature_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.percentile_quantities(
+                [{"value": 10, "unit": "c"}, {"value": 5, "unit": "c"}], 50)
+
+    def test_fuel_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.percentile_quantities([{"value": 30, "unit": "mpg"}], 50)
+
+
+class TestDomainProportions(unittest.TestCase):
+    def test_basic_shares(self):
+        result = domain.proportions(
+            [{"value": 2, "unit": "m"}, {"value": 4, "unit": "m"},
+             {"value": 6, "unit": "m"}], "m")
+        self.assertEqual(result["category"], "length")
+        self.assertEqual(result["unit"], "m")
+        self.assertEqual(result["count"], 3)
+        self.assertAlmostEqual(result["total"], 12.0, places=9)
+        self.assertAlmostEqual(result["items"][0]["fraction"], 2.0 / 12.0, places=9)
+        self.assertAlmostEqual(result["items"][2]["percent"], 50.0, places=9)
+        self.assertEqual([r["index"] for r in result["items"]], [0, 1, 2])
+
+    def test_fractions_sum_to_one(self):
+        result = domain.proportions(
+            [{"value": 5, "unit": "m"}, {"value": 300, "unit": "cm"},
+             {"value": 2, "unit": "ft"}], "m")
+        self.assertAlmostEqual(sum(r["fraction"] for r in result["items"]), 1.0, places=9)
+        self.assertAlmostEqual(sum(r["percent"] for r in result["items"]), 100.0, places=6)
+
+    def test_mixed_units_restated(self):
+        result = domain.proportions(
+            [{"value": 1, "unit": "m"}, {"value": 100, "unit": "cm"}], "m")
+        # Two equal lengths -> 50% each.
+        self.assertAlmostEqual(result["items"][0]["percent"], 50.0, places=9)
+        self.assertAlmostEqual(result["items"][1]["percent"], 50.0, places=9)
+
+    def test_default_target_is_first_unit(self):
+        result = domain.proportions(
+            [{"value": 1, "unit": "kg"}, {"value": 1000, "unit": "g"}])
+        self.assertEqual(result["unit"], "kg")
+        self.assertAlmostEqual(result["items"][0]["fraction"], 0.5, places=9)
+
+    def test_tuple_items_accepted(self):
+        result = domain.proportions([(1, "kg"), (3, "kg")], "kg")
+        self.assertAlmostEqual(result["items"][0]["fraction"], 0.25, places=9)
+
+    def test_single_item_is_whole(self):
+        result = domain.proportions([{"value": 42, "unit": "m"}])
+        self.assertAlmostEqual(result["items"][0]["fraction"], 1.0, places=9)
+        self.assertAlmostEqual(result["items"][0]["percent"], 100.0, places=9)
+
+    def test_zero_total_raises(self):
+        # 1 m + (-1 m) sums to zero -> a share of nothing is undefined.
+        with self.assertRaises(ValueError):
+            domain.proportions([{"value": 1, "unit": "m"}, {"value": -1, "unit": "m"}])
+
+    def test_empty_raises(self):
+        with self.assertRaises(ValueError):
+            domain.proportions([])
+
+    def test_not_a_list_raises(self):
+        with self.assertRaises(ValueError):
+            domain.proportions("nope")
+
+    def test_cross_category_raises(self):
+        with self.assertRaises(ValueError):
+            domain.proportions(
+                [{"value": 1, "unit": "m"}, {"value": 1, "unit": "s"}])
+
+    def test_unknown_unit_raises(self):
+        with self.assertRaises(ValueError):
+            domain.proportions([{"value": 1, "unit": "frobs"}])
+
+    def test_bad_target_unit_raises(self):
+        with self.assertRaises(ValueError):
+            domain.proportions([{"value": 1, "unit": "m"}], "kg")
+
+    def test_temperature_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.proportions(
+                [{"value": 10, "unit": "c"}, {"value": 5, "unit": "c"}])
+
+    def test_fuel_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.proportions([{"value": 30, "unit": "mpg"}])
+
+    def test_non_finite_value_raises(self):
+        with self.assertRaises(ValueError):
+            domain.proportions([{"value": float("inf"), "unit": "m"}])
+
+    def test_missing_value_raises(self):
+        with self.assertRaises(ValueError):
+            domain.proportions([{"unit": "m"}])
+
+
+class TestHttpCumsumPercentileProportions(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = server.make_server(0)
+        cls.host, cls.port = cls.server.server_address
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def _url(self, path):
+        return "http://127.0.0.1:%d%s" % (self.port, path)
+
+    def _post(self, path, payload, raw=None):
+        body = raw if raw is not None else json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            self._url(path), data=body,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            payload = json.loads(exc.read().decode("utf-8"))
+            exc.close()
+            return exc.code, payload
+
+    # --- /api/cumsum ---
+    def test_cumsum_endpoint_ok(self):
+        status, data = self._post("/api/cumsum", {
+            "items": [{"value": 5, "unit": "km"}, {"value": 3, "unit": "km"},
+                      {"value": 2, "unit": "km"}],
+            "to": "km",
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["unit"], "km")
+        self.assertEqual(data["count"], 3)
+        self.assertAlmostEqual(data["total"], 10.0, places=6)
+        self.assertEqual([r["cumulative"] for r in data["items"]], [5.0, 8.0, 10.0])
+        self.assertEqual([r["index"] for r in data["items"]], [0, 1, 2])
+
+    def test_cumsum_endpoint_default_unit_is_first(self):
+        status, data = self._post("/api/cumsum", {
+            "items": [{"value": 1, "unit": "kg"}, {"value": 500, "unit": "g"}],
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["unit"], "kg")
+        self.assertAlmostEqual(data["items"][1]["cumulative"], 1.5, places=6)
+
+    def test_cumsum_endpoint_precision(self):
+        status, data = self._post("/api/cumsum", {
+            "items": [{"value": 1, "unit": "ft"}, {"value": 2, "unit": "ft"}],
+            "to": "m", "precision": 2,
+        })
+        self.assertEqual(status, 200)
+        for r in data["items"]:
+            self.assertEqual(r["cumulative"], round(r["cumulative"], 2))
+
+    def test_cumsum_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/cumsum", {"items": "nope"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_cumsum_endpoint_cross_category_400(self):
+        status, data = self._post("/api/cumsum", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}],
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_cumsum_endpoint_temperature_400(self):
+        status, data = self._post("/api/cumsum", {
+            "items": [{"value": 10, "unit": "c"}, {"value": 5, "unit": "c"}],
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_cumsum_endpoint_empty_400(self):
+        status, data = self._post("/api/cumsum", {"items": []})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    # --- /api/percentile ---
+    def test_percentile_endpoint_ok(self):
+        status, data = self._post("/api/percentile", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)],
+            "percentile": 90,
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["count"], 4)
+        self.assertAlmostEqual(data["percentile"], 90.0, places=6)
+        self.assertAlmostEqual(data["value"], 3.7, places=6)
+
+    def test_percentile_endpoint_median_agrees_with_describe(self):
+        items = [{"value": v, "unit": "m"} for v in (2, 4, 4, 4, 5, 5, 7, 9)]
+        _, p50 = self._post("/api/percentile", {"items": items, "percentile": 50})
+        _, desc = self._post("/api/describe", {"items": items})
+        self.assertAlmostEqual(p50["value"], desc["median"], places=6)
+
+    def test_percentile_endpoint_default_unit_is_first(self):
+        status, data = self._post("/api/percentile", {
+            "items": [{"value": 1, "unit": "kg"}, {"value": 500, "unit": "g"}],
+            "percentile": 0,
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["unit"], "kg")
+        self.assertAlmostEqual(data["value"], 0.5, places=6)
+
+    def test_percentile_endpoint_precision(self):
+        status, data = self._post("/api/percentile", {
+            "items": [{"value": 1, "unit": "ft"}, {"value": 2, "unit": "ft"}],
+            "to": "m", "percentile": 50, "precision": 2,
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["value"], round(data["value"], 2))
+
+    def test_percentile_endpoint_missing_percentile_400(self):
+        status, data = self._post("/api/percentile", {
+            "items": [{"value": 1, "unit": "m"}],
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_percentile_endpoint_out_of_range_400(self):
+        status, data = self._post("/api/percentile", {
+            "items": [{"value": 1, "unit": "m"}], "percentile": 150,
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_percentile_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/percentile", {"items": "nope", "percentile": 50})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_percentile_endpoint_temperature_400(self):
+        status, data = self._post("/api/percentile", {
+            "items": [{"value": 10, "unit": "c"}, {"value": 5, "unit": "c"}],
+            "percentile": 50,
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    # --- /api/proportions ---
+    def test_proportions_endpoint_ok(self):
+        status, data = self._post("/api/proportions", {
+            "items": [{"value": 2, "unit": "m"}, {"value": 4, "unit": "m"},
+                      {"value": 6, "unit": "m"}],
+            "to": "m",
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["count"], 3)
+        self.assertAlmostEqual(data["total"], 12.0, places=6)
+        self.assertAlmostEqual(data["items"][2]["percent"], 50.0, places=6)
+        self.assertEqual([r["index"] for r in data["items"]], [0, 1, 2])
+
+    def test_proportions_endpoint_percentages_sum_to_100(self):
+        status, data = self._post("/api/proportions", {
+            "items": [{"value": 5, "unit": "m"}, {"value": 300, "unit": "cm"},
+                      {"value": 2, "unit": "ft"}],
+            "to": "m",
+        })
+        self.assertEqual(status, 200)
+        self.assertAlmostEqual(sum(r["percent"] for r in data["items"]), 100.0, places=4)
+
+    def test_proportions_endpoint_default_unit_is_first(self):
+        status, data = self._post("/api/proportions", {
+            "items": [{"value": 1, "unit": "kg"}, {"value": 1000, "unit": "g"}],
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["unit"], "kg")
+        self.assertAlmostEqual(data["items"][0]["fraction"], 0.5, places=6)
+
+    def test_proportions_endpoint_precision(self):
+        status, data = self._post("/api/proportions", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}],
+            "precision": 2,
+        })
+        self.assertEqual(status, 200)
+        for r in data["items"]:
+            self.assertEqual(r["fraction"], round(r["fraction"], 2))
+
+    def test_proportions_endpoint_zero_total_400(self):
+        status, data = self._post("/api/proportions", {
+            "items": [{"value": 1, "unit": "m"}, {"value": -1, "unit": "m"}],
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_proportions_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/proportions", {"items": "nope"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_proportions_endpoint_cross_category_400(self):
+        status, data = self._post("/api/proportions", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}],
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_proportions_endpoint_temperature_400(self):
+        status, data = self._post("/api/proportions", {
+            "items": [{"value": 10, "unit": "c"}, {"value": 5, "unit": "c"}],
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_proportions_endpoint_empty_400(self):
+        status, data = self._post("/api/proportions", {"items": []})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
+class TestDomainDifferences(unittest.TestCase):
+    def test_successive_deltas(self):
+        # Odometer readings -> the distance of each leg (first is the step from 0).
+        result = domain.differences(
+            [{"value": 10, "unit": "km"}, {"value": 25, "unit": "km"},
+             {"value": 40, "unit": "km"}], "km")
+        self.assertEqual(result["category"], "length")
+        self.assertEqual(result["unit"], "km")
+        self.assertEqual(result["count"], 3)
+        self.assertEqual([r["difference"] for r in result["items"]], [10.0, 15.0, 15.0])
+        self.assertEqual([r["index"] for r in result["items"]], [0, 1, 2])
+
+    def test_total_equals_last_value(self):
+        result = domain.differences(
+            [{"value": 10, "unit": "km"}, {"value": 25, "unit": "km"}], "km")
+        # The differences sum back to the final restated value.
+        self.assertAlmostEqual(sum(r["difference"] for r in result["items"]),
+                               result["items"][-1]["value"], places=9)
+        self.assertAlmostEqual(result["total"], 35.0, places=9)
+
+    def test_inverse_of_cumulative(self):
+        # differences(cumsum(series)) reconstructs the original increments.
+        series = [{"value": 5, "unit": "km"}, {"value": 3, "unit": "km"},
+                  {"value": 2, "unit": "km"}]
+        cum = domain.cumulative_quantities(series, "km")
+        cum_items = [{"value": r["cumulative"], "unit": "km"} for r in cum["items"]]
+        diff = domain.differences(cum_items, "km")
+        self.assertEqual([r["difference"] for r in diff["items"]], [5.0, 3.0, 2.0])
+
+    def test_cumsum_of_differences_reconstructs_series(self):
+        # And the other direction: cumsum of the differences == the values.
+        series = [{"value": 10, "unit": "km"}, {"value": 25, "unit": "km"},
+                  {"value": 40, "unit": "km"}]
+        diff = domain.differences(series, "km")
+        diff_items = [{"value": r["difference"], "unit": "km"} for r in diff["items"]]
+        cum = domain.cumulative_quantities(diff_items, "km")
+        self.assertEqual([r["cumulative"] for r in cum["items"]], [10.0, 25.0, 40.0])
+
+    def test_mixed_units_restated(self):
+        result = domain.differences(
+            [{"value": 1, "unit": "m"}, {"value": 150, "unit": "cm"}], "m")
+        self.assertAlmostEqual(result["items"][0]["difference"], 1.0, places=9)
+        self.assertAlmostEqual(result["items"][1]["difference"], 0.5, places=9)
+
+    def test_negative_difference(self):
+        result = domain.differences(
+            [{"value": 5, "unit": "m"}, {"value": 2, "unit": "m"}], "m")
+        self.assertAlmostEqual(result["items"][1]["difference"], -3.0, places=9)
+
+    def test_default_target_is_first_unit(self):
+        result = domain.differences(
+            [{"value": 1, "unit": "kg"}, {"value": 1500, "unit": "g"}])
+        self.assertEqual(result["unit"], "kg")
+        self.assertAlmostEqual(result["items"][1]["difference"], 0.5, places=9)
+
+    def test_tuple_items_accepted(self):
+        result = domain.differences([(1, "kg"), (3, "kg")], "kg")
+        self.assertEqual(result["count"], 2)
+        self.assertAlmostEqual(result["items"][1]["difference"], 2.0, places=9)
+
+    def test_single_item(self):
+        result = domain.differences([{"value": 42, "unit": "m"}])
+        self.assertEqual(result["items"],
+                         [{"index": 0, "value": 42.0, "difference": 42.0}])
+
+    def test_empty_raises(self):
+        with self.assertRaises(ValueError):
+            domain.differences([])
+
+    def test_not_a_list_raises(self):
+        with self.assertRaises(ValueError):
+            domain.differences("nope")
+
+    def test_cross_category_raises(self):
+        with self.assertRaises(ValueError):
+            domain.differences(
+                [{"value": 1, "unit": "m"}, {"value": 1, "unit": "s"}])
+
+    def test_unknown_unit_raises(self):
+        with self.assertRaises(ValueError):
+            domain.differences([{"value": 1, "unit": "frobs"}])
+
+    def test_bad_target_unit_raises(self):
+        with self.assertRaises(ValueError):
+            domain.differences([{"value": 1, "unit": "m"}], "kg")
+
+    def test_temperature_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.differences(
+                [{"value": 10, "unit": "c"}, {"value": 5, "unit": "c"}])
+
+    def test_fuel_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.differences([{"value": 30, "unit": "mpg"}])
+
+    def test_non_finite_value_raises(self):
+        with self.assertRaises(ValueError):
+            domain.differences([{"value": float("inf"), "unit": "m"}])
+
+    def test_missing_value_raises(self):
+        with self.assertRaises(ValueError):
+            domain.differences([{"unit": "m"}])
+
+
+class TestDomainZScores(unittest.TestCase):
+    def test_basic_scores(self):
+        # Values 2, 4, 4, 4, 5, 5, 7, 9 (m): mean 5, population stdev 2.
+        items = [{"value": v, "unit": "m"} for v in (2, 4, 4, 4, 5, 5, 7, 9)]
+        result = domain.zscores(items, "m")
+        self.assertEqual(result["category"], "length")
+        self.assertEqual(result["unit"], "m")
+        self.assertEqual(result["count"], 8)
+        self.assertAlmostEqual(result["mean"], 5.0, places=9)
+        self.assertAlmostEqual(result["stdev"], 2.0, places=9)
+        # (2 - 5) / 2 = -1.5 ; (9 - 5) / 2 = 2.0
+        self.assertAlmostEqual(result["items"][0]["zscore"], -1.5, places=9)
+        self.assertAlmostEqual(result["items"][7]["zscore"], 2.0, places=9)
+
+    def test_scores_have_zero_mean_unit_stdev(self):
+        items = [{"value": v, "unit": "m"} for v in (2, 4, 4, 4, 5, 5, 7, 9)]
+        result = domain.zscores(items, "m")
+        zs = [r["zscore"] for r in result["items"]]
+        n = len(zs)
+        mean_z = sum(zs) / n
+        var_z = sum((z - mean_z) ** 2 for z in zs) / n
+        self.assertAlmostEqual(mean_z, 0.0, places=9)
+        self.assertAlmostEqual(var_z, 1.0, places=9)
+
+    def test_mean_and_stdev_match_describe(self):
+        items = [{"value": 5, "unit": "m"}, {"value": 300, "unit": "cm"},
+                 {"value": 2, "unit": "ft"}]
+        desc = domain.describe_quantities(items, "m")
+        result = domain.zscores(items, "m")
+        self.assertAlmostEqual(result["mean"], desc["mean"], places=12)
+        self.assertAlmostEqual(result["stdev"], desc["stdev"], places=12)
+
+    def test_mixed_units_restated(self):
+        result = domain.zscores(
+            [{"value": 1, "unit": "m"}, {"value": 300, "unit": "cm"}], "m")
+        # Two values 1 and 3 -> mean 2, stdev 1 -> z-scores -1 and +1.
+        self.assertAlmostEqual(result["items"][0]["zscore"], -1.0, places=9)
+        self.assertAlmostEqual(result["items"][1]["zscore"], 1.0, places=9)
+
+    def test_default_target_is_first_unit(self):
+        result = domain.zscores(
+            [{"value": 1, "unit": "kg"}, {"value": 3000, "unit": "g"}])
+        self.assertEqual(result["unit"], "kg")
+        self.assertAlmostEqual(result["items"][0]["zscore"], -1.0, places=9)
+
+    def test_tuple_items_accepted(self):
+        result = domain.zscores([(1, "m"), (3, "m")], "m")
+        self.assertEqual(result["count"], 2)
+
+    def test_identical_values_raise(self):
+        # Zero spread -> z-score undefined.
+        with self.assertRaises(ValueError):
+            domain.zscores([{"value": 5, "unit": "m"}, {"value": 5, "unit": "m"}])
+
+    def test_single_item_raises(self):
+        # One observation has zero spread, so no z-score.
+        with self.assertRaises(ValueError):
+            domain.zscores([{"value": 42, "unit": "m"}])
+
+    def test_empty_raises(self):
+        with self.assertRaises(ValueError):
+            domain.zscores([])
+
+    def test_not_a_list_raises(self):
+        with self.assertRaises(ValueError):
+            domain.zscores("nope")
+
+    def test_cross_category_raises(self):
+        with self.assertRaises(ValueError):
+            domain.zscores([{"value": 1, "unit": "m"}, {"value": 1, "unit": "s"}])
+
+    def test_unknown_unit_raises(self):
+        with self.assertRaises(ValueError):
+            domain.zscores([{"value": 1, "unit": "frobs"}])
+
+    def test_bad_target_unit_raises(self):
+        with self.assertRaises(ValueError):
+            domain.zscores([{"value": 1, "unit": "m"}], "kg")
+
+    def test_temperature_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.zscores([{"value": 10, "unit": "c"}, {"value": 5, "unit": "c"}])
+
+    def test_fuel_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.zscores([{"value": 30, "unit": "mpg"}])
+
+    def test_non_finite_value_raises(self):
+        with self.assertRaises(ValueError):
+            domain.zscores([{"value": float("inf"), "unit": "m"}])
+
+    def test_missing_value_raises(self):
+        with self.assertRaises(ValueError):
+            domain.zscores([{"unit": "m"}])
+
+
+class TestDomainNormalize(unittest.TestCase):
+    def test_basic_scaling(self):
+        result = domain.normalize_quantities(
+            [{"value": 2, "unit": "m"}, {"value": 4, "unit": "m"},
+             {"value": 6, "unit": "m"}], "m")
+        self.assertEqual(result["category"], "length")
+        self.assertEqual(result["unit"], "m")
+        self.assertEqual(result["count"], 3)
+        self.assertAlmostEqual(result["min"], 2.0, places=9)
+        self.assertAlmostEqual(result["max"], 6.0, places=9)
+        # (2-2)/4=0, (4-2)/4=0.5, (6-2)/4=1
+        self.assertEqual([r["normalized"] for r in result["items"]], [0.0, 0.5, 1.0])
+        self.assertEqual([r["index"] for r in result["items"]], [0, 1, 2])
+
+    def test_min_maps_to_zero_max_to_one(self):
+        result = domain.normalize_quantities(
+            [{"value": 9, "unit": "m"}, {"value": 1, "unit": "m"},
+             {"value": 5, "unit": "m"}], "m")
+        self.assertAlmostEqual(result["items"][1]["normalized"], 0.0, places=9)
+        self.assertAlmostEqual(result["items"][0]["normalized"], 1.0, places=9)
+        self.assertAlmostEqual(result["items"][2]["normalized"], 0.5, places=9)
+
+    def test_mixed_units_restated(self):
+        result = domain.normalize_quantities(
+            [{"value": 1, "unit": "m"}, {"value": 300, "unit": "cm"}], "m")
+        self.assertAlmostEqual(result["items"][0]["normalized"], 0.0, places=9)
+        self.assertAlmostEqual(result["items"][1]["normalized"], 1.0, places=9)
+
+    def test_default_target_is_first_unit(self):
+        result = domain.normalize_quantities(
+            [{"value": 1, "unit": "kg"}, {"value": 3000, "unit": "g"}])
+        self.assertEqual(result["unit"], "kg")
+        self.assertAlmostEqual(result["items"][0]["normalized"], 0.0, places=9)
+        self.assertAlmostEqual(result["items"][1]["normalized"], 1.0, places=9)
+
+    def test_tuple_items_accepted(self):
+        result = domain.normalize_quantities([(2, "m"), (6, "m")], "m")
+        self.assertEqual(result["count"], 2)
+        self.assertAlmostEqual(result["items"][1]["normalized"], 1.0, places=9)
+
+    def test_min_max_match_describe(self):
+        items = [{"value": 5, "unit": "m"}, {"value": 300, "unit": "cm"},
+                 {"value": 2, "unit": "ft"}]
+        desc = domain.describe_quantities(items, "m")
+        result = domain.normalize_quantities(items, "m")
+        self.assertAlmostEqual(result["min"], desc["min"]["value"], places=12)
+        self.assertAlmostEqual(result["max"], desc["max"]["value"], places=12)
+
+    def test_identical_values_raise(self):
+        with self.assertRaises(ValueError):
+            domain.normalize_quantities(
+                [{"value": 5, "unit": "m"}, {"value": 5, "unit": "m"}])
+
+    def test_single_item_raises(self):
+        # One value has min == max, so a zero range.
+        with self.assertRaises(ValueError):
+            domain.normalize_quantities([{"value": 42, "unit": "m"}])
+
+    def test_empty_raises(self):
+        with self.assertRaises(ValueError):
+            domain.normalize_quantities([])
+
+    def test_not_a_list_raises(self):
+        with self.assertRaises(ValueError):
+            domain.normalize_quantities("nope")
+
+    def test_cross_category_raises(self):
+        with self.assertRaises(ValueError):
+            domain.normalize_quantities(
+                [{"value": 1, "unit": "m"}, {"value": 1, "unit": "s"}])
+
+    def test_unknown_unit_raises(self):
+        with self.assertRaises(ValueError):
+            domain.normalize_quantities([{"value": 1, "unit": "frobs"}])
+
+    def test_bad_target_unit_raises(self):
+        with self.assertRaises(ValueError):
+            domain.normalize_quantities([{"value": 1, "unit": "m"}], "kg")
+
+    def test_temperature_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.normalize_quantities(
+                [{"value": 10, "unit": "c"}, {"value": 5, "unit": "c"}])
+
+    def test_fuel_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.normalize_quantities([{"value": 30, "unit": "mpg"}])
+
+    def test_non_finite_value_raises(self):
+        with self.assertRaises(ValueError):
+            domain.normalize_quantities([{"value": float("inf"), "unit": "m"}])
+
+    def test_missing_value_raises(self):
+        with self.assertRaises(ValueError):
+            domain.normalize_quantities([{"unit": "m"}])
+
+
+class TestHttpDiffZscoreNormalize(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = server.make_server(0)
+        cls.host, cls.port = cls.server.server_address
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def _url(self, path):
+        return "http://127.0.0.1:%d%s" % (self.port, path)
+
+    def _post(self, path, payload, raw=None):
+        body = raw if raw is not None else json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            self._url(path), data=body,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            payload = json.loads(exc.read().decode("utf-8"))
+            exc.close()
+            return exc.code, payload
+
+    # --- /api/diff ---
+    def test_diff_endpoint_ok(self):
+        status, data = self._post("/api/diff", {
+            "items": [{"value": 10, "unit": "km"}, {"value": 25, "unit": "km"},
+                      {"value": 40, "unit": "km"}],
+            "to": "km",
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["unit"], "km")
+        self.assertEqual(data["count"], 3)
+        # total is the sum of the item values (10 + 25 + 40), as in /api/sum;
+        # the sum of the *differences* telescopes to the last value (40).
+        self.assertAlmostEqual(data["total"], 75.0, places=6)
+        self.assertAlmostEqual(sum(r["difference"] for r in data["items"]), 40.0, places=6)
+        self.assertEqual([r["difference"] for r in data["items"]], [10.0, 15.0, 15.0])
+        self.assertEqual([r["index"] for r in data["items"]], [0, 1, 2])
+
+    def test_diff_endpoint_inverts_cumsum(self):
+        # /api/cumsum then /api/diff returns the original increments.
+        items = [{"value": 5, "unit": "km"}, {"value": 3, "unit": "km"},
+                 {"value": 2, "unit": "km"}]
+        _, cum = self._post("/api/cumsum", {"items": items, "to": "km"})
+        cum_items = [{"value": r["cumulative"], "unit": "km"} for r in cum["items"]]
+        status, diff = self._post("/api/diff", {"items": cum_items, "to": "km"})
+        self.assertEqual(status, 200)
+        self.assertEqual([r["difference"] for r in diff["items"]], [5.0, 3.0, 2.0])
+
+    def test_diff_endpoint_default_unit_is_first(self):
+        status, data = self._post("/api/diff", {
+            "items": [{"value": 1, "unit": "kg"}, {"value": 1500, "unit": "g"}],
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["unit"], "kg")
+        self.assertAlmostEqual(data["items"][1]["difference"], 0.5, places=6)
+
+    def test_diff_endpoint_precision(self):
+        status, data = self._post("/api/diff", {
+            "items": [{"value": 1, "unit": "ft"}, {"value": 2, "unit": "ft"}],
+            "to": "m", "precision": 2,
+        })
+        self.assertEqual(status, 200)
+        for r in data["items"]:
+            self.assertEqual(r["difference"], round(r["difference"], 2))
+
+    def test_diff_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/diff", {"items": "nope"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_diff_endpoint_cross_category_400(self):
+        status, data = self._post("/api/diff", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}],
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_diff_endpoint_temperature_400(self):
+        status, data = self._post("/api/diff", {
+            "items": [{"value": 10, "unit": "c"}, {"value": 5, "unit": "c"}],
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_diff_endpoint_empty_400(self):
+        status, data = self._post("/api/diff", {"items": []})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    # --- /api/zscore ---
+    def test_zscore_endpoint_ok(self):
+        status, data = self._post("/api/zscore", {
+            "items": [{"value": v, "unit": "m"} for v in (2, 4, 4, 4, 5, 5, 7, 9)],
+            "to": "m",
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["count"], 8)
+        self.assertAlmostEqual(data["mean"], 5.0, places=6)
+        self.assertAlmostEqual(data["stdev"], 2.0, places=6)
+        self.assertAlmostEqual(data["items"][0]["zscore"], -1.5, places=6)
+        self.assertAlmostEqual(data["items"][7]["zscore"], 2.0, places=6)
+
+    def test_zscore_endpoint_agrees_with_describe(self):
+        items = [{"value": 5, "unit": "m"}, {"value": 300, "unit": "cm"},
+                 {"value": 2, "unit": "ft"}]
+        _, desc = self._post("/api/describe", {"items": items, "to": "m"})
+        _, z = self._post("/api/zscore", {"items": items, "to": "m"})
+        self.assertAlmostEqual(z["mean"], desc["mean"], places=6)
+        self.assertAlmostEqual(z["stdev"], desc["stdev"], places=6)
+
+    def test_zscore_endpoint_default_unit_is_first(self):
+        status, data = self._post("/api/zscore", {
+            "items": [{"value": 1, "unit": "kg"}, {"value": 3000, "unit": "g"}],
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["unit"], "kg")
+        self.assertAlmostEqual(data["items"][0]["zscore"], -1.0, places=6)
+
+    def test_zscore_endpoint_precision(self):
+        status, data = self._post("/api/zscore", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"},
+                      {"value": 6, "unit": "m"}],
+            "precision": 2,
+        })
+        self.assertEqual(status, 200)
+        for r in data["items"]:
+            self.assertEqual(r["zscore"], round(r["zscore"], 2))
+
+    def test_zscore_endpoint_identical_values_400(self):
+        status, data = self._post("/api/zscore", {
+            "items": [{"value": 5, "unit": "m"}, {"value": 5, "unit": "m"}],
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_zscore_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/zscore", {"items": "nope"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_zscore_endpoint_cross_category_400(self):
+        status, data = self._post("/api/zscore", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}],
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_zscore_endpoint_temperature_400(self):
+        status, data = self._post("/api/zscore", {
+            "items": [{"value": 10, "unit": "c"}, {"value": 5, "unit": "c"}],
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_zscore_endpoint_empty_400(self):
+        status, data = self._post("/api/zscore", {"items": []})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    # --- /api/normalize ---
+    def test_normalize_endpoint_ok(self):
+        status, data = self._post("/api/normalize", {
+            "items": [{"value": 2, "unit": "m"}, {"value": 4, "unit": "m"},
+                      {"value": 6, "unit": "m"}],
+            "to": "m",
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["count"], 3)
+        self.assertAlmostEqual(data["min"], 2.0, places=6)
+        self.assertAlmostEqual(data["max"], 6.0, places=6)
+        self.assertEqual([r["normalized"] for r in data["items"]], [0.0, 0.5, 1.0])
+        self.assertEqual([r["index"] for r in data["items"]], [0, 1, 2])
+
+    def test_normalize_endpoint_min_max_agree_with_describe(self):
+        items = [{"value": 5, "unit": "m"}, {"value": 300, "unit": "cm"},
+                 {"value": 2, "unit": "ft"}]
+        _, desc = self._post("/api/describe", {"items": items, "to": "m"})
+        _, norm = self._post("/api/normalize", {"items": items, "to": "m"})
+        self.assertAlmostEqual(norm["min"], desc["min"]["value"], places=6)
+        self.assertAlmostEqual(norm["max"], desc["max"]["value"], places=6)
+
+    def test_normalize_endpoint_default_unit_is_first(self):
+        status, data = self._post("/api/normalize", {
+            "items": [{"value": 1, "unit": "kg"}, {"value": 3000, "unit": "g"}],
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["unit"], "kg")
+        self.assertAlmostEqual(data["items"][0]["normalized"], 0.0, places=6)
+        self.assertAlmostEqual(data["items"][1]["normalized"], 1.0, places=6)
+
+    def test_normalize_endpoint_precision(self):
+        status, data = self._post("/api/normalize", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"},
+                      {"value": 6, "unit": "m"}],
+            "precision": 2,
+        })
+        self.assertEqual(status, 200)
+        for r in data["items"]:
+            self.assertEqual(r["normalized"], round(r["normalized"], 2))
+
+    def test_normalize_endpoint_identical_values_400(self):
+        status, data = self._post("/api/normalize", {
+            "items": [{"value": 5, "unit": "m"}, {"value": 5, "unit": "m"}],
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_normalize_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/normalize", {"items": "nope"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_normalize_endpoint_cross_category_400(self):
+        status, data = self._post("/api/normalize", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}],
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_normalize_endpoint_temperature_400(self):
+        status, data = self._post("/api/normalize", {
+            "items": [{"value": 10, "unit": "c"}, {"value": 5, "unit": "c"}],
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_normalize_endpoint_empty_400(self):
+        status, data = self._post("/api/normalize", {"items": []})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
+class TestDomainQuartiles(unittest.TestCase):
+    def test_five_number_summary(self):
+        # 1, 2, 3, 4, 5 (m): min 1, Q1 2, median 3, Q3 4, max 5, IQR 2.
+        q = domain.quartiles([{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)])
+        self.assertEqual(q["category"], "length")
+        self.assertEqual(q["unit"], "m")
+        self.assertEqual(q["count"], 5)
+        self.assertAlmostEqual(q["min"], 1.0, places=9)
+        self.assertAlmostEqual(q["q1"], 2.0, places=9)
+        self.assertAlmostEqual(q["median"], 3.0, places=9)
+        self.assertAlmostEqual(q["q3"], 4.0, places=9)
+        self.assertAlmostEqual(q["max"], 5.0, places=9)
+        self.assertAlmostEqual(q["iqr"], 2.0, places=9)
+
+    def test_unsorted_input(self):
+        q = domain.quartiles([{"value": v, "unit": "m"} for v in (5, 1, 3, 2, 4)])
+        self.assertAlmostEqual(q["median"], 3.0, places=9)
+        self.assertAlmostEqual(q["q1"], 2.0, places=9)
+
+    def test_mixed_units_restated(self):
+        # 100 cm == 1 m, 200 cm == 2 m, 3 m -> median 2 m.
+        q = domain.quartiles(
+            [{"value": 100, "unit": "cm"}, {"value": 200, "unit": "cm"},
+             {"value": 3, "unit": "m"}], "m")
+        self.assertAlmostEqual(q["median"], 2.0, places=9)
+
+    def test_median_matches_describe(self):
+        items = [{"value": v, "unit": "m"} for v in (2, 4, 4, 4, 5, 5, 7, 9)]
+        q = domain.quartiles(items)
+        desc = domain.describe_quantities(items)
+        self.assertAlmostEqual(q["median"], desc["median"], places=12)
+
+    def test_quartiles_match_percentile_endpoint(self):
+        # Q1/Q3 must equal P25/P75 from percentile_quantities.
+        items = [{"value": v, "unit": "m"} for v in (1, 2, 4, 7, 9)]
+        q = domain.quartiles(items)
+        p25 = domain.percentile_quantities(items, 25)["value"]
+        p75 = domain.percentile_quantities(items, 75)["value"]
+        self.assertAlmostEqual(q["q1"], p25, places=12)
+        self.assertAlmostEqual(q["q3"], p75, places=12)
+
+    def test_single_item(self):
+        q = domain.quartiles([{"value": 42, "unit": "m"}])
+        self.assertEqual(q["count"], 1)
+        for key in ("min", "q1", "median", "q3", "max"):
+            self.assertAlmostEqual(q[key], 42.0, places=9)
+        self.assertAlmostEqual(q["iqr"], 0.0, places=9)
+
+    def test_default_target_is_first_unit(self):
+        q = domain.quartiles([{"value": 1, "unit": "kg"}, {"value": 500, "unit": "g"}])
+        self.assertEqual(q["unit"], "kg")
+
+    def test_tuple_items_accepted(self):
+        q = domain.quartiles([(1, "kg"), (1000, "g")], "kg")
+        self.assertEqual(q["count"], 2)
+
+    def test_empty_raises(self):
+        with self.assertRaises(ValueError):
+            domain.quartiles([])
+
+    def test_not_a_list_raises(self):
+        with self.assertRaises(ValueError):
+            domain.quartiles("nope")
+
+    def test_cross_category_raises(self):
+        with self.assertRaises(ValueError):
+            domain.quartiles([{"value": 1, "unit": "m"}, {"value": 1, "unit": "s"}])
+
+    def test_unknown_unit_raises(self):
+        with self.assertRaises(ValueError):
+            domain.quartiles([{"value": 1, "unit": "frobs"}])
+
+    def test_bad_target_unit_raises(self):
+        with self.assertRaises(ValueError):
+            domain.quartiles([{"value": 1, "unit": "m"}], "kg")
+
+    def test_temperature_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.quartiles([{"value": 10, "unit": "c"}, {"value": 5, "unit": "c"}])
+
+    def test_fuel_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.quartiles([{"value": 30, "unit": "mpg"}])
+
+    def test_non_finite_value_raises(self):
+        with self.assertRaises(ValueError):
+            domain.quartiles([{"value": float("inf"), "unit": "m"}])
+
+    def test_missing_value_raises(self):
+        with self.assertRaises(ValueError):
+            domain.quartiles([{"unit": "m"}])
+
+
+class TestDomainOutliers(unittest.TestCase):
+    def test_flags_high_outlier(self):
+        # 10..13 are tight; 90 is far above the upper fence.
+        result = domain.outliers(
+            [{"value": v, "unit": "m"} for v in (10, 11, 12, 13, 90)])
+        self.assertEqual(result["category"], "length")
+        self.assertEqual(result["count"], 5)
+        self.assertEqual(result["outlier_count"], 1)
+        self.assertTrue(result["items"][4]["is_outlier"])
+        self.assertFalse(result["items"][0]["is_outlier"])
+
+    def test_no_outliers_in_tight_set(self):
+        result = domain.outliers(
+            [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)])
+        self.assertEqual(result["outlier_count"], 0)
+        self.assertTrue(all(not r["is_outlier"] for r in result["items"]))
+
+    def test_fences_from_quartiles(self):
+        items = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+        result = domain.outliers(items, k=1.5)
+        q = domain.quartiles(items)
+        self.assertAlmostEqual(result["q1"], q["q1"], places=12)
+        self.assertAlmostEqual(result["q3"], q["q3"], places=12)
+        self.assertAlmostEqual(result["iqr"], q["iqr"], places=12)
+        self.assertAlmostEqual(result["lower_fence"], q["q1"] - 1.5 * q["iqr"], places=12)
+        self.assertAlmostEqual(result["upper_fence"], q["q3"] + 1.5 * q["iqr"], places=12)
+
+    def test_k_echoed_and_default(self):
+        result = domain.outliers([{"value": v, "unit": "m"} for v in (1, 2, 3)])
+        self.assertAlmostEqual(result["k"], 1.5, places=9)
+
+    def test_larger_k_flags_fewer(self):
+        items = [{"value": v, "unit": "m"} for v in (10, 11, 12, 13, 40)]
+        mild = domain.outliers(items, k=1.5)
+        strict = domain.outliers(items, k=3.0)
+        self.assertGreaterEqual(mild["outlier_count"], strict["outlier_count"])
+
+    def test_mixed_units_restated(self):
+        result = domain.outliers(
+            [{"value": 100, "unit": "cm"}, {"value": 1, "unit": "m"}], "m")
+        self.assertEqual(result["unit"], "m")
+        self.assertAlmostEqual(result["items"][0]["value"], 1.0, places=9)
+
+    def test_negative_k_raises(self):
+        with self.assertRaises(ValueError):
+            domain.outliers([{"value": 1, "unit": "m"}], k=-1)
+
+    def test_non_finite_k_raises(self):
+        with self.assertRaises(ValueError):
+            domain.outliers([{"value": 1, "unit": "m"}], k=float("inf"))
+
+    def test_non_numeric_k_raises(self):
+        with self.assertRaises(ValueError):
+            domain.outliers([{"value": 1, "unit": "m"}], k="big")
+
+    def test_empty_raises(self):
+        with self.assertRaises(ValueError):
+            domain.outliers([])
+
+    def test_not_a_list_raises(self):
+        with self.assertRaises(ValueError):
+            domain.outliers("nope")
+
+    def test_cross_category_raises(self):
+        with self.assertRaises(ValueError):
+            domain.outliers([{"value": 1, "unit": "m"}, {"value": 1, "unit": "s"}])
+
+    def test_unknown_unit_raises(self):
+        with self.assertRaises(ValueError):
+            domain.outliers([{"value": 1, "unit": "frobs"}])
+
+    def test_temperature_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.outliers([{"value": 10, "unit": "c"}, {"value": 5, "unit": "c"}])
+
+    def test_fuel_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.outliers([{"value": 30, "unit": "mpg"}])
+
+    def test_non_finite_value_raises(self):
+        with self.assertRaises(ValueError):
+            domain.outliers([{"value": float("inf"), "unit": "m"}])
+
+
+class TestDomainHistogram(unittest.TestCase):
+    def test_basic_binning(self):
+        # 1..5 m into 4 bins (width 1): each of 1,2,3,4 lands low, 5 in last bin.
+        result = domain.histogram(
+            [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)], 4)
+        self.assertEqual(result["category"], "length")
+        self.assertEqual(result["count"], 5)
+        self.assertEqual(result["bins"], 4)
+        self.assertAlmostEqual(result["min"], 1.0, places=9)
+        self.assertAlmostEqual(result["max"], 5.0, places=9)
+        self.assertEqual([b["count"] for b in result["items"]], [1, 1, 1, 2])
+
+    def test_counts_sum_to_count(self):
+        items = [{"value": v, "unit": "m"} for v in (1, 3, 3, 5, 8, 9, 10)]
+        result = domain.histogram(items, 5)
+        self.assertEqual(sum(b["count"] for b in result["items"]), result["count"])
+
+    def test_single_bin_holds_all(self):
+        result = domain.histogram(
+            [{"value": v, "unit": "m"} for v in (1, 2, 3)], 1)
+        self.assertEqual(result["items"][0]["count"], 3)
+        self.assertAlmostEqual(result["items"][0]["start"], 1.0, places=9)
+        self.assertAlmostEqual(result["items"][0]["end"], 3.0, places=9)
+
+    def test_last_bin_closed_on_max(self):
+        result = domain.histogram(
+            [{"value": v, "unit": "m"} for v in (0, 10)], 5)
+        self.assertAlmostEqual(result["items"][-1]["end"], 10.0, places=9)
+        # Both endpoints counted: 0 in first bin, 10 in last bin.
+        self.assertEqual(result["items"][0]["count"], 1)
+        self.assertEqual(result["items"][-1]["count"], 1)
+
+    def test_edges_are_contiguous(self):
+        result = domain.histogram(
+            [{"value": v, "unit": "m"} for v in (0, 4)], 4)
+        items = result["items"]
+        for i in range(len(items) - 1):
+            self.assertAlmostEqual(items[i]["end"], items[i + 1]["start"], places=9)
+
+    def test_mixed_units_restated(self):
+        result = domain.histogram(
+            [{"value": 100, "unit": "cm"}, {"value": 3, "unit": "m"}], 2, "m")
+        self.assertEqual(result["unit"], "m")
+        self.assertAlmostEqual(result["min"], 1.0, places=9)
+        self.assertAlmostEqual(result["max"], 3.0, places=9)
+
+    def test_zero_range_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.histogram([{"value": 5, "unit": "m"}, {"value": 5, "unit": "m"}], 3)
+
+    def test_bins_must_be_int(self):
+        with self.assertRaises(ValueError):
+            domain.histogram([{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}], 2.5)
+
+    def test_bool_bins_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.histogram([{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}], True)
+
+    def test_zero_bins_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.histogram([{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}], 0)
+
+    def test_too_many_bins_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.histogram(
+                [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}],
+                domain.MAX_HISTOGRAM_BINS + 1)
+
+    def test_empty_raises(self):
+        with self.assertRaises(ValueError):
+            domain.histogram([], 3)
+
+    def test_not_a_list_raises(self):
+        with self.assertRaises(ValueError):
+            domain.histogram("nope", 3)
+
+    def test_cross_category_raises(self):
+        with self.assertRaises(ValueError):
+            domain.histogram([{"value": 1, "unit": "m"}, {"value": 1, "unit": "s"}], 2)
+
+    def test_temperature_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.histogram([{"value": 10, "unit": "c"}, {"value": 5, "unit": "c"}], 2)
+
+    def test_fuel_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.histogram([{"value": 30, "unit": "mpg"}, {"value": 40, "unit": "mpg"}], 2)
+
+    def test_non_finite_value_raises(self):
+        with self.assertRaises(ValueError):
+            domain.histogram([{"value": float("inf"), "unit": "m"}], 2)
+
+
+class TestHttpQuartilesOutliersHistogram(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = server.make_server(0)
+        cls.host, cls.port = cls.server.server_address
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def _url(self, path):
+        return "http://127.0.0.1:%d%s" % (self.port, path)
+
+    def _post(self, path, payload, raw=None):
+        body = raw if raw is not None else json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            self._url(path), data=body,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            payload = json.loads(exc.read().decode("utf-8"))
+            exc.close()
+            return exc.code, payload
+
+    # --- /api/quartiles ---
+    def test_quartiles_endpoint_ok(self):
+        status, data = self._post("/api/quartiles", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)],
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["count"], 5)
+        self.assertAlmostEqual(data["q1"], 2.0, places=6)
+        self.assertAlmostEqual(data["median"], 3.0, places=6)
+        self.assertAlmostEqual(data["q3"], 4.0, places=6)
+        self.assertAlmostEqual(data["iqr"], 2.0, places=6)
+
+    def test_quartiles_endpoint_median_matches_describe(self):
+        items = [{"value": v, "unit": "m"} for v in (2, 4, 4, 4, 5, 5, 7, 9)]
+        _, q = self._post("/api/quartiles", {"items": items})
+        _, desc = self._post("/api/describe", {"items": items})
+        self.assertAlmostEqual(q["median"], desc["median"], places=6)
+
+    def test_quartiles_endpoint_precision(self):
+        status, data = self._post("/api/quartiles", {
+            "items": [{"value": 1, "unit": "ft"}, {"value": 2, "unit": "ft"}],
+            "to": "m", "precision": 2,
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["median"], round(data["median"], 2))
+
+    def test_quartiles_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/quartiles", {"items": "nope"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_quartiles_endpoint_cross_category_400(self):
+        status, data = self._post("/api/quartiles", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_quartiles_endpoint_temperature_400(self):
+        status, data = self._post("/api/quartiles", {
+            "items": [{"value": 10, "unit": "c"}, {"value": 5, "unit": "c"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_quartiles_endpoint_empty_400(self):
+        status, data = self._post("/api/quartiles", {"items": []})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    # --- /api/outliers ---
+    def test_outliers_endpoint_ok(self):
+        status, data = self._post("/api/outliers", {
+            "items": [{"value": v, "unit": "m"} for v in (10, 11, 12, 13, 90)],
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["outlier_count"], 1)
+        self.assertTrue(data["items"][4]["is_outlier"])
+        self.assertAlmostEqual(data["k"], 1.5, places=6)
+
+    def test_outliers_endpoint_custom_k(self):
+        status, data = self._post("/api/outliers", {
+            "items": [{"value": v, "unit": "m"} for v in (10, 11, 12, 13, 40)],
+            "k": 3.0,
+        })
+        self.assertEqual(status, 200)
+        self.assertAlmostEqual(data["k"], 3.0, places=6)
+
+    def test_outliers_endpoint_negative_k_400(self):
+        status, data = self._post("/api/outliers", {
+            "items": [{"value": 1, "unit": "m"}], "k": -1})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_outliers_endpoint_precision(self):
+        status, data = self._post("/api/outliers", {
+            "items": [{"value": 1, "unit": "ft"}, {"value": 2, "unit": "ft"},
+                      {"value": 9, "unit": "ft"}],
+            "to": "m", "precision": 2,
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["lower_fence"], round(data["lower_fence"], 2))
+
+    def test_outliers_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/outliers", {"items": "nope"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_outliers_endpoint_cross_category_400(self):
+        status, data = self._post("/api/outliers", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_outliers_endpoint_temperature_400(self):
+        status, data = self._post("/api/outliers", {
+            "items": [{"value": 10, "unit": "c"}, {"value": 5, "unit": "c"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_outliers_endpoint_empty_400(self):
+        status, data = self._post("/api/outliers", {"items": []})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    # --- /api/histogram ---
+    def test_histogram_endpoint_ok(self):
+        status, data = self._post("/api/histogram", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)],
+            "bins": 4,
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["bins"], 4)
+        self.assertEqual(data["count"], 5)
+        self.assertEqual([b["count"] for b in data["items"]], [1, 1, 1, 2])
+        self.assertEqual(sum(b["count"] for b in data["items"]), 5)
+
+    def test_histogram_endpoint_missing_bins_400(self):
+        status, data = self._post("/api/histogram", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_histogram_endpoint_zero_range_400(self):
+        status, data = self._post("/api/histogram", {
+            "items": [{"value": 5, "unit": "m"}, {"value": 5, "unit": "m"}],
+            "bins": 3,
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_histogram_endpoint_bad_bins_400(self):
+        status, data = self._post("/api/histogram", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}],
+            "bins": 0,
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_histogram_endpoint_precision(self):
+        status, data = self._post("/api/histogram", {
+            "items": [{"value": 1, "unit": "ft"}, {"value": 4, "unit": "ft"}],
+            "to": "m", "bins": 3, "precision": 2,
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["min"], round(data["min"], 2))
+
+    def test_histogram_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/histogram", {"items": "nope", "bins": 3})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_histogram_endpoint_cross_category_400(self):
+        status, data = self._post("/api/histogram", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}],
+            "bins": 2,
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_histogram_endpoint_temperature_400(self):
+        status, data = self._post("/api/histogram", {
+            "items": [{"value": 10, "unit": "c"}, {"value": 5, "unit": "c"}],
+            "bins": 2,
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_histogram_endpoint_empty_400(self):
+        status, data = self._post("/api/histogram", {"items": [], "bins": 3})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
+class TestDomainMeans(unittest.TestCase):
+    def test_four_means(self):
+        # 1, 2, 4, 8 (m): AM 3.75, GM 64^.25, HM 4/1.875, RMS sqrt(85/4).
+        m = domain.means([{"value": v, "unit": "m"} for v in (1, 2, 4, 8)])
+        self.assertEqual(m["category"], "length")
+        self.assertEqual(m["unit"], "m")
+        self.assertEqual(m["count"], 4)
+        self.assertAlmostEqual(m["arithmetic"], 3.75, places=9)
+        self.assertAlmostEqual(m["geometric"], 64 ** 0.25, places=9)
+        self.assertAlmostEqual(m["harmonic"], 4 / 1.875, places=9)
+        self.assertAlmostEqual(m["quadratic"], (85 / 4) ** 0.5, places=9)
+
+    def test_inequality_chain(self):
+        # For positive, non-identical values: HM <= GM <= AM <= RMS (strict here).
+        m = domain.means([{"value": v, "unit": "m"} for v in (1, 2, 4, 8)])
+        self.assertLess(m["harmonic"], m["geometric"])
+        self.assertLess(m["geometric"], m["arithmetic"])
+        self.assertLess(m["arithmetic"], m["quadratic"])
+
+    def test_arithmetic_matches_describe(self):
+        items = [{"value": v, "unit": "m"} for v in (2, 3, 5, 7, 11)]
+        m = domain.means(items)
+        desc = domain.describe_quantities(items)
+        self.assertAlmostEqual(m["arithmetic"], desc["mean"], places=12)
+
+    def test_identical_values_all_equal(self):
+        m = domain.means([{"value": 5, "unit": "m"} for _ in range(3)])
+        for key in ("arithmetic", "geometric", "harmonic", "quadratic"):
+            self.assertAlmostEqual(m[key], 5.0, places=9)
+
+    def test_single_item(self):
+        m = domain.means([{"value": 42, "unit": "m"}])
+        self.assertEqual(m["count"], 1)
+        for key in ("arithmetic", "geometric", "harmonic", "quadratic"):
+            self.assertAlmostEqual(m[key], 42.0, places=9)
+
+    def test_mixed_units_restated(self):
+        # 100 cm == 1 m, 400 cm == 4 m, 2 m -> AM (1+4+2)/3.
+        m = domain.means(
+            [{"value": 100, "unit": "cm"}, {"value": 400, "unit": "cm"},
+             {"value": 2, "unit": "m"}], "m")
+        self.assertEqual(m["unit"], "m")
+        self.assertAlmostEqual(m["arithmetic"], 7 / 3, places=9)
+
+    def test_default_target_is_first_unit(self):
+        m = domain.means([{"value": 1, "unit": "kg"}, {"value": 500, "unit": "g"}])
+        self.assertEqual(m["unit"], "kg")
+
+    def test_tuple_items_accepted(self):
+        m = domain.means([(1, "kg"), (1000, "g")], "kg")
+        self.assertEqual(m["count"], 2)
+
+    def test_zero_value_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.means([{"value": 0, "unit": "m"}, {"value": 2, "unit": "m"}])
+
+    def test_negative_value_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.means([{"value": -1, "unit": "m"}, {"value": 2, "unit": "m"}])
+
+    def test_empty_raises(self):
+        with self.assertRaises(ValueError):
+            domain.means([])
+
+    def test_not_a_list_raises(self):
+        with self.assertRaises(ValueError):
+            domain.means("nope")
+
+    def test_cross_category_raises(self):
+        with self.assertRaises(ValueError):
+            domain.means([{"value": 1, "unit": "m"}, {"value": 1, "unit": "s"}])
+
+    def test_unknown_unit_raises(self):
+        with self.assertRaises(ValueError):
+            domain.means([{"value": 1, "unit": "frobs"}])
+
+    def test_bad_target_unit_raises(self):
+        with self.assertRaises(ValueError):
+            domain.means([{"value": 1, "unit": "m"}], "kg")
+
+    def test_temperature_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.means([{"value": 10, "unit": "c"}, {"value": 5, "unit": "c"}])
+
+    def test_fuel_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.means([{"value": 30, "unit": "mpg"}])
+
+    def test_non_finite_value_raises(self):
+        with self.assertRaises(ValueError):
+            domain.means([{"value": float("inf"), "unit": "m"}])
+
+    def test_missing_value_raises(self):
+        with self.assertRaises(ValueError):
+            domain.means([{"unit": "m"}])
+
+
+class TestDomainRank(unittest.TestCase):
+    def test_ascending_ranks(self):
+        # input order 5,1,3,2,4 (m) -> ranks 5,1,3,2,4 by ascending magnitude.
+        r = domain.rank_quantities(
+            [{"value": v, "unit": "m"} for v in (5, 1, 3, 2, 4)])
+        self.assertEqual(r["category"], "length")
+        self.assertEqual(r["count"], 5)
+        self.assertFalse(r["descending"])
+        ranks = [it["rank"] for it in r["items"]]
+        self.assertEqual(ranks, [5.0, 1.0, 3.0, 2.0, 4.0])
+
+    def test_ranks_sum_invariant(self):
+        # Average ranking: ranks always sum to n(n+1)/2, ties or not.
+        r = domain.rank_quantities(
+            [{"value": v, "unit": "m"} for v in (10, 10, 20, 5, 5, 5)])
+        n = r["count"]
+        self.assertAlmostEqual(
+            sum(it["rank"] for it in r["items"]), n * (n + 1) / 2.0, places=9)
+
+    def test_ties_share_average_rank(self):
+        # 10, 10, 20 -> the two 10s share ranks 1 and 2 -> 1.5 each; 20 -> 3.
+        r = domain.rank_quantities(
+            [{"value": v, "unit": "m"} for v in (10, 10, 20)])
+        ranks = [it["rank"] for it in r["items"]]
+        self.assertEqual(ranks, [1.5, 1.5, 3.0])
+
+    def test_descending_flips(self):
+        r = domain.rank_quantities(
+            [{"value": v, "unit": "m"} for v in (5, 1, 3, 2, 4)], descending=True)
+        self.assertTrue(r["descending"])
+        ranks = [it["rank"] for it in r["items"]]
+        self.assertEqual(ranks, [1.0, 5.0, 3.0, 4.0, 2.0])
+
+    def test_percent_rank_inverts_percentile(self):
+        # For distinct ascending values, feeding an item's percent_rank back to
+        # percentile_quantities returns that item's value (both are R-7).
+        items = [{"value": v, "unit": "m"} for v in (3, 1, 9, 4, 7)]
+        r = domain.rank_quantities(items)
+        for it in r["items"]:
+            p = domain.percentile_quantities(items, it["percent_rank"])
+            self.assertAlmostEqual(p["value"], it["value"], places=9)
+
+    def test_percent_rank_endpoints(self):
+        r = domain.rank_quantities(
+            [{"value": v, "unit": "m"} for v in (10, 20, 30)])
+        by_index = {it["index"]: it for it in r["items"]}
+        self.assertAlmostEqual(by_index[0]["percent_rank"], 0.0, places=9)
+        self.assertAlmostEqual(by_index[2]["percent_rank"], 100.0, places=9)
+
+    def test_single_item(self):
+        r = domain.rank_quantities([{"value": 42, "unit": "m"}])
+        self.assertEqual(r["count"], 1)
+        self.assertEqual(r["items"][0]["rank"], 1.0)
+        self.assertAlmostEqual(r["items"][0]["percent_rank"], 0.0, places=9)
+
+    def test_mixed_units_restated(self):
+        r = domain.rank_quantities(
+            [{"value": 100, "unit": "cm"}, {"value": 3, "unit": "m"}], "m")
+        self.assertEqual(r["unit"], "m")
+        self.assertAlmostEqual(r["items"][0]["value"], 1.0, places=9)
+        self.assertEqual(r["items"][0]["rank"], 1.0)
+        self.assertEqual(r["items"][1]["rank"], 2.0)
+
+    def test_default_target_is_first_unit(self):
+        r = domain.rank_quantities(
+            [{"value": 1, "unit": "kg"}, {"value": 500, "unit": "g"}])
+        self.assertEqual(r["unit"], "kg")
+
+    def test_tuple_items_accepted(self):
+        r = domain.rank_quantities([(1, "kg"), (1000, "g")], "kg")
+        self.assertEqual(r["count"], 2)
+
+    def test_empty_raises(self):
+        with self.assertRaises(ValueError):
+            domain.rank_quantities([])
+
+    def test_not_a_list_raises(self):
+        with self.assertRaises(ValueError):
+            domain.rank_quantities("nope")
+
+    def test_cross_category_raises(self):
+        with self.assertRaises(ValueError):
+            domain.rank_quantities([{"value": 1, "unit": "m"}, {"value": 1, "unit": "s"}])
+
+    def test_unknown_unit_raises(self):
+        with self.assertRaises(ValueError):
+            domain.rank_quantities([{"value": 1, "unit": "frobs"}])
+
+    def test_temperature_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.rank_quantities([{"value": 10, "unit": "c"}, {"value": 5, "unit": "c"}])
+
+    def test_fuel_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.rank_quantities([{"value": 30, "unit": "mpg"}])
+
+    def test_non_finite_value_raises(self):
+        with self.assertRaises(ValueError):
+            domain.rank_quantities([{"value": float("inf"), "unit": "m"}])
+
+
+class TestHttpMeansRank(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = server.make_server(0)
+        cls.host, cls.port = cls.server.server_address
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def _url(self, path):
+        return "http://127.0.0.1:%d%s" % (self.port, path)
+
+    def _post(self, path, payload, raw=None):
+        body = raw if raw is not None else json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            self._url(path), data=body,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            payload = json.loads(exc.read().decode("utf-8"))
+            exc.close()
+            return exc.code, payload
+
+    # --- /api/means ---
+    def test_means_endpoint_ok(self):
+        status, data = self._post("/api/means", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 4, 8)],
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["count"], 4)
+        self.assertAlmostEqual(data["arithmetic"], 3.75, places=6)
+        self.assertAlmostEqual(data["harmonic"], 4 / 1.875, places=6)
+
+    def test_means_endpoint_inequality(self):
+        status, data = self._post("/api/means", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 4, 8)]})
+        self.assertEqual(status, 200)
+        self.assertLessEqual(data["harmonic"], data["geometric"])
+        self.assertLessEqual(data["geometric"], data["arithmetic"])
+        self.assertLessEqual(data["arithmetic"], data["quadratic"])
+
+    def test_means_endpoint_matches_describe(self):
+        items = [{"value": v, "unit": "m"} for v in (2, 3, 5, 7, 11)]
+        _, m = self._post("/api/means", {"items": items})
+        _, desc = self._post("/api/describe", {"items": items})
+        self.assertAlmostEqual(m["arithmetic"], desc["mean"], places=6)
+
+    def test_means_endpoint_precision(self):
+        status, data = self._post("/api/means", {
+            "items": [{"value": 1, "unit": "ft"}, {"value": 2, "unit": "ft"}],
+            "to": "m", "precision": 2,
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["geometric"], round(data["geometric"], 2))
+
+    def test_means_endpoint_non_positive_400(self):
+        status, data = self._post("/api/means", {
+            "items": [{"value": 0, "unit": "m"}, {"value": 2, "unit": "m"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_means_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/means", {"items": "nope"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_means_endpoint_cross_category_400(self):
+        status, data = self._post("/api/means", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_means_endpoint_temperature_400(self):
+        status, data = self._post("/api/means", {
+            "items": [{"value": 10, "unit": "c"}, {"value": 5, "unit": "c"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_means_endpoint_empty_400(self):
+        status, data = self._post("/api/means", {"items": []})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    # --- /api/rank ---
+    def test_rank_endpoint_ok(self):
+        status, data = self._post("/api/rank", {
+            "items": [{"value": v, "unit": "m"} for v in (5, 1, 3, 2, 4)],
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["count"], 5)
+        self.assertFalse(data["descending"])
+        self.assertEqual([it["rank"] for it in data["items"]],
+                         [5.0, 1.0, 3.0, 2.0, 4.0])
+
+    def test_rank_endpoint_descending(self):
+        status, data = self._post("/api/rank", {
+            "items": [{"value": v, "unit": "m"} for v in (5, 1, 3, 2, 4)],
+            "descending": True,
+        })
+        self.assertEqual(status, 200)
+        self.assertTrue(data["descending"])
+        self.assertEqual([it["rank"] for it in data["items"]],
+                         [1.0, 5.0, 3.0, 4.0, 2.0])
+
+    def test_rank_endpoint_ties(self):
+        status, data = self._post("/api/rank", {
+            "items": [{"value": v, "unit": "m"} for v in (10, 10, 20)]})
+        self.assertEqual(status, 200)
+        self.assertEqual([it["rank"] for it in data["items"]], [1.5, 1.5, 3.0])
+
+    def test_rank_endpoint_percent_rank_endpoints(self):
+        status, data = self._post("/api/rank", {
+            "items": [{"value": v, "unit": "m"} for v in (10, 20, 30)]})
+        self.assertEqual(status, 200)
+        by_index = {it["index"]: it for it in data["items"]}
+        self.assertAlmostEqual(by_index[0]["percent_rank"], 0.0, places=6)
+        self.assertAlmostEqual(by_index[2]["percent_rank"], 100.0, places=6)
+
+    def test_rank_endpoint_precision(self):
+        status, data = self._post("/api/rank", {
+            "items": [{"value": 1, "unit": "ft"}, {"value": 2, "unit": "ft"},
+                      {"value": 9, "unit": "ft"}],
+            "to": "m", "precision": 2,
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["items"][0]["value"],
+                         round(data["items"][0]["value"], 2))
+
+    def test_rank_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/rank", {"items": "nope"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_rank_endpoint_cross_category_400(self):
+        status, data = self._post("/api/rank", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_rank_endpoint_temperature_400(self):
+        status, data = self._post("/api/rank", {
+            "items": [{"value": 10, "unit": "c"}, {"value": 5, "unit": "c"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_rank_endpoint_empty_400(self):
+        status, data = self._post("/api/rank", {"items": []})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
+class TestDomainMode(unittest.TestCase):
+    def test_single_mode(self):
+        result = domain.mode_quantities(
+            [{"value": v, "unit": "m"} for v in (1, 2, 2, 3)])
+        self.assertEqual(result["category"], "length")
+        self.assertEqual(result["unit"], "m")
+        self.assertEqual(result["count"], 4)
+        self.assertEqual(result["frequency"], 2)
+        self.assertFalse(result["is_multimodal"])
+        self.assertEqual(result["modes"], [2.0])
+
+    def test_multimodal_sorted(self):
+        result = domain.mode_quantities(
+            [{"value": v, "unit": "m"} for v in (3, 3, 1, 1, 2)])
+        self.assertTrue(result["is_multimodal"])
+        self.assertEqual(result["frequency"], 2)
+        self.assertEqual(result["modes"], [1.0, 3.0])
+
+    def test_all_unique_every_value_is_mode(self):
+        # No repeats -> frequency 1 -> every value ties (fully multimodal).
+        result = domain.mode_quantities(
+            [{"value": v, "unit": "m"} for v in (5, 1, 3)])
+        self.assertEqual(result["frequency"], 1)
+        self.assertTrue(result["is_multimodal"])
+        self.assertEqual(result["modes"], [1.0, 3.0, 5.0])
+
+    def test_single_item(self):
+        result = domain.mode_quantities([{"value": 7, "unit": "m"}])
+        self.assertEqual(result["frequency"], 1)
+        self.assertFalse(result["is_multimodal"])
+        self.assertEqual(result["modes"], [7.0])
+
+    def test_mode_after_unit_conversion(self):
+        # 100 cm == 1 m, so they count as the same magnitude in the target unit.
+        result = domain.mode_quantities(
+            [{"value": 100, "unit": "cm"}, {"value": 1, "unit": "m"},
+             {"value": 2, "unit": "m"}], "m")
+        self.assertEqual(result["frequency"], 2)
+        self.assertEqual(result["modes"], [1.0])
+
+    def test_empty_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.mode_quantities([])
+
+    def test_cross_category_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.mode_quantities(
+                [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}])
+
+    def test_temperature_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.mode_quantities(
+                [{"value": 1, "unit": "c"}, {"value": 2, "unit": "c"}])
+
+    def test_unknown_unit_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.mode_quantities([{"value": 1, "unit": "zorp"}])
+
+
+class TestDomainWeightedMean(unittest.TestCase):
+    def test_basic_weighting(self):
+        # (1*1 + 3*3) / (1 + 3) = 10/4 = 2.5
+        result = domain.weighted_mean([
+            {"value": 1, "unit": "m", "weight": 1},
+            {"value": 3, "unit": "m", "weight": 3},
+        ])
+        self.assertEqual(result["category"], "length")
+        self.assertEqual(result["unit"], "m")
+        self.assertEqual(result["count"], 2)
+        self.assertAlmostEqual(result["total_weight"], 4.0, places=9)
+        self.assertAlmostEqual(result["weighted_mean"], 2.5, places=9)
+
+    def test_missing_weight_defaults_to_one(self):
+        # No weights -> reduces to the plain arithmetic mean.
+        result = domain.weighted_mean(
+            [{"value": v, "unit": "m"} for v in (2, 4, 6)])
+        self.assertAlmostEqual(result["weighted_mean"], 4.0, places=9)
+        self.assertAlmostEqual(result["total_weight"], 3.0, places=9)
+
+    def test_matches_arithmetic_mean_when_equal_weights(self):
+        items = [{"value": v, "unit": "m", "weight": 2} for v in (2, 3, 5, 7)]
+        result = domain.weighted_mean(items)
+        self.assertAlmostEqual(result["weighted_mean"], (2 + 3 + 5 + 7) / 4.0,
+                               places=9)
+
+    def test_unit_conversion(self):
+        # 1 ft and 2 ft converted to m, equal weights -> mean of 1.5 ft in m.
+        result = domain.weighted_mean(
+            [{"value": 1, "unit": "ft"}, {"value": 2, "unit": "ft"}], "m")
+        self.assertEqual(result["unit"], "m")
+        self.assertAlmostEqual(result["weighted_mean"], 1.5 * 0.3048, places=9)
+
+    def test_zero_weight_item_ignored(self):
+        # A zero-weight item contributes nothing but is still valid.
+        result = domain.weighted_mean([
+            {"value": 100, "unit": "m", "weight": 0},
+            {"value": 5, "unit": "m", "weight": 1},
+        ])
+        self.assertAlmostEqual(result["weighted_mean"], 5.0, places=9)
+
+    def test_all_zero_weights_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.weighted_mean([
+                {"value": 1, "unit": "m", "weight": 0},
+                {"value": 2, "unit": "m", "weight": 0},
+            ])
+
+    def test_negative_weight_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.weighted_mean([
+                {"value": 1, "unit": "m", "weight": -1},
+                {"value": 2, "unit": "m", "weight": 1},
+            ])
+
+    def test_non_numeric_weight_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.weighted_mean([{"value": 1, "unit": "m", "weight": "heavy"}])
+
+    def test_empty_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.weighted_mean([])
+
+    def test_cross_category_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.weighted_mean(
+                [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}])
+
+    def test_temperature_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.weighted_mean(
+                [{"value": 1, "unit": "c"}, {"value": 2, "unit": "c"}])
+
+
+class TestDomainMovingAverage(unittest.TestCase):
+    def test_basic_window(self):
+        result = domain.moving_average(
+            [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)], 2)
+        self.assertEqual(result["category"], "length")
+        self.assertEqual(result["unit"], "m")
+        self.assertEqual(result["count"], 4)
+        self.assertEqual(result["window"], 2)
+        averages = [it["average"] for it in result["items"]]
+        self.assertEqual(averages, [1.5, 2.5, 3.5])
+        self.assertEqual(result["items"][0]["start_index"], 0)
+        self.assertEqual(result["items"][0]["end_index"], 1)
+        self.assertEqual(result["items"][-1]["end_index"], 3)
+
+    def test_window_of_one_echoes_values(self):
+        result = domain.moving_average(
+            [{"value": v, "unit": "m"} for v in (5, 7, 9)], 1)
+        self.assertEqual([it["average"] for it in result["items"]],
+                         [5.0, 7.0, 9.0])
+
+    def test_window_equals_count_is_overall_mean(self):
+        result = domain.moving_average(
+            [{"value": v, "unit": "m"} for v in (2, 4, 6)], 3)
+        self.assertEqual(len(result["items"]), 1)
+        self.assertAlmostEqual(result["items"][0]["average"], 4.0, places=9)
+
+    def test_count_of_windows(self):
+        result = domain.moving_average(
+            [{"value": v, "unit": "m"} for v in range(10)], 3)
+        self.assertEqual(len(result["items"]), 8)  # 10 - 3 + 1
+
+    def test_unit_conversion(self):
+        result = domain.moving_average(
+            [{"value": 100, "unit": "cm"}, {"value": 300, "unit": "cm"}], 2, "m")
+        self.assertEqual(result["unit"], "m")
+        self.assertAlmostEqual(result["items"][0]["average"], 2.0, places=9)
+
+    def test_window_too_large_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.moving_average([{"value": 1, "unit": "m"}], 2)
+
+    def test_window_zero_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.moving_average([{"value": 1, "unit": "m"}], 0)
+
+    def test_window_non_integer_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.moving_average([{"value": 1, "unit": "m"}], 1.5)
+
+    def test_window_bool_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.moving_average(
+                [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}], True)
+
+    def test_empty_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.moving_average([], 1)
+
+    def test_cross_category_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.moving_average(
+                [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}], 2)
+
+    def test_temperature_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.moving_average(
+                [{"value": 1, "unit": "c"}, {"value": 2, "unit": "c"}], 2)
+
+
+class TestHttpModeWeightedMovingAverage(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = server.make_server(0)
+        cls.host, cls.port = cls.server.server_address
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def _url(self, path):
+        return "http://127.0.0.1:%d%s" % (self.port, path)
+
+    def _post(self, path, payload, raw=None):
+        body = raw if raw is not None else json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            self._url(path), data=body,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            payload = json.loads(exc.read().decode("utf-8"))
+            exc.close()
+            return exc.code, payload
+
+    # --- /api/mode ---
+    def test_mode_endpoint_ok(self):
+        status, data = self._post("/api/mode", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 2, 3)]})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["frequency"], 2)
+        self.assertFalse(data["is_multimodal"])
+        self.assertEqual(data["modes"], [2.0])
+
+    def test_mode_endpoint_multimodal(self):
+        status, data = self._post("/api/mode", {
+            "items": [{"value": v, "unit": "m"} for v in (3, 3, 1, 1, 2)]})
+        self.assertEqual(status, 200)
+        self.assertTrue(data["is_multimodal"])
+        self.assertEqual(data["modes"], [1.0, 3.0])
+
+    def test_mode_endpoint_precision(self):
+        status, data = self._post("/api/mode", {
+            "items": [{"value": 1, "unit": "ft"}, {"value": 1, "unit": "ft"}],
+            "to": "m", "precision": 2})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["modes"], [round(0.3048, 2)])
+
+    def test_mode_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/mode", {"items": "nope"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_mode_endpoint_cross_category_400(self):
+        status, data = self._post("/api/mode", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_mode_endpoint_empty_400(self):
+        status, data = self._post("/api/mode", {"items": []})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    # --- /api/weighted-mean ---
+    def test_weighted_mean_endpoint_ok(self):
+        status, data = self._post("/api/weighted-mean", {
+            "items": [{"value": 1, "unit": "m", "weight": 1},
+                      {"value": 3, "unit": "m", "weight": 3}]})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertAlmostEqual(data["weighted_mean"], 2.5, places=6)
+        self.assertAlmostEqual(data["total_weight"], 4.0, places=6)
+
+    def test_weighted_mean_endpoint_default_weight(self):
+        status, data = self._post("/api/weighted-mean", {
+            "items": [{"value": v, "unit": "m"} for v in (2, 4, 6)]})
+        self.assertEqual(status, 200)
+        self.assertAlmostEqual(data["weighted_mean"], 4.0, places=6)
+
+    def test_weighted_mean_endpoint_matches_describe_when_unweighted(self):
+        items = [{"value": v, "unit": "m"} for v in (2, 3, 5, 7, 11)]
+        _, w = self._post("/api/weighted-mean", {"items": items})
+        _, desc = self._post("/api/describe", {"items": items})
+        self.assertAlmostEqual(w["weighted_mean"], desc["mean"], places=6)
+
+    def test_weighted_mean_endpoint_precision(self):
+        status, data = self._post("/api/weighted-mean", {
+            "items": [{"value": 1, "unit": "ft"}, {"value": 2, "unit": "ft"}],
+            "to": "m", "precision": 2})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["weighted_mean"],
+                         round(data["weighted_mean"], 2))
+
+    def test_weighted_mean_endpoint_all_zero_weight_400(self):
+        status, data = self._post("/api/weighted-mean", {
+            "items": [{"value": 1, "unit": "m", "weight": 0}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_weighted_mean_endpoint_negative_weight_400(self):
+        status, data = self._post("/api/weighted-mean", {
+            "items": [{"value": 1, "unit": "m", "weight": -1}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_weighted_mean_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/weighted-mean", {"items": "nope"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_weighted_mean_endpoint_cross_category_400(self):
+        status, data = self._post("/api/weighted-mean", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_weighted_mean_endpoint_empty_400(self):
+        status, data = self._post("/api/weighted-mean", {"items": []})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    # --- /api/moving-average ---
+    def test_moving_average_endpoint_ok(self):
+        status, data = self._post("/api/moving-average", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)],
+            "window": 2})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["window"], 2)
+        self.assertEqual(data["count"], 4)
+        self.assertEqual([it["average"] for it in data["items"]],
+                         [1.5, 2.5, 3.5])
+        self.assertEqual(data["items"][0]["start_index"], 0)
+        self.assertEqual(data["items"][0]["end_index"], 1)
+
+    def test_moving_average_endpoint_window_equals_count(self):
+        status, data = self._post("/api/moving-average", {
+            "items": [{"value": v, "unit": "m"} for v in (2, 4, 6)],
+            "window": 3})
+        self.assertEqual(status, 200)
+        self.assertEqual(len(data["items"]), 1)
+        self.assertAlmostEqual(data["items"][0]["average"], 4.0, places=6)
+
+    def test_moving_average_endpoint_precision(self):
+        status, data = self._post("/api/moving-average", {
+            "items": [{"value": 1, "unit": "ft"}, {"value": 2, "unit": "ft"}],
+            "window": 2, "to": "m", "precision": 2})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["items"][0]["average"],
+                         round(data["items"][0]["average"], 2))
+
+    def test_moving_average_endpoint_missing_window_400(self):
+        status, data = self._post("/api/moving-average", {
+            "items": [{"value": 1, "unit": "m"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_moving_average_endpoint_window_too_large_400(self):
+        status, data = self._post("/api/moving-average", {
+            "items": [{"value": 1, "unit": "m"}], "window": 5})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_moving_average_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/moving-average", {
+            "items": "nope", "window": 1})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_moving_average_endpoint_cross_category_400(self):
+        status, data = self._post("/api/moving-average", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}],
+            "window": 2})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_moving_average_endpoint_temperature_400(self):
+        status, data = self._post("/api/moving-average", {
+            "items": [{"value": 1, "unit": "c"}, {"value": 2, "unit": "c"}],
+            "window": 2})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
+# --------------------------------------------------------------------------- #
+# Bivariate statistics — two paired series of quantities
+# --------------------------------------------------------------------------- #
+class TestDomainCovariance(unittest.TestCase):
+    # x = [1,2,3,4,5] m, y = [2,4,6,8,10] s (a perfect y = 2x line):
+    #   mean_x = 3, mean_y = 6, Sxy = 20, so cov(pop) = 4, cov(sample) = 5.
+    X = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+    Y = [{"value": v, "unit": "s"} for v in (2, 4, 6, 8, 10)]
+
+    def test_population_and_sample(self):
+        r = domain.covariance(self.X, self.Y)
+        self.assertEqual(r["count"], 5)
+        self.assertEqual((r["x_category"], r["y_category"]), ("length", "time"))
+        self.assertEqual((r["x_unit"], r["y_unit"]), ("m", "s"))
+        self.assertAlmostEqual(r["mean_x"], 3.0, places=9)
+        self.assertAlmostEqual(r["mean_y"], 6.0, places=9)
+        self.assertAlmostEqual(r["covariance"], 4.0, places=9)
+        self.assertAlmostEqual(r["sample_covariance"], 5.0, places=9)
+
+    def test_negative_covariance(self):
+        x = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        y = [{"value": v, "unit": "s"} for v in (3, 2, 1)]
+        r = domain.covariance(x, y)
+        self.assertLess(r["covariance"], 0.0)
+
+    def test_restates_to_common_unit(self):
+        # x given in km but resolved to m must match the all-metres dataset.
+        x_km = [{"value": v / 1000.0, "unit": "km"} for v in (1, 2, 3, 4, 5)]
+        r = domain.covariance(x_km, self.Y, to_x="m")
+        self.assertEqual(r["x_unit"], "m")
+        self.assertAlmostEqual(r["covariance"], 4.0, places=9)
+
+    def test_length_mismatch_raises(self):
+        with self.assertRaises(ValueError):
+            domain.covariance(self.X, self.Y[:3])
+
+    def test_single_point_raises(self):
+        with self.assertRaises(ValueError):
+            domain.covariance(self.X[:1], self.Y[:1])
+
+    def test_cross_category_within_series_raises(self):
+        bad = [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}]
+        with self.assertRaises(ValueError):
+            domain.covariance(bad, self.Y[:2])
+
+
+class TestDomainCorrelation(unittest.TestCase):
+    X = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+    Y = [{"value": v, "unit": "s"} for v in (2, 4, 6, 8, 10)]
+
+    def test_perfect_positive(self):
+        r = domain.correlation(self.X, self.Y)
+        self.assertAlmostEqual(r["correlation"], 1.0, places=9)
+        self.assertAlmostEqual(r["covariance"], 4.0, places=9)
+        self.assertAlmostEqual(r["stdev_x"], math.sqrt(2.0), places=9)
+        self.assertAlmostEqual(r["stdev_y"], math.sqrt(8.0), places=9)
+
+    def test_perfect_negative(self):
+        x = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        y = [{"value": v, "unit": "s"} for v in (3, 2, 1)]
+        r = domain.correlation(x, y)
+        self.assertAlmostEqual(r["correlation"], -1.0, places=9)
+
+    def test_dimensionless_invariant_to_unit(self):
+        # r is unitless: scaling x into km must not change it.
+        x_km = [{"value": v / 1000.0, "unit": "km"} for v in (1, 2, 3, 4, 5)]
+        r1 = domain.correlation(self.X, self.Y)
+        r2 = domain.correlation(x_km, self.Y, to_x="km")
+        self.assertAlmostEqual(r1["correlation"], r2["correlation"], places=12)
+
+    def test_constant_series_is_none(self):
+        x = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        y = [{"value": 5, "unit": "s"} for _ in range(3)]
+        r = domain.correlation(x, y)
+        self.assertIsNone(r["correlation"])
+
+    def test_length_mismatch_raises(self):
+        with self.assertRaises(ValueError):
+            domain.correlation(self.X, self.Y[:2])
+
+
+class TestDomainLinearRegression(unittest.TestCase):
+    X = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+    Y = [{"value": v, "unit": "s"} for v in (2, 4, 6, 8, 10)]
+
+    def test_perfect_line(self):
+        r = domain.linear_regression(self.X, self.Y)
+        self.assertAlmostEqual(r["slope"], 2.0, places=9)
+        self.assertAlmostEqual(r["intercept"], 0.0, places=9)
+        self.assertAlmostEqual(r["r"], 1.0, places=9)
+        self.assertAlmostEqual(r["r_squared"], 1.0, places=9)
+        self.assertEqual((r["x_unit"], r["y_unit"]), ("m", "s"))
+
+    def test_intercept_and_slope(self):
+        # y = 3x + 1 over x = 0..3.
+        x = [{"value": v, "unit": "m"} for v in (0, 1, 2, 3)]
+        y = [{"value": 3 * v + 1, "unit": "s"} for v in (0, 1, 2, 3)]
+        r = domain.linear_regression(x, y)
+        self.assertAlmostEqual(r["slope"], 3.0, places=9)
+        self.assertAlmostEqual(r["intercept"], 1.0, places=9)
+        self.assertAlmostEqual(r["r_squared"], 1.0, places=9)
+
+    def test_noisy_fit_r_squared_between_zero_and_one(self):
+        x = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+        y = [{"value": v, "unit": "s"} for v in (2, 4, 5, 4, 5)]
+        r = domain.linear_regression(x, y)
+        self.assertTrue(0.0 < r["r_squared"] < 1.0)
+
+    def test_zero_variance_x_raises(self):
+        x = [{"value": 2, "unit": "m"} for _ in range(3)]
+        y = [{"value": v, "unit": "s"} for v in (1, 2, 3)]
+        with self.assertRaises(ValueError):
+            domain.linear_regression(x, y)
+
+    def test_constant_y_flat_line_r_none(self):
+        x = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        y = [{"value": 5, "unit": "s"} for _ in range(3)]
+        r = domain.linear_regression(x, y)
+        self.assertAlmostEqual(r["slope"], 0.0, places=9)
+        self.assertAlmostEqual(r["intercept"], 5.0, places=9)
+        self.assertIsNone(r["r"])
+        self.assertIsNone(r["r_squared"])
+
+
+class TestHttpBivariate(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = server.make_server(0)
+        cls.host, cls.port = cls.server.server_address
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def _post(self, path, payload, raw=None):
+        body = raw if raw is not None else json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            "http://127.0.0.1:%d%s" % (self.port, path), data=body,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            data = json.loads(exc.read().decode("utf-8"))
+            exc.close()
+            return exc.code, data
+
+    X = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+    Y = [{"value": v, "unit": "s"} for v in (2, 4, 6, 8, 10)]
+
+    def test_covariance_ok(self):
+        status, data = self._post("/api/covariance", {"x": self.X, "y": self.Y})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["count"], 5)
+        self.assertAlmostEqual(data["covariance"], 4.0, places=6)
+        self.assertAlmostEqual(data["sample_covariance"], 5.0, places=6)
+
+    def test_correlation_ok(self):
+        status, data = self._post("/api/correlation", {"x": self.X, "y": self.Y})
+        self.assertEqual(status, 200)
+        self.assertEqual((data["x_category"], data["y_category"]), ("length", "time"))
+        self.assertAlmostEqual(data["correlation"], 1.0, places=6)
+
+    def test_correlation_constant_series_null(self):
+        status, data = self._post("/api/correlation", {
+            "x": self.X[:3],
+            "y": [{"value": 5, "unit": "s"} for _ in range(3)],
+        })
+        self.assertEqual(status, 200)
+        self.assertIsNone(data["correlation"])
+
+    def test_regression_ok(self):
+        status, data = self._post("/api/regression", {"x": self.X, "y": self.Y})
+        self.assertEqual(status, 200)
+        self.assertAlmostEqual(data["slope"], 2.0, places=6)
+        self.assertAlmostEqual(data["intercept"], 0.0, places=6)
+        self.assertAlmostEqual(data["r_squared"], 1.0, places=6)
+
+    def test_regression_precision(self):
+        status, data = self._post("/api/regression", {
+            "x": self.X, "y": [{"value": v, "unit": "s"} for v in (2, 4, 5, 4, 5)],
+            "precision": 3})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["slope"], round(data["slope"], 3))
+
+    def test_regression_zero_variance_x_400(self):
+        status, data = self._post("/api/regression", {
+            "x": [{"value": 2, "unit": "m"} for _ in range(3)],
+            "y": [{"value": v, "unit": "s"} for v in (1, 2, 3)]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_missing_series_400(self):
+        status, data = self._post("/api/correlation", {"x": self.X})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_non_list_series_400(self):
+        status, data = self._post("/api/covariance", {"x": "nope", "y": self.Y})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_length_mismatch_400(self):
+        status, data = self._post("/api/correlation", {"x": self.X, "y": self.Y[:2]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_single_point_400(self):
+        status, data = self._post("/api/covariance", {
+            "x": self.X[:1], "y": self.Y[:1]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_invalid_json_400(self):
+        status, data = self._post("/api/correlation", None, raw=b"{bad")
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
 
 
 if __name__ == "__main__":

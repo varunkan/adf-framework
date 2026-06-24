@@ -405,6 +405,46 @@ FLOW = {
     "cubicfeetpersecond": _L_PER_CUBIC_FOOT,
 }
 
+# Luminous intensity, base = candela (an SI base quantity). Pure decimal ladder;
+# the bare "cd" token is unclaimed by any other category. Distinct from
+# LUMINOUS_FLUX (lumen = candela*steradian) and ILLUMINANCE (lux = lumen/m^2):
+# intensity is light emitted per unit solid angle in a given direction.
+LUMINOUS_INTENSITY = {
+    "cd": 1.0, "candela": 1.0, "candelas": 1.0,
+    "mcd": 1e-3, "millicandela": 1e-3, "millicandelas": 1e-3,
+    "kcd": 1e3, "kilocandela": 1e3, "kilocandelas": 1e3,
+}
+
+# Amount of substance, base = mole (an SI base quantity). Pure decimal ladder;
+# the "mol"/"mmol"/"umol"/"kmol" tokens are unclaimed elsewhere.
+SUBSTANCE = {
+    "mol": 1.0, "mole": 1.0, "moles": 1.0,
+    "mmol": 1e-3, "millimole": 1e-3, "millimoles": 1e-3,
+    "umol": 1e-6, "micromole": 1e-6, "micromoles": 1e-6,
+    "kmol": 1e3, "kilomole": 1e3, "kilomoles": 1e3,
+}
+
+# Catalytic activity, base = katal (one mole of substance converted per second).
+# Pure decimal ladder; "kat" and its prefixed forms are unclaimed elsewhere.
+CATALYSIS = {
+    "kat": 1.0, "katal": 1.0, "katals": 1.0,
+    "mkat": 1e-3, "millikatal": 1e-3, "millikatals": 1e-3,
+    "ukat": 1e-6, "microkatal": 1e-6, "microkatals": 1e-6,
+    "nkat": 1e-9, "nanokatal": 1e-9, "nanokatals": 1e-9,
+}
+
+# Solid angle, base = steradian. A full sphere subtends exactly 4*pi sr (the
+# "sphere"/"spat" tokens), and one square degree is (pi/180)^2 sr. Distinct from
+# the plane ANGLE category (radian/degree): a solid angle measures a 2-D cone of
+# directions, not a 1-D rotation. Tokens are multi-char ("sr"/"sterad"/...) so
+# they never collide with the bare angle symbols already in use.
+SOLID_ANGLE = {
+    "sr": 1.0, "steradian": 1.0, "steradians": 1.0, "sterad": 1.0,
+    "sphere": 4.0 * math.pi, "spat": 4.0 * math.pi,
+    "squaredegree": (math.pi / 180.0) ** 2, "squaredegrees": (math.pi / 180.0) ** 2,
+    "sqdeg": (math.pi / 180.0) ** 2, "deg2": (math.pi / 180.0) ** 2,
+}
+
 # Registry of linear categories.
 _LINEAR = {
     "length": LENGTH,
@@ -437,6 +477,10 @@ _LINEAR = {
     "conductance": CONDUCTANCE,
     "luminousflux": LUMINOUS_FLUX,
     "flow": FLOW,
+    "luminousintensity": LUMINOUS_INTENSITY,
+    "substance": SUBSTANCE,
+    "catalysis": CATALYSIS,
+    "solidangle": SOLID_ANGLE,
 }
 
 # Temperature units (affine, handled specially).
@@ -499,6 +543,10 @@ CANONICAL_UNITS = {
     "conductance": ["microsiemens", "millisiemens", "siemens", "kilosiemens", "mho"],
     "luminousflux": ["mlm", "lm", "klm"],
     "flow": ["l/h", "l/min", "l/s", "m3/h", "m3/min", "m3/s", "gpm", "gph", "cfm", "cfs"],
+    "luminousintensity": ["mcd", "cd", "kcd"],
+    "substance": ["umol", "mmol", "mol", "kmol"],
+    "catalysis": ["nkat", "ukat", "mkat", "kat"],
+    "solidangle": ["sqdeg", "sr", "sphere"],
     "fuel": ["mpg", "mpguk", "l/100km", "km/l"],
 }
 
@@ -523,6 +571,9 @@ HUMANIZE_LADDERS = {
     "inductance": ["nh", "uh", "mh", "henry"],
     "conductance": ["microsiemens", "millisiemens", "siemens", "kilosiemens"],
     "luminousflux": ["mlm", "lm", "klm"],
+    "luminousintensity": ["mcd", "cd", "kcd"],
+    "substance": ["umol", "mmol", "mol", "kmol"],
+    "catalysis": ["nkat", "ukat", "mkat", "kat"],
 }
 
 
@@ -1246,3 +1297,1579 @@ def convert_delta(value, from_unit, to_unit):
         raise ValueError("interval conversion is not defined for the fuel category")
     table = _LINEAR[from_cat]
     return numeric * table[f] / table[t], from_cat
+
+
+def aggregate_quantities(items, to_unit=None):
+    """Summarise a list of quantities of the SAME linear category.
+
+    Like :func:`sum_quantities`, every quantity is restated in a single common
+    ``to_unit`` (or, when omitted, the first item's unit) so the statistics are
+    apples-to-apples. Beyond the running total this also reports the count, the
+    arithmetic mean, the smallest and largest quantity (each with the index of
+    the item it came from), and the range (max - min) — the natural "describe
+    this set of measurements" companion to the plain sum.
+
+    ``items`` is a list of {"value": <number>, "unit": <token>} dicts (a
+    ``(value, unit)`` tuple is also accepted), identical to ``sum_quantities``.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,
+            "sum": <float>,
+            "mean": <float>,
+            "min": {"value": <float>, "index": <int>},
+            "max": {"value": <float>, "index": <int>},
+            "range": <float>,            # max - min, in the target unit
+        }
+
+    Raises ValueError for an empty/non-list input, a malformed item, an unknown
+    or cross-category unit, a non-finite value, or a non-linear category
+    (temperature is affine and fuel economy is reciprocal — neither aggregates
+    meaningfully, exactly as neither sums). Validation is delegated to
+    ``sum_quantities`` so the accepted inputs stay identical.
+    """
+    # sum_quantities does the full validation (list shape, item shape, finite
+    # values, single linear category, valid target) and returns the total in the
+    # resolved target unit, so a bad input fails here before any statistics run.
+    total, unit, category = sum_quantities(items, to_unit)
+
+    # Re-express every item in the resolved target unit. The category/units were
+    # already proven valid above, so convert_units cannot fail here.
+    converted = []
+    for item in items:
+        if isinstance(item, dict):
+            value, item_unit = item.get("value"), item.get("unit")
+        else:
+            value, item_unit = item
+        restated, _ = convert_units(value, item_unit, unit)
+        converted.append(restated)
+
+    count = len(converted)
+    min_index = min(range(count), key=lambda i: converted[i])
+    max_index = max(range(count), key=lambda i: converted[i])
+    minimum = converted[min_index]
+    maximum = converted[max_index]
+    return {
+        "category": category,
+        "unit": unit,
+        "count": count,
+        "sum": total,
+        "mean": total / count,
+        "min": {"value": minimum, "index": min_index},
+        "max": {"value": maximum, "index": max_index},
+        "range": maximum - minimum,
+    }
+
+
+def sort_quantities(items, to_unit=None, descending=False):
+    """Order a list of quantities of the SAME linear category by magnitude.
+
+    Every quantity is restated in a single common ``to_unit`` (or, when omitted,
+    the first item's unit) — exactly like :func:`sum_quantities` and
+    :func:`aggregate_quantities` — then ordered ascending (the default) or
+    descending. The sort is *stable*: items that compare equal keep their
+    original input order, so the returned ``index`` of equal quantities is itself
+    ascending. This is the natural "rank these measurements" companion to the
+    plain sum and the descriptive statistics.
+
+    ``items`` is a list of {"value": <number>, "unit": <token>} dicts (a
+    ``(value, unit)`` tuple is also accepted), identical to ``sum_quantities``.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,
+            "descending": <bool>,
+            "items": [{"index": <original position>, "value": <float>}, ...],
+        }
+
+    where ``items`` is the ordered list and each ``index`` points back to the
+    item's position in the input. Raises ValueError for an empty/non-list input,
+    a malformed item, an unknown or cross-category unit, a non-finite value, or a
+    non-linear category (temperature is affine and fuel economy is reciprocal —
+    neither orders meaningfully on a single common unit, exactly as neither
+    sums). Validation is delegated to ``sum_quantities`` so the accepted inputs
+    stay identical.
+    """
+    # sum_quantities does the full validation (list shape, item shape, finite
+    # values, single linear category, valid target) and resolves the common
+    # target unit, so a bad input fails here before any ordering runs.
+    _, unit, category = sum_quantities(items, to_unit)
+
+    # Re-express every item in the resolved target unit, tagged with its original
+    # input position. The category/units were already proven valid above, so
+    # convert_units cannot fail here.
+    ranked = []
+    for index, item in enumerate(items):
+        if isinstance(item, dict):
+            value, item_unit = item.get("value"), item.get("unit")
+        else:
+            value, item_unit = item
+        restated, _ = convert_units(value, item_unit, unit)
+        ranked.append({"index": index, "value": restated})
+
+    # ``sorted`` is stable, so equal magnitudes preserve their input order; for a
+    # descending sort we negate the key (rather than reverse=True) to keep that
+    # same stable ordering among ties instead of flipping it.
+    sign = -1.0 if descending else 1.0
+    ranked.sort(key=lambda r: sign * r["value"])
+    return {
+        "category": category,
+        "unit": unit,
+        "count": len(ranked),
+        "descending": bool(descending),
+        "items": ranked,
+    }
+
+
+def describe_quantities(items, to_unit=None):
+    """Full descriptive statistics for a list of SAME-category quantities.
+
+    The richer companion to :func:`aggregate_quantities`: on top of the count,
+    sum, mean, min, max and range it also reports the **median** (the middle
+    value, or the mean of the two middle values for an even count), the
+    population **variance** / standard deviation (dividing by N), and the sample
+    variance / standard deviation (dividing by N-1, the unbiased estimator). The
+    sample figures are ``None`` for a single item, since a sample standard
+    deviation is undefined for one observation.
+
+    Every quantity is first restated in a single common ``to_unit`` (or, when
+    omitted, the first item's unit) so the statistics are apples-to-apples —
+    exactly like :func:`sum_quantities`, :func:`aggregate_quantities` and
+    :func:`sort_quantities`.
+
+    ``items`` is a list of {"value": <number>, "unit": <token>} dicts (a
+    ``(value, unit)`` tuple is also accepted), identical to ``sum_quantities``.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,
+            "sum": <float>,
+            "mean": <float>,
+            "median": <float>,
+            "variance": <float>,            # population (/ N)
+            "stdev": <float>,               # population (/ N)
+            "sample_variance": <float|None>,  # sample (/ N-1), None for n == 1
+            "sample_stdev": <float|None>,     # sample (/ N-1), None for n == 1
+            "min": {"value": <float>, "index": <int>},
+            "max": {"value": <float>, "index": <int>},
+            "range": <float>,               # max - min, in the target unit
+        }
+
+    Raises ValueError for an empty/non-list input, a malformed item, an unknown
+    or cross-category unit, a non-finite value, or a non-linear category
+    (temperature is affine and fuel economy is reciprocal — neither aggregates
+    meaningfully, exactly as neither sums). Validation is delegated to
+    ``sum_quantities`` so the accepted inputs stay identical.
+    """
+    # sum_quantities does the full validation (list shape, item shape, finite
+    # values, single linear category, valid target) and resolves both the running
+    # total and the common target unit, so a bad input fails here before any
+    # statistics run.
+    total, unit, category = sum_quantities(items, to_unit)
+
+    # Re-express every item in the resolved target unit. The category/units were
+    # already proven valid above, so convert_units cannot fail here.
+    converted = []
+    for item in items:
+        if isinstance(item, dict):
+            value, item_unit = item.get("value"), item.get("unit")
+        else:
+            value, item_unit = item
+        restated, _ = convert_units(value, item_unit, unit)
+        converted.append(restated)
+
+    count = len(converted)
+    mean = total / count
+
+    # Median on a sorted copy (the original order is preserved for min/max
+    # indices below). Even counts average the two central values.
+    ordered = sorted(converted)
+    mid = count // 2
+    if count % 2 == 1:
+        median = ordered[mid]
+    else:
+        median = (ordered[mid - 1] + ordered[mid]) / 2.0
+
+    squared_deviations = sum((x - mean) ** 2 for x in converted)
+    variance = squared_deviations / count
+    stdev = math.sqrt(variance)
+    if count > 1:
+        sample_variance = squared_deviations / (count - 1)
+        sample_stdev = math.sqrt(sample_variance)
+    else:
+        sample_variance = None
+        sample_stdev = None
+
+    min_index = min(range(count), key=lambda i: converted[i])
+    max_index = max(range(count), key=lambda i: converted[i])
+    minimum = converted[min_index]
+    maximum = converted[max_index]
+    return {
+        "category": category,
+        "unit": unit,
+        "count": count,
+        "sum": total,
+        "mean": mean,
+        "median": median,
+        "variance": variance,
+        "stdev": stdev,
+        "sample_variance": sample_variance,
+        "sample_stdev": sample_stdev,
+        "min": {"value": minimum, "index": min_index},
+        "max": {"value": maximum, "index": max_index},
+        "range": maximum - minimum,
+    }
+
+
+def shape_quantities(items, to_unit=None):
+    """Distribution-shape statistics for a list of SAME-category quantities.
+
+    The third-/fourth-moment companion to :func:`describe_quantities` (which
+    stops at the mean, variance and standard deviation): this reports the
+    **skewness** (how lopsided the distribution is — positive means a longer
+    right tail, negative a longer left tail, zero a symmetric spread) and the
+    **excess kurtosis** (how heavy-tailed/peaked it is relative to a normal
+    distribution — positive means heavier tails, negative lighter tails).
+
+    Both are dimensionless standardised moments, so — like the Pearson ``r`` of
+    :func:`correlation` — their value does not depend on the chosen ``to_unit``;
+    the unit only affects the reported ``mean`` and ``stdev``. Two flavours of
+    each are returned:
+
+    - the **population** statistics (the biased moment estimators ``g1``/``g2``,
+      computed by dividing the moments by N), always defined for two or more
+      points; and
+    - the **sample** statistics (the bias-corrected estimators ``G1``/``G2``,
+      matching Excel's ``SKEW``/``KURT``), which need at least three points for
+      skewness and four for kurtosis and are otherwise ``None``.
+
+    When the values have zero spread (a constant series, so the standard
+    deviation is zero) the shape is undefined and every skewness/kurtosis figure
+    is ``None`` — exactly as ``correlation`` reports ``None`` for a flat series.
+
+    Every quantity is first restated in a single common ``to_unit`` (or, when
+    omitted, the first item's unit), identical to the rest of the aggregate
+    family. ``items`` is a list of {"value": <number>, "unit": <token>} dicts (a
+    ``(value, unit)`` tuple is also accepted).
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,
+            "mean": <float>,
+            "stdev": <float>,                 # population (/ N)
+            "skewness": <float|None>,         # population g1, None if flat
+            "sample_skewness": <float|None>,  # bias-corrected G1, None if n<3 or flat
+            "kurtosis": <float|None>,         # population EXCESS kurtosis g2
+            "sample_kurtosis": <float|None>,  # bias-corrected G2, None if n<4 or flat
+        }
+
+    Raises ValueError for an empty/non-list input, a malformed item, an unknown
+    or cross-category unit, a non-finite value, or a non-linear category
+    (temperature is affine and fuel economy is reciprocal — neither aggregates
+    meaningfully, exactly as neither sums). Validation is delegated to
+    ``sum_quantities`` so the accepted inputs stay identical.
+    """
+    # sum_quantities does the full validation (list shape, item shape, finite
+    # values, single linear category, valid target) and resolves the common
+    # target unit, so a bad input fails here before any statistics run.
+    _, unit, category = sum_quantities(items, to_unit)
+    values = _restate_items(items, unit)
+
+    n = len(values)
+    mean = sum(values) / n
+    # Central moments m2 (variance), m3 and m4, each divided by N (population).
+    m2 = sum((x - mean) ** 2 for x in values) / n
+    m3 = sum((x - mean) ** 3 for x in values) / n
+    m4 = sum((x - mean) ** 4 for x in values) / n
+    stdev = math.sqrt(m2)
+
+    if m2 == 0:
+        # A constant series has no shape — skewness and kurtosis are undefined.
+        return {
+            "category": category,
+            "unit": unit,
+            "count": n,
+            "mean": mean,
+            "stdev": stdev,
+            "skewness": None,
+            "sample_skewness": None,
+            "kurtosis": None,
+            "sample_kurtosis": None,
+        }
+
+    # Population (biased) Fisher-Pearson moments.
+    g1 = m3 / (m2 ** 1.5)
+    g2 = m4 / (m2 ** 2) - 3.0  # EXCESS kurtosis (normal distribution -> 0)
+
+    # Sample (bias-corrected) estimators, matching Excel SKEW / KURT. Skewness
+    # needs n >= 3 and kurtosis n >= 4 (the correction factors divide by n-2 /
+    # n-3); below those counts the unbiased estimate is undefined.
+    if n >= 3:
+        sample_skewness = math.sqrt(n * (n - 1)) / (n - 2) * g1
+    else:
+        sample_skewness = None
+    if n >= 4:
+        sample_kurtosis = (
+            (n - 1) / ((n - 2) * (n - 3)) * ((n + 1) * g2 + 6.0)
+        )
+    else:
+        sample_kurtosis = None
+
+    return {
+        "category": category,
+        "unit": unit,
+        "count": n,
+        "mean": mean,
+        "stdev": stdev,
+        "skewness": g1,
+        "sample_skewness": sample_skewness,
+        "kurtosis": g2,
+        "sample_kurtosis": sample_kurtosis,
+    }
+
+
+def cumulative_quantities(items, to_unit=None):
+    """Running (cumulative) totals over a list of SAME-category quantities.
+
+    Like :func:`sum_quantities`, every quantity is restated in a single common
+    ``to_unit`` (or, when omitted, the first item's unit) so the partial sums are
+    apples-to-apples. Then it walks the list *in input order* and reports the
+    running total after each item — the natural "how does the total build up?"
+    companion to the plain sum (e.g. the cumulative distance after each leg of a
+    journey). The final cumulative value equals the plain ``total`` (modulo float
+    precision).
+
+    ``items`` is a list of {"value": <number>, "unit": <token>} dicts (a
+    ``(value, unit)`` tuple is also accepted), identical to ``sum_quantities``.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,
+            "total": <float>,            # == the last cumulative value
+            "items": [{"index": <int>, "value": <float>, "cumulative": <float>}, ...],
+        }
+
+    where ``items`` is in the original input order, ``value`` is that item
+    restated in the target unit, and ``cumulative`` is the running total up to and
+    including it. Raises ValueError for an empty/non-list input, a malformed item,
+    an unknown or cross-category unit, a non-finite value, or a non-linear
+    category (temperature is affine and fuel economy is reciprocal — neither sums
+    meaningfully, exactly as neither sums). Validation is delegated to
+    ``sum_quantities`` so the accepted inputs stay identical.
+    """
+    # sum_quantities does the full validation (list shape, item shape, finite
+    # values, single linear category, valid target) and resolves both the running
+    # total and the common target unit, so a bad input fails here before any
+    # accumulation runs.
+    total, unit, category = sum_quantities(items, to_unit)
+
+    # Re-express every item in the resolved target unit, accumulating as we go.
+    # The category/units were already proven valid above, so convert_units cannot
+    # fail here.
+    running = 0.0
+    out = []
+    for index, item in enumerate(items):
+        if isinstance(item, dict):
+            value, item_unit = item.get("value"), item.get("unit")
+        else:
+            value, item_unit = item
+        restated, _ = convert_units(value, item_unit, unit)
+        running += restated
+        out.append({"index": index, "value": restated, "cumulative": running})
+    return {
+        "category": category,
+        "unit": unit,
+        "count": len(out),
+        "total": total,
+        "items": out,
+    }
+
+
+def percentile_quantities(items, percentile, to_unit=None):
+    """The ``percentile``-th percentile of a list of SAME-category quantities.
+
+    Every quantity is first restated in a single common ``to_unit`` (or, when
+    omitted, the first item's unit) so the ordering is apples-to-apples — exactly
+    like :func:`sum_quantities` and the rest of the aggregate family. The
+    percentile is computed by **linear interpolation between the closest ranks**
+    (the R-7 / Excel ``PERCENTILE.INC`` method): the 0th percentile is the
+    minimum, the 100th is the maximum, and the 50th equals the **median** reported
+    by :func:`describe_quantities`.
+
+    ``percentile`` must be a number in ``[0, 100]``. ``items`` is a list of
+    {"value": <number>, "unit": <token>} dicts (a ``(value, unit)`` tuple is also
+    accepted), identical to ``sum_quantities``.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,
+            "percentile": <float>,       # the requested p, echoed back
+            "value": <float>,            # the p-th percentile, in the target unit
+        }
+
+    Raises ValueError for a non-finite or out-of-range ``percentile``, an
+    empty/non-list input, a malformed item, an unknown or cross-category unit, a
+    non-finite value, or a non-linear category (temperature is affine and fuel
+    economy is reciprocal — neither orders meaningfully on a single common unit).
+    The item validation is delegated to ``sum_quantities`` so the accepted inputs
+    stay identical to the rest of the aggregate family.
+    """
+    try:
+        p = float(percentile)
+    except (TypeError, ValueError):
+        raise ValueError("'percentile' must be a number")
+    if p != p or p in (float("inf"), float("-inf")):
+        raise ValueError("'percentile' must be finite")
+    if p < 0.0 or p > 100.0:
+        raise ValueError("'percentile' must be between 0 and 100")
+
+    # sum_quantities does the full item validation and resolves the common target
+    # unit, so a bad input fails here before any ordering runs.
+    _, unit, category = sum_quantities(items, to_unit)
+
+    converted = []
+    for item in items:
+        if isinstance(item, dict):
+            value, item_unit = item.get("value"), item.get("unit")
+        else:
+            value, item_unit = item
+        restated, _ = convert_units(value, item_unit, unit)
+        converted.append(restated)
+
+    ordered = sorted(converted)
+    n = len(ordered)
+    if n == 1:
+        value = ordered[0]
+    else:
+        # Fractional rank in [0, n-1]; interpolate between its neighbours.
+        rank = (p / 100.0) * (n - 1)
+        lower = int(math.floor(rank))
+        upper = int(math.ceil(rank))
+        frac = rank - lower
+        value = ordered[lower] + (ordered[upper] - ordered[lower]) * frac
+    return {
+        "category": category,
+        "unit": unit,
+        "count": n,
+        "percentile": p,
+        "value": value,
+    }
+
+
+def proportions(items, to_unit=None):
+    """Each quantity's share of the group total, as a fraction and a percentage.
+
+    Every quantity is first restated in a single common ``to_unit`` (or, when
+    omitted, the first item's unit) so the shares are apples-to-apples — exactly
+    like :func:`sum_quantities` and the rest of the aggregate family. Then each
+    item's ``fraction`` is its restated value divided by the total, and
+    ``percent`` is that fraction times 100. By construction the fractions sum to
+    1 and the percentages to 100 (modulo float precision) — the natural "what
+    slice of the whole is each part?" companion to the plain sum and the
+    cumulative total (e.g. each expense as a share of the budget).
+
+    ``items`` is a list of {"value": <number>, "unit": <token>} dicts (a
+    ``(value, unit)`` tuple is also accepted), identical to ``sum_quantities``.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,
+            "total": <float>,            # the group total, in the target unit
+            "items": [{"index": <int>, "value": <float>,
+                       "fraction": <float>, "percent": <float>}, ...],
+        }
+
+    where ``items`` is in the original input order, ``value`` is that item
+    restated in the target unit, ``fraction`` is value/total and ``percent`` is
+    fraction*100. Raises ValueError for an empty/non-list input, a malformed
+    item, an unknown or cross-category unit, a non-finite value, a non-linear
+    category (temperature is affine and fuel economy is reciprocal — neither sums
+    meaningfully, so neither has shares), or a zero total (a share of nothing is
+    undefined). Item validation is delegated to ``sum_quantities`` so the
+    accepted inputs stay identical to the rest of the aggregate family.
+    """
+    # sum_quantities does the full validation (list shape, item shape, finite
+    # values, single linear category, valid target) and resolves both the group
+    # total and the common target unit, so a bad input fails here before any
+    # share is computed.
+    total, unit, category = sum_quantities(items, to_unit)
+    if total == 0:
+        raise ValueError("cannot compute proportions when the total is zero")
+
+    # Re-express every item in the resolved target unit, tagged with its original
+    # input position. The category/units were already proven valid above, so
+    # convert_units cannot fail here.
+    out = []
+    for index, item in enumerate(items):
+        if isinstance(item, dict):
+            value, item_unit = item.get("value"), item.get("unit")
+        else:
+            value, item_unit = item
+        restated, _ = convert_units(value, item_unit, unit)
+        fraction = restated / total
+        out.append({
+            "index": index,
+            "value": restated,
+            "fraction": fraction,
+            "percent": fraction * 100.0,
+        })
+    return {
+        "category": category,
+        "unit": unit,
+        "count": len(out),
+        "total": total,
+        "items": out,
+    }
+
+
+def _restate_items(items, unit):
+    """Re-express every entry of an already-validated ``items`` list in ``unit``.
+
+    The whole aggregate family (sum, stats, sort, ...) first calls
+    ``sum_quantities`` to validate the input and resolve the common target unit,
+    then walks ``items`` a second time to restate each value in that unit. This
+    helper holds that second walk in ONE place. It assumes the list/items/units
+    were already proven valid by ``sum_quantities``, so ``convert_units`` cannot
+    fail here. Returns a plain list of floats in the original input order.
+    """
+    converted = []
+    for item in items:
+        if isinstance(item, dict):
+            value, item_unit = item.get("value"), item.get("unit")
+        else:
+            value, item_unit = item
+        restated, _ = convert_units(value, item_unit, unit)
+        converted.append(restated)
+    return converted
+
+
+def differences(items, to_unit=None):
+    """Successive differences between consecutive quantities — the discrete
+    inverse of :func:`cumulative_quantities`.
+
+    Every quantity is first restated in a single common ``to_unit`` (or, when
+    omitted, the first item's unit) so the deltas are apples-to-apples — exactly
+    like :func:`sum_quantities` and the rest of the aggregate family. Then it
+    walks the list *in input order* and reports, for each item, the change from
+    the previous one: the first item's ``difference`` is the value itself (the
+    step up from zero), and every later ``difference`` is ``value[i] -
+    value[i-1]``. This is the exact inverse of the cumulative sum: feeding these
+    differences back through :func:`cumulative_quantities` reconstructs the
+    original restated series, and the final running total equals the plain sum
+    (e.g. odometer readings -> the distance of each individual leg).
+
+    ``items`` is a list of {"value": <number>, "unit": <token>} dicts (a
+    ``(value, unit)`` tuple is also accepted), identical to ``sum_quantities``.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,
+            "total": <float>,            # sum of the item values (as in /api/sum)
+            "items": [{"index": <int>, "value": <float>, "difference": <float>}, ...],
+        }
+
+    where ``items`` is in the original input order, ``value`` is that item
+    restated in the target unit, and ``difference`` is its change from the
+    previous item. Raises ValueError for an empty/non-list input, a malformed
+    item, an unknown or cross-category unit, a non-finite value, or a non-linear
+    category (temperature is affine and fuel economy is reciprocal — neither sums
+    meaningfully, so neither has differences). Validation is delegated to
+    ``sum_quantities`` so the accepted inputs stay identical to the rest of the
+    aggregate family.
+    """
+    # sum_quantities does the full validation (list shape, item shape, finite
+    # values, single linear category, valid target) and resolves both the running
+    # total and the common target unit, so a bad input fails here before any
+    # difference runs.
+    total, unit, category = sum_quantities(items, to_unit)
+
+    converted = _restate_items(items, unit)
+    out = []
+    previous = 0.0
+    for index, value in enumerate(converted):
+        out.append({"index": index, "value": value, "difference": value - previous})
+        previous = value
+    return {
+        "category": category,
+        "unit": unit,
+        "count": len(out),
+        "total": total,
+        "items": out,
+    }
+
+
+def zscores(items, to_unit=None):
+    """Standardise each quantity into a z-score (standard score).
+
+    Every quantity is first restated in a single common ``to_unit`` (or, when
+    omitted, the first item's unit) so the scores are apples-to-apples — exactly
+    like :func:`sum_quantities` and the rest of the aggregate family. Each item's
+    ``zscore`` is ``(value - mean) / stdev`` using the **population** mean and
+    standard deviation (dividing by N), matching the ``mean``/``stdev`` reported
+    by :func:`describe_quantities`. By construction the z-scores have a mean of 0
+    and a population standard deviation of 1 — the natural "how many standard
+    deviations from the average is each measurement?" companion to the
+    descriptive statistics (e.g. flagging outliers in a set of readings).
+
+    ``items`` is a list of {"value": <number>, "unit": <token>} dicts (a
+    ``(value, unit)`` tuple is also accepted), identical to ``sum_quantities``.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,
+            "mean": <float>,             # population mean, in the target unit
+            "stdev": <float>,            # population stdev, in the target unit
+            "items": [{"index": <int>, "value": <float>, "zscore": <float>}, ...],
+        }
+
+    Raises ValueError for an empty/non-list input, a malformed item, an unknown
+    or cross-category unit, a non-finite value, a non-linear category
+    (temperature is affine and fuel economy is reciprocal), or a **zero standard
+    deviation** (every quantity is identical, so a z-score is undefined — there is
+    no spread to divide by). Item validation is delegated to ``sum_quantities`` so
+    the accepted inputs stay identical to the rest of the aggregate family.
+    """
+    # sum_quantities does the full validation (list shape, item shape, finite
+    # values, single linear category, valid target) and resolves both the running
+    # total and the common target unit, so a bad input fails here before any
+    # score runs.
+    total, unit, category = sum_quantities(items, to_unit)
+
+    converted = _restate_items(items, unit)
+    count = len(converted)
+    mean = total / count
+    variance = sum((x - mean) ** 2 for x in converted) / count
+    stdev = math.sqrt(variance)
+    if stdev == 0:
+        raise ValueError(
+            "cannot compute z-scores when every quantity is identical "
+            "(standard deviation is zero)"
+        )
+
+    out = [
+        {"index": index, "value": value, "zscore": (value - mean) / stdev}
+        for index, value in enumerate(converted)
+    ]
+    return {
+        "category": category,
+        "unit": unit,
+        "count": count,
+        "mean": mean,
+        "stdev": stdev,
+        "items": out,
+    }
+
+
+def normalize_quantities(items, to_unit=None):
+    """Min-max scale each quantity to the unit interval ``[0, 1]``.
+
+    Every quantity is first restated in a single common ``to_unit`` (or, when
+    omitted, the first item's unit) so the scaling is apples-to-apples — exactly
+    like :func:`sum_quantities` and the rest of the aggregate family. Each item's
+    ``normalized`` value is ``(value - min) / (max - min)``, so the smallest
+    quantity maps to 0, the largest to 1, and everything else falls in between —
+    the natural "where does each measurement sit on the observed scale?" companion
+    to :func:`proportions` (which instead reports each value's share of the
+    total).
+
+    ``items`` is a list of {"value": <number>, "unit": <token>} dicts (a
+    ``(value, unit)`` tuple is also accepted), identical to ``sum_quantities``.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,
+            "min": <float>,              # smallest quantity, in the target unit
+            "max": <float>,              # largest quantity, in the target unit
+            "items": [{"index": <int>, "value": <float>, "normalized": <float>}, ...],
+        }
+
+    Raises ValueError for an empty/non-list input, a malformed item, an unknown
+    or cross-category unit, a non-finite value, a non-linear category
+    (temperature is affine and fuel economy is reciprocal), or a **zero range**
+    (every quantity is identical, so min == max and the scaling would divide by
+    zero). Item validation is delegated to ``sum_quantities`` so the accepted
+    inputs stay identical to the rest of the aggregate family.
+    """
+    # sum_quantities does the full validation (list shape, item shape, finite
+    # values, single linear category, valid target) and resolves the common
+    # target unit, so a bad input fails here before any scaling runs.
+    _, unit, category = sum_quantities(items, to_unit)
+
+    converted = _restate_items(items, unit)
+    minimum = min(converted)
+    maximum = max(converted)
+    span = maximum - minimum
+    if span == 0:
+        raise ValueError(
+            "cannot normalize when every quantity is identical "
+            "(min equals max, so the range is zero)"
+        )
+
+    out = [
+        {"index": index, "value": value, "normalized": (value - minimum) / span}
+        for index, value in enumerate(converted)
+    ]
+    return {
+        "category": category,
+        "unit": unit,
+        "count": len(out),
+        "min": minimum,
+        "max": maximum,
+        "items": out,
+    }
+
+
+def _percentile_of_sorted(ordered, p):
+    """Return the ``p``-th percentile of an already-sorted list of floats.
+
+    Uses the same linear interpolation between closest ranks (R-7 / Excel
+    ``PERCENTILE.INC``) as :func:`percentile_quantities`, so P0 is the minimum,
+    P100 the maximum and P50 the median. Factored out so the quartile / outlier
+    helpers compute exactly the same percentiles the ``/api/percentile`` endpoint
+    reports. ``ordered`` must be non-empty (callers validate via
+    ``sum_quantities`` first).
+    """
+    n = len(ordered)
+    if n == 1:
+        return ordered[0]
+    rank = (p / 100.0) * (n - 1)
+    lower = int(math.floor(rank))
+    upper = int(math.ceil(rank))
+    frac = rank - lower
+    return ordered[lower] + (ordered[upper] - ordered[lower]) * frac
+
+
+def quartiles(items, to_unit=None):
+    """Five-number summary (min, Q1, median, Q3, max) plus the IQR.
+
+    Every quantity is first restated in a single common ``to_unit`` (or, when
+    omitted, the first item's unit) so the order statistics are apples-to-apples
+    — exactly like :func:`sum_quantities` and the rest of the aggregate family.
+    The quartiles use the same R-7 / Excel ``PERCENTILE.INC`` interpolation as
+    :func:`percentile_quantities`, so Q1 == P25, the median == P50 (matching
+    :func:`describe_quantities`) and Q3 == P75. The **interquartile range**
+    ``iqr`` is ``Q3 - Q1``, the spread of the middle half of the data — the box
+    of a box-and-whisker plot and the basis for :func:`outliers`.
+
+    ``items`` is a list of {"value": <number>, "unit": <token>} dicts (a
+    ``(value, unit)`` tuple is also accepted), identical to ``sum_quantities``.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,
+            "min": <float>, "q1": <float>, "median": <float>,
+            "q3": <float>, "max": <float>,
+            "iqr": <float>,              # q3 - q1
+        }
+
+    Raises ValueError for an empty/non-list input, a malformed item, an unknown
+    or cross-category unit, a non-finite value, or a non-linear category
+    (temperature is affine and fuel economy is reciprocal — neither orders
+    meaningfully on a single common unit). Item validation is delegated to
+    ``sum_quantities`` so the accepted inputs stay identical to the rest of the
+    aggregate family.
+    """
+    # sum_quantities does the full validation (list shape, item shape, finite
+    # values, single linear category, valid target) and resolves the common
+    # target unit, so a bad input fails here before any ordering runs.
+    _, unit, category = sum_quantities(items, to_unit)
+
+    ordered = sorted(_restate_items(items, unit))
+    q1 = _percentile_of_sorted(ordered, 25)
+    median = _percentile_of_sorted(ordered, 50)
+    q3 = _percentile_of_sorted(ordered, 75)
+    return {
+        "category": category,
+        "unit": unit,
+        "count": len(ordered),
+        "min": ordered[0],
+        "q1": q1,
+        "median": median,
+        "q3": q3,
+        "max": ordered[-1],
+        "iqr": q3 - q1,
+    }
+
+
+def outliers(items, to_unit=None, k=1.5):
+    """Flag outliers by Tukey's interquartile-range fences.
+
+    Every quantity is first restated in a single common ``to_unit`` (or, when
+    omitted, the first item's unit) so the fences are apples-to-apples — exactly
+    like :func:`sum_quantities` and the rest of the aggregate family. Using the
+    quartiles from :func:`quartiles` it builds the classic Tukey fences
+    ``lower = Q1 - k*IQR`` and ``upper = Q3 + k*IQR`` (``k`` defaults to 1.5, the
+    standard "mild outlier" multiplier; ``k = 3`` marks the far/extreme
+    outliers), then flags every quantity falling strictly outside ``[lower,
+    upper]`` — the natural "which of these readings are anomalous?" companion to
+    :func:`describe_quantities` and :func:`zscores`.
+
+    ``k`` must be a finite, non-negative number. ``items`` is a list of
+    {"value": <number>, "unit": <token>} dicts (a ``(value, unit)`` tuple is also
+    accepted), identical to ``sum_quantities``.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,
+            "k": <float>,                # the multiplier used, echoed back
+            "q1": <float>, "q3": <float>, "iqr": <float>,
+            "lower_fence": <float>, "upper_fence": <float>,
+            "outlier_count": <int>,
+            "items": [{"index": <int>, "value": <float>, "is_outlier": <bool>}, ...],
+        }
+
+    Raises ValueError for a non-finite or negative ``k``, an empty/non-list
+    input, a malformed item, an unknown or cross-category unit, a non-finite
+    value, or a non-linear category (temperature is affine and fuel economy is
+    reciprocal). Item validation is delegated to ``sum_quantities`` so the
+    accepted inputs stay identical to the rest of the aggregate family.
+    """
+    try:
+        multiplier = float(k)
+    except (TypeError, ValueError):
+        raise ValueError("'k' must be a number")
+    if multiplier != multiplier or multiplier in (float("inf"), float("-inf")):
+        raise ValueError("'k' must be finite")
+    if multiplier < 0.0:
+        raise ValueError("'k' must be non-negative")
+
+    # sum_quantities does the full validation and resolves the common target
+    # unit, so a bad input fails here before any fence is computed.
+    _, unit, category = sum_quantities(items, to_unit)
+
+    converted = _restate_items(items, unit)
+    ordered = sorted(converted)
+    q1 = _percentile_of_sorted(ordered, 25)
+    q3 = _percentile_of_sorted(ordered, 75)
+    iqr = q3 - q1
+    lower_fence = q1 - multiplier * iqr
+    upper_fence = q3 + multiplier * iqr
+
+    out = []
+    outlier_count = 0
+    for index, value in enumerate(converted):
+        is_outlier = value < lower_fence or value > upper_fence
+        if is_outlier:
+            outlier_count += 1
+        out.append({"index": index, "value": value, "is_outlier": is_outlier})
+    return {
+        "category": category,
+        "unit": unit,
+        "count": len(converted),
+        "k": multiplier,
+        "q1": q1,
+        "q3": q3,
+        "iqr": iqr,
+        "lower_fence": lower_fence,
+        "upper_fence": upper_fence,
+        "outlier_count": outlier_count,
+        "items": out,
+    }
+
+
+# Hard ceiling on histogram bins, so a single request cannot ask for an
+# unbounded number of buckets.
+MAX_HISTOGRAM_BINS = 1000
+
+
+def histogram(items, bins, to_unit=None):
+    """Bucket a list of SAME-category quantities into equal-width bins.
+
+    Every quantity is first restated in a single common ``to_unit`` (or, when
+    omitted, the first item's unit) so the binning is apples-to-apples — exactly
+    like :func:`sum_quantities` and the rest of the aggregate family. The
+    observed range ``[min, max]`` is split into ``bins`` equal-width buckets and
+    each quantity is tallied into the bucket it lands in. Buckets are
+    half-open ``[start, end)`` so a value sits in exactly one, except the final
+    bucket, which is closed ``[start, max]`` so the maximum is counted. By
+    construction the bucket counts sum to ``count`` — the natural "how are these
+    measurements distributed?" companion to :func:`describe_quantities` and
+    :func:`quartiles`.
+
+    ``bins`` must be an integer in ``[1, MAX_HISTOGRAM_BINS]``. ``items`` is a
+    list of {"value": <number>, "unit": <token>} dicts (a ``(value, unit)``
+    tuple is also accepted), identical to ``sum_quantities``.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,
+            "bins": <int>,
+            "min": <float>, "max": <float>,
+            "items": [{"index": <int>, "start": <float>, "end": <float>,
+                       "count": <int>}, ...],
+        }
+
+    Raises ValueError for a non-integer / out-of-range ``bins``, an empty/non-list
+    input, a malformed item, an unknown or cross-category unit, a non-finite
+    value, a non-linear category (temperature is affine and fuel economy is
+    reciprocal), or a **zero range** (every quantity is identical, so min == max
+    and there is no span to divide into bins). Item validation is delegated to
+    ``sum_quantities`` so the accepted inputs stay identical to the rest of the
+    aggregate family.
+    """
+    # bool is an int subclass; reject it so True/False can't masquerade as a
+    # bin count.
+    if isinstance(bins, bool) or not isinstance(bins, int):
+        raise ValueError("'bins' must be an integer")
+    if bins < 1:
+        raise ValueError("'bins' must be at least 1")
+    if bins > MAX_HISTOGRAM_BINS:
+        raise ValueError("too many bins (%d); max is %d" % (bins, MAX_HISTOGRAM_BINS))
+
+    # sum_quantities does the full validation and resolves the common target
+    # unit, so a bad input fails here before any binning runs.
+    _, unit, category = sum_quantities(items, to_unit)
+
+    converted = _restate_items(items, unit)
+    minimum = min(converted)
+    maximum = max(converted)
+    span = maximum - minimum
+    if span == 0:
+        raise ValueError(
+            "cannot build a histogram when every quantity is identical "
+            "(min equals max, so the range is zero)"
+        )
+
+    width = span / bins
+    counts = [0] * bins
+    for value in converted:
+        # Floor into a bucket; the maximum (and any float drift past it) lands in
+        # the final closed bucket rather than overflowing the list.
+        index = int(math.floor((value - minimum) / width))
+        if index >= bins:
+            index = bins - 1
+        counts[index] += 1
+
+    out = []
+    for i in range(bins):
+        start = minimum + i * width
+        # The last bucket closes exactly on the observed maximum so the printed
+        # edge matches ``max`` rather than drifting by float accumulation.
+        end = maximum if i == bins - 1 else minimum + (i + 1) * width
+        out.append({"index": i, "start": start, "end": end, "count": counts[i]})
+    return {
+        "category": category,
+        "unit": unit,
+        "count": len(converted),
+        "bins": bins,
+        "min": minimum,
+        "max": maximum,
+        "items": out,
+    }
+
+
+def means(items, to_unit=None):
+    """The four classical means of a list of SAME-category quantities.
+
+    Every quantity is first restated in a single common ``to_unit`` (or, when
+    omitted, the first item's unit) so the means are apples-to-apples — exactly
+    like :func:`sum_quantities` and the rest of the aggregate family. It then
+    reports the three **Pythagorean means** plus the **quadratic mean**:
+
+    * ``arithmetic`` — the ordinary average ``sum / n`` (matching the ``mean``
+      reported by :func:`aggregate_quantities` / :func:`describe_quantities`);
+    * ``geometric`` — the n-th root of the product, ``exp(mean(ln value))``, the
+      right average for ratios and growth rates;
+    * ``harmonic`` — ``n / sum(1 / value)``, the right average for rates defined
+      per unit (e.g. speeds over equal distances);
+    * ``quadratic`` — the root-mean-square ``sqrt(mean(value^2))``.
+
+    For any set of positive quantities these obey the classic inequality chain
+    ``harmonic <= geometric <= arithmetic <= quadratic`` (with equality only when
+    every quantity is identical) — the natural "which average?" companion to
+    :func:`describe_quantities`. Because the geometric and harmonic means are
+    only defined for **positive** values, this rejects any quantity that is zero
+    or negative once restated in the target unit (a linear restating scales every
+    value by a positive factor, so positivity does not depend on the chosen
+    unit).
+
+    ``items`` is a list of {"value": <number>, "unit": <token>} dicts (a
+    ``(value, unit)`` tuple is also accepted), identical to ``sum_quantities``.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,
+            "arithmetic": <float>,
+            "geometric": <float>,
+            "harmonic": <float>,
+            "quadratic": <float>,
+        }
+
+    Raises ValueError for an empty/non-list input, a malformed item, an unknown
+    or cross-category unit, a non-finite value, a non-linear category
+    (temperature is affine and fuel economy is reciprocal — neither averages
+    meaningfully on a single common unit), or a **non-positive** quantity. Item
+    validation is delegated to ``sum_quantities`` so the accepted inputs stay
+    identical to the rest of the aggregate family.
+    """
+    # sum_quantities does the full validation (list shape, item shape, finite
+    # values, single linear category, valid target) and resolves both the
+    # arithmetic total and the common target unit, so a bad input fails here
+    # before any mean is computed.
+    total, unit, category = sum_quantities(items, to_unit)
+
+    converted = _restate_items(items, unit)
+    count = len(converted)
+    for value in converted:
+        if value <= 0:
+            raise ValueError(
+                "geometric and harmonic means require every quantity to be "
+                "positive (got %r in the target unit)" % value
+            )
+
+    arithmetic = total / count
+    geometric = math.exp(sum(math.log(v) for v in converted) / count)
+    harmonic = count / sum(1.0 / v for v in converted)
+    quadratic = math.sqrt(sum(v * v for v in converted) / count)
+    return {
+        "category": category,
+        "unit": unit,
+        "count": count,
+        "arithmetic": arithmetic,
+        "geometric": geometric,
+        "harmonic": harmonic,
+        "quadratic": quadratic,
+    }
+
+
+def rank_quantities(items, to_unit=None, descending=False):
+    """Rank a list of SAME-category quantities by magnitude.
+
+    Every quantity is first restated in a single common ``to_unit`` (or, when
+    omitted, the first item's unit) so the ordering is apples-to-apples — exactly
+    like :func:`sum_quantities` and the rest of the aggregate family. Each item,
+    *in its original input order*, is tagged with:
+
+    * ``rank`` — its 1-based rank by ascending magnitude (or descending, when
+      ``descending`` is set). Ties share the **average** of the ordinal ranks
+      they span (fractional / "average" ranking), so the ranks always sum to
+      ``n*(n+1)/2`` regardless of ties.
+    * ``percent_rank`` — the rank rescaled to ``[0, 100]`` as
+      ``(rank - 1) / (n - 1) * 100``. For an ascending ranking of distinct
+      values this is the exact inverse of :func:`percentile_quantities` (R-7):
+      feeding an item's ``percent_rank`` back to ``percentile_quantities``
+      returns that item's value. For a single item ``percent_rank`` is 0.
+
+    This is the "where does each measurement place in the set?" companion to
+    :func:`sort_quantities` (which reorders the list) and the inverse view of
+    :func:`percentile_quantities` (which maps a percentile to a value).
+
+    ``items`` is a list of {"value": <number>, "unit": <token>} dicts (a
+    ``(value, unit)`` tuple is also accepted), identical to ``sum_quantities``.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,
+            "descending": <bool>,
+            "items": [{"index": <int>, "value": <float>,
+                       "rank": <float>, "percent_rank": <float>}, ...],
+        }
+
+    where ``items`` is in the original input order. Raises ValueError for an
+    empty/non-list input, a malformed item, an unknown or cross-category unit, a
+    non-finite value, or a non-linear category (temperature is affine and fuel
+    economy is reciprocal — neither orders meaningfully on a single common unit).
+    Item validation is delegated to ``sum_quantities`` so the accepted inputs
+    stay identical to the rest of the aggregate family.
+    """
+    # sum_quantities does the full validation (list shape, item shape, finite
+    # values, single linear category, valid target) and resolves the common
+    # target unit, so a bad input fails here before any ranking runs.
+    _, unit, category = sum_quantities(items, to_unit)
+
+    converted = _restate_items(items, unit)
+    n = len(converted)
+
+    # Order the original positions by magnitude. ``sorted`` is stable, so equal
+    # magnitudes keep their input order; for a descending rank we negate the key
+    # (rather than reverse=True) to keep that same stable order among ties.
+    sign = -1.0 if descending else 1.0
+    order = sorted(range(n), key=lambda i: sign * converted[i])
+
+    # Walk runs of equal values in the ordered list and assign every member the
+    # average of the ordinal ranks the run spans (fractional ranking).
+    ranks = [0.0] * n
+    i = 0
+    while i < n:
+        j = i
+        while j + 1 < n and converted[order[j + 1]] == converted[order[i]]:
+            j += 1
+        avg_rank = (i + j) / 2.0 + 1.0  # ordinal positions i..j -> 1-based mean
+        for k in range(i, j + 1):
+            ranks[order[k]] = avg_rank
+        i = j + 1
+
+    out = []
+    for index in range(n):
+        rank = ranks[index]
+        percent_rank = 0.0 if n == 1 else (rank - 1.0) / (n - 1.0) * 100.0
+        out.append({
+            "index": index,
+            "value": converted[index],
+            "rank": rank,
+            "percent_rank": percent_rank,
+        })
+    return {
+        "category": category,
+        "unit": unit,
+        "count": n,
+        "descending": bool(descending),
+        "items": out,
+    }
+
+
+def mode_quantities(items, to_unit=None):
+    """The mode(s) — most frequent magnitude(s) — of SAME-category quantities.
+
+    Every quantity is first restated in a single common ``to_unit`` (or, when
+    omitted, the first item's unit) so the frequency count is apples-to-apples —
+    exactly like :func:`sum_quantities` and the rest of the aggregate family.
+    Frequencies are counted by **exact equality** of the restated values (a
+    linear restating scales every value by the same positive factor, so two
+    quantities are equal in the target unit iff they were equal originally). The
+    ``modes`` are every value sharing the highest frequency, returned ascending;
+    when more than one value ties for that frequency the data is
+    ``is_multimodal``. This is the frequency-based "what is the typical value?"
+    companion to the mean/median reported by :func:`describe_quantities` (the
+    third classic measure of central tendency).
+
+    ``items`` is a list of {"value": <number>, "unit": <token>} dicts (a
+    ``(value, unit)`` tuple is also accepted), identical to ``sum_quantities``.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,
+            "frequency": <int>,          # the highest observed frequency
+            "is_multimodal": <bool>,     # True when more than one value ties
+            "modes": [<float>, ...],     # every value at that frequency, ascending
+        }
+
+    Raises ValueError for an empty/non-list input, a malformed item, an unknown
+    or cross-category unit, a non-finite value, or a non-linear category
+    (temperature is affine and fuel economy is reciprocal — neither restates onto
+    a single common unit). Item validation is delegated to ``sum_quantities`` so
+    the accepted inputs stay identical to the rest of the aggregate family.
+    """
+    # sum_quantities does the full validation (list shape, item shape, finite
+    # values, single linear category, valid target) and resolves the common
+    # target unit, so a bad input fails here before any counting runs.
+    _, unit, category = sum_quantities(items, to_unit)
+
+    converted = _restate_items(items, unit)
+    # Count frequencies, remembering first-seen order so the eventual ascending
+    # sort is the only ordering applied (not dict-insertion happenstance).
+    counts = {}
+    for value in converted:
+        counts[value] = counts.get(value, 0) + 1
+
+    frequency = max(counts.values())
+    modes = sorted(value for value, freq in counts.items() if freq == frequency)
+    return {
+        "category": category,
+        "unit": unit,
+        "count": len(converted),
+        "frequency": frequency,
+        "is_multimodal": len(modes) > 1,
+        "modes": modes,
+    }
+
+
+def weighted_mean(items, to_unit=None):
+    """The weighted arithmetic mean of a list of SAME-category quantities.
+
+    Every quantity is first restated in a single common ``to_unit`` (or, when
+    omitted, the first item's unit) so the average is apples-to-apples — exactly
+    like :func:`sum_quantities` and the rest of the aggregate family. Each item
+    may carry a ``weight`` (a non-negative number); the result is
+    ``sum(weight * value) / sum(weight)``. A missing weight defaults to ``1.0``,
+    so an unweighted list reduces exactly to the arithmetic ``mean`` reported by
+    :func:`describe_quantities`. This is the "average where some measurements
+    count more than others" companion to the plain mean (e.g. a grade-weighted
+    average, or a price averaged by quantity sold).
+
+    ``items`` is a list of {"value": <number>, "unit": <token>, "weight"?:
+    <number>} dicts (a ``(value, unit)`` tuple is also accepted and is treated as
+    weight 1). The value/unit validation is delegated to ``sum_quantities`` so
+    the accepted inputs stay identical to the rest of the aggregate family.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,
+            "total_weight": <float>,     # sum of the weights
+            "weighted_mean": <float>,    # the weighted average, in the target unit
+        }
+
+    Raises ValueError for an empty/non-list input, a malformed item, an unknown
+    or cross-category unit, a non-finite value, a non-linear category
+    (temperature is affine and fuel economy is reciprocal), a non-numeric /
+    non-finite / negative ``weight``, or a **zero total weight** (every weight is
+    zero, so the average would divide by zero).
+    """
+    # sum_quantities does the full value/unit validation and resolves the common
+    # target unit, so a bad item fails here before any weighting runs. It reads
+    # only 'value'/'unit' from each dict, so the extra 'weight' key is ignored.
+    _, unit, category = sum_quantities(items, to_unit)
+
+    converted = _restate_items(items, unit)
+    weights = []
+    for item in items:
+        if isinstance(item, dict):
+            raw_weight = item.get("weight", 1.0)
+            if raw_weight is None:
+                raw_weight = 1.0
+        else:
+            raw_weight = 1.0
+        try:
+            weight = float(raw_weight)
+        except (TypeError, ValueError):
+            raise ValueError("'weight' must be a number")
+        if weight != weight or weight in (float("inf"), float("-inf")):
+            raise ValueError("'weight' must be finite")
+        if weight < 0.0:
+            raise ValueError("'weight' must be non-negative")
+        weights.append(weight)
+
+    total_weight = sum(weights)
+    if total_weight == 0:
+        raise ValueError(
+            "cannot compute a weighted mean when every weight is zero"
+        )
+    weighted_sum = sum(w * v for w, v in zip(weights, converted))
+    return {
+        "category": category,
+        "unit": unit,
+        "count": len(converted),
+        "total_weight": total_weight,
+        "weighted_mean": weighted_sum / total_weight,
+    }
+
+
+def moving_average(items, window, to_unit=None):
+    """Simple moving (rolling) average over a list of SAME-category quantities.
+
+    Every quantity is first restated in a single common ``to_unit`` (or, when
+    omitted, the first item's unit) so the windows are apples-to-apples — exactly
+    like :func:`sum_quantities` and the rest of the aggregate family. Walking the
+    list *in input order*, it reports the mean of every contiguous window of
+    ``window`` consecutive items: one entry per fully-populated window, so a list
+    of ``n`` items yields ``n - window + 1`` averages (a ``window`` of 1 simply
+    echoes each value, and a ``window`` equal to ``n`` yields the single overall
+    mean). This is the smoothing / trend companion to :func:`cumulative_quantities`
+    and :func:`differences` (e.g. a 7-day moving average of daily readings).
+
+    ``window`` must be an integer in ``[1, len(items)]``. ``items`` is a list of
+    {"value": <number>, "unit": <token>} dicts (a ``(value, unit)`` tuple is also
+    accepted), identical to ``sum_quantities``.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,              # number of input items
+            "window": <int>,
+            "items": [{"start_index": <int>, "end_index": <int>,
+                       "average": <float>}, ...],
+        }
+
+    where each entry's ``start_index``/``end_index`` are the inclusive input
+    positions the window spans and ``average`` is their mean in the target unit.
+    Raises ValueError for a non-integer ``window``, a ``window`` below 1 or
+    larger than the number of items, an empty/non-list input, a malformed item,
+    an unknown or cross-category unit, a non-finite value, or a non-linear
+    category (temperature is affine and fuel economy is reciprocal). Item
+    validation is delegated to ``sum_quantities`` so the accepted inputs stay
+    identical to the rest of the aggregate family.
+    """
+    # bool is an int subclass; reject it so True/False can't masquerade as a
+    # window length.
+    if isinstance(window, bool) or not isinstance(window, int):
+        raise ValueError("'window' must be an integer")
+    if window < 1:
+        raise ValueError("'window' must be at least 1")
+
+    # sum_quantities does the full validation and resolves the common target
+    # unit, so a bad input fails here before any averaging runs.
+    _, unit, category = sum_quantities(items, to_unit)
+
+    converted = _restate_items(items, unit)
+    n = len(converted)
+    if window > n:
+        raise ValueError(
+            "'window' (%d) cannot exceed the number of items (%d)" % (window, n)
+        )
+
+    out = []
+    running = sum(converted[:window])
+    for start in range(n - window + 1):
+        if start > 0:
+            # Slide the window: drop the element leaving, add the one entering.
+            running += converted[start + window - 1] - converted[start - 1]
+        out.append({
+            "start_index": start,
+            "end_index": start + window - 1,
+            "average": running / window,
+        })
+    return {
+        "category": category,
+        "unit": unit,
+        "count": n,
+        "window": window,
+        "items": out,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Bivariate statistics — two paired series of quantities
+# --------------------------------------------------------------------------- #
+# The whole aggregate family above is *univariate*: it summarises one list of
+# same-category quantities. The functions below are *bivariate* — they relate
+# two parallel series ``x`` and ``y`` (e.g. distance vs time, mass vs volume) and
+# ask how they co-vary. Each series is validated and restated on its own common
+# unit independently (so x can be a length while y is a time); only the pairing
+# (equal length, point i of x with point i of y) ties them together.
+
+
+def _series_values(items, to_unit):
+    """Validate one series of SAME-category quantities and restate it.
+
+    Reuses :func:`sum_quantities` for the full validation (list shape, item
+    shape, finite values, single linear category, valid target) and
+    :func:`_restate_items` to express every value in the resolved common unit.
+    Returns (values, unit, category) where ``values`` is a list of floats in the
+    original input order.
+    """
+    _, unit, category = sum_quantities(items, to_unit)
+    return _restate_items(items, unit), unit, category
+
+
+def _paired_series(x_items, y_items, to_x=None, to_y=None):
+    """Validate and restate two paired series ``x`` and ``y``.
+
+    Each series is validated/restated independently via :func:`_series_values`,
+    so the two may belong to different categories (length vs time, etc.). The
+    pairing requires the two series to have the SAME number of points and at
+    least two of them (a single point has no spread to co-vary).
+
+    Returns a dict with the two value lists, their resolved units and
+    categories, and the shared point count ``n``. Raises ValueError when the
+    lengths differ or there are fewer than two paired points (the underlying
+    per-series validation raises first for any malformed/cross-category input).
+    """
+    xs, x_unit, x_cat = _series_values(x_items, to_x)
+    ys, y_unit, y_cat = _series_values(y_items, to_y)
+    if len(xs) != len(ys):
+        raise ValueError(
+            "'x' and 'y' must have the same number of items (%d vs %d)"
+            % (len(xs), len(ys))
+        )
+    n = len(xs)
+    if n < 2:
+        raise ValueError("at least two paired points are required")
+    return {
+        "x": xs, "y": ys,
+        "x_unit": x_unit, "y_unit": y_unit,
+        "x_category": x_cat, "y_category": y_cat,
+        "n": n,
+    }
+
+
+def _co_moments(xs, ys):
+    """Return the means and the raw (un-normalised) sums of squares/products.
+
+    Computes ``mean_x``, ``mean_y`` and the three sums
+    ``Sxy = Σ(x-mx)(y-my)``, ``Sxx = Σ(x-mx)²`` and ``Syy = Σ(y-my)²`` shared by
+    every bivariate statistic below (covariance divides them by n or n-1;
+    correlation and regression take their ratios).
+    """
+    n = len(xs)
+    mean_x = sum(xs) / n
+    mean_y = sum(ys) / n
+    sxy = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
+    sxx = sum((x - mean_x) ** 2 for x in xs)
+    syy = sum((y - mean_y) ** 2 for y in ys)
+    return mean_x, mean_y, sxy, sxx, syy
+
+
+def covariance(x_items, y_items, to_x=None, to_y=None):
+    """Covariance of two paired series of quantities.
+
+    Each series is restated on its own common unit (``to_x`` / ``to_y``, or each
+    series' first unit when omitted). Reports both the **population** covariance
+    (dividing the co-moment ``Σ(x-mx)(y-my)`` by N) and the **sample** covariance
+    (dividing by N-1, the unbiased estimator). The covariance carries the product
+    unit ``x_unit*y_unit``; a positive value means the two move together, a
+    negative value means they move oppositely.
+
+    Returns a dict::
+
+        {
+            "x_category", "y_category",
+            "x_unit", "y_unit",
+            "count",
+            "mean_x", "mean_y",
+            "covariance",          # population (/ N)
+            "sample_covariance",   # sample (/ N-1)
+        }
+
+    Raises ValueError for mismatched lengths, fewer than two paired points, or
+    any malformed/cross-category series (delegated to ``sum_quantities``).
+    """
+    s = _paired_series(x_items, y_items, to_x, to_y)
+    xs, ys, n = s["x"], s["y"], s["n"]
+    mean_x, mean_y, sxy, _, _ = _co_moments(xs, ys)
+    return {
+        "x_category": s["x_category"], "y_category": s["y_category"],
+        "x_unit": s["x_unit"], "y_unit": s["y_unit"],
+        "count": n,
+        "mean_x": mean_x, "mean_y": mean_y,
+        "covariance": sxy / n,
+        "sample_covariance": sxy / (n - 1),
+    }
+
+
+def correlation(x_items, y_items, to_x=None, to_y=None):
+    """Pearson correlation coefficient of two paired series of quantities.
+
+    Each series is restated on its own common unit (``to_x`` / ``to_y``, or each
+    series' first unit when omitted), then the Pearson product-moment correlation
+    ``r = Σ(x-mx)(y-my) / √(Σ(x-mx)² · Σ(y-my)²)`` is computed. ``r`` lies in
+    ``[-1, 1]``: +1 is a perfect increasing linear relation, -1 a perfect
+    decreasing one, 0 no linear relation. ``r`` is dimensionless (the units
+    cancel), so it is unchanged by the choice of ``to_x``/``to_y``. When either
+    series has zero spread (a constant series) the correlation is undefined and
+    reported as ``None``. The (population and sample) covariance and each series'
+    mean and population standard deviation are reported alongside.
+
+    Returns a dict::
+
+        {
+            "x_category", "y_category",
+            "x_unit", "y_unit",
+            "count",
+            "mean_x", "mean_y",
+            "stdev_x", "stdev_y",        # population (/ N)
+            "covariance", "sample_covariance",
+            "correlation",               # Pearson r, or None when undefined
+        }
+
+    Raises ValueError for mismatched lengths, fewer than two paired points, or
+    any malformed/cross-category series (delegated to ``sum_quantities``).
+    """
+    s = _paired_series(x_items, y_items, to_x, to_y)
+    xs, ys, n = s["x"], s["y"], s["n"]
+    mean_x, mean_y, sxy, sxx, syy = _co_moments(xs, ys)
+    denom = math.sqrt(sxx * syy)
+    pearson = (sxy / denom) if denom != 0 else None
+    return {
+        "x_category": s["x_category"], "y_category": s["y_category"],
+        "x_unit": s["x_unit"], "y_unit": s["y_unit"],
+        "count": n,
+        "mean_x": mean_x, "mean_y": mean_y,
+        "stdev_x": math.sqrt(sxx / n), "stdev_y": math.sqrt(syy / n),
+        "covariance": sxy / n,
+        "sample_covariance": sxy / (n - 1),
+        "correlation": pearson,
+    }
+
+
+def linear_regression(x_items, y_items, to_x=None, to_y=None):
+    """Ordinary least-squares linear fit ``y = slope·x + intercept``.
+
+    Each series is restated on its own common unit (``to_x`` / ``to_y``, or each
+    series' first unit when omitted), then the best-fit line of ``y`` on ``x`` is
+    found by minimising the squared residuals: ``slope = Σ(x-mx)(y-my)/Σ(x-mx)²``
+    and ``intercept = my - slope·mx``. The slope carries the unit
+    ``y_unit/x_unit``; the intercept carries ``y_unit``. ``r`` is the Pearson
+    correlation and ``r_squared`` (the coefficient of determination) is the share
+    of the variance in ``y`` explained by the fit. ``r`` / ``r_squared`` are
+    ``None`` when ``y`` has zero spread (no variance to explain).
+
+    Returns a dict::
+
+        {
+            "x_category", "y_category",
+            "x_unit", "y_unit",
+            "count",
+            "slope",          # in y_unit per x_unit
+            "intercept",      # in y_unit
+            "r",              # Pearson correlation, or None
+            "r_squared",      # coefficient of determination, or None
+            "mean_x", "mean_y",
+        }
+
+    Raises ValueError for mismatched lengths, fewer than two paired points, any
+    malformed/cross-category series (delegated to ``sum_quantities``), or an
+    ``x`` series with zero spread (a vertical line has no finite slope).
+    """
+    s = _paired_series(x_items, y_items, to_x, to_y)
+    xs, ys, n = s["x"], s["y"], s["n"]
+    mean_x, mean_y, sxy, sxx, syy = _co_moments(xs, ys)
+    if sxx == 0:
+        raise ValueError("'x' values have zero spread; the slope is undefined")
+    slope = sxy / sxx
+    intercept = mean_y - slope * mean_x
+    denom = math.sqrt(sxx * syy)
+    r = (sxy / denom) if denom != 0 else None
+    r_squared = (r * r) if r is not None else None
+    return {
+        "x_category": s["x_category"], "y_category": s["y_category"],
+        "x_unit": s["x_unit"], "y_unit": s["y_unit"],
+        "count": n,
+        "slope": slope,
+        "intercept": intercept,
+        "r": r,
+        "r_squared": r_squared,
+        "mean_x": mean_x, "mean_y": mean_y,
+    }

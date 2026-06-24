@@ -103,6 +103,120 @@
       <button id="sum" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Total</button>
     </div>
 
+    <label for="statsExpr" style="margin-top:0.9rem;">Stats over a set of quantities (comma-separated, summarised in the “To” unit)</label>
+    <div class="row">
+      <div><input id="statsExpr" type="text" placeholder="e.g. 5 m, 300 cm, 2 ft" style="margin-bottom:0;" /></div>
+      <button id="stats" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Stats</button>
+    </div>
+
+    <label for="describeExpr" style="margin-top:0.9rem;">Describe a set of quantities (median, variance &amp; standard deviation, in the “To” unit)</label>
+    <div class="row">
+      <div><input id="describeExpr" type="text" placeholder="e.g. 2 m, 4 m, 9 m" style="margin-bottom:0;" /></div>
+      <button id="describe" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Describe</button>
+    </div>
+
+    <label for="shapeExpr" style="margin-top:0.9rem;">Distribution shape of a set of quantities (skewness &amp; excess kurtosis, in the “To” unit)</label>
+    <div class="row">
+      <div><input id="shapeExpr" type="text" placeholder="e.g. 1 m, 2 m, 2 m, 9 m" style="margin-bottom:0;" /></div>
+      <button id="shape" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Shape</button>
+    </div>
+
+    <label for="sortExpr" style="margin-top:0.9rem;">Sort a set of quantities by magnitude (in the “To” unit)</label>
+    <div class="row">
+      <div><input id="sortExpr" type="text" placeholder="e.g. 5 m, 300 cm, 2 ft" style="margin-bottom:0;" /></div>
+      <button id="sortDesc" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Sort &darr;</button>
+      <button id="sortAsc" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Sort &uarr;</button>
+    </div>
+
+    <label for="cumsumExpr" style="margin-top:0.9rem;">Running (cumulative) total of a set of quantities (in the “To” unit)</label>
+    <div class="row">
+      <div><input id="cumsumExpr" type="text" placeholder="e.g. 5 km, 3 km, 2 km" style="margin-bottom:0;" /></div>
+      <button id="cumsum" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Running total</button>
+    </div>
+
+    <label for="percentileExpr" style="margin-top:0.9rem;">Percentile of a set of quantities (0–100, in the “To” unit)</label>
+    <div class="row">
+      <div><input id="percentileExpr" type="text" placeholder="e.g. 2 m, 4 m, 9 m" style="margin-bottom:0;" /></div>
+      <div><input id="percentileP" type="number" min="0" max="100" step="any" placeholder="p (e.g. 90)" style="margin-bottom:0;" /></div>
+      <button id="percentile" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Percentile</button>
+    </div>
+
+    <label for="proportionsExpr" style="margin-top:0.9rem;">Each quantity’s share of the group total (fraction &amp; percent, in the “To” unit)</label>
+    <div class="row">
+      <div><input id="proportionsExpr" type="text" placeholder="e.g. 2 m, 4 m, 6 m" style="margin-bottom:0;" /></div>
+      <button id="proportions" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Proportions</button>
+    </div>
+
+    <label for="diffExpr" style="margin-top:0.9rem;">Successive differences between a set of quantities (in the “To” unit)</label>
+    <div class="row">
+      <div><input id="diffExpr" type="text" placeholder="e.g. 10 km, 25 km, 40 km" style="margin-bottom:0;" /></div>
+      <button id="diff" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Differences</button>
+    </div>
+
+    <label for="zscoreExpr" style="margin-top:0.9rem;">Z-scores of a set of quantities (deviations from the mean, in the “To” unit)</label>
+    <div class="row">
+      <div><input id="zscoreExpr" type="text" placeholder="e.g. 2 m, 4 m, 9 m" style="margin-bottom:0;" /></div>
+      <button id="zscore" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Z-scores</button>
+    </div>
+
+    <label for="normalizeExpr" style="margin-top:0.9rem;">Min-max normalize a set of quantities to [0, 1] (in the “To” unit)</label>
+    <div class="row">
+      <div><input id="normalizeExpr" type="text" placeholder="e.g. 2 m, 4 m, 6 m" style="margin-bottom:0;" /></div>
+      <button id="normalize" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Normalize</button>
+    </div>
+
+    <label for="quartilesExpr" style="margin-top:0.9rem;">Five-number summary &amp; IQR of a set of quantities (in the “To” unit)</label>
+    <div class="row">
+      <div><input id="quartilesExpr" type="text" placeholder="e.g. 1 m, 2 m, 4 m, 7 m, 9 m" style="margin-bottom:0;" /></div>
+      <button id="quartiles" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Quartiles</button>
+    </div>
+
+    <label for="outliersExpr" style="margin-top:0.9rem;">Flag outliers by Tukey IQR fences (in the “To” unit)</label>
+    <div class="row">
+      <div><input id="outliersExpr" type="text" placeholder="e.g. 10 m, 11 m, 12 m, 90 m" style="margin-bottom:0;" /></div>
+      <div style="flex:0 0 auto;"><input id="outliersK" type="number" step="0.1" min="0" placeholder="k=1.5" title="IQR multiplier (default 1.5)" style="margin-bottom:0;width:6rem;" /></div>
+      <button id="outliers" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Outliers</button>
+    </div>
+
+    <label for="histogramExpr" style="margin-top:0.9rem;">Histogram of a set of quantities into equal-width bins (in the “To” unit)</label>
+    <div class="row">
+      <div><input id="histogramExpr" type="text" placeholder="e.g. 1 m, 2 m, 3 m, 4 m, 5 m" style="margin-bottom:0;" /></div>
+      <div style="flex:0 0 auto;"><input id="histogramBins" type="number" step="1" min="1" placeholder="bins=4" title="number of bins" style="margin-bottom:0;width:6rem;" /></div>
+      <button id="histogram" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Histogram</button>
+    </div>
+
+    <label for="meansExpr" style="margin-top:0.9rem;">Four classical means — arithmetic, geometric, harmonic, RMS (in the “To” unit)</label>
+    <div class="row">
+      <div><input id="meansExpr" type="text" placeholder="e.g. 1 m, 2 m, 4 m, 8 m" style="margin-bottom:0;" /></div>
+      <button id="means" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Means</button>
+    </div>
+
+    <label for="rankExpr" style="margin-top:0.9rem;">Rank &amp; percentile rank of each quantity (in the “To” unit)</label>
+    <div class="row">
+      <div><input id="rankExpr" type="text" placeholder="e.g. 5 m, 1 m, 3 m, 2 m, 4 m" style="margin-bottom:0;" /></div>
+      <button id="rankDesc" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Rank &darr;</button>
+      <button id="rankAsc" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Rank &uarr;</button>
+    </div>
+
+    <label for="modeExpr" style="margin-top:0.9rem;">Mode — the most frequent quantity / quantities (in the “To” unit)</label>
+    <div class="row">
+      <div><input id="modeExpr" type="text" placeholder="e.g. 1 m, 2 m, 2 m, 3 m" style="margin-bottom:0;" /></div>
+      <button id="mode" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Mode</button>
+    </div>
+
+    <label for="weightedExpr" style="margin-top:0.9rem;">Weighted mean — append <code>*weight</code> to a quantity (in the “To” unit)</label>
+    <div class="row">
+      <div><input id="weightedExpr" type="text" placeholder="e.g. 1 m*1, 3 m*3" style="margin-bottom:0;" /></div>
+      <button id="weighted" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Weighted mean</button>
+    </div>
+
+    <label for="movingExpr" style="margin-top:0.9rem;">Moving average — rolling mean over a window of N items (in the “To” unit)</label>
+    <div class="row">
+      <div><input id="movingExpr" type="text" placeholder="e.g. 1 m, 2 m, 3 m, 4 m" style="margin-bottom:0;" /></div>
+      <div style="flex:0 0 auto;"><input id="movingWindow" type="number" step="1" min="1" placeholder="window=2" title="window size" style="margin-bottom:0;width:7rem;" /></div>
+      <button id="moving" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Moving avg</button>
+    </div>
+
     <div id="result" role="status" aria-live="polite" style="margin-top:1.5rem;">Pick units and press Convert.</div>
     <div id="allResults"></div>
   </main>
@@ -353,6 +467,601 @@
     }
   }
 
+  async function stats() {
+    const raw = document.getElementById("statsExpr").value || "";
+    const chunks = raw.split(",").map(function (c) { return c.trim(); }).filter(Boolean);
+    if (chunks.length === 0) {
+      resultEl.innerHTML = '<span class="err">List some quantities, e.g. "5 m, 300 cm, 2 ft".</span>';
+      return;
+    }
+    const items = [];
+    for (let i = 0; i < chunks.length; i++) {
+      const m = chunks[i].match(/^([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)\s*(.+)$/);
+      if (!m) {
+        resultEl.innerHTML = '<span class="err">Could not read "' + chunks[i] + '" — use "&lt;number&gt; &lt;unit&gt;".</span>';
+        return;
+      }
+      items.push({ value: m[1], unit: m[2].trim() });
+    }
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/stats", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: items, to: toEl.value }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Stats failed") + "</span>";
+        return;
+      }
+      const u = " " + data.unit;
+      resultEl.innerHTML =
+        "<strong>" + data.count + "</strong> " + data.category + " quantities in " + data.unit +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' +
+        "sum " + data.sum + u + " &middot; mean " + data.mean + u + "<br>" +
+        "min " + data.min.value + u + " (#" + (data.min.index + 1) + ") &middot; " +
+        "max " + data.max.value + u + " (#" + (data.max.index + 1) + ")<br>" +
+        "range " + data.range + u + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  // Parse a comma-separated "5 m, 300 cm, 2 ft" string into [{value, unit}].
+  // Returns null and renders an error when an entry cannot be read.
+  function parseQuantityList(raw) {
+    const chunks = (raw || "").split(",").map(function (c) { return c.trim(); }).filter(Boolean);
+    if (chunks.length === 0) {
+      resultEl.innerHTML = '<span class="err">List some quantities, e.g. "5 m, 300 cm, 2 ft".</span>';
+      return null;
+    }
+    const items = [];
+    for (let i = 0; i < chunks.length; i++) {
+      const m = chunks[i].match(/^([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)\s*(.+)$/);
+      if (!m) {
+        resultEl.innerHTML = '<span class="err">Could not read "' + chunks[i] + '" — use "&lt;number&gt; &lt;unit&gt;".</span>';
+        return null;
+      }
+      items.push({ value: m[1], unit: m[2].trim() });
+    }
+    return items;
+  }
+
+  async function describe() {
+    const items = parseQuantityList(document.getElementById("describeExpr").value);
+    if (!items) return;
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/describe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: items, to: toEl.value }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Describe failed") + "</span>";
+        return;
+      }
+      const u = " " + data.unit;
+      const sample = (data.sample_stdev === null) ? "n/a" : (data.sample_stdev + u);
+      resultEl.innerHTML =
+        "<strong>" + data.count + "</strong> " + data.category + " quantities in " + data.unit +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' +
+        "mean " + data.mean + u + " &middot; median " + data.median + u + "<br>" +
+        "variance " + data.variance + " &middot; std dev (pop.) " + data.stdev + u + "<br>" +
+        "std dev (sample) " + sample + "<br>" +
+        "min " + data.min.value + u + " &middot; max " + data.max.value + u + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function shape() {
+    const items = parseQuantityList(document.getElementById("shapeExpr").value);
+    if (!items) return;
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/shape", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: items, to: toEl.value }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Shape failed") + "</span>";
+        return;
+      }
+      const u = " " + data.unit;
+      const fmt = function (v) { return v === null ? "n/a" : v; };
+      resultEl.innerHTML =
+        "<strong>" + data.count + "</strong> " + data.category + " quantities in " + data.unit +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' +
+        "mean " + data.mean + u + " &middot; std dev (pop.) " + data.stdev + u + "<br>" +
+        "skewness " + fmt(data.skewness) + " &middot; sample " + fmt(data.sample_skewness) + "<br>" +
+        "excess kurtosis " + fmt(data.kurtosis) + " &middot; sample " + fmt(data.sample_kurtosis) + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function sortQuantities(descending) {
+    const items = parseQuantityList(document.getElementById("sortExpr").value);
+    if (!items) return;
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/sort", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: items, to: toEl.value, descending: descending }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Sort failed") + "</span>";
+        return;
+      }
+      const ordered = data.items.map(function (r) { return r.value + " " + data.unit + " (#" + (r.index + 1) + ")"; }).join(" &le; ");
+      resultEl.innerHTML =
+        "<strong>" + data.count + "</strong> " + data.category + " quantities, " +
+        (data.descending ? "largest first" : "smallest first") +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' + ordered + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function cumsum() {
+    const items = parseQuantityList(document.getElementById("cumsumExpr").value);
+    if (!items) return;
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/cumsum", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: items, to: toEl.value }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Running total failed") + "</span>";
+        return;
+      }
+      const steps = data.items.map(function (r) {
+        return "#" + (r.index + 1) + ": +" + r.value + " &rarr; " + r.cumulative + " " + data.unit;
+      }).join("<br>");
+      resultEl.innerHTML =
+        "<strong>" + data.count + "</strong> " + data.category + " quantities, total " +
+        data.total + " " + data.unit +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' + steps + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function percentile() {
+    const items = parseQuantityList(document.getElementById("percentileExpr").value);
+    if (!items) return;
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/percentile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items: items, to: toEl.value,
+          percentile: document.getElementById("percentileP").value,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Percentile failed") + "</span>";
+        return;
+      }
+      resultEl.innerHTML =
+        "P" + data.percentile + " of <strong>" + data.count + "</strong> " + data.category +
+        " quantities = <strong>" + data.value + " " + data.unit + "</strong>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function proportions() {
+    const items = parseQuantityList(document.getElementById("proportionsExpr").value);
+    if (!items) return;
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/proportions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: items, to: toEl.value }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Proportions failed") + "</span>";
+        return;
+      }
+      const shares = data.items.map(function (r) {
+        return "#" + (r.index + 1) + ": " + r.value + " " + data.unit + " (" + r.percent + "%)";
+      }).join("<br>");
+      resultEl.innerHTML =
+        "<strong>" + data.count + "</strong> " + data.category + " quantities, total " +
+        data.total + " " + data.unit +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' + shares + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function diff() {
+    const items = parseQuantityList(document.getElementById("diffExpr").value);
+    if (!items) return;
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/diff", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: items, to: toEl.value }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Differences failed") + "</span>";
+        return;
+      }
+      const steps = data.items.map(function (r) {
+        const d = r.difference >= 0 ? "+" + r.difference : "" + r.difference;
+        return "#" + (r.index + 1) + ": " + r.value + " " + data.unit + " (&Delta; " + d + ")";
+      }).join("<br>");
+      resultEl.innerHTML =
+        "<strong>" + data.count + "</strong> " + data.category + " quantities, total " +
+        data.total + " " + data.unit +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' + steps + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function zscore() {
+    const items = parseQuantityList(document.getElementById("zscoreExpr").value);
+    if (!items) return;
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/zscore", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: items, to: toEl.value }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Z-scores failed") + "</span>";
+        return;
+      }
+      const rows = data.items.map(function (r) {
+        return "#" + (r.index + 1) + ": " + r.value + " " + data.unit + " (z = " + r.zscore + ")";
+      }).join("<br>");
+      resultEl.innerHTML =
+        "<strong>" + data.count + "</strong> " + data.category + " quantities, mean " +
+        data.mean + " " + data.unit + ", stdev " + data.stdev + " " + data.unit +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' + rows + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function normalize() {
+    const items = parseQuantityList(document.getElementById("normalizeExpr").value);
+    if (!items) return;
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/normalize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: items, to: toEl.value }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Normalize failed") + "</span>";
+        return;
+      }
+      const rows = data.items.map(function (r) {
+        return "#" + (r.index + 1) + ": " + r.value + " " + data.unit + " &rarr; " + r.normalized;
+      }).join("<br>");
+      resultEl.innerHTML =
+        "<strong>" + data.count + "</strong> " + data.category + " quantities, min " +
+        data.min + " " + data.unit + ", max " + data.max + " " + data.unit +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' + rows + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function quartiles() {
+    const items = parseQuantityList(document.getElementById("quartilesExpr").value);
+    if (!items) return;
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/quartiles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: items, to: toEl.value }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Quartiles failed") + "</span>";
+        return;
+      }
+      const u = " " + data.unit;
+      const rows = [
+        "min: " + data.min + u, "Q1: " + data.q1 + u, "median: " + data.median + u,
+        "Q3: " + data.q3 + u, "max: " + data.max + u, "IQR: " + data.iqr + u,
+      ].join("<br>");
+      resultEl.innerHTML =
+        "<strong>" + data.count + "</strong> " + data.category + " quantities" +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' + rows + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function outliers() {
+    const items = parseQuantityList(document.getElementById("outliersExpr").value);
+    if (!items) return;
+    allResultsEl.innerHTML = "";
+    const body = { items: items, to: toEl.value };
+    const kRaw = document.getElementById("outliersK").value;
+    if (kRaw !== "") body.k = Number(kRaw);
+    try {
+      const resp = await fetch("/api/outliers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Outliers failed") + "</span>";
+        return;
+      }
+      const rows = data.items.map(function (r) {
+        const flag = r.is_outlier ? " &larr; outlier" : "";
+        return "#" + (r.index + 1) + ": " + r.value + " " + data.unit + flag;
+      }).join("<br>");
+      resultEl.innerHTML =
+        "<strong>" + data.outlier_count + "</strong> / " + data.count + " " + data.category +
+        " quantities flagged (k = " + data.k + ", fences " + data.lower_fence + " &hellip; " +
+        data.upper_fence + " " + data.unit + ")" +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' + rows + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function histogram() {
+    const items = parseQuantityList(document.getElementById("histogramExpr").value);
+    if (!items) return;
+    allResultsEl.innerHTML = "";
+    const binsRaw = document.getElementById("histogramBins").value;
+    const bins = binsRaw === "" ? 4 : Number(binsRaw);
+    try {
+      const resp = await fetch("/api/histogram", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: items, to: toEl.value, bins: bins }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Histogram failed") + "</span>";
+        return;
+      }
+      const rows = data.items.map(function (r) {
+        const bar = r.count > 0 ? " ".repeat(0) + "█".repeat(r.count) : "";
+        return "[" + r.start + ", " + r.end + "]: " + r.count + " " + bar;
+      }).join("<br>");
+      resultEl.innerHTML =
+        "<strong>" + data.count + "</strong> " + data.category + " quantities in " +
+        data.bins + " bins (" + data.min + " &hellip; " + data.max + " " + data.unit + ")" +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;font-family:monospace;">' + rows + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function means() {
+    const items = parseQuantityList(document.getElementById("meansExpr").value);
+    if (!items) return;
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/means", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: items, to: toEl.value }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Means failed") + "</span>";
+        return;
+      }
+      const u = " " + data.unit;
+      const rows = [
+        "arithmetic: " + data.arithmetic + u, "geometric: " + data.geometric + u,
+        "harmonic: " + data.harmonic + u, "quadratic (RMS): " + data.quadratic + u,
+      ].join("<br>");
+      resultEl.innerHTML =
+        "<strong>" + data.count + "</strong> " + data.category + " quantities" +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' + rows + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function rank(descending) {
+    const items = parseQuantityList(document.getElementById("rankExpr").value);
+    if (!items) return;
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/rank", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: items, to: toEl.value, descending: descending }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Rank failed") + "</span>";
+        return;
+      }
+      const rows = data.items.map(function (r) {
+        return "#" + (r.index + 1) + ": " + r.value + " " + data.unit +
+          " &rarr; rank " + r.rank + " (" + r.percent_rank + "%)";
+      }).join("<br>");
+      resultEl.innerHTML =
+        "<strong>" + data.count + "</strong> " + data.category + " quantities, ranked " +
+        (data.descending ? "high&rarr;low" : "low&rarr;high") +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' + rows + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function mode() {
+    const items = parseQuantityList(document.getElementById("modeExpr").value);
+    if (!items) return;
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/mode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: items, to: toEl.value }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Mode failed") + "</span>";
+        return;
+      }
+      const list = data.modes.map(function (m) { return m + " " + data.unit; }).join(", ");
+      resultEl.innerHTML =
+        "<strong>" + (data.is_multimodal ? "Modes" : "Mode") + ":</strong> " + list +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' +
+        "frequency " + data.frequency + " of " + data.count + " " + data.category + " quantities" +
+        (data.is_multimodal ? " (multimodal)" : "") + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  // Parse "1 m*1, 3 m*3" — each chunk is a quantity with an optional *weight.
+  function parseWeightedList(raw) {
+    const chunks = (raw || "").split(",").map(function (c) { return c.trim(); }).filter(Boolean);
+    if (chunks.length === 0) {
+      resultEl.innerHTML = '<span class="err">List some quantities, e.g. "1 m*1, 3 m*3".</span>';
+      return null;
+    }
+    const items = [];
+    for (let i = 0; i < chunks.length; i++) {
+      const star = chunks[i].lastIndexOf("*");
+      let qty = chunks[i], weight = null;
+      if (star !== -1) {
+        qty = chunks[i].slice(0, star).trim();
+        weight = chunks[i].slice(star + 1).trim();
+      }
+      const m = qty.match(/^([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)\s*(.+)$/);
+      if (!m) {
+        resultEl.innerHTML = '<span class="err">Could not read "' + chunks[i] + '" — use "&lt;number&gt; &lt;unit&gt;*&lt;weight&gt;".</span>';
+        return null;
+      }
+      const item = { value: m[1], unit: m[2].trim() };
+      if (weight !== null && weight !== "") item.weight = Number(weight);
+      items.push(item);
+    }
+    return items;
+  }
+
+  async function weightedMean() {
+    const items = parseWeightedList(document.getElementById("weightedExpr").value);
+    if (!items) return;
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/weighted-mean", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: items, to: toEl.value }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Weighted mean failed") + "</span>";
+        return;
+      }
+      resultEl.innerHTML =
+        "<strong>" + data.weighted_mean + " " + data.unit + "</strong>" +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' +
+        "weighted mean of " + data.count + " " + data.category + " quantities " +
+        "(total weight " + data.total_weight + ")</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function movingAverage() {
+    const items = parseQuantityList(document.getElementById("movingExpr").value);
+    if (!items) return;
+    allResultsEl.innerHTML = "";
+    const windowRaw = document.getElementById("movingWindow").value;
+    const window = windowRaw === "" ? 2 : Number(windowRaw);
+    try {
+      const resp = await fetch("/api/moving-average", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: items, to: toEl.value, window: window }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Moving average failed") + "</span>";
+        return;
+      }
+      const rows = data.items.map(function (r) {
+        return "[" + (r.start_index + 1) + "&ndash;" + (r.end_index + 1) + "]: " + r.average + " " + data.unit;
+      }).join("<br>");
+      resultEl.innerHTML =
+        "<strong>" + data.count + "</strong> " + data.category + " quantities, window " + data.window +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' + rows + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  document.getElementById("mode").addEventListener("click", mode);
+  document.getElementById("modeExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") mode(); });
+  document.getElementById("weighted").addEventListener("click", weightedMean);
+  document.getElementById("weightedExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") weightedMean(); });
+  document.getElementById("moving").addEventListener("click", movingAverage);
+  document.getElementById("movingExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") movingAverage(); });
+  document.getElementById("means").addEventListener("click", means);
+  document.getElementById("meansExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") means(); });
+  document.getElementById("rankAsc").addEventListener("click", function () { rank(false); });
+  document.getElementById("rankDesc").addEventListener("click", function () { rank(true); });
+  document.getElementById("rankExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") rank(false); });
+  document.getElementById("quartiles").addEventListener("click", quartiles);
+  document.getElementById("quartilesExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") quartiles(); });
+  document.getElementById("outliers").addEventListener("click", outliers);
+  document.getElementById("outliersExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") outliers(); });
+  document.getElementById("histogram").addEventListener("click", histogram);
+  document.getElementById("histogramExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") histogram(); });
+  document.getElementById("diff").addEventListener("click", diff);
+  document.getElementById("diffExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") diff(); });
+  document.getElementById("zscore").addEventListener("click", zscore);
+  document.getElementById("zscoreExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") zscore(); });
+  document.getElementById("normalize").addEventListener("click", normalize);
+  document.getElementById("normalizeExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") normalize(); });
+  document.getElementById("cumsum").addEventListener("click", cumsum);
+  document.getElementById("cumsumExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") cumsum(); });
+  document.getElementById("percentile").addEventListener("click", percentile);
+  document.getElementById("percentileExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") percentile(); });
+  document.getElementById("proportions").addEventListener("click", proportions);
+  document.getElementById("proportionsExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") proportions(); });
+  document.getElementById("stats").addEventListener("click", stats);
+  document.getElementById("statsExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") stats(); });
+  document.getElementById("describe").addEventListener("click", describe);
+  document.getElementById("describeExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") describe(); });
+  document.getElementById("shape").addEventListener("click", shape);
+  document.getElementById("shapeExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") shape(); });
+  document.getElementById("sortAsc").addEventListener("click", function () { sortQuantities(false); });
+  document.getElementById("sortDesc").addEventListener("click", function () { sortQuantities(true); });
+  document.getElementById("sortExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") sortQuantities(false); });
   document.getElementById("sum").addEventListener("click", sumCompound);
   document.getElementById("sumExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") sumCompound(); });
   document.getElementById("compare").addEventListener("click", compare);
