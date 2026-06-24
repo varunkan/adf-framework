@@ -1362,12 +1362,15 @@ Instructions:
               (run?['phase'] as num?)?.toInt() ?? _resolveRunPhase(id);
           final err = run?['error'] as String? ?? 'unknown error';
           await _scheduleSelfHeal(id, phase, err);
-        } else if (status == 'idle') {
-          // RELENTLESS SAFETY NET: a build that went 'idle' but is NOT actually
-          // complete must never just sit there (some exit/resume paths leave an
-          // unfinished direct build idle instead of 'error'). Re-engage the heal
-          // loop so it keeps fighting to green — unless the user must act (an
-          // approval gate), the user cancelled, or the build is genuinely done.
+        } else if (status == 'idle' &&
+            staleRunSec > 0 &&
+            _health.backend.buildsAppDirectly) {
+          // RELENTLESS SAFETY NET (storm-proof): a direct build that went 'idle'
+          // but is NOT actually complete must not sit forever. Re-engage it — but
+          // via the STALE-gated orphan-resume path (fires at most once the run has
+          // been idle for staleRunSec, capped by maxOrphanResumes, _active-guarded
+          // for the agent's whole lifetime), NEVER per-tick, so it can't storm.
+          // Skip approval gates, cancellation, and genuinely-complete builds.
           if (_userCancelled.contains(id)) continue;
           final st = store.readState(id);
           if (st['awaiting_user'] == true) continue;
@@ -1376,11 +1379,8 @@ Instructions:
               (run?['phase'] as num?)?.toInt() ?? 0;
           final complete = gates['review_approved'] == true ||
               (gates['tests_green'] == true && phase >= 7);
-          if (!complete &&
-              _health.backend.buildsAppDirectly &&
-              phase >= 5) {
-            await _scheduleSelfHeal(
-                id, phase, 'build is idle but not complete — resuming the loop');
+          if (!complete && phase >= 5) {
+            await _resumeOrphanedRun(id, run);
           }
         } else if (status == 'needs_login') {
           final h = await getHealth(refresh: true);
