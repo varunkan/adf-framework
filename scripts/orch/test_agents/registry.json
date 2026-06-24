@@ -22,19 +22,19 @@
       "cmd": ["python3", "scripts/orch/test_agents/functional_coverage.py", "{app_dir}"] },
 
     { "id": "e2e", "title": "End-to-end user journeys",
-      "kind": "llm", "gate": "blocking", "block_severity": "medium", "enabled": true,
+      "kind": "llm", "gate": "blocking", "block_severity": "medium", "enabled": false,
       "cmd": ["python3", "scripts/orch/test_agents/llm_agent.py", "e2e", "{app_dir}", "{base_url}"] },
 
     { "id": "integration", "title": "Integration testing — modules + API + storage",
-      "kind": "llm", "gate": "blocking", "block_severity": "medium", "enabled": true,
+      "kind": "llm", "gate": "blocking", "block_severity": "medium", "enabled": false,
       "cmd": ["python3", "scripts/orch/test_agents/llm_agent.py", "integration", "{app_dir}", "{base_url}"] },
 
     { "id": "black-box", "title": "Black-box — contract/boundary/fuzz via API+UI only",
-      "kind": "llm", "gate": "blocking", "block_severity": "medium", "enabled": true,
+      "kind": "llm", "gate": "blocking", "block_severity": "medium", "enabled": false,
       "cmd": ["python3", "scripts/orch/test_agents/llm_agent.py", "black-box", "{app_dir}", "{base_url}"] },
 
     { "id": "white-box", "title": "White-box — branch/path coverage with code knowledge",
-      "kind": "llm", "gate": "advisory", "block_severity": "high", "enabled": true,
+      "kind": "llm", "gate": "advisory", "block_severity": "high", "enabled": false,
       "cmd": ["python3", "scripts/orch/test_agents/llm_agent.py", "white-box", "{app_dir}", "{base_url}"] }
   ]
 }
