@@ -131,6 +131,22 @@ POST routes:
   plain `mean` alongside, plus `trimmed_each_side` and `kept`. The
   outlier-resistant location companion to `/api/means` (classical means) and
   `/api/mad` (robust spread); rejects a `proportion` outside `[0, 0.5)`.
+- `/api/winsorize` — `{items:[{value,unit},...], proportion?, to?}` → the full
+  **winsorized series** of same-category quantities, one entry per input in the
+  original order, each clamped to the trim bounds and flagged, restated in `to`
+  (or the first item's unit). Where `/api/trimmed-mean` collapses the data to the
+  scalar winsorized *mean*, this returns the whole transformed dataset: with the
+  values sorted ascending and `g = floor(n·proportion)`, every value below
+  `lower` (`= ordered[g]`) is raised to `lower` and every value above `upper`
+  (`= ordered[n−1−g]`) is lowered to `upper`, while the middle block is left
+  untouched. Each item reports its `winsorized` value and whether it was
+  `clamped` (strictly outside `[lower, upper]`); also reports the untouched
+  `mean`, the `winsorized_mean` (identical to the one `/api/trimmed-mean` gives
+  for the same `proportion`) and the `winsorized_stdev` (population stdev of the
+  clamped series). `proportion` is the fraction clamped from *each* tail (default
+  `0.1`, must be in `[0, 0.5)`). The per-item transformation companion to
+  `/api/trimmed-mean`, alongside `/api/zscore`, `/api/normalize` and
+  `/api/outliers`.
 - `/api/ema` — `{items:[{value,unit},...], alpha?, span?, to?}` → the
   **exponential moving average** (exponential smoothing) over each item on a
   common unit (`ema[0] = value[0]`, `ema[i] = α·value[i] + (1−α)·ema[i−1]`). The
@@ -140,3 +156,39 @@ POST routes:
   one smoothed value per item over the whole history and weights recent items
   more heavily — the reactive smoothing companion to `/api/cumsum` and
   `/api/diff`.
+- `/api/autocorrelation` — `{items:[{value,unit},...], maxlag?, to?}` → the
+  **serial (auto)correlation** `r_k` of a *single* series at lags `0..maxlag`,
+  on a common unit. Where the bivariate `/api/correlation` family relates two
+  different series, this correlates one series with a delayed copy of itself — the
+  standard trend/seasonality/momentum diagnostic, the serial-dependence companion
+  to `/api/moving-average`, `/api/ema` and `/api/diff`. Uses the population mean
+  (`r_k = Σ(xₜ−m)(xₜ₋ₖ−m) / Σ(xₜ−m)²`), so `r0` is always `1` and every `r_k` is
+  in `[-1, 1]`. The coefficients are **dimensionless** (invariant under `to`);
+  only the reported `mean`/`variance`/`stdev` carry the unit. `maxlag` is optional
+  and defaults to `count − 1` (must be an integer in `[0, count − 1]`); rejects
+  fewer than two items or a **zero-variance** series (every value identical).
+- `/api/robust-zscore` — `{items:[{value,unit},...], threshold?, to?}` → each
+  quantity's **modified (robust) z-score**, the Iglewicz–Hoaglin score
+  standardised against the **median** and the **median absolute deviation (MAD)**
+  rather than the outlier-sensitive mean and stdev of `/api/zscore`:
+  `Mi = 0.6745·(x − median)/MAD`. An item is flagged `is_outlier` when `|Mi|`
+  exceeds `threshold` (default 3.5, the Iglewicz–Hoaglin cut-off). The score is
+  **dimensionless** (invariant under `to`); only `median`/`mad` carry the unit.
+  When the MAD is zero it falls back to the **mean** absolute deviation about the
+  median (`Mi = (x − median)/(1.253314·meanAD)`), reporting `method` as `"mad"`
+  or `"meanad"`. Rejects a non-positive `threshold` and an all-identical series
+  (both deviations vanish). The outlier-robust companion to `/api/zscore`,
+  `/api/mad` and `/api/outliers`.
+- `/api/confidence-interval` — `{items:[{value,unit},...], confidence?, to?}` →
+  a two-sided **confidence interval for the population mean**, using the
+  large-sample **normal (z) approximation**: with the sample mean `x̄`, the
+  unbiased sample stdev `s` (`/(n−1)`) and `n` observations, the **standard error
+  of the mean** is `SE = s/√n`, the critical value is the normal quantile
+  `z = Φ⁻¹((1+confidence)/2)`, the **margin of error** is `z·SE` and the interval
+  is `[x̄ − z·SE, x̄ + z·SE]`. Reports `mean`, `sample_stdev`, `standard_error`,
+  `critical_value`, `margin_of_error` and the `lower`/`upper` bounds.
+  `confidence` defaults to 0.95 and must lie strictly in `(0, 1)` (0.95 → z≈1.96,
+  0.99 → z≈2.576). The probit `Φ⁻¹` is computed in-house (Acklam's
+  approximation + a Halley refinement against `math.erfc`) — standard library
+  only. Requires at least two values (the standard error is undefined for one
+  observation). The inferential companion to `/api/describe`.

@@ -402,6 +402,9 @@ class RequestHandler(BaseHTTPRequestHandler):
         if self.path == "/api/mad":
             self._handle_mad()
             return
+        if self.path == "/api/cv":
+            self._handle_cv()
+            return
         if self.path == "/api/rank":
             self._handle_rank()
             return
@@ -443,6 +446,18 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/trimmed-mean":
             self._handle_trimmed_mean()
+            return
+        if self.path == "/api/winsorize":
+            self._handle_winsorize()
+            return
+        if self.path == "/api/autocorrelation":
+            self._handle_autocorrelation()
+            return
+        if self.path == "/api/robust-zscore":
+            self._handle_robust_zscore()
+            return
+        if self.path == "/api/confidence-interval":
+            self._handle_confidence_interval()
             return
         if self.path != "/api/convert":
             self._send_json(404, {"error": "not found"})
@@ -1294,6 +1309,47 @@ class RequestHandler(BaseHTTPRequestHandler):
             ],
         })
 
+    def _handle_cv(self):
+        """POST /api/cv — {items: [{value, unit}, ...], to?} -> the relative
+        (scale-free) dispersion statistics: the coefficient of variation
+        (population and sample, as a ratio and a percentage), the variance-to-mean
+        index of dispersion (Fano factor) and the signal-to-noise ratio, plus the
+        mean, variance and standard deviations they are built from, all restated
+        in 'to' (or the first item's unit). The relative-spread companion to
+        /api/describe (absolute spread) and /api/mad (robust spread). Additive:
+        reuses ``domain.cv_quantities`` and never touches the other convert
+        paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        parsed = self._items_request(data)
+        if parsed is None:
+            return
+        items, to_unit, precision = parsed
+        try:
+            result = domain.cv_quantities(items, to_unit)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "category": result["category"],
+            "unit": result["unit"],
+            "count": result["count"],
+            "mean": round(result["mean"], precision),
+            "variance": round(result["variance"], precision),
+            "stdev": round(result["stdev"], precision),
+            "sample_stdev": self._round_opt(result["sample_stdev"], precision),
+            "cv": self._round_opt(result["cv"], precision),
+            "sample_cv": self._round_opt(result["sample_cv"], precision),
+            "cv_percent": self._round_opt(result["cv_percent"], precision),
+            "sample_cv_percent": self._round_opt(
+                result["sample_cv_percent"], precision),
+            "index_of_dispersion": self._round_opt(
+                result["index_of_dispersion"], precision),
+            "signal_to_noise": self._round_opt(
+                result["signal_to_noise"], precision),
+        })
+
     def _handle_rank(self):
         """POST /api/rank — {items: [{value, unit}, ...], to?, descending?} ->
         each quantity's rank (1-based, ties share the average rank) and percentile
@@ -1781,6 +1837,173 @@ class RequestHandler(BaseHTTPRequestHandler):
             "mean": round(result["mean"], precision),
             "trimmed_mean": round(result["trimmed_mean"], precision),
             "winsorized_mean": round(result["winsorized_mean"], precision),
+            "lower": round(result["lower"], precision),
+            "upper": round(result["upper"], precision),
+        })
+
+    def _handle_winsorize(self):
+        """POST /api/winsorize — {items: [{value, unit}, ...], proportion?, to?}
+        -> the winsorized SERIES of a list of same-category quantities, one entry
+        per input in original order, each clamped to the trim bounds and flagged,
+        all restated in 'to' (or the first item's unit). 'proportion' is the
+        fraction clamped at each tail (default 0.1, in [0, 0.5)). The per-item
+        transformation companion to /api/trimmed-mean (which reports only the
+        scalar winsorized mean), alongside /api/zscore, /api/normalize and
+        /api/outliers. Additive: reuses ``domain.winsorize_quantities`` and never
+        touches the other convert paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        parsed = self._items_request(data)
+        if parsed is None:
+            return
+        items, to_unit, precision = parsed
+        # proportion is optional; the domain layer defaults and validates it.
+        proportion = data.get("proportion", 0.1)
+        try:
+            result = domain.winsorize_quantities(items, proportion, to_unit)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "category": result["category"],
+            "unit": result["unit"],
+            "count": result["count"],
+            "proportion": result["proportion"],
+            "clamped_each_side": result["clamped_each_side"],
+            "lower": round(result["lower"], precision),
+            "upper": round(result["upper"], precision),
+            "mean": round(result["mean"], precision),
+            "winsorized_mean": round(result["winsorized_mean"], precision),
+            "winsorized_stdev": round(result["winsorized_stdev"], precision),
+            "items": [
+                {"index": r["index"],
+                 "value": round(r["value"], precision),
+                 "winsorized": round(r["winsorized"], precision),
+                 "clamped": r["clamped"]}
+                for r in result["items"]
+            ],
+        })
+
+    def _handle_autocorrelation(self):
+        """POST /api/autocorrelation — {items: [{value, unit}, ...], maxlag?, to?}
+        -> the serial (auto)correlation of a single series of same-category
+        quantities at lags 0..maxlag, on a common unit. Where /api/correlation &
+        friends relate two different series, this correlates one series with a
+        delayed copy of itself (the standard trend/seasonality diagnostic) — the
+        serial-dependence companion to /api/moving-average, /api/ema and /api/diff.
+        'maxlag' is optional and defaults to count-1. The coefficients are
+        dimensionless; r0 is always 1. Additive: reuses ``domain.autocorrelation``
+        and never touches the other convert paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        items = data.get("items")
+        if not isinstance(items, list):
+            self._send_json(400, {"error": "'items' must be a list"})
+            return
+        to_unit = data.get("to")
+        precision = self._precision_or_400(data)
+        if precision is None:
+            return
+        # maxlag is optional; the domain layer defaults it to count-1 and
+        # validates it.
+        try:
+            result = domain.autocorrelation(items, data.get("maxlag"), to_unit)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "category": result["category"],
+            "unit": result["unit"],
+            "count": result["count"],
+            "maxlag": result["maxlag"],
+            "mean": round(result["mean"], precision),
+            "variance": round(result["variance"], precision),
+            "stdev": round(result["stdev"], precision),
+            "items": [
+                {"lag": r["lag"],
+                 "autocorrelation": round(r["autocorrelation"], precision)}
+                for r in result["items"]
+            ],
+        })
+
+    def _handle_robust_zscore(self):
+        """POST /api/robust-zscore — {items: [{value, unit}, ...], threshold?, to?}
+        -> each quantity's modified (robust) z-score, the Iglewicz-Hoaglin score
+        standardised against the median and the median absolute deviation (MAD)
+        instead of the mean and stdev. The outlier-robust companion to /api/zscore
+        (mean/stdev), /api/mad (median/MAD) and /api/outliers (IQR fences). Each
+        item is flagged is_outlier when |score| exceeds 'threshold' (default 3.5).
+        The score is dimensionless; only median/mad carry the unit. 'threshold' is
+        optional and validated by the domain layer. Additive: reuses
+        ``domain.robust_zscores`` and never touches the other convert paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        parsed = self._items_request(data)
+        if parsed is None:
+            return
+        items, to_unit, precision = parsed
+        # threshold is optional; the domain layer defaults it to 3.5 and validates.
+        try:
+            result = domain.robust_zscores(items, data.get("threshold"), to_unit)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "category": result["category"],
+            "unit": result["unit"],
+            "count": result["count"],
+            "median": round(result["median"], precision),
+            "mad": round(result["mad"], precision),
+            "mean_abs_deviation": round(result["mean_abs_deviation"], precision),
+            "method": result["method"],
+            "threshold": result["threshold"],
+            "outlier_count": result["outlier_count"],
+            "items": [
+                {"index": r["index"],
+                 "value": round(r["value"], precision),
+                 "robust_zscore": round(r["robust_zscore"], precision),
+                 "is_outlier": r["is_outlier"]}
+                for r in result["items"]
+            ],
+        })
+
+    def _handle_confidence_interval(self):
+        """POST /api/confidence-interval — {items: [{value, unit}, ...], confidence?,
+        to?} -> a two-sided confidence interval for the population MEAN, using the
+        large-sample normal (z) approximation: mean +/- z * (sample_stdev /
+        sqrt(n)). The inferential companion to /api/describe (which reports the
+        sample mean/spread as fixed descriptions); this reports the standard error
+        of the mean, the two-sided critical z value, the margin of error and the
+        lower/upper bounds. 'confidence' is optional (default 0.95, strictly in
+        (0, 1)) and validated by the domain layer, which also requires at least two
+        values. Additive: reuses ``domain.confidence_interval`` and never touches
+        the other convert paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        parsed = self._items_request(data)
+        if parsed is None:
+            return
+        items, to_unit, precision = parsed
+        # confidence is optional; the domain layer defaults it to 0.95 and validates.
+        try:
+            result = domain.confidence_interval(items, data.get("confidence"), to_unit)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "category": result["category"],
+            "unit": result["unit"],
+            "count": result["count"],
+            "confidence": result["confidence"],
+            "mean": round(result["mean"], precision),
+            "sample_stdev": round(result["sample_stdev"], precision),
+            "standard_error": round(result["standard_error"], precision),
+            "critical_value": round(result["critical_value"], precision),
+            "margin_of_error": round(result["margin_of_error"], precision),
             "lower": round(result["lower"], precision),
             "upper": round(result["upper"], precision),
         })

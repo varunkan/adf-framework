@@ -2349,6 +2349,17 @@ def means(items, to_unit=None):
 # quantile of the standard normal), which to the precision we report is 1.4826.
 MAD_SCALE = 1.4826
 
+# Iglewicz & Hoaglin (1993) modified z-score constants. 0.6745 == Phi^-1(3/4),
+# the 0.75 quantile of the standard normal, so 0.6745/MAD is a consistent
+# estimator of 1/sigma for normally distributed data (it is exactly the
+# reciprocal of MAD_SCALE to four places). 1.253314 == sqrt(pi/2) is the
+# corresponding consistency factor for the *mean* absolute deviation, used only
+# as the fallback scale when the MAD is zero. The recommended outlier cut-off is
+# a modified z-score whose magnitude exceeds 3.5.
+ROBUST_Z_CONSTANT = 0.6745
+ROBUST_Z_MEANAD_CONSTANT = 1.253314
+ROBUST_Z_DEFAULT_THRESHOLD = 3.5
+
 
 def mad_quantities(items, to_unit=None):
     """Absolute-deviation (robust dispersion) statistics for SAME-category items.
@@ -2431,6 +2442,106 @@ def mad_quantities(items, to_unit=None):
         "median_abs_deviation": median_abs_deviation,
         "median_abs_deviation_scaled": MAD_SCALE * median_abs_deviation,
         "items": out,
+    }
+
+
+def cv_quantities(items, to_unit=None):
+    """Relative-dispersion statistics for a list of SAME-category quantities.
+
+    The *relative* (scale-free) companion to :func:`describe_quantities` (which
+    reports the absolute variance/standard deviation) and :func:`mad_quantities`
+    (robust absolute spread). Where the standard deviation answers "how spread
+    out, in the unit?", these answer "how spread out *relative to the mean*?",
+    so two series on different scales can be compared directly. Every quantity is
+    first restated in a single common ``to_unit`` (or, when omitted, the first
+    item's unit) so the statistics are apples-to-apples — exactly like
+    :func:`sum_quantities` and the rest of the aggregate family. It reports:
+
+    * ``mean`` / ``variance`` / ``stdev`` — the population centre and spread
+      (matching :func:`describe_quantities`), so the ratios can be read against
+      the figures they are built from; ``sample_stdev`` divides by ``N-1`` and is
+      ``None`` for a single item (undefined, exactly as in
+      :func:`describe_quantities`);
+    * ``cv`` — the **coefficient of variation**, ``stdev / |mean|``, the
+      dimensionless population relative standard deviation; ``sample_cv`` is the
+      same ratio built from the sample stdev. ``cv_percent`` /
+      ``sample_cv_percent`` are those ratios as percentages;
+    * ``index_of_dispersion`` — the variance-to-mean ratio ``variance / mean``
+      (a.k.a. the Fano factor; ``1`` for a Poisson process, ``< 1`` under-
+      dispersed, ``> 1`` over-dispersed); and
+    * ``signal_to_noise`` — the reciprocal of the CV, ``mean / stdev``.
+
+    The CV and the index of dispersion are undefined when the mean is zero, and
+    the signal-to-noise ratio is undefined when the standard deviation is zero;
+    each is reported as ``None`` in that case rather than raising. The CV uses
+    ``|mean|`` so it stays a non-negative magnitude, while the (signed) index of
+    dispersion and signal-to-noise keep the mean's sign.
+
+    ``items`` is a list of {"value": <number>, "unit": <token>} dicts (a
+    ``(value, unit)`` tuple is also accepted), identical to ``sum_quantities``.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,
+            "mean": <float>,
+            "variance": <float>,            # population (/ N)
+            "stdev": <float>,               # population (/ N)
+            "sample_stdev": <float|None>,   # sample (/ N-1), None for n == 1
+            "cv": <float|None>,             # stdev / |mean|, None when mean == 0
+            "sample_cv": <float|None>,      # sample_stdev / |mean|
+            "cv_percent": <float|None>,         # 100 * cv
+            "sample_cv_percent": <float|None>,  # 100 * sample_cv
+            "index_of_dispersion": <float|None>,  # variance / mean
+            "signal_to_noise": <float|None>,      # mean / stdev, None when stdev == 0
+        }
+
+    Raises ValueError for an empty/non-list input, a malformed item, an unknown
+    or cross-category unit, a non-finite value, or a non-linear category
+    (temperature is affine and fuel economy is reciprocal — neither has a
+    meaningful spread on a single common unit). Item validation is delegated to
+    ``sum_quantities`` so the accepted inputs stay identical to the rest of the
+    aggregate family.
+    """
+    # sum_quantities does the full validation (list shape, item shape, finite
+    # values, single linear category, valid target) and resolves both the running
+    # total and the common target unit, so a bad input fails here before any
+    # statistics run.
+    total, unit, category = sum_quantities(items, to_unit)
+
+    converted = _restate_items(items, unit)
+    count = len(converted)
+    mean = total / count
+
+    squared_deviations = sum((x - mean) ** 2 for x in converted)
+    variance = squared_deviations / count
+    stdev = math.sqrt(variance)
+    sample_stdev = math.sqrt(squared_deviations / (count - 1)) if count > 1 else None
+
+    # The CV uses |mean| so it stays a non-negative relative magnitude; it (and
+    # the index of dispersion) are undefined at a zero mean, and the SNR is
+    # undefined at a zero spread. Report None there rather than dividing by zero.
+    cv = (stdev / abs(mean)) if mean != 0 else None
+    sample_cv = (sample_stdev / abs(mean)) if (mean != 0 and sample_stdev is not None) else None
+    index_of_dispersion = (variance / mean) if mean != 0 else None
+    signal_to_noise = (mean / stdev) if stdev != 0 else None
+
+    return {
+        "category": category,
+        "unit": unit,
+        "count": count,
+        "mean": mean,
+        "variance": variance,
+        "stdev": stdev,
+        "sample_stdev": sample_stdev,
+        "cv": cv,
+        "sample_cv": sample_cv,
+        "cv_percent": (100.0 * cv) if cv is not None else None,
+        "sample_cv_percent": (100.0 * sample_cv) if sample_cv is not None else None,
+        "index_of_dispersion": index_of_dispersion,
+        "signal_to_noise": signal_to_noise,
     }
 
 
@@ -3483,6 +3594,125 @@ def trimmed_mean(items, proportion=0.1, to_unit=None):
     }
 
 
+def winsorize_quantities(items, proportion=0.1, to_unit=None):
+    """Winsorize a series of SAME-category quantities — return the clamped data.
+
+    The per-item transformation companion to :func:`trimmed_mean` (which reports
+    only the scalar winsorized *mean*): where ``trimmed_mean`` collapses the
+    dataset to a single robust centre, this returns the full winsorized SERIES,
+    one entry per input in the original order, exactly like :func:`zscores`,
+    :func:`normalize_quantities` and :func:`outliers` do for their own
+    transforms. Winsorizing replaces the most extreme values — rather than
+    dropping them, as a trim would — with the nearest value that survives the
+    trim, so a single wild measurement is pulled in to the boundary instead of
+    distorting the spread. Every quantity is first restated in a single common
+    ``to_unit`` (or, when omitted, the first item's unit) so the clamp is
+    apples-to-apples, identical to :func:`sum_quantities` and the rest of the
+    aggregate family.
+
+    ``proportion`` is the fraction winsorized at EACH tail, so a proportion ``p``
+    clamps a total of ``2p`` of the data. The count clamped on each side is
+    ``g = floor(n * p)`` (the same symmetric floor convention as
+    :func:`trimmed_mean`). With the values sorted ascending, ``lower`` is the
+    ``g``-th smallest survivor (``ordered[g]``) and ``upper`` is the ``g``-th
+    largest survivor (``ordered[n-1-g]``); every value below ``lower`` is raised
+    to ``lower`` and every value above ``upper`` is lowered to ``upper``, while
+    the middle block is left untouched. With ``p == 0`` nothing is clamped and
+    the winsorized series equals the restated input.
+
+    For each item ``winsorized`` is the clamped value and ``clamped`` is whether
+    that value actually changed (strictly outside ``[lower, upper]``; a value
+    sitting exactly on a bound is unchanged and so is not flagged).
+    ``winsorized_mean`` and ``winsorized_stdev`` are the population mean and
+    population standard deviation of the clamped series, reported against the
+    untouched ``mean`` so the robust shift can be read directly; the
+    ``winsorized_mean`` here is by construction identical to the one
+    :func:`trimmed_mean` returns for the same ``proportion``.
+
+    ``items`` is a list of {"value": <number>, "unit": <token>} dicts (a
+    ``(value, unit)`` tuple is also accepted), identical to ``sum_quantities``.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int n>,
+            "proportion": <float p>,
+            "clamped_each_side": <int g>,
+            "lower": <float>,
+            "upper": <float>,
+            "mean": <float>,                 # untouched arithmetic mean
+            "winsorized_mean": <float>,
+            "winsorized_stdev": <float>,     # population stdev of clamped series
+            "items": [
+                {"index": <int>, "value": <float>,
+                 "winsorized": <float>, "clamped": <bool>}, ...
+            ],
+        }
+
+    Raises ValueError for an empty/non-list input, a malformed item, an unknown
+    or cross-category unit, a non-finite value, a non-linear category
+    (temperature is affine and fuel economy is reciprocal — neither averages
+    meaningfully on a single common unit), or a ``proportion`` that is not a
+    finite number in ``[0, 0.5)``. Item validation is delegated to
+    :func:`_series_values` so the accepted inputs stay identical to the rest of
+    the aggregate family.
+    """
+    try:
+        p = float(proportion)
+    except (TypeError, ValueError):
+        raise ValueError("'proportion' must be a number")
+    if p != p or p in (float("inf"), float("-inf")):
+        raise ValueError("'proportion' must be finite")
+    if p < 0.0 or p >= 0.5:
+        raise ValueError("'proportion' must be in [0, 0.5)")
+
+    values, unit, category = _series_values(items, to_unit)
+    n = len(values)
+    ordered = sorted(values)
+
+    # Symmetric floor winsorize: clamp g from each tail. p < 0.5 guarantees
+    # 2g < n, so the clamp bounds always straddle at least one untouched value.
+    g = int(math.floor(n * p))
+    lower = ordered[g]
+    upper = ordered[n - 1 - g]
+
+    mean = sum(values) / n
+    out = []
+    clamped_total = 0.0
+    for index, value in enumerate(values):
+        if value < lower:
+            w = lower
+            clamped = True
+        elif value > upper:
+            w = upper
+            clamped = True
+        else:
+            w = value
+            clamped = False
+        clamped_total += w
+        out.append({"index": index, "value": value,
+                    "winsorized": w, "clamped": clamped})
+
+    winsorized_mean = clamped_total / n
+    var = sum((row["winsorized"] - winsorized_mean) ** 2 for row in out) / n
+    winsorized_stdev = math.sqrt(var)
+    return {
+        "category": category,
+        "unit": unit,
+        "count": n,
+        "proportion": p,
+        "clamped_each_side": g,
+        "lower": lower,
+        "upper": upper,
+        "mean": mean,
+        "winsorized_mean": winsorized_mean,
+        "winsorized_stdev": winsorized_stdev,
+        "items": out,
+    }
+
+
 def _median_sorted(ordered):
     """Median of an already-ascending list (length >= 1)."""
     m = len(ordered)
@@ -3567,4 +3797,379 @@ def theil_sen(x_items, y_items, to_x=None, to_y=None):
         "median_y": _median_sorted(sorted(ys)),
         "mean_x": sum(xs) / n,
         "mean_y": sum(ys) / n,
+    }
+
+
+def autocorrelation(items, maxlag=None, to_unit=None):
+    """Serial (auto)correlation of ONE series of same-category quantities at a
+    range of lags.
+
+    Where the bivariate :func:`correlation` family relates two *different* series
+    ``x`` and ``y``, the autocorrelation correlates a single series *with a
+    delayed copy of itself* — the standard time-series diagnostic for asking "does
+    each reading resemble the one ``k`` steps earlier?" (trend, seasonality,
+    momentum). It is the serial-dependence companion to the smoothing family
+    (:func:`moving_average`, :func:`ema`) and the step-to-step :func:`differences`.
+
+    Every quantity is first restated in a single common ``to_unit`` (or, when
+    omitted, the first item's unit) so the series is apples-to-apples — exactly
+    like :func:`sum_quantities` and the rest of the aggregate family. Using the
+    population mean ``m`` (matching :func:`zscores` / :func:`describe_quantities`),
+    the autocorrelation at lag ``k`` is the standard biased estimator
+
+        r_k = sum_{t=k}^{n-1} (x_t - m)(x_{t-k} - m) / sum_{t=0}^{n-1} (x_t - m)^2
+
+    so ``r_0`` is always ``1`` and every ``r_k`` lies in ``[-1, 1]``. Because both
+    sums scale with the unit squared, the coefficient is **dimensionless** — it is
+    invariant under the choice of ``to_unit`` (only the reported ``mean``/``stdev``
+    carry the unit).
+
+    ``maxlag`` is the largest lag to report (lags ``0..maxlag`` are returned). It
+    is optional: when omitted it defaults to ``n - 1`` (every computable lag). It
+    must be an integer in ``[0, n - 1]``. ``items`` is a list of
+    {"value": <number>, "unit": <token>} dicts (a ``(value, unit)`` tuple is also
+    accepted), identical to ``sum_quantities``.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,
+            "maxlag": <int>,
+            "mean": <float>,             # population mean, in the target unit
+            "variance": <float>,         # population variance, in unit^2
+            "stdev": <float>,            # population stdev, in the target unit
+            "items": [{"lag": <int>, "autocorrelation": <float>}, ...],
+        }
+
+    Raises ValueError for a non-integer / out-of-range ``maxlag``, fewer than two
+    items, an empty/non-list input, a malformed item, an unknown or cross-category
+    unit, a non-finite value, a non-linear category (temperature is affine and
+    fuel economy is reciprocal), or a **zero variance** (every quantity is
+    identical, so the lag-0 normaliser vanishes and the correlation is undefined —
+    matching the guard in :func:`zscores`). Item validation is delegated to
+    :func:`_series_values` so the accepted inputs stay identical to the rest of the
+    aggregate family.
+    """
+    # _series_values does the full validation (list shape, item shape, finite
+    # values, single linear category, valid target) and resolves the common
+    # target unit, so a bad input fails here before any lag runs.
+    converted, unit, category = _series_values(items, to_unit)
+    n = len(converted)
+    if n < 2:
+        raise ValueError("autocorrelation needs at least two items")
+
+    if maxlag is None:
+        maxlag = n - 1
+    # bool is an int subclass; reject it so True/False can't masquerade as a lag.
+    if isinstance(maxlag, bool) or not isinstance(maxlag, int):
+        raise ValueError("'maxlag' must be an integer")
+    if maxlag < 0:
+        raise ValueError("'maxlag' must be at least 0")
+    if maxlag > n - 1:
+        raise ValueError(
+            "'maxlag' (%d) cannot exceed the number of items minus one (%d)"
+            % (maxlag, n - 1)
+        )
+
+    mean = sum(converted) / n
+    deviations = [x - mean for x in converted]
+    denom = sum(d * d for d in deviations)
+    if denom == 0:
+        raise ValueError(
+            "cannot compute autocorrelation when every quantity is identical "
+            "(variance is zero)"
+        )
+
+    out = []
+    for lag in range(maxlag + 1):
+        numer = sum(
+            deviations[t] * deviations[t - lag] for t in range(lag, n)
+        )
+        out.append({"lag": lag, "autocorrelation": numer / denom})
+
+    variance = denom / n
+    return {
+        "category": category,
+        "unit": unit,
+        "count": n,
+        "maxlag": maxlag,
+        "mean": mean,
+        "variance": variance,
+        "stdev": math.sqrt(variance),
+        "items": out,
+    }
+
+
+def robust_zscores(items, threshold=None, to_unit=None):
+    """Modified (robust) z-score of each quantity — the Iglewicz & Hoaglin score.
+
+    The outlier-robust companion to :func:`zscores`. Where the classic z-score
+    standardises against the **mean** and **population standard deviation** — both
+    of which are themselves pulled by the very outliers one is hunting for — the
+    modified z-score standardises against the **median** and the **median absolute
+    deviation (MAD)**, neither of which a few extreme points can budge. Every
+    quantity is first restated in a single common ``to_unit`` (or, when omitted,
+    the first item's unit) so the scores are apples-to-apples — exactly like
+    :func:`sum_quantities` and the rest of the aggregate family.
+
+    With the median ``M`` and ``MAD = median(|x - M|)`` (the same robust spread
+    :func:`mad_quantities` reports), each item's ``robust_zscore`` is
+
+        Mi = 0.6745 * (x - M) / MAD
+
+    The 0.6745 factor (``Phi^-1(3/4)``) makes ``0.6745 / MAD`` a consistent
+    estimator of ``1 / sigma`` for normal data, so the modified z-score is on the
+    same scale as the ordinary z-score and, being a ratio of like units, is
+    **dimensionless** (invariant under ``to_unit`` — only the reported
+    ``median``/``mad`` carry the unit). An item is flagged ``is_outlier`` when its
+    magnitude exceeds ``threshold`` (default 3.5, the value Iglewicz & Hoaglin
+    recommend).
+
+    When the MAD is zero (more than half the values share the median, yet some
+    differ) the score falls back to the **mean** absolute deviation about the
+    median, ``meanAD = mean(|x - M|)``, with its own consistency factor
+    ``Mi = (x - M) / (1.253314 * meanAD)``; the ``method`` field reports which
+    scale was used (``"mad"`` or ``"meanad"``).
+
+    ``items`` is a list of {"value": <number>, "unit": <token>} dicts (a
+    ``(value, unit)`` tuple is also accepted), identical to ``sum_quantities``.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,
+            "median": <float>,                # in the target unit
+            "mad": <float>,                    # median(|x - median|), target unit
+            "mean_abs_deviation": <float>,     # mean(|x - median|), target unit
+            "method": "mad" | "meanad",        # which scale standardised the score
+            "threshold": <float>,
+            "outlier_count": <int>,
+            "items": [{"index": <int>, "value": <float>,
+                       "robust_zscore": <float>, "is_outlier": <bool>}, ...],
+        }
+
+    Raises ValueError for an empty/non-list input, a malformed item, an unknown or
+    cross-category unit, a non-finite value, a non-linear category (temperature is
+    affine and fuel economy is reciprocal), a non-positive / non-finite
+    ``threshold``, or a series in which **every quantity is identical** (both the
+    MAD and the mean absolute deviation vanish, so there is no spread to divide by
+    — matching the guard in :func:`zscores`). Item validation is delegated to
+    ``sum_quantities`` so the accepted inputs stay identical to the rest of the
+    aggregate family.
+    """
+    if threshold is None:
+        threshold = ROBUST_Z_DEFAULT_THRESHOLD
+    if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
+        raise ValueError("'threshold' must be a number")
+    threshold = float(threshold)
+    if threshold != threshold or threshold in (float("inf"), float("-inf")):
+        raise ValueError("'threshold' must be finite")
+    if threshold <= 0:
+        raise ValueError("'threshold' must be positive")
+
+    # sum_quantities does the full validation (list shape, item shape, finite
+    # values, single linear category, valid target) and resolves both the running
+    # total and the common target unit, so a bad input fails here before any
+    # score runs.
+    _total, unit, category = sum_quantities(items, to_unit)
+
+    converted = _restate_items(items, unit)
+    count = len(converted)
+    median = _percentile_of_sorted(sorted(converted), 50)
+
+    abs_devs = [abs(x - median) for x in converted]
+    mad = _percentile_of_sorted(sorted(abs_devs), 50)
+    mean_abs_deviation = sum(abs_devs) / count
+
+    if mad != 0:
+        method = "mad"
+        scale = mad / ROBUST_Z_CONSTANT
+    elif mean_abs_deviation != 0:
+        # All-but-some values equal the median: MAD collapses to 0 but the mean
+        # absolute deviation still has spread, so fall back to it.
+        method = "meanad"
+        scale = ROBUST_Z_MEANAD_CONSTANT * mean_abs_deviation
+    else:
+        raise ValueError(
+            "cannot compute robust z-scores when every quantity is identical "
+            "(both the MAD and the mean absolute deviation are zero)"
+        )
+
+    out = []
+    outlier_count = 0
+    for index, value in enumerate(converted):
+        score = (value - median) / scale
+        is_outlier = abs(score) > threshold
+        if is_outlier:
+            outlier_count += 1
+        out.append({
+            "index": index,
+            "value": value,
+            "robust_zscore": score,
+            "is_outlier": is_outlier,
+        })
+    return {
+        "category": category,
+        "unit": unit,
+        "count": count,
+        "median": median,
+        "mad": mad,
+        "mean_abs_deviation": mean_abs_deviation,
+        "method": method,
+        "threshold": threshold,
+        "outlier_count": outlier_count,
+        "items": out,
+    }
+
+
+# Default confidence level for :func:`confidence_interval` — the conventional
+# 95% interval.
+CI_DEFAULT_CONFIDENCE = 0.95
+
+
+def _inv_normal_cdf(p):
+    """Inverse of the standard-normal CDF (the *probit* function).
+
+    Returns the ``z`` such that ``Phi(z) == p`` for ``0 < p < 1``, using Peter
+    Acklam's rational approximation followed by one Halley refinement step
+    against :func:`math.erfc`. The refinement pins the result to full double
+    precision (relative error ~1e-15), so ``_inv_normal_cdf(0.975)`` returns the
+    familiar ``1.959963985...`` and ``_inv_normal_cdf(0.995)`` returns
+    ``2.575829303...``. Standard-library only — no statistics/scipy dependency.
+
+    Raises ValueError when ``p`` is not strictly inside ``(0, 1)``.
+    """
+    if not (0.0 < p < 1.0):
+        raise ValueError("probability must be strictly between 0 and 1")
+
+    # Coefficients for Acklam's rational approximation.
+    a = [-3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02,
+         1.383577518672690e+02, -3.066479806614716e+01, 2.506628277459239e+00]
+    b = [-5.447609879822406e+01, 1.615858368580409e+02, -1.556989798598866e+02,
+         6.680131188771972e+01, -1.328068155288572e+01]
+    c = [-7.784894002430293e-03, -3.223964580411365e-01, -2.400758277161838e+00,
+         -2.549732539343734e+00, 4.374664141464968e+00, 2.938163982698783e+00]
+    d = [7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e+00,
+         3.754408661907416e+00]
+    p_low = 0.02425
+    p_high = 1.0 - p_low
+
+    if p < p_low:
+        q = math.sqrt(-2.0 * math.log(p))
+        x = (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / \
+            ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1.0)
+    elif p <= p_high:
+        q = p - 0.5
+        r = q * q
+        x = (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q / \
+            (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1.0)
+    else:
+        q = math.sqrt(-2.0 * math.log(1.0 - p))
+        x = -(((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / \
+            ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1.0)
+
+    # One Halley step: e == Phi(x) - p, refined against the exact erfc.
+    e = 0.5 * math.erfc(-x / math.sqrt(2.0)) - p
+    u = e * math.sqrt(2.0 * math.pi) * math.exp(x * x / 2.0)
+    x = x - u / (1.0 + x * u / 2.0)
+    return x
+
+
+def confidence_interval(items, confidence=None, to_unit=None):
+    """Confidence interval for the population MEAN of a list of quantities.
+
+    The inferential companion to :func:`describe_quantities`: where ``describe``
+    reports the sample mean and spread as fixed descriptions of the data at hand,
+    this asks *how precisely that sample pins down the true population mean* and
+    answers with a two-sided interval ``mean +/- margin``. Every quantity is
+    first restated in a single common ``to_unit`` (or, when omitted, the first
+    item's unit) so the interval is apples-to-apples — exactly like
+    :func:`sum_quantities` and the rest of the aggregate family.
+
+    The interval is the large-sample **normal (z) approximation**: with the
+    sample mean ``xbar``, the sample standard deviation ``s`` (the unbiased
+    ``/(n-1)`` estimator) and ``n`` observations, the **standard error of the
+    mean** is ``SE = s / sqrt(n)``, the two-sided critical value is the normal
+    quantile ``z = Phi^-1((1 + confidence) / 2)`` (see :func:`_inv_normal_cdf`),
+    the **margin of error** is ``z * SE`` and the interval is
+    ``[xbar - margin, xbar + margin]``. ``confidence`` defaults to 0.95 and must
+    lie strictly inside ``(0, 1)``; e.g. 0.95 gives ``z ~ 1.96`` and 0.99 gives
+    ``z ~ 2.576``.
+
+    ``items`` is a list of {"value": <number>, "unit": <token>} dicts (a
+    ``(value, unit)`` tuple is also accepted), identical to ``sum_quantities``.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,
+            "confidence": <float>,            # the requested level, e.g. 0.95
+            "mean": <float>,                  # sample mean, in the target unit
+            "sample_stdev": <float>,          # unbiased (/(n-1)) stdev
+            "standard_error": <float>,        # s / sqrt(n)
+            "critical_value": <float>,        # the two-sided z quantile
+            "margin_of_error": <float>,       # z * standard_error
+            "lower": <float>,                 # mean - margin_of_error
+            "upper": <float>,                 # mean + margin_of_error
+        }
+
+    Raises ValueError for an empty/non-list input, a malformed item, an unknown
+    or cross-category unit, a non-finite value, a non-linear category
+    (temperature is affine and fuel economy is reciprocal — neither has a
+    meaningful mean to bound), a ``confidence`` that is not a number strictly in
+    ``(0, 1)``, or a series of fewer than two values (the sample standard
+    deviation — and hence the standard error — is undefined for a single
+    observation, matching the ``sample_stdev`` guard in
+    :func:`describe_quantities`). Item validation is delegated to
+    ``sum_quantities`` so the accepted inputs stay identical to the rest of the
+    aggregate family.
+    """
+    if confidence is None:
+        confidence = CI_DEFAULT_CONFIDENCE
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+        raise ValueError("'confidence' must be a number")
+    confidence = float(confidence)
+    if confidence != confidence or confidence in (float("inf"), float("-inf")):
+        raise ValueError("'confidence' must be finite")
+    if not (0.0 < confidence < 1.0):
+        raise ValueError("'confidence' must be strictly between 0 and 1")
+
+    # sum_quantities does the full validation (list shape, item shape, finite
+    # values, single linear category, valid target) and resolves both the running
+    # total and the common target unit, so a bad input fails here before any
+    # statistics run.
+    total, unit, category = sum_quantities(items, to_unit)
+    converted = _restate_items(items, unit)
+    count = len(converted)
+    if count < 2:
+        raise ValueError(
+            "confidence interval requires at least two values "
+            "(the sample standard error is undefined for one observation)"
+        )
+
+    mean = total / count
+    sample_variance = sum((x - mean) ** 2 for x in converted) / (count - 1)
+    sample_stdev = math.sqrt(sample_variance)
+    standard_error = sample_stdev / math.sqrt(count)
+
+    critical_value = _inv_normal_cdf((1.0 + confidence) / 2.0)
+    margin = critical_value * standard_error
+    return {
+        "category": category,
+        "unit": unit,
+        "count": count,
+        "confidence": confidence,
+        "mean": mean,
+        "sample_stdev": sample_stdev,
+        "standard_error": standard_error,
+        "critical_value": critical_value,
+        "margin_of_error": margin,
+        "lower": mean - margin,
+        "upper": mean + margin,
     }

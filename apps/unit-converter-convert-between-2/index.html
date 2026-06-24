@@ -160,6 +160,12 @@
       <button id="zscore" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Z-scores</button>
     </div>
 
+    <label for="robustzExpr" style="margin-top:0.9rem;">Robust (modified) z-scores &mdash; median/MAD-based, flags outliers (in the “To” unit)</label>
+    <div class="row">
+      <div><input id="robustzExpr" type="text" placeholder="e.g. 1 m, 2 m, 3 m, 100 m" style="margin-bottom:0;" /></div>
+      <button id="robustz" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Robust z</button>
+    </div>
+
     <label for="normalizeExpr" style="margin-top:0.9rem;">Min-max normalize a set of quantities to [0, 1] (in the “To” unit)</label>
     <div class="row">
       <div><input id="normalizeExpr" type="text" placeholder="e.g. 2 m, 4 m, 6 m" style="margin-bottom:0;" /></div>
@@ -225,6 +231,20 @@
       <button id="ema" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">EMA</button>
     </div>
 
+    <label for="acfExpr" style="margin-top:0.9rem;">Autocorrelation — how much each reading resembles one k steps earlier (lag 0 is always 1; maxlag defaults to count−1)</label>
+    <div class="row">
+      <div><input id="acfExpr" type="text" placeholder="e.g. 1 m, 2 m, 3 m, 4 m, 5 m" style="margin-bottom:0;" /></div>
+      <div style="flex:0 0 auto;"><input id="acfMaxlag" type="number" step="1" min="0" placeholder="maxlag" title="largest lag to report (0..count-1)" style="margin-bottom:0;width:7rem;" /></div>
+      <button id="acf" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">ACF</button>
+    </div>
+
+    <label for="ciExpr" style="margin-top:0.9rem;">Confidence interval for the mean — mean ± margin via the normal (z) approximation (confidence in (0,1), default 0.95)</label>
+    <div class="row">
+      <div><input id="ciExpr" type="text" placeholder="e.g. 10 m, 12 m, 14 m, 16 m, 18 m" style="margin-bottom:0;" /></div>
+      <div style="flex:0 0 auto;"><input id="ciConf" type="number" step="any" min="0" max="1" placeholder="0.95" title="confidence level in (0, 1)" style="margin-bottom:0;width:7rem;" /></div>
+      <button id="ci" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">CI</button>
+    </div>
+
     <label for="giniExpr" style="margin-top:0.9rem;">Gini inequality coefficient — how evenly the total is shared (0 = equal, →1 = concentrated)</label>
     <div class="row">
       <div><input id="giniExpr" type="text" placeholder="e.g. 1 m, 2 m, 3 m, 4 m" style="margin-bottom:0;" /></div>
@@ -236,6 +256,13 @@
       <div><input id="trimExpr" type="text" placeholder="e.g. 10 m, 11 m, 12 m, 13 m, 1000 m" style="margin-bottom:0;" /></div>
       <div><input id="trimProp" type="number" step="0.05" min="0" max="0.49" placeholder="0.1" style="margin-bottom:0;width:5rem;" /></div>
       <button id="trim" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Trimmed</button>
+    </div>
+
+    <label for="winsorExpr" style="margin-top:0.9rem;">Winsorize &mdash; clamp the extreme values to the trim bounds, returning the whole transformed series (proportion clamped per tail)</label>
+    <div class="row">
+      <div><input id="winsorExpr" type="text" placeholder="e.g. 10 m, 11 m, 12 m, 13 m, 1000 m" style="margin-bottom:0;" /></div>
+      <div><input id="winsorProp" type="number" step="0.05" min="0" max="0.49" placeholder="0.1" style="margin-bottom:0;width:5rem;" /></div>
+      <button id="winsorize" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Winsorize</button>
     </div>
 
     <label for="spearmanX" style="margin-top:0.9rem;">Spearman rank correlation — monotonic association between two paired series (−1…1)</label>
@@ -787,6 +814,36 @@
     }
   }
 
+  async function robustz() {
+    const items = parseQuantityList(document.getElementById("robustzExpr").value);
+    if (!items) return;
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/robust-zscore", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: items, to: toEl.value }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Robust z-scores failed") + "</span>";
+        return;
+      }
+      const rows = data.items.map(function (r) {
+        return "#" + (r.index + 1) + ": " + r.value + " " + data.unit +
+          " (z = " + r.robust_zscore + ")" + (r.is_outlier ? " &larr; outlier" : "");
+      }).join("<br>");
+      resultEl.innerHTML =
+        "<strong>" + data.count + "</strong> " + data.category + " quantities, median " +
+        data.median + " " + data.unit + ", MAD " + data.mad + " " + data.unit +
+        " &middot; " + data.outlier_count + " outlier(s) at |z| &gt; " + data.threshold +
+        ' (method: ' + data.method + ')' +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' + rows + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
   async function normalize() {
     const items = parseQuantityList(document.getElementById("normalizeExpr").value);
     if (!items) return;
@@ -1095,6 +1152,66 @@
     }
   }
 
+  async function autocorrelation() {
+    const items = parseQuantityList(document.getElementById("acfExpr").value);
+    if (!items) return;
+    allResultsEl.innerHTML = "";
+    const maxlagRaw = document.getElementById("acfMaxlag").value;
+    const body = { items: items, to: toEl.value };
+    if (maxlagRaw !== "") body.maxlag = Number(maxlagRaw);
+    try {
+      const resp = await fetch("/api/autocorrelation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Autocorrelation failed") + "</span>";
+        return;
+      }
+      const rows = data.items.map(function (r) {
+        return "lag " + r.lag + ": " + r.autocorrelation;
+      }).join("<br>");
+      resultEl.innerHTML =
+        "<strong>" + data.count + "</strong> " + data.category + " quantities, maxlag " + data.maxlag +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' + rows + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function confidenceInterval() {
+    const items = parseQuantityList(document.getElementById("ciExpr").value);
+    if (!items) return;
+    allResultsEl.innerHTML = "";
+    const confRaw = document.getElementById("ciConf").value;
+    const body = { items: items, to: toEl.value };
+    if (confRaw !== "") body.confidence = Number(confRaw);
+    try {
+      const resp = await fetch("/api/confidence-interval", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Confidence interval failed") + "</span>";
+        return;
+      }
+      const pct = (data.confidence * 100);
+      resultEl.innerHTML =
+        "<strong>" + pct + "%</strong> CI for the mean of " + data.count + " " + data.category + " quantities" +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' +
+        "mean " + data.mean + " " + data.unit + "<br>" +
+        "interval [" + data.lower + ", " + data.upper + "] " + data.unit + "<br>" +
+        "margin ±" + data.margin_of_error + " (z = " + data.critical_value +
+        ", SE = " + data.standard_error + ")</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
   async function gini() {
     const items = parseQuantityList(document.getElementById("giniExpr").value);
     if (!items) return;
@@ -1147,6 +1264,42 @@
         "winsorized mean " + data.winsorized_mean + " " + data.unit + "<br>" +
         "plain mean " + data.mean + " " + data.unit + " &middot; kept range " +
         data.lower + "&ndash;" + data.upper + " " + data.unit + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function winsorize() {
+    const items = parseQuantityList(document.getElementById("winsorExpr").value);
+    if (!items) return;
+    allResultsEl.innerHTML = "";
+    const propRaw = document.getElementById("winsorProp").value;
+    const body = { items: items, to: toEl.value };
+    if (propRaw !== "") body.proportion = Number(propRaw);
+    try {
+      const resp = await fetch("/api/winsorize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Winsorize failed") + "</span>";
+        return;
+      }
+      const series = data.items.map(function (r) {
+        return r.clamped
+          ? "<strong>" + r.winsorized + "</strong> (was " + r.value + ")"
+          : String(r.winsorized);
+      }).join(", ");
+      resultEl.innerHTML =
+        "<strong>Winsorized mean " + data.winsorized_mean + " " + data.unit + "</strong>" +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' +
+        data.count + " " + data.category + " quantities, clamping " + data.proportion +
+        " per tail (" + data.clamped_each_side + " each side) to " +
+        data.lower + "&ndash;" + data.upper + " " + data.unit + "<br>" +
+        "plain mean " + data.mean + " " + data.unit + " &middot; winsorized stdev " +
+        data.winsorized_stdev + " " + data.unit + "<br>series: " + series + "</div>";
     } catch (e) {
       resultEl.innerHTML = '<span class="err">Network error.</span>';
     }
@@ -1249,6 +1402,7 @@
   document.getElementById("gini").addEventListener("click", gini);
   document.getElementById("giniExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") gini(); });
   document.getElementById("trim").addEventListener("click", trimmedMean);
+  document.getElementById("winsorize").addEventListener("click", winsorize);
   document.getElementById("trimExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") trimmedMean(); });
   document.getElementById("trimProp").addEventListener("keydown", function (e) { if (e.key === "Enter") trimmedMean(); });
   document.getElementById("kendall").addEventListener("click", kendall);
@@ -1265,6 +1419,10 @@
   document.getElementById("movingExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") movingAverage(); });
   document.getElementById("ema").addEventListener("click", ema);
   document.getElementById("emaExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") ema(); });
+  document.getElementById("acf").addEventListener("click", autocorrelation);
+  document.getElementById("acfExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") autocorrelation(); });
+  document.getElementById("ci").addEventListener("click", confidenceInterval);
+  document.getElementById("ciExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") confidenceInterval(); });
   document.getElementById("means").addEventListener("click", means);
   document.getElementById("meansExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") means(); });
   document.getElementById("rankAsc").addEventListener("click", function () { rank(false); });
@@ -1280,6 +1438,8 @@
   document.getElementById("diffExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") diff(); });
   document.getElementById("zscore").addEventListener("click", zscore);
   document.getElementById("zscoreExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") zscore(); });
+  document.getElementById("robustz").addEventListener("click", robustz);
+  document.getElementById("robustzExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") robustz(); });
   document.getElementById("normalize").addEventListener("click", normalize);
   document.getElementById("normalizeExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") normalize(); });
   document.getElementById("cumsum").addEventListener("click", cumsum);

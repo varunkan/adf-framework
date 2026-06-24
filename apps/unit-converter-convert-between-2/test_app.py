@@ -5721,6 +5721,232 @@ class TestHttpTrimmedMean(unittest.TestCase):
         self.assertIn("error", data)
 
 
+class TestDomainWinsorize(unittest.TestCase):
+    def _items(self, values, unit="m"):
+        return [{"value": v, "unit": unit} for v in values]
+
+    def test_no_clamp_equals_input(self):
+        # proportion 0 clamps nothing, so the series is the restated input.
+        result = domain.winsorize_quantities(self._items([1, 2, 3, 4, 5]), 0.0)
+        self.assertEqual(result["category"], "length")
+        self.assertEqual(result["count"], 5)
+        self.assertEqual(result["clamped_each_side"], 0)
+        self.assertEqual([r["winsorized"] for r in result["items"]],
+                         [1.0, 2.0, 3.0, 4.0, 5.0])
+        self.assertFalse(any(r["clamped"] for r in result["items"]))
+        self.assertAlmostEqual(result["winsorized_mean"], 3.0, places=9)
+
+    def test_clamps_extremes_to_bounds(self):
+        # 5 values, p=0.2 -> clamp 1 each side. lower=2, upper=4:
+        # [1,2,3,4,5] -> [2,2,3,4,4].
+        result = domain.winsorize_quantities(self._items([1, 2, 3, 4, 5]), 0.2)
+        self.assertEqual(result["clamped_each_side"], 1)
+        self.assertAlmostEqual(result["lower"], 2.0, places=9)
+        self.assertAlmostEqual(result["upper"], 4.0, places=9)
+        self.assertEqual([r["winsorized"] for r in result["items"]],
+                         [2.0, 2.0, 3.0, 4.0, 4.0])
+        self.assertEqual([r["clamped"] for r in result["items"]],
+                         [True, False, False, False, True])
+        self.assertAlmostEqual(result["winsorized_mean"], 3.0, places=9)
+
+    def test_preserves_input_order(self):
+        # The series is reported in input order, not sorted order.
+        result = domain.winsorize_quantities(self._items([5, 1, 3, 2, 4]), 0.2)
+        self.assertEqual([r["value"] for r in result["items"]],
+                         [5.0, 1.0, 3.0, 2.0, 4.0])
+        # 5 -> upper(4); 1 -> lower(2); the rest unchanged.
+        self.assertEqual([r["winsorized"] for r in result["items"]],
+                         [4.0, 2.0, 3.0, 2.0, 4.0])
+
+    def test_winsorized_mean_matches_trimmed_mean(self):
+        # By construction the winsorized mean equals the one trimmed_mean reports.
+        values = [10, 11, 12, 13, 1000]
+        w = domain.winsorize_quantities(self._items(values), 0.2)
+        t = domain.trimmed_mean(self._items(values), 0.2)
+        self.assertAlmostEqual(w["winsorized_mean"], t["winsorized_mean"], places=9)
+        self.assertAlmostEqual(w["lower"], t["lower"], places=9)
+        self.assertAlmostEqual(w["upper"], t["upper"], places=9)
+
+    def test_outlier_pulled_to_boundary(self):
+        # The wild 1000 is pulled down to the upper bound (13), so the winsorized
+        # mean sits far below the raw mean.
+        result = domain.winsorize_quantities(
+            self._items([10, 11, 12, 13, 1000]), 0.2)
+        last = result["items"][-1]
+        self.assertEqual(last["value"], 1000.0)
+        self.assertAlmostEqual(last["winsorized"], 13.0, places=9)
+        self.assertTrue(last["clamped"])
+        self.assertGreater(result["mean"], result["winsorized_mean"])
+
+    def test_winsorized_stdev_below_raw(self):
+        # Clamping the tails shrinks the spread.
+        result = domain.winsorize_quantities(
+            self._items([1, 2, 3, 4, 100]), 0.2)
+        raw = domain.describe_quantities(self._items([1, 2, 3, 4, 100]))
+        self.assertLess(result["winsorized_stdev"], raw["stdev"])
+
+    def test_to_unit_restates(self):
+        result = domain.winsorize_quantities(self._items([1, 2, 3]), 0.0, "cm")
+        self.assertEqual(result["unit"], "cm")
+        self.assertEqual([r["winsorized"] for r in result["items"]],
+                         [100.0, 200.0, 300.0])
+
+    def test_default_proportion_is_point_one(self):
+        result = domain.winsorize_quantities(self._items(range(1, 11)))
+        self.assertAlmostEqual(result["proportion"], 0.1, places=9)
+        self.assertEqual(result["clamped_each_side"], 1)
+        # 1 -> lower(2), 10 -> upper(9).
+        self.assertAlmostEqual(result["items"][0]["winsorized"], 2.0, places=9)
+        self.assertAlmostEqual(result["items"][-1]["winsorized"], 9.0, places=9)
+
+    def test_negative_values_allowed(self):
+        result = domain.winsorize_quantities(self._items([-5, -1, 0, 1, 5]), 0.2)
+        self.assertAlmostEqual(result["winsorized_mean"], 0.0, places=9)
+
+    def test_proportion_too_large_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.winsorize_quantities(self._items([1, 2, 3]), 0.5)
+
+    def test_proportion_negative_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.winsorize_quantities(self._items([1, 2, 3]), -0.1)
+
+    def test_proportion_non_numeric_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.winsorize_quantities(self._items([1, 2, 3]), "lots")
+
+    def test_empty_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.winsorize_quantities([], 0.1)
+
+    def test_cross_category_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.winsorize_quantities(
+                [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}], 0.1)
+
+    def test_temperature_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.winsorize_quantities([{"value": 10, "unit": "c"}], 0.1)
+
+    def test_unknown_unit_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.winsorize_quantities([{"value": 1, "unit": "zorp"}], 0.1)
+
+    def test_nonfinite_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.winsorize_quantities([{"value": float("inf"), "unit": "m"}], 0.1)
+
+
+class TestHttpWinsorize(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = server.make_server(0)
+        cls.host, cls.port = cls.server.server_address
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def _post(self, path, payload, raw=None):
+        body = raw if raw is not None else json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            "http://127.0.0.1:%d%s" % (self.port, path), data=body,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            data = json.loads(exc.read().decode("utf-8"))
+            exc.close()
+            return exc.code, data
+
+    def test_winsorize_ok(self):
+        status, data = self._post("/api/winsorize", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)],
+            "proportion": 0.2})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["count"], 5)
+        self.assertEqual(data["clamped_each_side"], 1)
+        self.assertAlmostEqual(data["lower"], 2.0, places=6)
+        self.assertAlmostEqual(data["upper"], 4.0, places=6)
+        self.assertEqual([r["winsorized"] for r in data["items"]],
+                         [2.0, 2.0, 3.0, 4.0, 4.0])
+        self.assertEqual([r["clamped"] for r in data["items"]],
+                         [True, False, False, False, True])
+        self.assertAlmostEqual(data["winsorized_mean"], 3.0, places=6)
+
+    def test_winsorize_default_proportion(self):
+        status, data = self._post("/api/winsorize", {
+            "items": [{"value": v, "unit": "m"} for v in range(1, 11)]})
+        self.assertEqual(status, 200)
+        self.assertAlmostEqual(data["proportion"], 0.1, places=9)
+        self.assertEqual(data["clamped_each_side"], 1)
+
+    def test_winsorize_preserves_order(self):
+        status, data = self._post("/api/winsorize", {
+            "items": [{"value": v, "unit": "m"} for v in (5, 1, 3, 2, 4)],
+            "proportion": 0.2})
+        self.assertEqual(status, 200)
+        self.assertEqual([r["index"] for r in data["items"]], [0, 1, 2, 3, 4])
+        self.assertEqual([r["value"] for r in data["items"]],
+                         [5.0, 1.0, 3.0, 2.0, 4.0])
+        self.assertEqual([r["winsorized"] for r in data["items"]],
+                         [4.0, 2.0, 3.0, 2.0, 4.0])
+
+    def test_winsorize_outlier_resistance(self):
+        status, data = self._post("/api/winsorize", {
+            "items": [{"value": v, "unit": "m"} for v in (10, 11, 12, 13, 1000)],
+            "proportion": 0.2})
+        self.assertEqual(status, 200)
+        self.assertAlmostEqual(data["items"][-1]["winsorized"], 13.0, places=6)
+        self.assertGreater(data["mean"], data["winsorized_mean"])
+
+    def test_winsorize_to_unit(self):
+        status, data = self._post("/api/winsorize", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 3)],
+            "to": "cm"})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["unit"], "cm")
+        self.assertEqual([r["winsorized"] for r in data["items"]],
+                         [100.0, 200.0, 300.0])
+
+    def test_winsorize_precision(self):
+        status, data = self._post("/api/winsorize", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 4)],
+            "proportion": 0.0, "precision": 3})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["winsorized_mean"],
+                         round(data["winsorized_mean"], 3))
+
+    def test_winsorize_proportion_too_large_400(self):
+        status, data = self._post("/api/winsorize", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 3)],
+            "proportion": 0.5})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_winsorize_cross_category_400(self):
+        status, data = self._post("/api/winsorize", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_winsorize_items_not_list_400(self):
+        status, data = self._post("/api/winsorize", {"items": "nope"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_winsorize_invalid_json_400(self):
+        status, data = self._post("/api/winsorize", None, raw=b"{bad")
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
 class TestDomainEma(unittest.TestCase):
     def test_basic_alpha_half(self):
         result = domain.ema(
@@ -5904,6 +6130,684 @@ class TestHttpEma(unittest.TestCase):
 
     def test_ema_endpoint_invalid_json_400(self):
         status, data = self._post("/api/ema", None, raw=b"{bad")
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
+class TestDomainAutocorrelation(unittest.TestCase):
+    def test_basic_acf_known_series(self):
+        # x = [1,2,3,4,5], mean 3, deviations [-2,-1,0,1,2], denom = 10.
+        # r0 = 1, r1 = 4/10, r2 = -1/10, r3 = -4/10, r4 = -4/10.
+        result = domain.autocorrelation(
+            [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)])
+        self.assertEqual(result["category"], "length")
+        self.assertEqual(result["unit"], "m")
+        self.assertEqual(result["count"], 5)
+        self.assertEqual(result["maxlag"], 4)  # defaults to count-1
+        self.assertAlmostEqual(result["mean"], 3.0, places=9)
+        self.assertAlmostEqual(result["variance"], 2.0, places=9)
+        acf = [it["autocorrelation"] for it in result["items"]]
+        self.assertEqual([it["lag"] for it in result["items"]], [0, 1, 2, 3, 4])
+        self.assertAlmostEqual(acf[0], 1.0, places=9)
+        self.assertAlmostEqual(acf[1], 0.4, places=9)
+        self.assertAlmostEqual(acf[2], -0.1, places=9)
+        self.assertAlmostEqual(acf[3], -0.4, places=9)
+        self.assertAlmostEqual(acf[4], -0.4, places=9)
+
+    def test_lag_zero_is_always_one(self):
+        result = domain.autocorrelation(
+            [{"value": v, "unit": "kg"} for v in (3, 1, 4, 1, 5, 9, 2)])
+        self.assertAlmostEqual(result["items"][0]["autocorrelation"], 1.0, places=12)
+
+    def test_all_coefficients_within_unit_interval(self):
+        result = domain.autocorrelation(
+            [{"value": v, "unit": "s"} for v in (10, 4, 7, 2, 9, 5, 6, 1)])
+        for it in result["items"]:
+            self.assertGreaterEqual(it["autocorrelation"], -1.0 - 1e-9)
+            self.assertLessEqual(it["autocorrelation"], 1.0 + 1e-9)
+
+    def test_explicit_maxlag_limits_output(self):
+        result = domain.autocorrelation(
+            [{"value": v, "unit": "m"} for v in range(6)], 2)
+        self.assertEqual(result["maxlag"], 2)
+        self.assertEqual([it["lag"] for it in result["items"]], [0, 1, 2])
+
+    def test_maxlag_zero_only_r0(self):
+        result = domain.autocorrelation(
+            [{"value": v, "unit": "m"} for v in (1, 2, 3)], 0)
+        self.assertEqual(len(result["items"]), 1)
+        self.assertAlmostEqual(result["items"][0]["autocorrelation"], 1.0, places=12)
+
+    def test_dimensionless_invariant_under_unit(self):
+        # The same physical series in cm vs m yields identical coefficients.
+        in_m = domain.autocorrelation(
+            [{"value": v, "unit": "m"} for v in (1, 2, 4, 8)])
+        in_cm = domain.autocorrelation(
+            [{"value": v * 100, "unit": "cm"} for v in (1, 2, 4, 8)], to_unit="m")
+        a = [it["autocorrelation"] for it in in_m["items"]]
+        b = [it["autocorrelation"] for it in in_cm["items"]]
+        for x, y in zip(a, b):
+            self.assertAlmostEqual(x, y, places=9)
+
+    def test_unit_conversion_reports_target_unit(self):
+        result = domain.autocorrelation(
+            [{"value": 100, "unit": "cm"}, {"value": 300, "unit": "cm"}], to_unit="m")
+        self.assertEqual(result["unit"], "m")
+        self.assertAlmostEqual(result["mean"], 2.0, places=9)
+
+    def test_tuple_items_accepted(self):
+        result = domain.autocorrelation([(1, "m"), (2, "m"), (3, "m")])
+        self.assertEqual(result["count"], 3)
+
+    def test_single_item_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.autocorrelation([{"value": 1, "unit": "m"}])
+
+    def test_empty_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.autocorrelation([])
+
+    def test_zero_variance_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.autocorrelation([{"value": 5, "unit": "m"} for _ in range(4)])
+
+    def test_maxlag_too_large_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.autocorrelation(
+                [{"value": v, "unit": "m"} for v in (1, 2, 3)], 3)
+
+    def test_maxlag_negative_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.autocorrelation(
+                [{"value": v, "unit": "m"} for v in (1, 2, 3)], -1)
+
+    def test_maxlag_non_integer_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.autocorrelation(
+                [{"value": v, "unit": "m"} for v in (1, 2, 3)], 1.5)
+
+    def test_maxlag_bool_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.autocorrelation(
+                [{"value": v, "unit": "m"} for v in (1, 2, 3)], True)
+
+    def test_cross_category_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.autocorrelation(
+                [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}])
+
+    def test_temperature_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.autocorrelation(
+                [{"value": 1, "unit": "c"}, {"value": 2, "unit": "c"}])
+
+    def test_fuel_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.autocorrelation(
+                [{"value": 30, "unit": "mpg"}, {"value": 40, "unit": "mpg"}])
+
+
+class TestHttpAutocorrelation(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = server.make_server(0)
+        cls.host, cls.port = cls.server.server_address
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def _post(self, path, payload, raw=None):
+        body = raw if raw is not None else json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            "http://127.0.0.1:%d%s" % (self.port, path), data=body,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            data = json.loads(exc.read().decode("utf-8"))
+            exc.close()
+            return exc.code, data
+
+    def test_endpoint_ok(self):
+        status, data = self._post("/api/autocorrelation", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["count"], 5)
+        self.assertEqual(data["maxlag"], 4)
+        acf = [it["autocorrelation"] for it in data["items"]]
+        self.assertEqual(acf[0], 1.0)
+        self.assertAlmostEqual(acf[1], 0.4, places=6)
+        self.assertAlmostEqual(acf[2], -0.1, places=6)
+
+    def test_endpoint_explicit_maxlag(self):
+        status, data = self._post("/api/autocorrelation", {
+            "items": [{"value": v, "unit": "m"} for v in range(6)], "maxlag": 2})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["maxlag"], 2)
+        self.assertEqual([it["lag"] for it in data["items"]], [0, 1, 2])
+
+    def test_endpoint_precision_and_unit(self):
+        status, data = self._post("/api/autocorrelation", {
+            "items": [{"value": v, "unit": "cm"} for v in (100, 200, 400)],
+            "to": "m", "precision": 3})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["items"][1]["autocorrelation"],
+                         round(data["items"][1]["autocorrelation"], 3))
+
+    def test_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/autocorrelation", {"items": "nope"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_single_item_400(self):
+        status, data = self._post("/api/autocorrelation", {
+            "items": [{"value": 1, "unit": "m"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_zero_variance_400(self):
+        status, data = self._post("/api/autocorrelation", {
+            "items": [{"value": 5, "unit": "m"} for _ in range(3)]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_maxlag_too_large_400(self):
+        status, data = self._post("/api/autocorrelation", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 3)], "maxlag": 9})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_cross_category_400(self):
+        status, data = self._post("/api/autocorrelation", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_temperature_400(self):
+        status, data = self._post("/api/autocorrelation", {
+            "items": [{"value": 1, "unit": "c"}, {"value": 2, "unit": "c"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_invalid_json_400(self):
+        status, data = self._post("/api/autocorrelation", None, raw=b"{bad")
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
+class TestDomainRobustZscore(unittest.TestCase):
+    """Modified (Iglewicz-Hoaglin) z-score: median/MAD-standardised scores."""
+
+    def test_basic_scores_and_centres(self):
+        result = domain.robust_zscores(
+            [{"value": v, "unit": "m"} for v in (10, 12, 14, 16, 18)])
+        self.assertEqual(result["category"], "length")
+        self.assertEqual(result["unit"], "m")
+        self.assertEqual(result["count"], 5)
+        self.assertEqual(result["median"], 14.0)
+        self.assertEqual(result["mad"], 2.0)
+        self.assertEqual(result["method"], "mad")
+        self.assertEqual(result["threshold"], 3.5)
+        # 0.6745 * (10 - 14) / 2 == -1.349
+        self.assertAlmostEqual(result["items"][0]["robust_zscore"], -1.349, places=3)
+        self.assertEqual(result["items"][2]["robust_zscore"], 0.0)
+        self.assertEqual(result["outlier_count"], 0)
+
+    def test_outlier_flagged(self):
+        result = domain.robust_zscores(
+            [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5, 100)])
+        self.assertEqual(result["median"], 3.5)
+        self.assertEqual(result["mad"], 1.5)
+        self.assertEqual(result["outlier_count"], 1)
+        last = result["items"][-1]
+        self.assertTrue(last["is_outlier"])
+        self.assertGreater(abs(last["robust_zscore"]), 3.5)
+        self.assertFalse(result["items"][0]["is_outlier"])
+
+    def test_formula_matches_definition(self):
+        values = (4.0, 7.0, 9.0, 11.0, 40.0)
+        result = domain.robust_zscores([{"value": v, "unit": "m"} for v in values])
+        median = result["median"]
+        mad = result["mad"]
+        for item, v in zip(result["items"], values):
+            expected = domain.ROBUST_Z_CONSTANT * (v - median) / mad
+            self.assertAlmostEqual(item["robust_zscore"], expected, places=9)
+
+    def test_meanad_fallback_when_mad_zero(self):
+        # Four values equal the median, so MAD collapses to 0 but the mean
+        # absolute deviation still has spread -> the meanAD fallback kicks in.
+        result = domain.robust_zscores(
+            [{"value": v, "unit": "m"} for v in (5, 5, 5, 5, 9)])
+        self.assertEqual(result["method"], "meanad")
+        self.assertEqual(result["mad"], 0.0)
+        self.assertAlmostEqual(result["mean_abs_deviation"], 0.8, places=9)
+        expected = (9 - 5) / (domain.ROBUST_Z_MEANAD_CONSTANT * 0.8)
+        self.assertAlmostEqual(result["items"][-1]["robust_zscore"], expected, places=9)
+
+    def test_custom_threshold_changes_flags(self):
+        loose = domain.robust_zscores(
+            [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5, 100)], threshold=50)
+        self.assertEqual(loose["threshold"], 50.0)
+        self.assertEqual(loose["outlier_count"], 0)
+
+    def test_dimensionless_invariant_under_unit(self):
+        in_m = domain.robust_zscores(
+            [{"value": v, "unit": "m"} for v in (1, 2, 4, 8, 30)])
+        in_cm = domain.robust_zscores(
+            [{"value": v * 100, "unit": "cm"} for v in (1, 2, 4, 8, 30)], to_unit="m")
+        a = [it["robust_zscore"] for it in in_m["items"]]
+        b = [it["robust_zscore"] for it in in_cm["items"]]
+        for x, y in zip(a, b):
+            self.assertAlmostEqual(x, y, places=9)
+
+    def test_unit_conversion_reports_target_unit(self):
+        result = domain.robust_zscores(
+            [{"value": v, "unit": "cm"} for v in (100, 300, 500)], to_unit="m")
+        self.assertEqual(result["unit"], "m")
+        self.assertEqual(result["median"], 3.0)
+
+    def test_tuple_items_accepted(self):
+        result = domain.robust_zscores([(1, "m"), (2, "m"), (3, "m")])
+        self.assertEqual(result["count"], 3)
+
+    def test_single_item_meanad_zero_rejected(self):
+        # One item: median == value, MAD == meanAD == 0 -> no spread.
+        with self.assertRaises(ValueError):
+            domain.robust_zscores([{"value": 7, "unit": "m"}])
+
+    def test_all_identical_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.robust_zscores([{"value": 5, "unit": "m"} for _ in range(4)])
+
+    def test_empty_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.robust_zscores([])
+
+    def test_threshold_zero_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.robust_zscores(
+                [{"value": v, "unit": "m"} for v in (1, 2, 3)], threshold=0)
+
+    def test_threshold_negative_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.robust_zscores(
+                [{"value": v, "unit": "m"} for v in (1, 2, 3)], threshold=-1)
+
+    def test_threshold_non_number_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.robust_zscores(
+                [{"value": v, "unit": "m"} for v in (1, 2, 3)], threshold="big")
+
+    def test_threshold_bool_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.robust_zscores(
+                [{"value": v, "unit": "m"} for v in (1, 2, 3)], threshold=True)
+
+    def test_cross_category_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.robust_zscores(
+                [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}])
+
+    def test_temperature_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.robust_zscores(
+                [{"value": 1, "unit": "c"}, {"value": 2, "unit": "c"}])
+
+    def test_fuel_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.robust_zscores(
+                [{"value": 30, "unit": "mpg"}, {"value": 40, "unit": "mpg"}])
+
+
+class TestHttpRobustZscore(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = server.make_server(0)
+        cls.host, cls.port = cls.server.server_address
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def _post(self, path, payload, raw=None):
+        body = raw if raw is not None else json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            "http://127.0.0.1:%d%s" % (self.port, path), data=body,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            data = json.loads(exc.read().decode("utf-8"))
+            exc.close()
+            return exc.code, data
+
+    def test_endpoint_ok(self):
+        status, data = self._post("/api/robust-zscore", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5, 100)]})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["count"], 6)
+        self.assertEqual(data["median"], 3.5)
+        self.assertEqual(data["mad"], 1.5)
+        self.assertEqual(data["method"], "mad")
+        self.assertEqual(data["threshold"], 3.5)
+        self.assertEqual(data["outlier_count"], 1)
+        self.assertTrue(data["items"][-1]["is_outlier"])
+        self.assertFalse(data["items"][0]["is_outlier"])
+
+    def test_endpoint_custom_threshold(self):
+        status, data = self._post("/api/robust-zscore", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5, 100)],
+            "threshold": 50})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["threshold"], 50)
+        self.assertEqual(data["outlier_count"], 0)
+
+    def test_endpoint_precision_and_unit(self):
+        status, data = self._post("/api/robust-zscore", {
+            "items": [{"value": v, "unit": "cm"} for v in (100, 200, 400, 5000)],
+            "to": "m", "precision": 3})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["unit"], "m")
+        z = data["items"][0]["robust_zscore"]
+        self.assertEqual(z, round(z, 3))
+
+    def test_endpoint_meanad_fallback(self):
+        status, data = self._post("/api/robust-zscore", {
+            "items": [{"value": v, "unit": "m"} for v in (5, 5, 5, 5, 9)]})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["method"], "meanad")
+        self.assertEqual(data["mad"], 0.0)
+
+    def test_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/robust-zscore", {"items": "nope"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_all_identical_400(self):
+        status, data = self._post("/api/robust-zscore", {
+            "items": [{"value": 5, "unit": "m"} for _ in range(3)]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_threshold_zero_400(self):
+        status, data = self._post("/api/robust-zscore", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 3)], "threshold": 0})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_cross_category_400(self):
+        status, data = self._post("/api/robust-zscore", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_temperature_400(self):
+        status, data = self._post("/api/robust-zscore", {
+            "items": [{"value": 1, "unit": "c"}, {"value": 2, "unit": "c"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_invalid_json_400(self):
+        status, data = self._post("/api/robust-zscore", None, raw=b"{bad")
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
+class TestDomainInvNormalCdf(unittest.TestCase):
+    """The probit helper underpinning the confidence interval."""
+
+    def test_median_is_zero(self):
+        self.assertAlmostEqual(domain._inv_normal_cdf(0.5), 0.0, places=12)
+
+    def test_standard_two_sided_quantiles(self):
+        # The textbook critical values (two-sided 90/95/99% -> p 0.95/0.975/0.995).
+        self.assertAlmostEqual(domain._inv_normal_cdf(0.95), 1.6448536269514722, places=10)
+        self.assertAlmostEqual(domain._inv_normal_cdf(0.975), 1.959963984540054, places=10)
+        self.assertAlmostEqual(domain._inv_normal_cdf(0.995), 2.5758293035489004, places=10)
+
+    def test_one_sigma_round_trips(self):
+        # Phi(1) == 0.8413447460685429, so the probit of that is exactly 1.
+        self.assertAlmostEqual(domain._inv_normal_cdf(0.8413447460685429), 1.0, places=10)
+
+    def test_inverse_of_erf_cdf(self):
+        # Round-trip against the true normal CDF built from math.erf.
+        for z in (-2.3, -0.7, 0.4, 1.1, 2.8):
+            p = 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+            self.assertAlmostEqual(domain._inv_normal_cdf(p), z, places=9)
+
+    def test_symmetry(self):
+        self.assertAlmostEqual(
+            domain._inv_normal_cdf(0.3), -domain._inv_normal_cdf(0.7), places=12)
+
+    def test_out_of_range_raises(self):
+        for bad in (0.0, 1.0, -0.1, 1.5):
+            with self.assertRaises(ValueError):
+                domain._inv_normal_cdf(bad)
+
+
+class TestDomainConfidenceInterval(unittest.TestCase):
+    """Normal-approximation confidence interval for the population mean."""
+
+    def test_basic_interval(self):
+        result = domain.confidence_interval(
+            [{"value": v, "unit": "m"} for v in (10, 12, 14, 16, 18)])
+        self.assertEqual(result["category"], "length")
+        self.assertEqual(result["unit"], "m")
+        self.assertEqual(result["count"], 5)
+        self.assertEqual(result["confidence"], 0.95)
+        self.assertAlmostEqual(result["mean"], 14.0, places=12)
+        # sample stdev == sqrt(40/4) == sqrt(10); SE == sqrt(10)/sqrt(5) == sqrt(2).
+        self.assertAlmostEqual(result["sample_stdev"], math.sqrt(10.0), places=12)
+        self.assertAlmostEqual(result["standard_error"], math.sqrt(2.0), places=12)
+        self.assertAlmostEqual(result["critical_value"], 1.959963984540054, places=10)
+        expected_margin = 1.959963984540054 * math.sqrt(2.0)
+        self.assertAlmostEqual(result["margin_of_error"], expected_margin, places=10)
+        self.assertAlmostEqual(result["lower"], 14.0 - expected_margin, places=10)
+        self.assertAlmostEqual(result["upper"], 14.0 + expected_margin, places=10)
+
+    def test_interval_is_symmetric_about_the_mean(self):
+        result = domain.confidence_interval(
+            [{"value": v, "unit": "m"} for v in (3, 7, 11, 19)])
+        self.assertAlmostEqual(
+            (result["lower"] + result["upper"]) / 2.0, result["mean"], places=12)
+        self.assertAlmostEqual(
+            result["upper"] - result["mean"], result["margin_of_error"], places=12)
+
+    def test_default_confidence_is_95_percent(self):
+        explicit = domain.confidence_interval(
+            [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)], confidence=0.95)
+        default = domain.confidence_interval(
+            [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)])
+        self.assertEqual(default["confidence"], 0.95)
+        self.assertAlmostEqual(
+            default["margin_of_error"], explicit["margin_of_error"], places=12)
+
+    def test_higher_confidence_widens_the_interval(self):
+        data = [{"value": v, "unit": "m"} for v in (5, 10, 15, 20, 25)]
+        narrow = domain.confidence_interval(data, confidence=0.90)
+        wide = domain.confidence_interval(data, confidence=0.99)
+        self.assertGreater(wide["critical_value"], narrow["critical_value"])
+        self.assertGreater(wide["margin_of_error"], narrow["margin_of_error"])
+        # The two intervals share the same point estimate and standard error.
+        self.assertAlmostEqual(narrow["mean"], wide["mean"], places=12)
+        self.assertAlmostEqual(
+            narrow["standard_error"], wide["standard_error"], places=12)
+
+    def test_unit_conversion_scales_the_interval(self):
+        # The same physical sample expressed in cm but reported in m: the critical
+        # value is dimensionless, while the mean / SE / bounds carry the unit.
+        in_m = domain.confidence_interval(
+            [{"value": v, "unit": "m"} for v in (1, 2, 3)])
+        in_cm = domain.confidence_interval(
+            [{"value": v * 100, "unit": "cm"} for v in (1, 2, 3)], to_unit="m")
+        self.assertEqual(in_cm["unit"], "m")
+        self.assertAlmostEqual(
+            in_cm["critical_value"], in_m["critical_value"], places=12)
+        self.assertAlmostEqual(in_cm["mean"], in_m["mean"], places=10)
+        self.assertAlmostEqual(in_cm["lower"], in_m["lower"], places=10)
+        self.assertAlmostEqual(in_cm["upper"], in_m["upper"], places=10)
+
+    def test_one_sigma_confidence(self):
+        # A confidence equal to the 1-sigma mass gives a critical value of exactly 1,
+        # so the margin equals the standard error.
+        result = domain.confidence_interval(
+            [{"value": v, "unit": "m"} for v in (10, 20, 30, 40)],
+            confidence=0.6826894921370859)
+        self.assertAlmostEqual(result["critical_value"], 1.0, places=9)
+        self.assertAlmostEqual(
+            result["margin_of_error"], result["standard_error"], places=9)
+
+    def test_tuple_items_accepted(self):
+        result = domain.confidence_interval([(2, "kg"), (4, "kg"), (6, "kg")])
+        self.assertEqual(result["category"], "mass")
+        self.assertAlmostEqual(result["mean"], 4.0, places=12)
+
+    def test_single_value_raises(self):
+        with self.assertRaises(ValueError):
+            domain.confidence_interval([{"value": 5, "unit": "m"}])
+
+    def test_empty_raises(self):
+        with self.assertRaises(ValueError):
+            domain.confidence_interval([])
+
+    def test_confidence_out_of_range_raises(self):
+        data = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        for bad in (0.0, 1.0, -0.5, 1.5):
+            with self.assertRaises(ValueError):
+                domain.confidence_interval(data, confidence=bad)
+
+    def test_non_numeric_confidence_raises(self):
+        data = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        with self.assertRaises(ValueError):
+            domain.confidence_interval(data, confidence="lots")
+        # Booleans are not accepted as a numeric confidence either.
+        with self.assertRaises(ValueError):
+            domain.confidence_interval(data, confidence=True)
+
+    def test_cross_category_raises(self):
+        with self.assertRaises(ValueError):
+            domain.confidence_interval(
+                [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}])
+
+    def test_temperature_raises(self):
+        with self.assertRaises(ValueError):
+            domain.confidence_interval(
+                [{"value": 1, "unit": "c"}, {"value": 2, "unit": "c"}])
+
+    def test_fuel_raises(self):
+        with self.assertRaises(ValueError):
+            domain.confidence_interval(
+                [{"value": 30, "unit": "mpg"}, {"value": 40, "unit": "mpg"}])
+
+
+class TestHttpConfidenceInterval(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = server.make_server(0)
+        cls.host, cls.port = cls.server.server_address
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def _post(self, path, payload, raw=None):
+        body = raw if raw is not None else json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            "http://127.0.0.1:%d%s" % (self.port, path), data=body,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            data = json.loads(exc.read().decode("utf-8"))
+            exc.close()
+            return exc.code, data
+
+    def test_endpoint_ok(self):
+        status, data = self._post("/api/confidence-interval", {
+            "items": [{"value": v, "unit": "m"} for v in (10, 12, 14, 16, 18)]})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["count"], 5)
+        self.assertEqual(data["confidence"], 0.95)
+        self.assertAlmostEqual(data["mean"], 14.0, places=6)
+        self.assertAlmostEqual(data["critical_value"], 1.959964, places=5)
+        self.assertLess(data["lower"], data["mean"])
+        self.assertGreater(data["upper"], data["mean"])
+        # mean is the midpoint of the interval.
+        self.assertAlmostEqual(
+            (data["lower"] + data["upper"]) / 2.0, data["mean"], places=6)
+
+    def test_endpoint_custom_confidence(self):
+        status, data = self._post("/api/confidence-interval", {
+            "items": [{"value": v, "unit": "m"} for v in (5, 10, 15, 20, 25)],
+            "confidence": 0.99})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["confidence"], 0.99)
+        self.assertAlmostEqual(data["critical_value"], 2.575829, places=5)
+
+    def test_endpoint_precision_and_unit(self):
+        status, data = self._post("/api/confidence-interval", {
+            "items": [{"value": v, "unit": "cm"} for v in (100, 200, 300)],
+            "to": "m", "precision": 3})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["mean"], round(data["mean"], 3))
+        self.assertEqual(data["margin_of_error"], round(data["margin_of_error"], 3))
+
+    def test_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/confidence-interval", {"items": "nope"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_single_value_400(self):
+        status, data = self._post("/api/confidence-interval", {
+            "items": [{"value": 5, "unit": "m"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_bad_confidence_400(self):
+        status, data = self._post("/api/confidence-interval", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 3)],
+            "confidence": 1.5})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_cross_category_400(self):
+        status, data = self._post("/api/confidence-interval", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_temperature_400(self):
+        status, data = self._post("/api/confidence-interval", {
+            "items": [{"value": 1, "unit": "c"}, {"value": 2, "unit": "c"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_invalid_json_400(self):
+        status, data = self._post("/api/confidence-interval", None, raw=b"{bad")
         self.assertEqual(status, 400)
         self.assertIn("error", data)
 
