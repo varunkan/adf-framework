@@ -57,6 +57,20 @@ def _validate_people(people):
     return people_int
 
 
+def _validate_bill_tip_people(bill, tip_percent, people):
+    """Validate the common (bill, tip_percent, people) trio: coerce bill/tip to
+    numbers, reject negatives, and resolve the people count. Returns the parsed
+    ``(bill, tip_percent, people_int)`` trio so callers don't repeat the block."""
+    bill = _to_number(bill, "bill")
+    tip_percent = _to_number(tip_percent, "tip_percent")
+    people_int = _validate_people(people)
+    if bill < 0:
+        raise TipError("bill must not be negative")
+    if tip_percent < 0:
+        raise TipError("tip_percent must not be negative")
+    return bill, tip_percent, people_int
+
+
 _TIP_ON_TOTAL = ("total", "posttax", "post-tax", "gross")
 _TIP_ON_SUBTOTAL = ("subtotal", "pretax", "pre-tax", "net")
 
@@ -797,13 +811,7 @@ def split_with_caps(bill, tip_percent, people, caps):
     cannot cover the total. Returns each diner's ``amount`` and whether they were
     ``capped``, plus the ``fair_share`` (uncapped even split) for reference.
     """
-    bill = _to_number(bill, "bill")
-    tip_percent = _to_number(tip_percent, "tip_percent")
-    people_int = _validate_people(people)
-    if bill < 0:
-        raise TipError("bill must not be negative")
-    if tip_percent < 0:
-        raise TipError("tip_percent must not be negative")
+    bill, tip_percent, people_int = _validate_bill_tip_people(bill, tip_percent, people)
 
     if isinstance(caps, (str, bytes)) or not hasattr(caps, "__iter__"):
         raise TipError("caps must be a list")
@@ -1346,13 +1354,7 @@ def split_comped(bill, tip_percent, people, comped):
     ``payers`` count and the ``fair_share`` (the even split among the payers).
     Raises ``TipError`` on invalid input so callers can fail safe.
     """
-    bill = _to_number(bill, "bill")
-    tip_percent = _to_number(tip_percent, "tip_percent")
-    people_int = _validate_people(people)
-    if bill < 0:
-        raise TipError("bill must not be negative")
-    if tip_percent < 0:
-        raise TipError("tip_percent must not be negative")
+    bill, tip_percent, people_int = _validate_bill_tip_people(bill, tip_percent, people)
 
     if comped is None or comped == "":
         comped = []
@@ -1460,6 +1462,322 @@ def gross_up_tip(bill, tip_percent, fee_percent, people=1):
         "effective_tip_percent": _round2(effective),
         "tip_per_person": _round2(gross_tip / people_int),
         "total_per_person": _round2(total / people_int),
+    }
+
+
+def _parse_shared_item(entry, index, n):
+    """Normalise one shared-item entry into ``(price, sharers)`` (REQ-002 helper).
+
+    An entry may be a bare price (number/numeric string — shared by EVERYONE),
+    a 1- or 2-element list ``[price]`` / ``[price, sharers]``, or a mapping with
+    a ``price`` and optional ``sharers`` (a list of 0-based diner indices). When
+    ``sharers`` is omitted the item is split across all ``n`` diners. ``sharers``
+    must be a non-empty list of distinct whole numbers in ``[0, n)``. Raises
+    ``TipError`` on junk so callers can fail safe.
+    """
+    sharers = None
+    if isinstance(entry, dict):
+        if "price" not in entry:
+            raise TipError("shared item %d is missing a price" % (index + 1))
+        price = entry.get("price")
+        if entry.get("sharers") not in (None, ""):
+            sharers = entry.get("sharers")
+    elif isinstance(entry, (list, tuple)):
+        if not entry or len(entry) > 2:
+            raise TipError(
+                "shared item %d must be [price] or [price, sharers]" % (index + 1))
+        price = entry[0]
+        if len(entry) == 2 and entry[1] not in (None, ""):
+            sharers = entry[1]
+    else:
+        price = entry
+
+    price = _to_number(price, "shared item %d price" % (index + 1))
+    if price < 0:
+        raise TipError("shared item %d price must not be negative" % (index + 1))
+
+    if sharers is None:
+        resolved = list(range(n))
+    else:
+        if isinstance(sharers, (str, bytes)) or not hasattr(sharers, "__iter__"):
+            raise TipError(
+                "shared item %d sharers must be a list of diner numbers" % (index + 1))
+        resolved = []
+        seen = set()
+        for s in list(sharers):
+            if isinstance(s, bool):
+                raise TipError(
+                    "shared item %d sharers must be whole numbers" % (index + 1))
+            try:
+                i = int(s)
+            except (TypeError, ValueError):
+                raise TipError(
+                    "shared item %d sharers must be whole numbers" % (index + 1))
+            if float(s) != i:
+                raise TipError(
+                    "shared item %d sharers must be whole numbers" % (index + 1))
+            if i < 0 or i >= n:
+                raise TipError(
+                    "shared item %d references diner %d out of range" % (index + 1, i))
+            if i not in seen:
+                seen.add(i)
+                resolved.append(i)
+        if not resolved:
+            raise TipError(
+                "shared item %d must have at least one sharer" % (index + 1))
+    return price, resolved
+
+
+def split_shared_items(diners, shared_items=None, tip_percent=0, tax=0,
+                       tip_on="subtotal"):
+    """Itemised split that also handles SHARED items (REQ-002 extension).
+
+    Where :func:`split_by_items` assumes every item belongs to exactly one
+    diner, real tables also order things to share — a $30 appetiser platter
+    split between three of the four diners, a bottle of wine for the whole
+    table. This builds each diner's subtotal from their OWN personal items PLUS
+    their fair portion of every shared item, then apportions tax and tip across
+    diners in proportion to what each one consumed so the per-diner ``amounts``
+    always sum EXACTLY to the grand ``total`` — nobody is over- or under-charged
+    by a stray cent.
+
+    ``diners`` is a non-empty list, one entry per diner, where each entry is
+    that diner's personal item prices (an empty list means they only shared).
+    ``shared_items`` is an optional list of shared items; each entry is either a
+    bare price (shared equally by EVERYONE) or a mapping/list pairing a
+    ``price`` with the 0-based ``sharers`` indices splitting it (e.g.
+    ``{"price": 30, "sharers": [0, 1, 2]}`` or ``[30, [0, 1, 2]]``). Each shared
+    item's price is divided among its sharers with the largest-remainder method
+    so the split is exact to the cent. Tip is computed on the food subtotal
+    (``tip_on="subtotal"``, the default) or the tax-inclusive amount
+    (``tip_on="total"``).
+
+    Returns a dict whose ``people`` list carries each diner's ``personal``,
+    ``shared``, ``subtotal``, apportioned ``tax`` and ``tip`` and final
+    ``amount``. Raises ``TipError`` on invalid input so callers can fail safe.
+    """
+    tip_percent = _to_number(tip_percent, "tip_percent")
+    tax = _to_number(tax, "tax") if tax not in (None, "") else 0.0
+    mode = _normalise_tip_on(tip_on)
+
+    if tip_percent < 0:
+        raise TipError("tip_percent must not be negative")
+    if tax < 0:
+        raise TipError("tax must not be negative")
+
+    if isinstance(diners, (str, bytes)) or not hasattr(diners, "__iter__"):
+        raise TipError("diners must be a list of item lists")
+    diners = list(diners)
+    if not diners:
+        raise TipError("diners must not be empty")
+    n = len(diners)
+
+    # Each diner's personal spend, in integer cents to keep the totals exact.
+    personal_cents = []
+    for entry in diners:
+        if isinstance(entry, (str, bytes)) or not hasattr(entry, "__iter__"):
+            raise TipError("each diner's items must be a list of numbers")
+        c = 0
+        for price in list(entry):
+            p = _to_number(price, "item price")
+            if p < 0:
+                raise TipError("item prices must not be negative")
+            c += int(round(p * 100))
+        personal_cents.append(c)
+
+    # Distribute each shared item across its sharers, exact to the cent.
+    if shared_items in (None, ""):
+        shared_items = []
+    if isinstance(shared_items, (str, bytes)) or not hasattr(shared_items, "__iter__"):
+        raise TipError("shared_items must be a list")
+    shared_items = list(shared_items)
+
+    shared_cents = [0] * n
+    for idx, entry in enumerate(shared_items):
+        price, sharers = _parse_shared_item(entry, idx, n)
+        price_cents = int(round(price * 100))
+        parts = _largest_remainder(price_cents, [1] * len(sharers))
+        for pos, diner in enumerate(sharers):
+            shared_cents[diner] += parts[pos]
+
+    subtotal_cents = [personal_cents[i] + shared_cents[i] for i in range(n)]
+    food_cents = sum(subtotal_cents)
+    food_total = food_cents / 100.0
+
+    tip_base = food_total if mode == "subtotal" else food_total + tax
+    tip = tip_base * tip_percent / 100.0
+    tip_cents_total = int(round(tip * 100))
+    tax_cents_total = int(round(tax * 100))
+
+    # Apportion tax and tip by each diner's subtotal. When nobody ordered
+    # anything the weights are all zero and the helper spreads evenly.
+    weights = subtotal_cents
+    tax_cents = _largest_remainder(tax_cents_total, weights)
+    tip_cents = _largest_remainder(tip_cents_total, weights)
+
+    people = []
+    total_check = 0
+    for i in range(n):
+        amount_cents = subtotal_cents[i] + tax_cents[i] + tip_cents[i]
+        total_check += amount_cents
+        people.append({
+            "personal": _round2(personal_cents[i] / 100.0),
+            "shared": _round2(shared_cents[i] / 100.0),
+            "subtotal": _round2(subtotal_cents[i] / 100.0),
+            "tax": _round2(tax_cents[i] / 100.0),
+            "tip": _round2(tip_cents[i] / 100.0),
+            "amount": _round2(amount_cents / 100.0),
+        })
+
+    return {
+        "people": people,
+        "tip_percent": _round2(tip_percent),
+        "tip_on": mode,
+        "subtotal": _round2(food_total),
+        "tax": _round2(tax),
+        "tip": _round2(tip_cents_total / 100.0),
+        "total": _round2(total_check / 100.0),
+        "amounts": [p["amount"] for p in people],
+    }
+
+
+# Customary restaurant gratuity norms by country/region (REQ-001 extension).
+# ``customary`` is the typical tip a local would leave; ``low``/``high`` bound
+# the usual range. These are rough cultural conventions for traveller guidance,
+# not legal/financial advice. Codes resolve via :data:`_REGION_ALIASES`.
+_REGIONAL_TIP_NORMS = {
+    "US": {"name": "United States", "customary": 18.0, "low": 15.0, "high": 20.0},
+    "CA": {"name": "Canada", "customary": 15.0, "low": 15.0, "high": 20.0},
+    "UK": {"name": "United Kingdom", "customary": 12.5, "low": 10.0, "high": 15.0},
+    "EU": {"name": "Europe (general)", "customary": 10.0, "low": 5.0, "high": 10.0},
+    "FR": {"name": "France", "customary": 5.0, "low": 0.0, "high": 10.0},
+    "DE": {"name": "Germany", "customary": 10.0, "low": 5.0, "high": 10.0},
+    "IT": {"name": "Italy", "customary": 10.0, "low": 5.0, "high": 10.0},
+    "JP": {"name": "Japan", "customary": 0.0, "low": 0.0, "high": 0.0},
+    "CN": {"name": "China", "customary": 0.0, "low": 0.0, "high": 0.0},
+    "AU": {"name": "Australia", "customary": 10.0, "low": 0.0, "high": 10.0},
+    "IN": {"name": "India", "customary": 10.0, "low": 5.0, "high": 10.0},
+    "MX": {"name": "Mexico", "customary": 12.5, "low": 10.0, "high": 15.0},
+    "BR": {"name": "Brazil", "customary": 10.0, "low": 10.0, "high": 10.0},
+}
+
+_REGION_ALIASES = {
+    "USA": "US", "AMERICA": "US", "UNITED STATES": "US",
+    "CANADA": "CA",
+    "GB": "UK", "BRITAIN": "UK", "ENGLAND": "UK", "UNITED KINGDOM": "UK",
+    "EUROPE": "EU",
+    "FRANCE": "FR", "GERMANY": "DE", "ITALY": "IT",
+    "JAPAN": "JP", "CHINA": "CN", "AUSTRALIA": "AU",
+    "INDIA": "IN", "MEXICO": "MX", "BRAZIL": "BR",
+}
+
+
+def _normalise_region(region):
+    """Resolve a country/region name or code to a key in :data:`_REGIONAL_TIP_NORMS`."""
+    if region in (None, ""):
+        raise TipError("region is required")
+    if not isinstance(region, str):
+        raise TipError("region must be a country name or code")
+    key = region.strip().upper()
+    key = _REGION_ALIASES.get(key, key)
+    if key not in _REGIONAL_TIP_NORMS:
+        valid = ", ".join(sorted(_REGIONAL_TIP_NORMS))
+        raise TipError("unknown region %r (try one of: %s)" % (region, valid))
+    return key
+
+
+def recommend_regional_tip(bill, region, people=1):
+    """Suggest a customary tip for a country/region, then calculate it (REQ-001/002).
+
+    A companion to :func:`convert_currency` for travellers: tipping etiquette
+    varies wildly by country — 18% is expected in the United States, ~10% across
+    much of Europe, and tipping is famously absent in Japan. Given the ``bill``
+    and a ``region`` (a country name or code such as ``"US"``, ``"Japan"`` or
+    ``"uk"``), this looks up the customary gratuity from
+    :data:`_REGIONAL_TIP_NORMS` and runs it through :func:`calculate_tip` so the
+    rounding and per-person split rules stay identical.
+
+    Returns the resolved ``region``/``region_name``, the ``customary`` percent
+    actually applied and the typical ``low``/``high`` range for context, plus the
+    usual tip/total/per-person fields. Raises ``TipError`` on an unknown region
+    so callers can fail safe with the list of supported regions.
+    """
+    key = _normalise_region(region)
+    norms = _REGIONAL_TIP_NORMS[key]
+
+    result = calculate_tip(bill, norms["customary"], people)
+    result["region"] = key
+    result["region_name"] = norms["name"]
+    result["customary"] = _round2(norms["customary"])
+    result["low"] = _round2(norms["low"])
+    result["high"] = _round2(norms["high"])
+    return result
+
+
+def charity_round_up(bill, tip_percent, people=1, round_to=1.0, donation=None,
+                     tax=0, tip_on="total"):
+    """Round the checkout total up for a charity donation (REQ-001/002 extension).
+
+    The ubiquitous point-of-sale prompt — "round up for charity?". The tip is
+    computed normally (honouring ``tax`` and pre/post-tax ``tip_on`` exactly like
+    :func:`calculate_tip`), and then the grand total is bumped up so the spare
+    change goes to a good cause. This is deliberately DISTINCT from
+    :func:`round_total_to`: there the rounding surplus is folded into the
+    server's tip, whereas here it is a SEPARATE ``donation`` line — the server's
+    gratuity is untouched.
+
+    Two ways to set the donation:
+
+    - leave ``donation`` unset and the bill+tip total is rounded UP to the next
+      multiple of ``round_to`` (default ``1.0`` — the next whole dollar); the
+      difference is the donation. A total already on a clean multiple donates 0.
+    - pass an explicit ``donation`` amount to add a fixed gift instead; in that
+      case ``round_to`` is ignored.
+
+    The grand ``total`` (bill + tip + donation) is split evenly across ``people``
+    using the largest-remainder method so the per-person ``amounts`` always sum
+    EXACTLY to the total. Returns the ``base_total`` (before the round-up), the
+    resolved ``donation``, the usual tip/total fields and the per-person split.
+    Raises ``TipError`` on invalid input so callers can fail safe.
+    """
+    base = calculate_tip(bill, tip_percent, people, tax=tax, tip_on=tip_on)
+    base_total_cents = int(round(base["total"] * 100))
+    people_int = base["people"]
+
+    if donation not in (None, ""):
+        donation_amt = _to_number(donation, "donation")
+        if donation_amt < 0:
+            raise TipError("donation must not be negative")
+        donation_cents = int(round(donation_amt * 100))
+    else:
+        round_to = _to_number(round_to, "round_to") if round_to not in (None, "") else 1.0
+        if round_to <= 0:
+            raise TipError("round_to must be a positive number")
+        step_cents = int(round(round_to * 100))
+        if step_cents <= 0:
+            raise TipError("round_to must be a positive number")
+        units = math.ceil(round(base_total_cents / step_cents, 9))
+        donation_cents = units * step_cents - base_total_cents
+
+    total_cents = base_total_cents + donation_cents
+    share_cents = _largest_remainder(total_cents, [1] * people_int)
+    per_person_amounts = [c / 100.0 for c in share_cents]
+
+    return {
+        "bill": base["bill"],
+        "tip_percent": base["tip_percent"],
+        "people": people_int,
+        "tax": base["tax"],
+        "subtotal": base["subtotal"],
+        "tip_on": base["tip_on"],
+        "tip": base["tip"],
+        "base_total": _round2(base_total_cents / 100.0),
+        "donation": _round2(donation_cents / 100.0),
+        "total": _round2(total_cents / 100.0),
+        "tip_per_person": base["tip_per_person"],
+        "donation_per_person": _round2(donation_cents / 100.0 / people_int),
+        "total_per_person": _round2(total_cents / 100.0 / people_int),
+        "per_person_amounts": per_person_amounts,
     }
 
 
@@ -1737,11 +2055,56 @@ INDEX_HTML = """<!DOCTYPE html>
       <div id="fee-rows"></div>
       <div class="err" id="fee-err"></div>
     </div>
+
+    <div class="out">
+      <div class="row"><span class="k">Shared items split</span><span class="v">personal + shared</span></div>
+      <label for="shared-diners">Each diner's PERSONAL item prices, one diner per line</label>
+      <textarea id="shared-diners" rows="3" style="width:100%;padding:.6rem .7rem;font-size:1rem;
+        border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;
+        font-family:inherit;">12
+8
+0</textarea>
+      <label for="shared-items">SHARED items: price, then diner numbers (blank = everyone), per line</label>
+      <textarea id="shared-items" rows="2" style="width:100%;padding:.6rem .7rem;font-size:1rem;
+        border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;
+        font-family:inherit;">30, 1 2 3
+18, 1 2</textarea>
+      <button class="chip" id="shared-go" style="margin-top:.6rem;flex:initial;width:100%;">Split shared items</button>
+      <div id="shared-rows"></div>
+      <div class="err" id="shared-err"></div>
+    </div>
+
+    <div class="out">
+      <div class="row"><span class="k">Regional tip</span><span class="v">customary by country</span></div>
+      <label for="region">Country or region (e.g. US, Japan, uk)</label>
+      <input id="region" type="text" value="US" placeholder="e.g. Japan">
+      <button class="chip" id="region-go" style="margin-top:.6rem;flex:initial;width:100%;">Customary tip</button>
+      <div id="region-rows"></div>
+      <div class="err" id="region-err"></div>
+    </div>
+
+    <div class="out">
+      <div class="row"><span class="k">Round up for charity</span><span class="v">donate the change</span></div>
+      <label for="charity-round">Round the total up to the nearest</label>
+      <input id="charity-round" type="number" min="0" step="0.01" value="1" inputmode="decimal">
+      <button class="chip" id="charity-go" style="margin-top:.6rem;flex:initial;width:100%;">Round up &amp; donate</button>
+      <div id="charity-rows"></div>
+      <div class="err" id="charity-err"></div>
+    </div>
   </div>
 
 <script>
 const $ = (id) => document.getElementById(id);
 const money = (n) => "$" + Number(n).toFixed(2);
+// Shared key/value row renderer — appends one ".row" div per [key, value] pair.
+const renderRows = (id, rows) => {
+  rows.forEach(([k, v]) => {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = '<span class="k">' + k + '</span><span class="v">' + v + '</span>';
+    $(id).appendChild(row);
+  });
+};
 
 async function calc() {
   const body = {
@@ -1877,12 +2240,7 @@ async function tipForRating() {
       ["Total", money(data.total)],
       ["Total / person", money(data.total_per_person)],
     ];
-    rows.forEach(([k, v]) => {
-      const row = document.createElement("div");
-      row.className = "row";
-      row.innerHTML = '<span class="k">' + k + '</span><span class="v">' + v + '</span>';
-      $("rating-rows").appendChild(row);
-    });
+    renderRows("rating-rows", rows);
   } catch (e) {
     $("rating-err").textContent = "Network error";
   }
@@ -1942,12 +2300,7 @@ async function combineChecks() {
       ["Grand total", money(data.total)],
       ["Total / person", money(data.total_per_person)],
     ];
-    rows.forEach(([k, v]) => {
-      const row = document.createElement("div");
-      row.className = "row";
-      row.innerHTML = '<span class="k">' + k + '</span><span class="v">' + v + '</span>';
-      $("combine-rows").appendChild(row);
-    });
+    renderRows("combine-rows", rows);
   } catch (e) {
     $("combine-err").textContent = "Network error";
   }
@@ -1980,12 +2333,7 @@ async function applyDiscount() {
       ["Total", money(data.total)],
       ["Total / person", money(data.total_per_person)],
     ];
-    rows.forEach(([k, v]) => {
-      const row = document.createElement("div");
-      row.className = "row";
-      row.innerHTML = '<span class="k">' + k + '</span><span class="v">' + v + '</span>';
-      $("discount-rows").appendChild(row);
-    });
+    renderRows("discount-rows", rows);
   } catch (e) {
     $("discount-err").textContent = "Network error";
   }
@@ -2195,12 +2543,7 @@ async function autoGratuity() {
       ["Total", money(data.total)],
       ["Total / person", money(data.total_per_person)],
     ];
-    rows.forEach(([k, v]) => {
-      const row = document.createElement("div");
-      row.className = "row";
-      row.innerHTML = '<span class="k">' + k + '</span><span class="v">' + v + '</span>';
-      $("ag-rows").appendChild(row);
-    });
+    renderRows("ag-rows", rows);
   } catch (e) {
     $("ag-err").textContent = "Network error";
   }
@@ -2260,12 +2603,7 @@ async function targetPerPerson() {
       ["Total", money(data.total)],
       ["Each pays", money(data.total_per_person)],
     ];
-    rows.forEach(([k, v]) => {
-      const row = document.createElement("div");
-      row.className = "row";
-      row.innerHTML = '<span class="k">' + k + '</span><span class="v">' + v + '</span>';
-      $("tpp-rows").appendChild(row);
-    });
+    renderRows("tpp-rows", rows);
   } catch (e) {
     $("tpp-err").textContent = "Network error";
   }
@@ -2300,12 +2638,7 @@ async function roundTotal() {
       ["Effective tip", data.effective_tip_percent + "%"],
       ["Total / person", money(data.total_per_person)],
     ];
-    rows.forEach(([k, v]) => {
-      const row = document.createElement("div");
-      row.className = "row";
-      row.innerHTML = '<span class="k">' + k + '</span><span class="v">' + v + '</span>';
-      $("rt-rows").appendChild(row);
-    });
+    renderRows("rt-rows", rows);
   } catch (e) {
     $("rt-err").textContent = "Network error";
   }
@@ -2372,17 +2705,119 @@ async function grossUpTip() {
       ["Total", money(data.total)],
       ["Total / person", money(data.total_per_person)],
     ];
-    rows.forEach(([k, v]) => {
-      const row = document.createElement("div");
-      row.className = "row";
-      row.innerHTML = '<span class="k">' + k + '</span><span class="v">' + v + '</span>';
-      $("fee-rows").appendChild(row);
-    });
+    renderRows("fee-rows", rows);
   } catch (e) {
     $("fee-err").textContent = "Network error";
   }
 }
 $("fee-go").addEventListener("click", grossUpTip);
+
+async function splitSharedItems() {
+  const diners = $("shared-diners").value.split("\n").map((l) => l.trim())
+    .filter((l) => l.length)
+    .map((l) => l.split(",").map((s) => s.trim()).filter((s) => s.length).map(Number));
+  const shared_items = $("shared-items").value.split("\n").map((l) => l.trim())
+    .filter((l) => l.length).map((l) => {
+      const parts = l.split(",").map((s) => s.trim());
+      const price = Number(parts[0]);
+      if (parts.length < 2 || parts[1] === "") return price;  // shared by everyone
+      const sharers = parts[1].split(/\\s+/).filter((s) => s.length).map((s) => Number(s) - 1);
+      return { price, sharers };
+    });
+  const body = {
+    diners,
+    shared_items,
+    tip_percent: $("tip").value,
+    tax: $("tax").value,
+    tip_on: $("pretax").checked ? "subtotal" : "total",
+  };
+  $("shared-rows").innerHTML = "";
+  try {
+    const res = await fetch("/api/shared-items", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) { $("shared-err").textContent = data.error || "Invalid input"; return; }
+    $("shared-err").textContent = "";
+    data.people.forEach((p, i) => {
+      const row = document.createElement("div");
+      row.className = "row";
+      row.innerHTML = '<span class="k">Diner ' + (i + 1) + '</span><span class="v">' +
+        money(p.amount) + '</span>';
+      $("shared-rows").appendChild(row);
+    });
+    const grand = document.createElement("div");
+    grand.className = "row grand";
+    grand.innerHTML = '<span class="k">Total</span><span class="v">' + money(data.total) + '</span>';
+    $("shared-rows").appendChild(grand);
+  } catch (e) {
+    $("shared-err").textContent = "Network error";
+  }
+}
+$("shared-go").addEventListener("click", splitSharedItems);
+
+async function regionalTip() {
+  const body = {
+    bill: $("bill").value,
+    region: $("region").value,
+    people: $("people").value,
+  };
+  $("region-rows").innerHTML = "";
+  try {
+    const res = await fetch("/api/regional-tip", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) { $("region-err").textContent = data.error || "Invalid input"; return; }
+    $("region-err").textContent = "";
+    const rows = [
+      [data.region_name, data.customary + "% (" + data.low + "–" + data.high + "%)"],
+      ["Tip", money(data.tip)],
+      ["Total", money(data.total)],
+      ["Total / person", money(data.total_per_person)],
+    ];
+    renderRows("region-rows", rows);
+  } catch (e) {
+    $("region-err").textContent = "Network error";
+  }
+}
+$("region-go").addEventListener("click", regionalTip);
+
+async function charityRoundUp() {
+  const body = {
+    bill: $("bill").value,
+    tip_percent: $("tip").value,
+    people: $("people").value,
+    round_to: $("charity-round").value,
+    tax: $("tax").value,
+    tip_on: $("pretax").checked ? "subtotal" : "total",
+  };
+  $("charity-rows").innerHTML = "";
+  try {
+    const res = await fetch("/api/charity", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) { $("charity-err").textContent = data.error || "Invalid input"; return; }
+    $("charity-err").textContent = "";
+    const rows = [
+      ["Bill + tip", money(data.base_total)],
+      ["Charity donation", money(data.donation)],
+      ["Total", money(data.total)],
+      ["Total / person", money(data.total_per_person)],
+    ];
+    renderRows("charity-rows", rows);
+  } catch (e) {
+    $("charity-err").textContent = "Network error";
+  }
+}
+$("charity-go").addEventListener("click", charityRoundUp);
 </script>
 </body>
 </html>
@@ -2420,7 +2855,9 @@ class Handler(BaseHTTPRequestHandler):
                              "/api/service-charge", "/api/convert",
                              "/api/auto-gratuity", "/api/split-percentage",
                              "/api/target-per-person", "/api/round-total",
-                             "/api/split-comped", "/api/gross-up-tip"):
+                             "/api/split-comped", "/api/gross-up-tip",
+                             "/api/shared-items", "/api/regional-tip",
+                             "/api/charity"):
             self._send_json(404, {"error": "not found"})
             return
         try:
@@ -2581,6 +3018,30 @@ class Handler(BaseHTTPRequestHandler):
                     data.get("tip_percent"),
                     data.get("fee_percent", 0),
                     data.get("people", 1),
+                )
+            elif self.path == "/api/shared-items":
+                result = split_shared_items(
+                    data.get("diners"),
+                    data.get("shared_items"),
+                    data.get("tip_percent", 0),
+                    data.get("tax", 0),
+                    data.get("tip_on", "subtotal"),
+                )
+            elif self.path == "/api/regional-tip":
+                result = recommend_regional_tip(
+                    data.get("bill"),
+                    data.get("region"),
+                    data.get("people", 1),
+                )
+            elif self.path == "/api/charity":
+                result = charity_round_up(
+                    data.get("bill"),
+                    data.get("tip_percent"),
+                    data.get("people", 1),
+                    data.get("round_to", 1.0),
+                    data.get("donation"),
+                    data.get("tax", 0),
+                    data.get("tip_on", "total"),
                 )
             else:  # /api/split
                 result = split_by_shares(

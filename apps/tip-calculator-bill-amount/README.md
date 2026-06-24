@@ -58,4 +58,16 @@ JSON endpoints (all `POST` unless noted):
   remaining payers (REQ-002 extension).
 - `/api/gross-up-tip` — gross up a card tip so the server still nets the intended
   gratuity after the payment processor's percentage fee (REQ-001 extension).
+- `/api/shared-items` — itemised split that also handles SHARED items: each diner
+  pays their own items plus a fair portion of every shared item (split among its
+  named sharers), with tax/tip apportioned by consumption and reconciled exactly
+  to the cent (REQ-002 extension).
+- `/api/regional-tip` — suggest a customary gratuity for a country/region (e.g.
+  18% in the US, ~10% across much of Europe, 0% in Japan), then calculate it; the
+  typical low/high range is returned for context (REQ-001 extension).
+- `/api/charity` — round the checkout total UP for a charity donation: the spare
+  change becomes a separate donation line and the server's tip is left untouched
+  (distinct from `/api/round-total`, which folds the round-up into the tip); also
+  accepts an explicit fixed donation and splits the total exactly across people
+  (REQ-001/002 extension).
 - `GET /health` — liveness probe.

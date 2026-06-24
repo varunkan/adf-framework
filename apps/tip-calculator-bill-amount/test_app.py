@@ -32,6 +32,9 @@ from server import (
     round_total_to,
     split_comped,
     gross_up_tip,
+    split_shared_items,
+    recommend_regional_tip,
+    charity_round_up,
     TipError,
     Handler,
 )
@@ -1421,6 +1424,259 @@ class TestGrossUpTip(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Shared-items split — personal + shared items (REQ-002 extension)
+# ---------------------------------------------------------------------------
+
+
+class TestSplitSharedItems(unittest.TestCase):
+    def test_personal_only_no_tip(self):
+        # No shared items, no tax/tip: each diner pays exactly their own.
+        r = split_shared_items([[10], [20], [30]], tip_percent=0)
+        self.assertEqual([p["amount"] for p in r["people"]], [10.0, 20.0, 30.0])
+        self.assertEqual(r["total"], 60.0)
+
+    def test_shared_item_split_evenly_when_no_sharers(self):
+        # A bare-price shared item is split across EVERYONE.
+        r = split_shared_items([[0], [0]], [30], tip_percent=0)
+        self.assertEqual(r["people"][0]["shared"], 15.0)
+        self.assertEqual(r["people"][1]["shared"], 15.0)
+        self.assertEqual(r["total"], 30.0)
+
+    def test_shared_item_among_subset(self):
+        # 30 appetiser shared only by diners 0 and 1 (not diner 2).
+        r = split_shared_items([[10], [10], [10]],
+                               [{"price": 30, "sharers": [0, 1]}], tip_percent=0)
+        self.assertEqual(r["people"][0]["shared"], 15.0)
+        self.assertEqual(r["people"][1]["shared"], 15.0)
+        self.assertEqual(r["people"][2]["shared"], 0.0)
+        self.assertEqual([p["amount"] for p in r["people"]], [25.0, 25.0, 10.0])
+
+    def test_shared_item_list_form(self):
+        # [price, [sharers]] is accepted alongside the mapping form.
+        r = split_shared_items([[0], [0]], [[18, [0, 1]]], tip_percent=0)
+        self.assertEqual(r["people"][0]["shared"], 9.0)
+        self.assertEqual(r["people"][1]["shared"], 9.0)
+
+    def test_tip_apportioned_by_consumption(self):
+        # Personal 10/20/30 (=60) + 20% tip = 12, split 1:2:3.
+        r = split_shared_items([[10], [20], [30]], tip_percent=20)
+        self.assertEqual(r["tip"], 12.0)
+        self.assertEqual([p["tip"] for p in r["people"]], [2.0, 4.0, 6.0])
+
+    def test_amounts_sum_exactly_to_total(self):
+        r = split_shared_items([[12.5, 4], [9]],
+                               [{"price": 17.77, "sharers": [0, 1]}],
+                               tip_percent=18, tax=3.33)
+        self.assertEqual(round(sum(p["amount"] for p in r["people"]), 2), r["total"])
+
+    def test_tax_apportioned(self):
+        r = split_shared_items([[50], [50]], tip_percent=0, tax=10)
+        self.assertEqual([p["tax"] for p in r["people"]], [5.0, 5.0])
+        self.assertEqual(r["total"], 110.0)
+
+    def test_tip_on_total_includes_tax(self):
+        r = split_shared_items([[100]], tip_percent=10, tax=10, tip_on="total")
+        self.assertEqual(r["tip"], 11.0)  # 10% of 110
+        self.assertEqual(r["total"], 121.0)
+
+    def test_no_shared_items_defaults_empty(self):
+        r = split_shared_items([[10], [20]], None, tip_percent=0)
+        self.assertEqual(r["total"], 30.0)
+
+    def test_string_inputs_coerced(self):
+        r = split_shared_items([["10"], ["10"]], [["30", ["0", "1"]]],
+                               tip_percent="0")
+        self.assertEqual(r["people"][0]["amount"], 25.0)
+        self.assertEqual(r["people"][1]["amount"], 25.0)
+
+    def test_empty_diners_rejected(self):
+        with self.assertRaises(TipError):
+            split_shared_items([], [], tip_percent=15)
+
+    def test_non_list_diners_rejected(self):
+        with self.assertRaises(TipError):
+            split_shared_items("nope", [], tip_percent=15)
+
+    def test_diner_entry_must_be_list(self):
+        with self.assertRaises(TipError):
+            split_shared_items([10, 20], [], tip_percent=15)
+
+    def test_negative_personal_item_rejected(self):
+        with self.assertRaises(TipError):
+            split_shared_items([[10, -1]], [], tip_percent=15)
+
+    def test_shared_item_out_of_range_rejected(self):
+        with self.assertRaises(TipError):
+            split_shared_items([[10], [10]],
+                               [{"price": 30, "sharers": [0, 5]}], tip_percent=0)
+
+    def test_shared_item_missing_price_rejected(self):
+        with self.assertRaises(TipError):
+            split_shared_items([[10]], [{"sharers": [0]}], tip_percent=0)
+
+    def test_shared_item_empty_sharers_rejected(self):
+        with self.assertRaises(TipError):
+            split_shared_items([[10], [10]],
+                               [{"price": 30, "sharers": []}], tip_percent=0)
+
+    def test_negative_tip_rejected(self):
+        with self.assertRaises(TipError):
+            split_shared_items([[10]], [], tip_percent=-5)
+
+    def test_negative_tax_rejected(self):
+        with self.assertRaises(TipError):
+            split_shared_items([[10]], [], tip_percent=15, tax=-1)
+
+
+# ---------------------------------------------------------------------------
+# Regional customary tip (REQ-001 extension)
+# ---------------------------------------------------------------------------
+
+
+class TestRecommendRegionalTip(unittest.TestCase):
+    def test_us_customary(self):
+        r = recommend_regional_tip(100, "US")
+        self.assertEqual(r["customary"], 18.0)
+        self.assertEqual(r["tip"], 18.0)
+        self.assertEqual(r["total"], 118.0)
+        self.assertEqual(r["region"], "US")
+        self.assertEqual(r["region_name"], "United States")
+
+    def test_japan_no_tip(self):
+        r = recommend_regional_tip(100, "Japan")
+        self.assertEqual(r["customary"], 0.0)
+        self.assertEqual(r["tip"], 0.0)
+        self.assertEqual(r["total"], 100.0)
+
+    def test_low_high_range_reported(self):
+        r = recommend_regional_tip(100, "UK")
+        self.assertEqual(r["customary"], 12.5)
+        self.assertEqual(r["low"], 10.0)
+        self.assertEqual(r["high"], 15.0)
+
+    def test_region_code_case_insensitive(self):
+        r = recommend_regional_tip(100, "jp")
+        self.assertEqual(r["region"], "JP")
+
+    def test_region_alias_full_name(self):
+        a = recommend_regional_tip(100, "united states")
+        b = recommend_regional_tip(100, "USA")
+        self.assertEqual(a["region"], "US")
+        self.assertEqual(b["region"], "US")
+
+    def test_split_per_person(self):
+        r = recommend_regional_tip(100, "US", people=4)
+        self.assertEqual(r["total"], 118.0)
+        self.assertEqual(r["total_per_person"], 29.5)
+
+    def test_string_inputs_coerced(self):
+        r = recommend_regional_tip("100", "FR")
+        self.assertEqual(r["customary"], 5.0)
+        self.assertEqual(r["total"], 105.0)
+
+    def test_unknown_region_rejected(self):
+        with self.assertRaises(TipError):
+            recommend_regional_tip(100, "Atlantis")
+
+    def test_missing_region_rejected(self):
+        with self.assertRaises(TipError):
+            recommend_regional_tip(100, None)
+
+    def test_negative_bill_rejected(self):
+        with self.assertRaises(TipError):
+            recommend_regional_tip(-1, "US")
+
+    def test_non_string_region_rejected(self):
+        with self.assertRaises(TipError):
+            recommend_regional_tip(100, 42)
+
+
+# ---------------------------------------------------------------------------
+# Round up for charity (REQ-001/002 extension)
+# ---------------------------------------------------------------------------
+
+
+class TestCharityRoundUp(unittest.TestCase):
+    def test_round_up_to_dollar(self):
+        # 100 + 15% = 115; already whole -> donates 0.
+        r = charity_round_up(100, 15)
+        self.assertEqual(r["base_total"], 115.0)
+        self.assertEqual(r["donation"], 0.0)
+        self.assertEqual(r["total"], 115.0)
+
+    def test_round_up_with_cents(self):
+        # 53.27 + 18% = 62.86; round up to next dollar 63 -> donate 0.14.
+        r = charity_round_up(53.27, 18)
+        self.assertEqual(r["base_total"], 62.86)
+        self.assertEqual(r["donation"], 0.14)
+        self.assertEqual(r["total"], 63.0)
+
+    def test_tip_unaffected_by_donation(self):
+        # Unlike round_total_to, the server's tip stays the plain percent tip.
+        r = charity_round_up(53.27, 18)
+        self.assertEqual(r["tip"], 9.59)  # same as calculate_tip(53.27, 18)
+
+    def test_round_up_to_five(self):
+        # 100 + 18% = 118; round up to next $5 = 120 -> donate 2.
+        r = charity_round_up(100, 18, round_to=5)
+        self.assertEqual(r["donation"], 2.0)
+        self.assertEqual(r["total"], 120.0)
+
+    def test_explicit_donation_amount(self):
+        # A fixed gift ignores round_to.
+        r = charity_round_up(100, 15, donation=10, round_to=5)
+        self.assertEqual(r["donation"], 10.0)
+        self.assertEqual(r["total"], 125.0)
+
+    def test_donation_zero_when_explicit_zero(self):
+        r = charity_round_up(100, 15, donation=0)
+        self.assertEqual(r["donation"], 0.0)
+        self.assertEqual(r["total"], 115.0)
+
+    def test_split_across_people_sums_exactly(self):
+        r = charity_round_up(100, 18, people=3, round_to=5)
+        self.assertEqual(round(sum(r["per_person_amounts"]), 2), r["total"])
+        self.assertEqual(len(r["per_person_amounts"]), 3)
+        self.assertEqual(r["total_per_person"], 40.0)
+
+    def test_tax_on_subtotal_carried_through(self):
+        # bill 110 incl 10 tax; tip 20% on subtotal 100 = 20 -> base 130.
+        r = charity_round_up(110, 20, tax=10, tip_on="subtotal", round_to=5)
+        self.assertEqual(r["base_total"], 130.0)
+        self.assertEqual(r["donation"], 0.0)
+        self.assertEqual(r["subtotal"], 100.0)
+
+    def test_donation_per_person(self):
+        r = charity_round_up(100, 18, people=4, round_to=5)
+        self.assertEqual(r["donation"], 2.0)
+        self.assertEqual(r["donation_per_person"], 0.5)
+
+    def test_string_inputs_coerced(self):
+        r = charity_round_up("100", "18", round_to="5")
+        self.assertEqual(r["total"], 120.0)
+
+    def test_negative_donation_rejected(self):
+        with self.assertRaises(TipError):
+            charity_round_up(100, 15, donation=-5)
+
+    def test_zero_round_to_rejected(self):
+        with self.assertRaises(TipError):
+            charity_round_up(100, 15, round_to=0)
+
+    def test_negative_bill_rejected(self):
+        with self.assertRaises(TipError):
+            charity_round_up(-1, 15)
+
+    def test_negative_tip_rejected(self):
+        with self.assertRaises(TipError):
+            charity_round_up(100, -5)
+
+    def test_zero_people_rejected(self):
+        with self.assertRaises(TipError):
+            charity_round_up(100, 15, people=0)
+
+
+# ---------------------------------------------------------------------------
 # HTTP API tests
 # ---------------------------------------------------------------------------
 
@@ -1822,6 +2078,50 @@ class TestApi(unittest.TestCase):
         status, data = self._post_to(
             "/api/gross-up-tip",
             {"bill": 100, "tip_percent": 20, "fee_percent": 100})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_api_shared_items_happy(self):
+        status, data = self._post_to(
+            "/api/shared-items",
+            {"diners": [[10], [10], [10]],
+             "shared_items": [{"price": 30, "sharers": [0, 1]}],
+             "tip_percent": 0})
+        self.assertEqual(status, 200)
+        self.assertEqual([p["amount"] for p in data["people"]], [25.0, 25.0, 10.0])
+        self.assertEqual(data["total"], 60.0)
+
+    def test_api_shared_items_validation(self):
+        status, data = self._post_to(
+            "/api/shared-items", {"diners": [], "tip_percent": 0})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_api_regional_tip_happy(self):
+        status, data = self._post_to(
+            "/api/regional-tip", {"bill": 100, "region": "US"})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["customary"], 18.0)
+        self.assertEqual(data["total"], 118.0)
+        self.assertEqual(data["region"], "US")
+
+    def test_api_regional_tip_validation(self):
+        status, data = self._post_to(
+            "/api/regional-tip", {"bill": 100, "region": "Atlantis"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_api_charity_happy(self):
+        status, data = self._post_to(
+            "/api/charity", {"bill": 100, "tip_percent": 18, "round_to": 5})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["donation"], 2.0)
+        self.assertEqual(data["total"], 120.0)
+        self.assertEqual(data["tip"], 18.0)
+
+    def test_api_charity_validation(self):
+        status, data = self._post_to(
+            "/api/charity", {"bill": 100, "tip_percent": 18, "round_to": 0})
         self.assertEqual(status, 400)
         self.assertIn("error", data)
 
