@@ -1781,6 +1781,181 @@ def charity_round_up(bill, tip_percent, people=1, round_to=1.0, donation=None,
     }
 
 
+def tip_excluding(bill, tip_percent, excluded=0, people=1):
+    """Tip on the eligible amount, leaving non-tippable charges out (REQ-001/002).
+
+    Restaurants routinely print charges on the cheque that diners do not tip on:
+    the bar tab / alcohol, a redeemed gift card, a packaged retail item. This is
+    deliberately DISTINCT from the pre-tax ``tip_on="subtotal"`` mode of
+    :func:`calculate_tip` — there the only thing removed from the tip base is the
+    *tax*, whereas here an arbitrary ``excluded`` amount of the food/drink itself
+    is held back.
+
+    ``bill`` is the full pre-tip amount on the cheque. ``excluded`` is the slice
+    of that bill NOT subject to gratuity — either a single number or a list of
+    charges (which are summed, e.g. ``[40, 12.50]`` for a bar tab plus a gift
+    card). The gratuity is computed on the ``eligible`` base ``bill - excluded``;
+    the grand ``total`` is still ``bill + tip`` (you pay for the excluded items,
+    you just do not tip on them) and is split evenly across ``people`` using the
+    largest-remainder method so the per-person ``amounts`` sum EXACTLY to it.
+
+    Returns the resolved ``excluded``/``eligible`` figures, the ``tip``/``total``,
+    the ``effective_tip_percent`` actually paid against the whole bill, and the
+    per-person split. Raises ``TipError`` on invalid input so callers fail safe.
+    """
+    bill = _to_number(bill, "bill")
+    tip_percent = _to_number(tip_percent, "tip_percent")
+    people_int = _validate_people(people)
+
+    # ``excluded`` may be a single amount or a list of charges to sum.
+    if excluded in (None, ""):
+        excluded_total = 0.0
+    elif isinstance(excluded, (str, bytes)):
+        excluded_total = _to_number(excluded, "excluded")
+    elif hasattr(excluded, "__iter__"):
+        excluded_total = 0.0
+        for charge in list(excluded):
+            c = _to_number(charge, "excluded charge")
+            if c < 0:
+                raise TipError("excluded charges must not be negative")
+            excluded_total += c
+    else:
+        excluded_total = _to_number(excluded, "excluded")
+
+    if bill < 0:
+        raise TipError("bill must not be negative")
+    if tip_percent < 0:
+        raise TipError("tip_percent must not be negative")
+    if excluded_total < 0:
+        raise TipError("excluded must not be negative")
+    if excluded_total > bill:
+        raise TipError("excluded must not exceed the bill")
+
+    eligible = bill - excluded_total
+    tip = eligible * tip_percent / 100.0
+    total = bill + tip
+    total_cents = int(round(total * 100))
+
+    if bill > 0:
+        effective = tip / bill * 100.0
+    else:
+        effective = tip_percent
+
+    share_cents = _largest_remainder(total_cents, [1] * people_int)
+    per_person_amounts = [c / 100.0 for c in share_cents]
+
+    return {
+        "bill": _round2(bill),
+        "tip_percent": _round2(tip_percent),
+        "people": people_int,
+        "excluded": _round2(excluded_total),
+        "eligible": _round2(eligible),
+        "tip": _round2(tip),
+        "total": _round2(total_cents / 100.0),
+        "effective_tip_percent": _round2(effective),
+        "tip_per_person": _round2(tip / people_int),
+        "total_per_person": _round2(total_cents / 100.0 / people_int),
+        "per_person_amounts": per_person_amounts,
+    }
+
+
+def tip_by_diner(diners, tax=0):
+    """Per-diner INDIVIDUAL tip rates on each diner's own portion (REQ-001/002).
+
+    Friends rarely agree on a tip. This models "I'll tip 25%, you tip 15%": each
+    diner brings their own pre-tax portion of the bill (``amount``) AND their own
+    chosen ``tip_percent``, so every person's gratuity is computed against only
+    what *they* ate. This is deliberately DISTINCT from the single-rate splitters:
+    :func:`split_by_items` and :func:`split_by_shares` apply ONE tip rate to the
+    whole table, and :func:`split_by_percentage` divides one grand total by fixed
+    shares — none let each diner pick a different rate.
+
+    ``diners`` is a list of objects, one per person, each with an ``amount`` (their
+    pre-tax food/drink portion) and a ``tip_percent`` (their own rate); an optional
+    ``name`` defaults to ``"Diner N"``. ``tax`` is the total tax on the whole
+    cheque and is apportioned across diners in proportion to their ``amount`` using
+    the largest-remainder method, so the per-diner tax shares sum EXACTLY to it.
+    Each diner pays ``amount + tax share + tip`` (tip is taken on the pre-tax
+    amount, matching the pre-tax convention used elsewhere).
+
+    Returns the per-diner breakdown (``name``/``amount``/``tip_percent``/``tax``/
+    ``tip``/``total``) plus the table-wide ``subtotal``, ``tax``, total ``tip``,
+    grand ``total``, ``people`` count and the ``effective_tip_percent`` actually
+    paid against the subtotal. Per-diner totals always reconcile to the grand
+    total to the cent. Raises ``TipError`` on invalid input so callers fail safe.
+    """
+    if diners in (None, ""):
+        raise TipError("diners is required")
+    if isinstance(diners, (str, bytes, dict)) or not hasattr(diners, "__iter__"):
+        raise TipError("diners must be a list of diners")
+    diners = list(diners)
+    if not diners:
+        raise TipError("at least one diner is required")
+
+    names = []
+    amount_cents = []
+    percents = []
+    for index, entry in enumerate(diners):
+        if not isinstance(entry, dict):
+            raise TipError("diner %d must be an object" % (index + 1))
+        name = entry.get("name")
+        if name in (None, ""):
+            name = "Diner %d" % (index + 1)
+        else:
+            name = str(name)
+        amount = _to_number(entry.get("amount"), "diner %d amount" % (index + 1))
+        if amount < 0:
+            raise TipError("diner %d amount must not be negative" % (index + 1))
+        pct = _to_number(entry.get("tip_percent"), "diner %d tip_percent" % (index + 1))
+        if pct < 0:
+            raise TipError("diner %d tip_percent must not be negative" % (index + 1))
+        names.append(name)
+        amount_cents.append(int(round(amount * 100)))
+        percents.append(pct)
+
+    tax_amount = _to_number(tax, "tax") if tax not in (None, "") else 0.0
+    if tax_amount < 0:
+        raise TipError("tax must not be negative")
+    tax_cents_total = int(round(tax_amount * 100))
+    tax_shares = _largest_remainder(tax_cents_total, list(amount_cents))
+
+    rows = []
+    subtotal_cents = 0
+    tip_cents_total = 0
+    total_cents = 0
+    for i, name in enumerate(names):
+        a_cents = amount_cents[i]
+        t_cents = int(round(a_cents / 100.0 * percents[i]))
+        tax_share = tax_shares[i]
+        row_total = a_cents + tax_share + t_cents
+        subtotal_cents += a_cents
+        tip_cents_total += t_cents
+        total_cents += row_total
+        rows.append({
+            "name": name,
+            "amount": _round2(a_cents / 100.0),
+            "tip_percent": _round2(percents[i]),
+            "tax": _round2(tax_share / 100.0),
+            "tip": _round2(t_cents / 100.0),
+            "total": _round2(row_total / 100.0),
+        })
+
+    if subtotal_cents > 0:
+        effective = tip_cents_total / subtotal_cents * 100.0
+    else:
+        effective = 0.0
+
+    return {
+        "diners": rows,
+        "people": len(rows),
+        "subtotal": _round2(subtotal_cents / 100.0),
+        "tax": _round2(tax_cents_total / 100.0),
+        "tip": _round2(tip_cents_total / 100.0),
+        "total": _round2(total_cents / 100.0),
+        "effective_tip_percent": _round2(effective),
+    }
+
+
 # ---------------------------------------------------------------------------
 # HTTP layer
 # ---------------------------------------------------------------------------
@@ -2090,6 +2265,28 @@ INDEX_HTML = """<!DOCTYPE html>
       <button class="chip" id="charity-go" style="margin-top:.6rem;flex:initial;width:100%;">Round up &amp; donate</button>
       <div id="charity-rows"></div>
       <div class="err" id="charity-err"></div>
+    </div>
+
+    <div class="out">
+      <div class="row"><span class="k">Tip on food only</span><span class="v">exclude the bar tab</span></div>
+      <label for="excluded">Non-tippable charges (e.g. alcohol, gift card), comma-separated</label>
+      <input id="excluded" type="text" value="40" placeholder="e.g. 40, 12.50">
+      <button class="chip" id="excl-go" style="margin-top:.6rem;flex:initial;width:100%;">Tip on eligible</button>
+      <div id="excl-rows"></div>
+      <div class="err" id="excl-err"></div>
+    </div>
+
+    <div class="out">
+      <div class="row"><span class="k">Everyone tips their own rate</span><span class="v">amount @ percent</span></div>
+      <label for="diner-tips">One diner per line: amount @ tip%, e.g. "Sam 30 @ 20"</label>
+      <textarea id="diner-tips" rows="3" style="width:100%;padding:.6rem .7rem;font-size:1rem;
+        border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;
+        font-family:inherit;">Sam 30 @ 20
+Alex 45 @ 15
+Jo 25 @ 25</textarea>
+      <button class="chip" id="diner-tips-go" style="margin-top:.6rem;flex:initial;width:100%;">Split by individual tips</button>
+      <div id="diner-tips-rows"></div>
+      <div class="err" id="diner-tips-err"></div>
     </div>
   </div>
 
@@ -2818,6 +3015,78 @@ async function charityRoundUp() {
   }
 }
 $("charity-go").addEventListener("click", charityRoundUp);
+
+async function tipExcluding() {
+  const excluded = $("excluded").value.split(",").map((s) => s.trim())
+    .filter((s) => s.length).map(Number);
+  const body = {
+    bill: $("bill").value,
+    tip_percent: $("tip").value,
+    people: $("people").value,
+    excluded,
+  };
+  $("excl-rows").innerHTML = "";
+  try {
+    const res = await fetch("/api/tip-excluding", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) { $("excl-err").textContent = data.error || "Invalid input"; return; }
+    $("excl-err").textContent = "";
+    const rows = [
+      ["Excluded", money(data.excluded)],
+      ["Tippable base", money(data.eligible)],
+      ["Tip", money(data.tip)],
+      ["Effective tip", data.effective_tip_percent + "%"],
+      ["Total", money(data.total)],
+      ["Total / person", money(data.total_per_person)],
+    ];
+    renderRows("excl-rows", rows);
+  } catch (e) {
+    $("excl-err").textContent = "Network error";
+  }
+}
+$("excl-go").addEventListener("click", tipExcluding);
+
+// Parse "Name 30 @ 20" / "30 @ 20" lines into {name, amount, tip_percent} diners.
+function parseDinerTips(text) {
+  return text.split("\n").map((s) => s.trim()).filter((s) => s.length).map((line) => {
+    const [left, right] = line.split("@");
+    const tip_percent = Number((right || "").trim());
+    const tokens = (left || "").trim().split(/\s+/);
+    const amount = Number(tokens.pop());
+    const name = tokens.join(" ");
+    const diner = { amount, tip_percent };
+    if (name) diner.name = name;
+    return diner;
+  });
+}
+
+async function dinerTips() {
+  const body = { diners: parseDinerTips($("diner-tips").value), tax: $("tax").value };
+  $("diner-tips-rows").innerHTML = "";
+  try {
+    const res = await fetch("/api/diner-tips", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) { $("diner-tips-err").textContent = data.error || "Invalid input"; return; }
+    $("diner-tips-err").textContent = "";
+    const rows = data.diners.map((d) => [
+      d.name + " (" + d.tip_percent + "%)", money(d.total),
+    ]);
+    rows.push(["Tip total", money(data.tip)]);
+    rows.push(["Grand total", money(data.total)]);
+    renderRows("diner-tips-rows", rows);
+  } catch (e) {
+    $("diner-tips-err").textContent = "Network error";
+  }
+}
+$("diner-tips-go").addEventListener("click", dinerTips);
 </script>
 </body>
 </html>
@@ -2857,7 +3126,8 @@ class Handler(BaseHTTPRequestHandler):
                              "/api/target-per-person", "/api/round-total",
                              "/api/split-comped", "/api/gross-up-tip",
                              "/api/shared-items", "/api/regional-tip",
-                             "/api/charity"):
+                             "/api/charity", "/api/tip-excluding",
+                             "/api/diner-tips"):
             self._send_json(404, {"error": "not found"})
             return
         try:
@@ -3042,6 +3312,18 @@ class Handler(BaseHTTPRequestHandler):
                     data.get("donation"),
                     data.get("tax", 0),
                     data.get("tip_on", "total"),
+                )
+            elif self.path == "/api/tip-excluding":
+                result = tip_excluding(
+                    data.get("bill"),
+                    data.get("tip_percent"),
+                    data.get("excluded", 0),
+                    data.get("people", 1),
+                )
+            elif self.path == "/api/diner-tips":
+                result = tip_by_diner(
+                    data.get("diners"),
+                    data.get("tax", 0),
                 )
             else:  # /api/split
                 result = split_by_shares(

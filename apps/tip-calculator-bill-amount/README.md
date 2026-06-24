@@ -70,4 +70,10 @@ JSON endpoints (all `POST` unless noted):
   (distinct from `/api/round-total`, which folds the round-up into the tip); also
   accepts an explicit fixed donation and splits the total exactly across people
   (REQ-001/002 extension).
+- `/api/diner-tips` — per-diner INDIVIDUAL tip rates: each diner brings their own
+  pre-tax portion of the bill AND their own chosen tip percent ("I tip 25%, you
+  tip 15%"); shared tax is apportioned across diners in proportion to their portion
+  via largest-remainder, and each diner pays amount + tax share + their own tip.
+  Distinct from `/api/items-split` and `/api/split` (single table-wide rate) and
+  `/api/split-percentage` (fixed shares of one total) (REQ-001/002 extension).
 - `GET /health` — liveness probe.

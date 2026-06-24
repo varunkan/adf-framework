@@ -35,6 +35,8 @@ from server import (
     split_shared_items,
     recommend_regional_tip,
     charity_round_up,
+    tip_excluding,
+    tip_by_diner,
     TipError,
     Handler,
 )
@@ -1676,6 +1678,128 @@ class TestCharityRoundUp(unittest.TestCase):
             charity_round_up(100, 15, people=0)
 
 
+class TestTipByDiner(unittest.TestCase):
+    def test_each_diner_uses_own_rate(self):
+        r = tip_by_diner([
+            {"name": "Sam", "amount": 30, "tip_percent": 20},
+            {"name": "Alex", "amount": 45, "tip_percent": 15},
+            {"name": "Jo", "amount": 25, "tip_percent": 25},
+        ])
+        tips = {d["name"]: d["tip"] for d in r["diners"]}
+        self.assertEqual(tips["Sam"], 6.0)    # 30 @ 20%
+        self.assertEqual(tips["Alex"], 6.75)  # 45 @ 15%
+        self.assertEqual(tips["Jo"], 6.25)    # 25 @ 25%
+
+    def test_grand_totals(self):
+        r = tip_by_diner([
+            {"amount": 30, "tip_percent": 20},
+            {"amount": 45, "tip_percent": 15},
+            {"amount": 25, "tip_percent": 25},
+        ])
+        self.assertEqual(r["subtotal"], 100.0)
+        self.assertEqual(r["tip"], 19.0)
+        self.assertEqual(r["total"], 119.0)
+        self.assertEqual(r["people"], 3)
+
+    def test_per_diner_totals_reconcile_to_grand_total(self):
+        r = tip_by_diner([
+            {"amount": 33.33, "tip_percent": 18},
+            {"amount": 41.11, "tip_percent": 22},
+            {"amount": 25.55, "tip_percent": 15},
+        ], tax=8.77)
+        self.assertEqual(round(sum(d["total"] for d in r["diners"]), 2), r["total"])
+
+    def test_diner_total_is_amount_plus_tax_plus_tip(self):
+        r = tip_by_diner([{"amount": 50, "tip_percent": 20}], tax=5)
+        d = r["diners"][0]
+        self.assertEqual(d["amount"], 50.0)
+        self.assertEqual(d["tax"], 5.0)
+        self.assertEqual(d["tip"], 10.0)
+        self.assertEqual(d["total"], 65.0)
+
+    def test_tax_allocated_proportionally(self):
+        # amounts 75 / 25 -> tax 10 splits 7.50 / 2.50.
+        r = tip_by_diner([
+            {"amount": 75, "tip_percent": 0},
+            {"amount": 25, "tip_percent": 0},
+        ], tax=10)
+        taxes = [d["tax"] for d in r["diners"]]
+        self.assertEqual(taxes, [7.5, 2.5])
+        self.assertEqual(sum(taxes), r["tax"])
+
+    def test_tax_shares_sum_exactly_with_remainder(self):
+        # 10 cents over 3 equal amounts -> shares sum to exactly 0.10.
+        r = tip_by_diner([
+            {"amount": 10, "tip_percent": 0},
+            {"amount": 10, "tip_percent": 0},
+            {"amount": 10, "tip_percent": 0},
+        ], tax=0.10)
+        self.assertEqual(round(sum(d["tax"] for d in r["diners"]), 2), 0.10)
+
+    def test_zero_tax_default(self):
+        r = tip_by_diner([{"amount": 40, "tip_percent": 10}])
+        self.assertEqual(r["tax"], 0.0)
+        self.assertEqual(r["diners"][0]["tax"], 0.0)
+
+    def test_effective_tip_percent(self):
+        # tip 19 on subtotal 100 -> 19%.
+        r = tip_by_diner([
+            {"amount": 30, "tip_percent": 20},
+            {"amount": 45, "tip_percent": 15},
+            {"amount": 25, "tip_percent": 25},
+        ])
+        self.assertEqual(r["effective_tip_percent"], 19.0)
+
+    def test_default_names(self):
+        r = tip_by_diner([
+            {"amount": 10, "tip_percent": 10},
+            {"amount": 20, "tip_percent": 10},
+        ])
+        self.assertEqual([d["name"] for d in r["diners"]], ["Diner 1", "Diner 2"])
+
+    def test_string_inputs_coerced(self):
+        r = tip_by_diner([{"name": "Sam", "amount": "30", "tip_percent": "20"}], tax="3")
+        self.assertEqual(r["diners"][0]["tip"], 6.0)
+        self.assertEqual(r["total"], 39.0)
+
+    def test_zero_amount_diner_pays_only_tax_share_zero(self):
+        r = tip_by_diner([
+            {"amount": 0, "tip_percent": 20},
+            {"amount": 50, "tip_percent": 20},
+        ], tax=5)
+        # zero-amount diner gets no proportional tax and no tip.
+        self.assertEqual(r["diners"][0]["total"], 0.0)
+        self.assertEqual(r["diners"][1]["tax"], 5.0)
+
+    def test_empty_list_rejected(self):
+        with self.assertRaises(TipError):
+            tip_by_diner([])
+
+    def test_none_rejected(self):
+        with self.assertRaises(TipError):
+            tip_by_diner(None)
+
+    def test_non_list_rejected(self):
+        with self.assertRaises(TipError):
+            tip_by_diner({"amount": 10, "tip_percent": 10})
+
+    def test_diner_not_object_rejected(self):
+        with self.assertRaises(TipError):
+            tip_by_diner([42])
+
+    def test_negative_amount_rejected(self):
+        with self.assertRaises(TipError):
+            tip_by_diner([{"amount": -1, "tip_percent": 10}])
+
+    def test_negative_tip_percent_rejected(self):
+        with self.assertRaises(TipError):
+            tip_by_diner([{"amount": 10, "tip_percent": -5}])
+
+    def test_negative_tax_rejected(self):
+        with self.assertRaises(TipError):
+            tip_by_diner([{"amount": 10, "tip_percent": 10}], tax=-1)
+
+
 # ---------------------------------------------------------------------------
 # HTTP API tests
 # ---------------------------------------------------------------------------
@@ -2122,6 +2246,29 @@ class TestApi(unittest.TestCase):
     def test_api_charity_validation(self):
         status, data = self._post_to(
             "/api/charity", {"bill": 100, "tip_percent": 18, "round_to": 0})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_api_diner_tips_happy(self):
+        status, data = self._post_to("/api/diner-tips", {"diners": [
+            {"name": "Sam", "amount": 30, "tip_percent": 20},
+            {"name": "Alex", "amount": 45, "tip_percent": 15},
+            {"name": "Jo", "amount": 25, "tip_percent": 25},
+        ]})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["subtotal"], 100.0)
+        self.assertEqual(data["tip"], 19.0)
+        self.assertEqual(data["total"], 119.0)
+        self.assertEqual([d["tip"] for d in data["diners"]], [6.0, 6.75, 6.25])
+
+    def test_api_diner_tips_with_tax(self):
+        status, data = self._post_to("/api/diner-tips", {
+            "diners": [{"amount": 50, "tip_percent": 20}], "tax": 5})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["diners"][0]["total"], 65.0)
+
+    def test_api_diner_tips_validation(self):
+        status, data = self._post_to("/api/diner-tips", {"diners": []})
         self.assertEqual(status, 400)
         self.assertIn("error", data)
 
