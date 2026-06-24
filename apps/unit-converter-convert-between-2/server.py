@@ -376,6 +376,9 @@ class RequestHandler(BaseHTTPRequestHandler):
         if self.path == "/api/means":
             self._handle_means()
             return
+        if self.path == "/api/mad":
+            self._handle_mad()
+            return
         if self.path == "/api/rank":
             self._handle_rank()
             return
@@ -396,6 +399,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/regression":
             self._handle_regression()
+            return
+        if self.path == "/api/gini":
+            self._handle_gini()
             return
         if self.path != "/api/convert":
             self._send_json(404, {"error": "not found"})
@@ -1208,6 +1214,45 @@ class RequestHandler(BaseHTTPRequestHandler):
             "quadratic": round(result["quadratic"], precision),
         })
 
+    def _handle_mad(self):
+        """POST /api/mad — {items: [{value, unit}, ...], to?} -> the
+        absolute-deviation (robust dispersion) statistics: the mean and median
+        centres, the mean absolute deviation about the mean, the median absolute
+        deviation (the classic outlier-robust MAD) and its normal-consistent
+        scaled form, plus each item's absolute deviation from the mean, all
+        restated in 'to' (or the first item's unit). The outlier-robust companion
+        to /api/describe (which reports variance/stdev). Additive: reuses
+        ``domain.mad_quantities`` and never touches the other convert paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        parsed = self._items_request(data)
+        if parsed is None:
+            return
+        items, to_unit, precision = parsed
+        try:
+            result = domain.mad_quantities(items, to_unit)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "category": result["category"],
+            "unit": result["unit"],
+            "count": result["count"],
+            "mean": round(result["mean"], precision),
+            "median": round(result["median"], precision),
+            "mean_abs_deviation": round(result["mean_abs_deviation"], precision),
+            "median_abs_deviation": round(result["median_abs_deviation"], precision),
+            "median_abs_deviation_scaled": round(
+                result["median_abs_deviation_scaled"], precision),
+            "items": [
+                {"index": r["index"],
+                 "value": round(r["value"], precision),
+                 "abs_deviation": round(r["abs_deviation"], precision)}
+                for r in result["items"]
+            ],
+        })
+
     def _handle_rank(self):
         """POST /api/rank — {items: [{value, unit}, ...], to?, descending?} ->
         each quantity's rank (1-based, ties share the average rank) and percentile
@@ -1451,6 +1496,37 @@ class RequestHandler(BaseHTTPRequestHandler):
             "r_squared": self._round_opt(result["r_squared"], precision),
             "mean_x": round(result["mean_x"], precision),
             "mean_y": round(result["mean_y"], precision),
+        })
+
+    def _handle_gini(self):
+        """POST /api/gini — {items: [{value, unit}, ...], to?} -> the Gini
+        inequality coefficient (in [0, 1]) of a list of same-category quantities,
+        plus the relative and absolute mean-difference views of the same spread,
+        all restated in 'to' (or the first item's unit). The inequality/
+        concentration companion to /api/proportions (which reports each item's
+        share of the total). Additive: reuses ``domain.gini_quantities`` and
+        never touches the other convert paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        parsed = self._items_request(data)
+        if parsed is None:
+            return
+        items, to_unit, precision = parsed
+        try:
+            result = domain.gini_quantities(items, to_unit)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "category": result["category"],
+            "unit": result["unit"],
+            "count": result["count"],
+            "total": round(result["total"], precision),
+            "mean": round(result["mean"], precision),
+            "gini": round(result["gini"], precision),
+            "rmad": round(result["rmad"], precision),
+            "mean_abs_difference": round(result["mean_abs_difference"], precision),
         })
 
 

@@ -2374,6 +2374,98 @@ def means(items, to_unit=None):
     }
 
 
+# The normal-consistency scale factor for the median absolute deviation: for a
+# normal distribution E[MAD] == sigma / 1.4826..., so multiplying the MAD by
+# this constant yields an estimator of the standard deviation that is robust to
+# outliers. The exact value is 1 / Phi^-1(3/4) (the reciprocal of the 0.75
+# quantile of the standard normal), which to the precision we report is 1.4826.
+MAD_SCALE = 1.4826
+
+
+def mad_quantities(items, to_unit=None):
+    """Absolute-deviation (robust dispersion) statistics for SAME-category items.
+
+    The robust companion to :func:`describe_quantities` (which reports the
+    variance- and standard-deviation-based spread, both of which square the
+    deviations and so are sensitive to outliers). Every quantity is first
+    restated in a single common ``to_unit`` (or, when omitted, the first item's
+    unit) so the deviations are apples-to-apples — exactly like
+    :func:`sum_quantities` and the rest of the aggregate family. It then reports:
+
+    * ``mean`` / ``median`` — the two centres (matching
+      :func:`describe_quantities`), so the deviations can be read against the
+      centre they are measured from;
+    * ``mean_abs_deviation`` — the mean absolute deviation about the mean,
+      ``mean(|x - mean|)`` (a linear-deviation analogue of the standard
+      deviation; never larger than the population stdev);
+    * ``median_abs_deviation`` — the classic MAD, ``median(|x - median|)``, the
+      most outlier-robust spread measure here; and
+    * ``median_abs_deviation_scaled`` — that MAD multiplied by :data:`MAD_SCALE`
+      (1.4826), a robust estimate of the population standard deviation that
+      agrees with it for normally distributed data.
+
+    The per-item ``abs_deviation`` is ``|value - mean|``, so the mean of the
+    per-item absolute deviations equals ``mean_abs_deviation`` exactly. Both the
+    median and the scaled MAD use the same R-7 / Excel ``PERCENTILE.INC`` median
+    as :func:`describe_quantities` and :func:`quartiles`.
+
+    ``items`` is a list of {"value": <number>, "unit": <token>} dicts (a
+    ``(value, unit)`` tuple is also accepted), identical to ``sum_quantities``.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,
+            "mean": <float>,
+            "median": <float>,
+            "mean_abs_deviation": <float>,           # mean(|x - mean|)
+            "median_abs_deviation": <float>,         # median(|x - median|)
+            "median_abs_deviation_scaled": <float>,  # 1.4826 * the MAD
+            "items": [{"index": <int>, "value": <float>,
+                       "abs_deviation": <float>}, ...],   # |value - mean|
+        }
+
+    Raises ValueError for an empty/non-list input, a malformed item, an unknown
+    or cross-category unit, a non-finite value, or a non-linear category
+    (temperature is affine and fuel economy is reciprocal — neither has a
+    meaningful spread on a single common unit). Item validation is delegated to
+    ``sum_quantities`` so the accepted inputs stay identical to the rest of the
+    aggregate family.
+    """
+    # sum_quantities does the full validation (list shape, item shape, finite
+    # values, single linear category, valid target) and resolves both the running
+    # total and the common target unit, so a bad input fails here before any
+    # deviation runs.
+    total, unit, category = sum_quantities(items, to_unit)
+
+    converted = _restate_items(items, unit)
+    count = len(converted)
+    mean = total / count
+    median = _percentile_of_sorted(sorted(converted), 50)
+
+    mean_abs_deviation = sum(abs(x - mean) for x in converted) / count
+    median_abs_deviation = _percentile_of_sorted(
+        sorted(abs(x - median) for x in converted), 50)
+
+    out = [
+        {"index": index, "value": value, "abs_deviation": abs(value - mean)}
+        for index, value in enumerate(converted)
+    ]
+    return {
+        "category": category,
+        "unit": unit,
+        "count": count,
+        "mean": mean,
+        "median": median,
+        "mean_abs_deviation": mean_abs_deviation,
+        "median_abs_deviation": median_abs_deviation,
+        "median_abs_deviation_scaled": MAD_SCALE * median_abs_deviation,
+        "items": out,
+    }
+
+
 def rank_quantities(items, to_unit=None, descending=False):
     """Rank a list of SAME-category quantities by magnitude.
 
@@ -2872,4 +2964,85 @@ def linear_regression(x_items, y_items, to_x=None, to_y=None):
         "r": r,
         "r_squared": r_squared,
         "mean_x": mean_x, "mean_y": mean_y,
+    }
+
+
+def gini_quantities(items, to_unit=None):
+    """The Gini inequality coefficient of a list of SAME-category quantities.
+
+    The natural inequality/concentration companion to :func:`proportions`
+    (which reports each quantity's *share* of the total): where proportions
+    answers "what slice is each part?", the Gini answers "how *evenly* is the
+    whole shared out?" — 0 means perfect equality (every quantity identical),
+    approaching 1 means one quantity holds almost everything (e.g. how unevenly
+    a budget, a set of file sizes, or a stretch of leg distances is distributed).
+
+    Every quantity is first restated in a single common ``to_unit`` (or, when
+    omitted, the first item's unit) so the comparison is apples-to-apples —
+    exactly like :func:`sum_quantities` and the rest of the aggregate family.
+    The coefficient is then computed from the values sorted ascending,
+
+        G = Σ (2·i − n − 1)·x⟮i⟯ / (n · Σ x)          (i = 1..n, x⟮i⟯ ascending),
+
+    which is algebraically the *relative mean absolute difference* halved: the
+    mean over every ordered pair of the absolute gap ``|xᵢ − xⱼ|``, divided by
+    twice the mean. So ``rmad == 2·gini`` and ``mean_abs_difference ==
+    rmad·mean`` are reported alongside as the un-normalised views of the same
+    spread. A single item (or any all-equal list) is perfectly equal, G = 0;
+    an all-zero list is likewise G = 0 (nothing to share unevenly).
+
+    ``items`` is a list of {"value": <number>, "unit": <token>} dicts (a
+    ``(value, unit)`` tuple is also accepted), identical to ``sum_quantities``.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,
+            "total": <float>,                  # the group total, in the target unit
+            "mean": <float>,                   # the arithmetic mean
+            "gini": <float>,                   # Gini coefficient in [0, 1]
+            "rmad": <float>,                   # relative mean absolute difference (2·gini)
+            "mean_abs_difference": <float>,    # mean |xᵢ − xⱼ| over all ordered pairs
+        }
+
+    Raises ValueError for an empty/non-list input, a malformed item, an unknown
+    or cross-category unit, a non-finite value, a non-linear category
+    (temperature is affine and fuel economy is reciprocal — neither sums, so
+    neither has a Gini), or any negative restated value (the Gini coefficient is
+    only defined for a non-negative distribution). Validation is delegated to
+    ``sum_quantities`` so the accepted inputs stay identical to the rest of the
+    aggregate family.
+    """
+    # sum_quantities does the full validation (list shape, item shape, finite
+    # values, single linear category, valid target) and resolves both the group
+    # total and the common target unit, so a bad input fails here first.
+    total, unit, category = sum_quantities(items, to_unit)
+    values = _restate_items(items, unit)
+
+    if any(v < 0 for v in values):
+        raise ValueError(
+            "the Gini coefficient is only defined for non-negative quantities")
+
+    n = len(values)
+    mean = total / n
+    # An all-zero (zero-total) distribution is perfectly equal: G = 0. Guard the
+    # division before applying the sorted-values formula.
+    if total == 0:
+        gini = 0.0
+    else:
+        ordered = sorted(values)
+        weighted = sum((2 * (i + 1) - n - 1) * x for i, x in enumerate(ordered))
+        gini = weighted / (n * total)
+    rmad = 2.0 * gini
+    return {
+        "category": category,
+        "unit": unit,
+        "count": n,
+        "total": total,
+        "mean": mean,
+        "gini": gini,
+        "rmad": rmad,
+        "mean_abs_difference": rmad * mean,
     }

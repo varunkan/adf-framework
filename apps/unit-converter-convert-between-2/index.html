@@ -217,6 +217,12 @@
       <button id="moving" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Moving avg</button>
     </div>
 
+    <label for="giniExpr" style="margin-top:0.9rem;">Gini inequality coefficient — how evenly the total is shared (0 = equal, →1 = concentrated)</label>
+    <div class="row">
+      <div><input id="giniExpr" type="text" placeholder="e.g. 1 m, 2 m, 3 m, 4 m" style="margin-bottom:0;" /></div>
+      <button id="gini" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Gini</button>
+    </div>
+
     <div id="result" role="status" aria-live="polite" style="margin-top:1.5rem;">Pick units and press Convert.</div>
     <div id="allResults"></div>
   </main>
@@ -1024,6 +1030,34 @@
     }
   }
 
+  async function gini() {
+    const items = parseQuantityList(document.getElementById("giniExpr").value);
+    if (!items) return;
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/gini", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: items, to: toEl.value }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Gini failed") + "</span>";
+        return;
+      }
+      resultEl.innerHTML =
+        "<strong>Gini " + data.gini + "</strong>" +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' +
+        data.count + " " + data.category + " quantities, mean " + data.mean + " " + data.unit + "<br>" +
+        "relative mean abs. difference (rmad) " + data.rmad + "<br>" +
+        "mean abs. difference " + data.mean_abs_difference + " " + data.unit + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  document.getElementById("gini").addEventListener("click", gini);
+  document.getElementById("giniExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") gini(); });
   document.getElementById("mode").addEventListener("click", mode);
   document.getElementById("modeExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") mode(); });
   document.getElementById("weighted").addEventListener("click", weightedMean);

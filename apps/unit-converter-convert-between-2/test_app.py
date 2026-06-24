@@ -4881,5 +4881,183 @@ class TestHttpBivariate(unittest.TestCase):
         self.assertIn("error", data)
 
 
+class TestDomainGini(unittest.TestCase):
+    def test_known_coefficient(self):
+        # The Gini of [1, 2, 3, 4] is exactly 0.25 (textbook value).
+        result = domain.gini_quantities(
+            [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)])
+        self.assertEqual(result["category"], "length")
+        self.assertEqual(result["count"], 4)
+        self.assertAlmostEqual(result["gini"], 0.25, places=9)
+        self.assertAlmostEqual(result["mean"], 2.5, places=9)
+
+    def test_perfect_equality_is_zero(self):
+        result = domain.gini_quantities(
+            [{"value": 5, "unit": "m"} for _ in range(4)])
+        self.assertAlmostEqual(result["gini"], 0.0, places=12)
+        self.assertAlmostEqual(result["rmad"], 0.0, places=12)
+        self.assertAlmostEqual(result["mean_abs_difference"], 0.0, places=12)
+
+    def test_single_item_is_zero(self):
+        result = domain.gini_quantities([{"value": 42, "unit": "kg"}])
+        self.assertEqual(result["count"], 1)
+        self.assertAlmostEqual(result["gini"], 0.0, places=12)
+
+    def test_all_zero_is_zero(self):
+        # A zero total is perfectly equal, not a division-by-zero error.
+        result = domain.gini_quantities(
+            [{"value": 0, "unit": "m"} for _ in range(3)])
+        self.assertEqual(result["total"], 0.0)
+        self.assertAlmostEqual(result["gini"], 0.0, places=12)
+
+    def test_rmad_is_twice_gini(self):
+        result = domain.gini_quantities(
+            [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)])
+        self.assertAlmostEqual(result["rmad"], 2.0 * result["gini"], places=12)
+
+    def test_mean_abs_difference(self):
+        # For [1,2,3,4]: mean |xi-xj| over all ordered pairs == 1.25.
+        result = domain.gini_quantities(
+            [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)])
+        self.assertAlmostEqual(result["mean_abs_difference"], 1.25, places=9)
+        # ... and it equals rmad * mean by construction.
+        self.assertAlmostEqual(
+            result["mean_abs_difference"], result["rmad"] * result["mean"],
+            places=12)
+
+    def test_unit_independent(self):
+        # The coefficient is dimensionless: restating into another unit of the
+        # same category must not change it.
+        a = domain.gini_quantities(
+            [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)])
+        b = domain.gini_quantities(
+            [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)], "cm")
+        self.assertAlmostEqual(a["gini"], b["gini"], places=12)
+
+    def test_mixed_units_restated(self):
+        # 1 m + 100 cm == two equal quantities -> perfect equality.
+        result = domain.gini_quantities(
+            [{"value": 1, "unit": "m"}, {"value": 100, "unit": "cm"}])
+        self.assertAlmostEqual(result["gini"], 0.0, places=12)
+
+    def test_max_inequality_approaches_one(self):
+        # One large value among many zeros: G -> (n-1)/n.
+        items = [{"value": 0, "unit": "m"} for _ in range(9)]
+        items.append({"value": 100, "unit": "m"})
+        result = domain.gini_quantities(items)
+        self.assertAlmostEqual(result["gini"], 0.9, places=9)
+
+    def test_negative_value_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.gini_quantities(
+                [{"value": 1, "unit": "m"}, {"value": -2, "unit": "m"}])
+
+    def test_empty_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.gini_quantities([])
+
+    def test_cross_category_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.gini_quantities(
+                [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}])
+
+    def test_temperature_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.gini_quantities([{"value": 10, "unit": "c"}])
+
+    def test_fuel_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.gini_quantities([{"value": 30, "unit": "mpg"}])
+
+    def test_unknown_unit_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.gini_quantities([{"value": 1, "unit": "zorp"}])
+
+    def test_nonfinite_rejected(self):
+        with self.assertRaises(ValueError):
+            domain.gini_quantities([{"value": float("inf"), "unit": "m"}])
+
+
+class TestHttpGini(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = server.make_server(0)
+        cls.host, cls.port = cls.server.server_address
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def _post(self, path, payload, raw=None):
+        body = raw if raw is not None else json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            "http://127.0.0.1:%d%s" % (self.port, path), data=body,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            data = json.loads(exc.read().decode("utf-8"))
+            exc.close()
+            return exc.code, data
+
+    def test_gini_ok(self):
+        status, data = self._post("/api/gini", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)]})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["count"], 4)
+        self.assertAlmostEqual(data["gini"], 0.25, places=6)
+        self.assertAlmostEqual(data["mean"], 2.5, places=6)
+
+    def test_gini_perfect_equality(self):
+        status, data = self._post("/api/gini", {
+            "items": [{"value": 5, "unit": "m"} for _ in range(3)]})
+        self.assertEqual(status, 200)
+        self.assertAlmostEqual(data["gini"], 0.0, places=9)
+        self.assertAlmostEqual(data["mean_abs_difference"], 0.0, places=9)
+
+    def test_gini_to_unit(self):
+        status, data = self._post("/api/gini", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)],
+            "to": "cm"})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["unit"], "cm")
+        self.assertAlmostEqual(data["gini"], 0.25, places=6)
+
+    def test_gini_precision(self):
+        status, data = self._post("/api/gini", {
+            "items": [{"value": v, "unit": "m"} for v in (1, 2, 3, 5)],
+            "precision": 3})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["gini"], round(data["gini"], 3))
+
+    def test_gini_negative_400(self):
+        status, data = self._post("/api/gini", {
+            "items": [{"value": 1, "unit": "m"}, {"value": -1, "unit": "m"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_gini_cross_category_400(self):
+        status, data = self._post("/api/gini", {
+            "items": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "kg"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_gini_items_not_list_400(self):
+        status, data = self._post("/api/gini", {"items": "nope"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_gini_invalid_json_400(self):
+        status, data = self._post("/api/gini", None, raw=b"{bad")
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
 if __name__ == "__main__":
     unittest.main()

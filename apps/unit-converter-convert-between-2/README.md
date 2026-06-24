@@ -90,3 +90,9 @@ POST routes:
   **moving (rolling) average** over each contiguous window of `window` items (an
   `n`-item list yields `n − window + 1` averages); the smoothing companion to
   `/api/cumsum` and `/api/diff`.
+- `/api/gini` — `{items:[{value,unit},...], to?}` → the **Gini inequality
+  coefficient** (in `[0, 1]`; 0 = perfect equality, → 1 = one quantity holds
+  almost everything) of same-category quantities, plus `rmad` (the relative mean
+  absolute difference, `2·gini`) and `mean_abs_difference` (its absolute form).
+  The inequality/concentration companion to `/api/proportions`; rejects negative
+  values (an all-equal or all-zero list is `gini = 0`).
