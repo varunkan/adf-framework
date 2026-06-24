@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Unit Converter — Convert Between Units</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    margin: 0; min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #1e3a5f, #2c5364);
+    color: #f5f7fa; padding: 1rem;
+  }
+  .card {
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 16px; padding: 2rem; width: 100%; max-width: 440px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.35); backdrop-filter: blur(8px);
+  }
+  h1 { font-size: 1.4rem; margin: 0 0 0.25rem; }
+  p.sub { margin: 0 0 1.5rem; opacity: 0.75; font-size: 0.9rem; }
+  label { display: block; font-size: 0.85rem; margin-bottom: 0.4rem; opacity: 0.9; }
+  input, select {
+    width: 100%; padding: 0.7rem 0.8rem; border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.25);
+    color: #fff; font-size: 1rem; margin-bottom: 1rem;
+  }
+  .row { display: flex; gap: 0.6rem; align-items: flex-end; }
+  .row > div { flex: 1; }
+  button {
+    width: 100%; padding: 0.8rem; border: none; border-radius: 10px;
+    background: #4fc3f7; color: #06243a; font-size: 1rem; font-weight: 600;
+    cursor: pointer; transition: filter 0.15s;
+  }
+  button:hover { filter: brightness(1.08); }
+  #swap { width: auto; padding: 0.7rem 0.8rem; background: rgba(255,255,255,0.15); color: #fff; margin-bottom: 1rem; }
+  #result {
+    margin-top: 1.5rem; padding: 1rem; border-radius: 10px;
+    background: rgba(79,195,247,0.12); border: 1px solid rgba(79,195,247,0.3);
+    min-height: 3rem; font-size: 1.15rem; text-align: center;
+  }
+  #result strong { font-size: 1.5rem; }
+  .err { color: #ff8a80; }
+</style>
+</head>
+<body>
+  <main class="card">
+    <h1>Unit Converter</h1>
+    <p class="sub">Convert between units across length, mass, temperature, volume, time, area, speed, digital storage, electrical (capacitance, inductance, conductance), luminous flux, flow rate and fuel economy.</p>
+
+    <label for="expr">Quick convert</label>
+    <div class="row">
+      <div><input id="expr" type="text" placeholder="e.g. 10 km to mi" style="margin-bottom:0;" /></div>
+      <button id="exprGo" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Go</button>
+    </div>
+    <div style="height:1rem;"></div>
+
+    <label for="category">Category</label>
+    <select id="category"></select>
+
+    <label for="value">Value</label>
+    <input id="value" type="number" step="any" value="1" inputmode="decimal" />
+
+    <div class="row">
+      <div>
+        <label for="from">From</label>
+        <select id="from"></select>
+      </div>
+      <button id="swap" type="button" title="Swap units" aria-label="Swap units">&#8645;</button>
+      <div>
+        <label for="to">To</label>
+        <select id="to"></select>
+      </div>
+    </div>
+
+    <label style="display:flex;align-items:center;gap:0.5rem;margin:-0.4rem 0 1rem;font-size:0.85rem;opacity:0.9;">
+      <input id="deltaMode" type="checkbox" style="width:auto;margin:0;" />
+      Treat value as a change / interval (e.g. a 10&deg;C rise &rarr; 18&deg;F rise)
+    </label>
+
+    <button id="convert" type="button">Convert</button>
+    <button id="convertAll" type="button" style="margin-top:0.6rem;background:rgba(255,255,255,0.15);color:#fff;">Convert to all units</button>
+    <button id="humanize" type="button" style="margin-top:0.6rem;background:rgba(255,255,255,0.15);color:#fff;">Auto-scale (humanize)</button>
+
+    <label for="valueB" style="margin-top:0.9rem;">Compare against (value in the “To” unit)</label>
+    <div class="row">
+      <div><input id="valueB" type="number" step="any" placeholder="e.g. 800" inputmode="decimal" style="margin-bottom:0;" /></div>
+      <button id="compare" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Compare</button>
+    </div>
+
+    <label for="compoundUnits" style="margin-top:0.9rem;">Breakdown units (comma-separated, e.g. h, min, s)</label>
+    <div class="row">
+      <div><input id="compoundUnits" type="text" placeholder="e.g. ft, in" style="margin-bottom:0;" /></div>
+      <button id="compound" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Break down</button>
+    </div>
+
+    <label for="sumExpr" style="margin-top:0.9rem;">Sum a compound / mixed-unit quantity (totalled into the “To” unit)</label>
+    <div class="row">
+      <div><input id="sumExpr" type="text" placeholder="e.g. 6 ft 2 in" style="margin-bottom:0;" /></div>
+      <button id="sum" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Total</button>
+    </div>
+
+    <div id="result" role="status" aria-live="polite" style="margin-top:1.5rem;">Pick units and press Convert.</div>
+    <div id="allResults"></div>
+  </main>
+
+<script>
+  const categoryEl = document.getElementById("category");
+  const valueEl = document.getElementById("value");
+  const fromEl = document.getElementById("from");
+  const toEl = document.getElementById("to");
+  const resultEl = document.getElementById("result");
+
+  let UNITS = {};
+
+  function fillSelect(sel, units, selectedIndex) {
+    sel.innerHTML = "";
+    units.forEach(function (u, i) {
+      const opt = document.createElement("option");
+      opt.value = u;
+      opt.textContent = u;
+      if (i === selectedIndex) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  }
+
+  function onCategoryChange() {
+    const units = UNITS[categoryEl.value] || [];
+    fillSelect(fromEl, units, 0);
+    fillSelect(toEl, units, units.length > 1 ? 1 : 0);
+  }
+
+  async function loadUnits() {
+    try {
+      const resp = await fetch("/api/units");
+      const data = await resp.json();
+      UNITS = data.categories || {};
+      Object.keys(UNITS).forEach(function (cat) {
+        const opt = document.createElement("option");
+        opt.value = cat;
+        opt.textContent = cat;
+        categoryEl.appendChild(opt);
+      });
+      onCategoryChange();
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Could not load units.</span>';
+    }
+  }
+
+  async function convert() {
+    const value = valueEl.value;
+    if (value === "" || value === null) {
+      resultEl.innerHTML = '<span class="err">Please enter a value.</span>';
+      return;
+    }
+    const delta = document.getElementById("deltaMode").checked;
+    const endpoint = delta ? "/api/convert-delta" : "/api/convert";
+    try {
+      const resp = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: value, from: fromEl.value, to: toEl.value }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Conversion failed") + "</span>";
+        return;
+      }
+      const tag = delta ? " <span style=\"opacity:0.7;font-size:0.85rem;\">(interval)</span>" : "";
+      resultEl.innerHTML =
+        data.input + " " + data.from + " = <strong>" + data.result + " " + data.to + "</strong>" + tag;
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  const allResultsEl = document.getElementById("allResults");
+
+  async function sumCompound() {
+    const expr = document.getElementById("sumExpr").value;
+    if (!expr || !expr.trim()) {
+      resultEl.innerHTML = '<span class="err">Type a compound quantity, e.g. "6 ft 2 in".</span>';
+      return;
+    }
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/parse-compound", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expression: expr, to: toEl.value }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Sum failed") + "</span>";
+        return;
+      }
+      const parts = data.parts.map(function (p) { return p.value + " " + p.unit; }).join(" + ");
+      resultEl.innerHTML =
+        parts + " = <strong>" + data.total + " " + data.unit + "</strong>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function convertAll() {
+    const value = valueEl.value;
+    if (value === "" || value === null) {
+      resultEl.innerHTML = '<span class="err">Please enter a value.</span>';
+      return;
+    }
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/convert-all", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: value, from: fromEl.value }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Conversion failed") + "</span>";
+        return;
+      }
+      resultEl.innerHTML = data.input + " " + data.from + " in every " + data.category + " unit:";
+      const rows = data.results.map(function (r) {
+        return '<div style="display:flex;justify-content:space-between;padding:0.2rem 0;">' +
+          '<span style="opacity:0.8;">' + r.unit + '</span><strong>' + r.result + '</strong></div>';
+      }).join("");
+      allResultsEl.innerHTML =
+        '<div style="margin-top:0.8rem;padding:0.8rem;border-radius:10px;' +
+        'background:rgba(79,195,247,0.08);border:1px solid rgba(79,195,247,0.25);">' + rows + '</div>';
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function quickConvert() {
+    const expr = document.getElementById("expr").value;
+    if (!expr || !expr.trim()) {
+      resultEl.innerHTML = '<span class="err">Type something like "10 km to mi".</span>';
+      return;
+    }
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/parse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expression: expr }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Conversion failed") + "</span>";
+        return;
+      }
+      resultEl.innerHTML =
+        data.input + " " + data.from + " = <strong>" + data.result + " " + data.to + "</strong>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function humanize() {
+    const value = valueEl.value;
+    if (value === "" || value === null) {
+      resultEl.innerHTML = '<span class="err">Please enter a value.</span>';
+      return;
+    }
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/humanize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: value, from: fromEl.value }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Auto-scale failed") + "</span>";
+        return;
+      }
+      resultEl.innerHTML =
+        data.input + " " + data.from + " = <strong>" + data.value + " " + data.unit + "</strong>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function compound() {
+    const value = valueEl.value;
+    if (value === "" || value === null) {
+      resultEl.innerHTML = '<span class="err">Please enter a value.</span>';
+      return;
+    }
+    const raw = document.getElementById("compoundUnits").value || "";
+    const units = raw.split(",").map(function (u) { return u.trim(); }).filter(Boolean);
+    if (units.length === 0) {
+      resultEl.innerHTML = '<span class="err">List the units to break down into, e.g. "h, min, s".</span>';
+      return;
+    }
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/compound", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: value, from: fromEl.value, units: units }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Breakdown failed") + "</span>";
+        return;
+      }
+      resultEl.innerHTML =
+        data.input + " " + data.from + " = <strong>" + data.formatted + "</strong>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function compare() {
+    const value = valueEl.value;
+    const valueB = document.getElementById("valueB").value;
+    if (value === "" || value === null || valueB === "" || valueB === null) {
+      resultEl.innerHTML = '<span class="err">Enter both the value and the comparison value.</span>';
+      return;
+    }
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/compare", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          a: { value: value, unit: fromEl.value },
+          b: { value: valueB, unit: toEl.value },
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Compare failed") + "</span>";
+        return;
+      }
+      const rel = data.larger === "equal"
+        ? "equal to"
+        : (data.larger === "a" ? "larger than" : "smaller than");
+      resultEl.innerHTML =
+        "<strong>" + data.a.value + " " + data.a.unit + "</strong> is " + rel +
+        " <strong>" + data.b.value + " " + data.b.unit + "</strong>" +
+        '<div style="margin-top:0.5rem;opacity:0.85;font-size:0.95rem;">' +
+        data.a.value + " " + data.a.unit + " = " + data.a_in_b_unit + " " + data.b.unit +
+        (data.ratio !== null ? " &middot; ratio " + data.ratio + "&times;" : "") + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  document.getElementById("sum").addEventListener("click", sumCompound);
+  document.getElementById("sumExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") sumCompound(); });
+  document.getElementById("compare").addEventListener("click", compare);
+  document.getElementById("compound").addEventListener("click", compound);
+  document.getElementById("humanize").addEventListener("click", humanize);
+  document.getElementById("exprGo").addEventListener("click", quickConvert);
+  document.getElementById("expr").addEventListener("keydown", function (e) { if (e.key === "Enter") quickConvert(); });
+
+  categoryEl.addEventListener("change", function () { allResultsEl.innerHTML = ""; onCategoryChange(); });
+  document.getElementById("convert").addEventListener("click", convert);
+  document.getElementById("convertAll").addEventListener("click", convertAll);
+  document.getElementById("swap").addEventListener("click", function () {
+    const f = fromEl.value;
+    fromEl.value = toEl.value;
+    toEl.value = f;
+    convert();
+  });
+  valueEl.addEventListener("keydown", function (e) { if (e.key === "Enter") convert(); });
+
+  loadUnits();
+</script>
+</body>
+</html>
