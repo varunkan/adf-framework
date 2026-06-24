@@ -95,6 +95,16 @@ unset ORCH_RUNNER_TIMEOUT_SEC  # legacy fixed budget — superseded by the slidi
 export ADF_NVIDIA_TIMEOUT_SEC="${ADF_NVIDIA_TIMEOUT_SEC:-480}"
 export ADF_RUNNER_MAX_TOKENS="${ADF_RUNNER_MAX_TOKENS:-12000}"
 
+# Verification gate = the FULL test-agent ecosystem, deep agents included. The
+# deep LLM agents (e2e/integration/black-box) "reason like Claude" over the built
+# app during review. run_test_agents.py runs all agents CONCURRENTLY against one
+# shared app instance, so the whole gate stays well under the runner timeout even
+# with the slow deep agents. Set ADF_DEEP_AGENTS=0 to fall back to the fast
+# deterministic-only gate.
+export ADF_DEEP_AGENTS="${ADF_DEEP_AGENTS:-1}"
+export ADF_DEEP_AGENT_TIMEOUT="${ADF_DEEP_AGENT_TIMEOUT:-420}"
+export ADF_AGENT_TIMEOUT="${ADF_AGENT_TIMEOUT:-700}"
+
 if [ "$USE_OPUS" = "1" ] && [ -n "${ANTHROPIC_API_KEY:-}" ]; then
   # Opus available (credits present): deep tier + implement runner lead with Opus 4.8 (ultra thinking)
   export ORCH_PROVIDER_DEEP=anthropic

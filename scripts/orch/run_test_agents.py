@@ -151,14 +151,48 @@ def main(app_dir):
                 os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
             except Exception:
                 pass
+            # Clean scratch DBs the gate's form-submissions created, so the next
+            # unit-test run starts from a clean slate (the boot path used to do this).
+            for db in ("submissions.db", "ands.db", "data.db", "app.db"):
+                try:
+                    os.remove(os.path.join(app_dir, db))
+                except Exception:
+                    pass
 
 
 def _run_all(reg, app_dir):
     results, defects, advisory = [], [], []
-    for agent in reg["agents"]:
-        if not agent.get("enabled", True):
-            continue
-        res = _run(agent, app_dir)
+    enabled = [a for a in reg["agents"] if a.get("enabled", True)]
+    # Concurrency model: the deep LLM agents (pure Opus calls) and the static
+    # agents (read files) run CONCURRENTLY — that's what keeps the whole gate well
+    # under the orchestrator timeout despite the slow deep agents. But the
+    # 'dynamic' BROWSER agents (ui-visual, accessibility) each drive the ONE shared
+    # app via headless Chrome; running two at once corrupts each other's crawl
+    # (ui-visual's form submits change the DOM accessibility is auditing), so those
+    # run SEQUENTIALLY in this thread while the rest run in the pool. Aggregation
+    # below stays in registry order for stable output.
+    dynamic = [a for a in enabled if a.get("kind") == "dynamic"]
+    rest = [a for a in enabled if a.get("kind") != "dynamic"]
+    max_workers = int(os.environ.get("ADF_GATE_CONCURRENCY", str(min(8, max(1, len(rest))))))
+    import concurrent.futures
+
+    def _safe(a):
+        try:
+            return _run(a, app_dir)
+        except Exception as e:  # never let one agent crash the gate
+            return {"id": a["id"], "ok": False, "gate": a["gate"], "implemented": True,
+                    "findings": [{"severity": "high", "title": "agent runner crashed",
+                                  "detail": str(e)[:200]}]}
+
+    res_by_id = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futs = {ex.submit(_safe, a): a for a in rest}
+        for a in dynamic:                       # browser agents: one at a time
+            res_by_id[a["id"]] = _safe(a)
+        for fut in concurrent.futures.as_completed(futs):
+            res_by_id[futs[fut]["id"]] = fut.result()
+    for agent in enabled:
+        res = res_by_id[agent["id"]]
         results.append(res)
         if not res.get("implemented", True):
             advisory.append(f"{res['id']}: not implemented yet")

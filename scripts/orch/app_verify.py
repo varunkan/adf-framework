@@ -47,6 +47,16 @@ def _free_port():
         pass
 
 
+def _alive(url):
+    try:
+        urllib.request.urlopen(url, timeout=3)
+        return True
+    except urllib.error.HTTPError:
+        return True  # responded (even a 4xx) → server is up
+    except Exception:
+        return False
+
+
 def _get(path):
     try:
         r = urllib.request.urlopen(BASE + path, timeout=8)
@@ -122,6 +132,15 @@ def _browser_defects(app_dir):
 def verify(app_dir):
     if not os.path.exists(os.path.join(app_dir, "server.py")):
         return {"ok": False, "defects": ["no server.py in app"]}
+    # REUSE a shared instance: when the orchestrator (run_test_agents.py) has
+    # already booted the app and points ADF_APP_URL at it, do NOT free/boot/kill
+    # our own — that would race the shared server other dynamic agents depend on.
+    # Just verify against it. Only boot our own when running standalone.
+    shared = os.environ.get("ADF_APP_URL", "").strip()
+    if shared and _alive(shared):
+        defects = _http_defects() + _browser_defects(app_dir)
+        uniq = list(dict.fromkeys(defects))
+        return {"ok": len(uniq) == 0, "defects": uniq}
     _free_port()
     proc = subprocess.Popen([sys.executable, "server.py"], cwd=app_dir,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,

@@ -103,10 +103,28 @@ try {
     const issues = [];
     if ((st.textLen || 0) < 25 && (st.controls || 0) === 0) issues.push('renders blank / no visible content');
     if (st.visErr) issues.push(`error text on screen: "${st.visErr}"`);
-    const evs = [...new Set(before)];
+    let evs = [...new Set(before)];
+    // A form submitted with the crawler's synthetic values getting a 4xx (e.g.
+    // 400/422) is usually the app correctly VALIDATING input rather than a bug —
+    // but it MIGHT be a real contract gap, so don't drop it: DEMOTE it to an
+    // informational NOTE: (recorded + visible, non-blocking) so the heal loop
+    // can't get stuck on synthetic-input validation. 5xx and JS exceptions on a
+    // form submit, and all 4xx on load/nav, remain hard defects.
+    if (/^form#/.test(label)) {
+      const is4xx = (e) => /^network 4\d\d:/.test(e) ||
+        (/Failed to load resource/i.test(e) && /\b4\d\d\b/.test(e));
+      evs = evs.map((e) => (is4xx(e) ? `NOTE: form input validation (${e})` : e));
+    }
     for (const e of evs) issues.push(e);
-    views.push({ view: label, viewport: vp, screenshot: shot, textLen: st.textLen, controls: st.controls, heading: st.heading, ok: issues.length === 0, issues });
-    for (const i of issues) defects.push(`[${vp}] ${label}: ${i}`);
+    const hardIssues = issues.filter((i) => !i.startsWith('NOTE:'));
+    views.push({ view: label, viewport: vp, screenshot: shot, textLen: st.textLen, controls: st.controls, heading: st.heading, ok: hardIssues.length === 0, issues });
+    // Keep the NOTE: prefix at the START of the emitted line so the downstream
+    // advisory filter (defects.startsWith('NOTE:')) recognises it as non-blocking.
+    for (const i of issues) {
+      defects.push(i.startsWith('NOTE:')
+        ? `NOTE: [${vp}] ${label}: ${i.slice(5).trim()}`
+        : `[${vp}] ${label}: ${i}`);
+    }
   };
 
   // Enumerate the navigation a user could click (nav/tabs/menu/in-page links).

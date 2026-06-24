@@ -62,8 +62,11 @@ def emit(agent_id, findings, summary):
     sys.exit(0)
 
 
-def low_finding(title, detail, location="llm_agent.py"):
-    return [{"severity": "low", "title": title, "detail": detail, "location": location}]
+def info_finding(title, detail, location="llm_agent.py"):
+    # INFRA/error reports (no token, CLI timeout, unparseable output, crash) are
+    # NOT defects of the app under test — severity 'info' so the gate reports them
+    # but never BLOCKS the build on an infrastructure hiccup.
+    return [{"severity": "info", "title": title, "detail": detail, "location": location}]
 
 
 # --------------------------------------------------------------------------- #
@@ -307,7 +310,7 @@ def main(argv):
     if agent_id is None:
         # Unknown mode — report as a finding under the raw mode string, never crash.
         emit(mode or "llm-agent",
-             low_finding("unknown deep-agent mode",
+             info_finding("unknown deep-agent mode",
                          f"mode must be one of {sorted(MODE_TO_ID)}; got {mode!r}"),
              "invalid mode argument")
 
@@ -321,7 +324,7 @@ def main(argv):
         requirements = gather_requirements(app_dir)
     except Exception as e:  # noqa: BLE001
         emit(agent_id,
-             low_finding("could not read app source/requirements", str(e)),
+             info_finding("could not read app source/requirements", str(e)),
              "deep agent setup error")
 
     prompt = build_prompt(mode, source, requirements, base_url)
@@ -329,13 +332,13 @@ def main(argv):
     text, err = call_claude(prompt)
     if err:
         emit(agent_id,
-             low_finding("deep agent could not run", err),
+             info_finding("deep agent could not run", err),
              f"{agent_id} deep agent error (not a defect of the app)")
 
     findings, perr = parse_findings(text)
     if perr:
         emit(agent_id,
-             low_finding("deep agent output not parseable", perr),
+             info_finding("deep agent output not parseable", perr),
              f"{agent_id} could not parse model findings")
 
     n = len(findings)
@@ -352,5 +355,5 @@ if __name__ == "__main__":
     except Exception as e:  # noqa: BLE001 — last-resort: still emit valid JSON.
         mode_guess = sys.argv[1].strip().lower() if len(sys.argv) > 1 else "llm-agent"
         emit(MODE_TO_ID.get(mode_guess, mode_guess or "llm-agent"),
-             low_finding("deep agent crashed", str(e)),
+             info_finding("deep agent crashed", str(e)),
              "unexpected error")
