@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calculator</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: linear-gradient(135deg, #1e293b, #0f172a);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    color: #e2e8f0;
+  }
+  .app {
+    width: 100%;
+    max-width: 360px;
+  }
+  .calc {
+    background: #1e293b;
+    border-radius: 18px;
+    padding: 20px;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+  }
+  .display {
+    background: #0f172a;
+    border-radius: 12px;
+    padding: 18px;
+    text-align: right;
+    margin-bottom: 16px;
+    min-height: 90px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+  }
+  .expr {
+    color: #64748b;
+    font-size: 16px;
+    min-height: 20px;
+    word-break: break-all;
+  }
+  .result {
+    color: #f8fafc;
+    font-size: 40px;
+    font-weight: 600;
+    word-break: break-all;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+  }
+  button {
+    border: none;
+    border-radius: 12px;
+    padding: 18px 0;
+    font-size: 20px;
+    font-weight: 600;
+    cursor: pointer;
+    color: #f1f5f9;
+    background: #334155;
+    transition: filter 0.1s;
+  }
+  button:hover { filter: brightness(1.15); }
+  button:active { transform: scale(0.96); }
+  .op { background: #475569; }
+  .eq { background: #2563eb; }
+  .clear { background: #dc2626; }
+  .wide { grid-column: span 2; }
+  .sci-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .sci { background: #1e3a5f; font-size: 16px; padding: 12px 0; }
+  .mem-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .mem { background: #3f2d5f; font-size: 14px; padding: 10px 0; }
+  .mem-ind {
+    font-size: 13px;
+    color: #a78bfa;
+    font-weight: 600;
+    padding-left: 6px;
+    white-space: nowrap;
+  }
+  .exprbar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .exprbar input {
+    flex: 1;
+    border: none;
+    border-radius: 12px;
+    padding: 0 14px;
+    font-size: 16px;
+    background: #0f172a;
+    color: #f1f5f9;
+  }
+  .exprbar input::placeholder { color: #475569; }
+  .exprbar button { background: #2563eb; padding: 12px 18px; }
+  .history {
+    margin-top: 18px;
+    background: #1e293b;
+    border-radius: 14px;
+    padding: 14px 16px;
+  }
+  .history h3 {
+    margin: 0 0 8px;
+    font-size: 14px;
+    color: #94a3b8;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .history h3 button {
+    padding: 4px 10px;
+    font-size: 12px;
+    background: #334155;
+    border-radius: 8px;
+  }
+  .history ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 180px;
+    overflow-y: auto;
+  }
+  .history li {
+    padding: 6px 0;
+    border-bottom: 1px solid #334155;
+    font-size: 14px;
+    color: #cbd5e1;
+    display: flex;
+    justify-content: space-between;
+  }
+  .history li:last-child { border-bottom: none; }
+  .history li span:last-child { color: #60a5fa; font-weight: 600; }
+  .empty { color: #475569; font-size: 13px; }
+  .tool-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+  .tool-row input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 14px;
+    background: #0f172a;
+    color: #f1f5f9;
+  }
+  .tool-row input::placeholder { color: #475569; }
+  .tool-row select {
+    border: none;
+    border-radius: 10px;
+    padding: 10px 8px;
+    font-size: 14px;
+    background: #334155;
+    color: #f1f5f9;
+    cursor: pointer;
+  }
+  .tool-row .arrow { color: #94a3b8; }
+  .tool-row button {
+    padding: 10px 14px;
+    font-size: 14px;
+    background: #2563eb;
+    border-radius: 10px;
+  }
+  .tool-out {
+    font-size: 14px;
+    color: #60a5fa;
+    font-weight: 600;
+    word-break: break-all;
+    min-height: 20px;
+  }
+  .tool-out.err { color: #f87171; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="calc">
+    <div class="display">
+      <div class="expr" id="expr">&nbsp;</div>
+      <div class="result" id="result">0</div>
+    </div>
+    <div class="exprbar">
+      <input id="exprInput" type="text" placeholder="Type an expression e.g. (2+3)*pi^2" autocomplete="off">
+      <button id="evalBtn">=</button>
+    </div>
+    <div class="mem-grid">
+      <button class="mem" data-mem="clear">MC</button>
+      <button class="mem" data-mem="recall">MR</button>
+      <button class="mem" data-mem="add">M+</button>
+      <button class="mem" data-mem="subtract">M−</button>
+      <button class="mem" data-mem="store">MS</button>
+      <span class="mem-ind" id="memInd">M: 0</span>
+    </div>
+    <div class="sci-grid">
+      <button class="sci" data-unary="sqrt">√</button>
+      <button class="sci" data-unary="cbrt">∛</button>
+      <button class="sci" data-unary="square">x²</button>
+      <button class="sci" data-unary="cube">x³</button>
+      <button class="sci" data-unary="reciprocal">1/x</button>
+      <button class="sci" data-unary="sin">sin</button>
+      <button class="sci" data-unary="cos">cos</button>
+      <button class="sci" data-unary="tan">tan</button>
+      <button class="sci" data-unary="sinh">sinh</button>
+      <button class="sci" data-unary="cosh">cosh</button>
+      <button class="sci" data-unary="tanh">tanh</button>
+      <button class="sci" data-unary="factorial">n!</button>
+      <button class="sci" data-unary="ln">ln</button>
+      <button class="sci" data-unary="log10">log</button>
+      <button class="sci" data-unary="log2">log₂</button>
+      <button class="sci" data-unary="exp">eˣ</button>
+      <button class="sci" data-unary="floor">⌊x⌋</button>
+      <button class="sci" data-unary="ceil">⌈x⌉</button>
+      <button class="sci" data-unary="round">≈</button>
+      <button class="sci" data-unary="percent">%</button>
+    </div>
+    <div class="grid">
+      <button class="clear wide" data-action="clear">AC</button>
+      <button data-action="back">⌫</button>
+      <button class="op" data-op="divide">÷</button>
+
+      <button data-digit="7">7</button>
+      <button data-digit="8">8</button>
+      <button data-digit="9">9</button>
+      <button class="op" data-op="multiply">×</button>
+
+      <button data-digit="4">4</button>
+      <button data-digit="5">5</button>
+      <button data-digit="6">6</button>
+      <button class="op" data-op="subtract">−</button>
+
+      <button data-digit="1">1</button>
+      <button data-digit="2">2</button>
+      <button data-digit="3">3</button>
+      <button class="op" data-op="add">+</button>
+
+      <button data-digit="0" class="wide">0</button>
+      <button data-digit=".">.</button>
+      <button class="eq" data-action="equals">=</button>
+    </div>
+  </div>
+
+  <div class="history">
+    <h3>Base converter</h3>
+    <div class="tool-row">
+      <input id="convValue" type="text" placeholder="value" autocomplete="off">
+      <select id="convFrom">
+        <option value="dec">dec</option>
+        <option value="bin">bin</option>
+        <option value="oct">oct</option>
+        <option value="hex">hex</option>
+      </select>
+      <span class="arrow">→</span>
+      <select id="convTo">
+        <option value="hex">hex</option>
+        <option value="bin">bin</option>
+        <option value="oct">oct</option>
+        <option value="dec">dec</option>
+      </select>
+      <button id="convBtn">Go</button>
+    </div>
+    <div class="tool-out" id="convOut">&nbsp;</div>
+  </div>
+
+  <div class="history">
+    <h3>Statistics</h3>
+    <div class="tool-row">
+      <input id="statsValues" type="text" placeholder="comma-separated numbers e.g. 2, 4, 4, 5" autocomplete="off">
+      <button id="statsBtn">Calc</button>
+    </div>
+    <div class="tool-out" id="statsOut">&nbsp;</div>
+  </div>
+
+  <div class="history">
+    <h3>History <button id="clearHist">Clear</button></h3>
+    <ul id="histList"><li class="empty">No calculations yet</li></ul>
+  </div>
+</div>
+
+<script>
+  const OP_SYMBOL = { add: '+', subtract: '−', multiply: '×', divide: '÷' };
+  let current = '';
+  let stored = null;
+  let pendingOp = null;
+  let justEvaluated = false;
+
+  const resultEl = document.getElementById('result');
+  const exprEl = document.getElementById('expr');
+  const histList = document.getElementById('histList');
+
+  function render() {
+    resultEl.textContent = current === '' ? '0' : current;
+    if (stored !== null && pendingOp) {
+      exprEl.textContent = stored + ' ' + OP_SYMBOL[pendingOp] + ' ' + (current || '');
+    } else {
+      exprEl.innerHTML = '&nbsp;';
+    }
+  }
+
+  function inputDigit(d) {
+    if (justEvaluated) { current = ''; justEvaluated = false; }
+    if (d === '.' && current.includes('.')) return;
+    if (current === '' && d === '.') current = '0';
+    current += d;
+    render();
+  }
+
+  function backspace() {
+    if (justEvaluated) return;
+    current = current.slice(0, -1);
+    render();
+  }
+
+  function clearAll() {
+    current = '';
+    stored = null;
+    pendingOp = null;
+    justEvaluated = false;
+    render();
+  }
+
+  function setOp(op) {
+    if (current === '' && stored === null) return;
+    if (stored !== null && pendingOp && current !== '') {
+      evaluate(true);
+    }
+    if (current !== '') {
+      stored = current;
+      current = '';
+    }
+    pendingOp = op;
+    justEvaluated = false;
+    render();
+  }
+
+  async function evaluate(chain) {
+    if (stored === null || !pendingOp || current === '') return;
+    try {
+      const res = await fetch('/api/calculate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ op: pendingOp, a: parseFloat(stored), b: parseFloat(current) })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        resultEl.textContent = data.error || 'Error';
+        exprEl.innerHTML = '&nbsp;';
+        current = '';
+        stored = null;
+        pendingOp = null;
+        justEvaluated = true;
+        return;
+      }
+      current = String(data.result);
+      stored = null;
+      pendingOp = null;
+      justEvaluated = true;
+      render();
+      loadHistory();
+    } catch (e) {
+      resultEl.textContent = 'Network error';
+    }
+  }
+
+  async function applyUnary(op) {
+    const operand = current !== '' ? current : (justEvaluated ? current : '0');
+    const a = parseFloat(operand || '0');
+    try {
+      const res = await fetch('/api/unary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ op: op, a: a })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        resultEl.textContent = data.error || 'Error';
+        exprEl.innerHTML = '&nbsp;';
+        current = '';
+        stored = null;
+        pendingOp = null;
+        justEvaluated = true;
+        return;
+      }
+      current = String(data.result);
+      stored = null;
+      pendingOp = null;
+      justEvaluated = true;
+      exprEl.textContent = data.expression;
+      resultEl.textContent = current;
+      loadHistory();
+    } catch (e) {
+      resultEl.textContent = 'Network error';
+    }
+  }
+
+  async function evaluateExpression() {
+    const input = document.getElementById('exprInput');
+    const expression = input.value.trim();
+    if (expression === '') return;
+    try {
+      const res = await fetch('/api/evaluate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expression: expression })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        resultEl.textContent = data.error || 'Error';
+        exprEl.innerHTML = '&nbsp;';
+        return;
+      }
+      exprEl.textContent = expression + ' =';
+      resultEl.textContent = String(data.result);
+      current = String(data.result);
+      stored = null;
+      pendingOp = null;
+      justEvaluated = true;
+      loadHistory();
+    } catch (e) {
+      resultEl.textContent = 'Network error';
+    }
+  }
+
+  const memInd = document.getElementById('memInd');
+
+  function renderMemory(value) {
+    memInd.textContent = 'M: ' + value;
+  }
+
+  async function loadMemory() {
+    try {
+      const res = await fetch('/api/memory');
+      const data = await res.json();
+      renderMemory(data.memory);
+    } catch (e) {}
+  }
+
+  async function applyMemory(action) {
+    const body = { action: action };
+    if (action === 'store' || action === 'add' || action === 'subtract') {
+      body.value = parseFloat(current || '0');
+    }
+    try {
+      const res = await fetch('/api/memory', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        resultEl.textContent = data.error || 'Error';
+        return;
+      }
+      renderMemory(data.memory);
+      if (action === 'recall') {
+        current = String(data.memory);
+        justEvaluated = true;
+        render();
+      }
+    } catch (e) {
+      resultEl.textContent = 'Network error';
+    }
+  }
+
+  async function loadHistory() {
+    try {
+      const res = await fetch('/api/history');
+      const data = await res.json();
+      renderHistory(data.history || []);
+    } catch (e) {}
+  }
+
+  function renderHistory(items) {
+    if (!items.length) {
+      histList.innerHTML = '<li class="empty">No calculations yet</li>';
+      return;
+    }
+    histList.innerHTML = items.map(it =>
+      '<li><span>' + it.expression + '</span><span>= ' + it.result + '</span></li>'
+    ).join('');
+  }
+
+  document.querySelectorAll('button[data-digit]').forEach(b =>
+    b.addEventListener('click', () => inputDigit(b.dataset.digit)));
+  document.querySelectorAll('button[data-op]').forEach(b =>
+    b.addEventListener('click', () => setOp(b.dataset.op)));
+  document.querySelector('[data-action="clear"]').addEventListener('click', clearAll);
+  document.querySelector('[data-action="back"]').addEventListener('click', backspace);
+  document.querySelector('[data-action="equals"]').addEventListener('click', () => evaluate(false));
+  document.querySelectorAll('button[data-unary]').forEach(b =>
+    b.addEventListener('click', () => applyUnary(b.dataset.unary)));
+  document.querySelectorAll('button[data-mem]').forEach(b =>
+    b.addEventListener('click', () => applyMemory(b.dataset.mem)));
+  document.getElementById('evalBtn').addEventListener('click', evaluateExpression);
+  document.getElementById('exprInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); evaluateExpression(); }
+  });
+
+  document.getElementById('clearHist').addEventListener('click', async () => {
+    await fetch('/api/history', { method: 'DELETE' });
+    loadHistory();
+  });
+
+  const convOut = document.getElementById('convOut');
+  async function convertBase() {
+    const value = document.getElementById('convValue').value.trim();
+    if (value === '') return;
+    const from_base = document.getElementById('convFrom').value;
+    const to_base = document.getElementById('convTo').value;
+    convOut.classList.remove('err');
+    try {
+      const res = await fetch('/api/convert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value, from_base, to_base })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        convOut.classList.add('err');
+        convOut.textContent = data.error || 'Error';
+        return;
+      }
+      convOut.textContent = value + ' (' + from_base + ') = ' + data.result + ' (' + to_base + ')';
+      loadHistory();
+    } catch (e) {
+      convOut.classList.add('err');
+      convOut.textContent = 'Network error';
+    }
+  }
+  document.getElementById('convBtn').addEventListener('click', convertBase);
+  document.getElementById('convValue').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); convertBase(); }
+  });
+
+  const statsOut = document.getElementById('statsOut');
+  async function computeStats() {
+    const raw = document.getElementById('statsValues').value.trim();
+    if (raw === '') return;
+    const values = raw.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
+    statsOut.classList.remove('err');
+    try {
+      const res = await fetch('/api/stats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        statsOut.classList.add('err');
+        statsOut.textContent = data.error || 'Error';
+        return;
+      }
+      const s = data.stats;
+      statsOut.textContent =
+        'n=' + s.count + '  mean=' + s.mean + '  median=' + s.median +
+        '  stdev=' + s.stdev + '  min=' + s.min + '  max=' + s.max;
+      loadHistory();
+    } catch (e) {
+      statsOut.classList.add('err');
+      statsOut.textContent = 'Network error';
+    }
+  }
+  document.getElementById('statsBtn').addEventListener('click', computeStats);
+  document.getElementById('statsValues').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); computeStats(); }
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (e.target && e.target.id === 'exprInput') return;
+    if (e.key >= '0' && e.key <= '9') inputDigit(e.key);
+    else if (e.key === '.') inputDigit('.');
+    else if (e.key === '+') setOp('add');
+    else if (e.key === '-') setOp('subtract');
+    else if (e.key === '*') setOp('multiply');
+    else if (e.key === '/') { e.preventDefault(); setOp('divide'); }
+    else if (e.key === 'Enter' || e.key === '=') { e.preventDefault(); evaluate(false); }
+    else if (e.key === 'Backspace') backspace();
+    else if (e.key === 'Escape') clearAll();
+  });
+
+  render();
+  loadHistory();
+  loadMemory();
+</script>
+</body>
+</html>
