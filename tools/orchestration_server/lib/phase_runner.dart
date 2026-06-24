@@ -66,10 +66,12 @@ class PhaseRunner {
   }
 
   /// Cap on automatic resumes of a repeatedly-interrupted run before it is marked
-  /// blocked for human attention — so a crash-looping run escalates, not spins.
+  /// blocked for human attention. Generous (default 100) so transient
+  /// interruptions — server restarts, sleeps, network blips — never prematurely
+  /// stop a long unattended build; only a genuine tight crash-loop escalates.
   int get maxOrphanResumes {
     final raw = int.tryParse(_env['ORCH_MAX_ORPHAN_RESUMES']?.trim() ?? '');
-    return raw != null && raw > 0 ? raw : 8;
+    return raw != null && raw > 0 ? raw : 100;
   }
 
   /// Age in seconds of an ISO-8601 timestamp relative to [now], or null if absent
@@ -1248,10 +1250,17 @@ class PhaseRunner {
       final testsGreen = gatesAfter['tests_green'] == true;
       // RELENTLESS: a direct (Claude/Opus) build that finished but whose tests
       // ADF could not verify green must ENGAGE the heal loop (status=error →
-      // poller heals), not go quietly idle on a half-built app.
+      // poller heals), not go idle/blocked on a half-built app. This holds even
+      // when the agent exited non-zero (crash/kill): a crashed direct build still
+      // needs healing, never a terminal 'blocked' — that's what stopped builds.
       final directBuildNeedsHeal =
-          _health.backend.buildsAppDirectly && code == 0 && !directBuildGreen;
-      final testsFailedAtImpl = phase >= 7 && !nowAwaiting && !testsGreen;
+          _health.backend.buildsAppDirectly && !directBuildGreen && !nowAwaiting;
+      // 'blocked' is reserved for the @orch-protocol runner; a direct builder is
+      // NEVER blocked on tests-not-green — it always re-enters the heal loop.
+      final testsFailedAtImpl = !_health.backend.buildsAppDirectly &&
+          phase >= 7 &&
+          !nowAwaiting &&
+          !testsGreen;
       store.writeRunStatus(featureId, {
         'status': nowAwaiting
             ? 'awaiting_approval'
@@ -1465,30 +1474,76 @@ Instructions:
     final state = store.readState(featureId);
     final attempts = (state['heal_attempts'] as num?)?.toInt() ?? 0;
     if (attempts >= maxHealAttempts) {
-      state['status'] = 'blocked';
-      store.writeState(featureId, state);
-      store.writeRunStatus(featureId, {
-        'status': 'blocked',
-        'phase': phase,
-        'error': '$maxHealAttempts consecutive heal attempts made no progress '
-            '(defect count did not drop) — stuck',
-        'error_code': 'heal_exhausted',
-        'recovery_steps': [
-          'Review run-log.jsonl for this feature',
-          'Look at the top defect on the worklist — it may be a false positive or need a human',
-          'Fix manually in your editor',
-          'Reset heal_attempts in state.json and Retry',
-        ],
-      });
-      store.appendSystemMessage(
-        featureId,
-        'Self-heal made no progress for $maxHealAttempts attempts in a row — the '
-        'remaining defect(s) appear stuck (a false positive or something that '
-        'needs a human). The loop fixed everything it could one-by-one before '
-        'stopping here. Open Review to see the remaining worklist, or fix the top '
-        'item and tap Retry to resume the loop.',
-      );
-      return;
+      // NEVER STOP UNTIL BUILT. For a direct builder, hitting maxHealAttempts
+      // no-progress attempts does NOT terminate the build — reset the streak and
+      // keep fighting from a fresh progress baseline (the next attempt escalates
+      // its strategy). Bounded only by a very high absolute backstop
+      // (ORCH_MAX_HEAL_CYCLES, default 300 ≈ days of fighting) so a truly
+      // pathological loop eventually surfaces to a human instead of burning
+      // forever. The @orch-protocol runner keeps the original 'blocked' behavior.
+      if (_health.backend.buildsAppDirectly) {
+        final cycles = ((state['heal_cycles'] as num?)?.toInt() ?? 0) + 1;
+        final maxCycles =
+            int.tryParse(_env['ORCH_MAX_HEAL_CYCLES']?.trim() ?? '') ?? 300;
+        if (cycles <= maxCycles) {
+          state['heal_attempts'] = 0; // reset the no-progress streak
+          state['heal_cycles'] = cycles;
+          state.remove('heal_defect_count'); // fresh baseline for the new streak
+          store.writeState(featureId, state);
+          store.appendSystemMessage(
+            featureId,
+            'Self-heal hit $maxHealAttempts no-progress attempts, but the app is '
+            'not a finished product yet — NOT stopping. Resetting and continuing '
+            'to fight (cycle $cycles/$maxCycles).',
+          );
+          // fall through with heal_attempts reset to 0 → schedules another heal
+        } else {
+          state['status'] = 'blocked';
+          store.writeState(featureId, state);
+          store.writeRunStatus(featureId, {
+            'status': 'blocked',
+            'phase': phase,
+            'error': 'Heal ran $maxCycles full cycles without reaching a finished '
+                'product — surfacing to a human (likely a false positive or a '
+                'genuinely hard blocker)',
+            'error_code': 'heal_cycles_exhausted',
+            'recovery_steps': const [
+              'Review run-log.jsonl + the open defect worklist',
+              'The top defect may be a false positive or need a human decision',
+              'Raise ORCH_MAX_HEAL_CYCLES and Retry to keep fighting',
+            ],
+          });
+          store.appendSystemMessage(
+            featureId,
+            'Self-heal fought $maxCycles full cycles and still cannot reach green '
+            '— pausing for a human. Open Review to see the remaining worklist.',
+          );
+          return;
+        }
+      } else {
+        state['status'] = 'blocked';
+        store.writeState(featureId, state);
+        store.writeRunStatus(featureId, {
+          'status': 'blocked',
+          'phase': phase,
+          'error': '$maxHealAttempts consecutive heal attempts made no progress '
+              '(defect count did not drop) — stuck',
+          'error_code': 'heal_exhausted',
+          'recovery_steps': [
+            'Review run-log.jsonl for this feature',
+            'Look at the top defect on the worklist — it may be a false positive or need a human',
+            'Fix manually in your editor',
+            'Reset heal_attempts in state.json and Retry',
+          ],
+        });
+        store.appendSystemMessage(
+          featureId,
+          'Self-heal made no progress for $maxHealAttempts attempts in a row — the '
+          'remaining defect(s) appear stuck. Open Review to see the worklist, or '
+          'fix the top item and tap Retry to resume the loop.',
+        );
+        return;
+      }
     }
 
     _healing.add(featureId);
