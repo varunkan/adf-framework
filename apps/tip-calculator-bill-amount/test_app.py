@@ -1846,6 +1846,25 @@ class TestApi(unittest.TestCase):
             self.assertEqual(resp.status, 200)
             self.assertEqual(json.loads(resp.read())["status"], "ok")
 
+    def test_favicon_no_404(self):
+        # The browser implicitly requests /favicon.ico; it must not 404
+        # (which would surface as a console error on the home page).
+        with urllib.request.urlopen(self._url("/favicon.ico")) as resp:
+            self.assertEqual(resp.status, 204)
+
+    def test_index_inline_js_is_syntactically_valid(self):
+        # Regression: INDEX_HTML is a non-raw Python string, so a JS string
+        # literal like split("\\n") must keep its backslash escaped in the
+        # source or Python turns it into a real newline and breaks the JS,
+        # raising "SyntaxError: Invalid or unexpected token" in the browser.
+        import re
+        html = server.INDEX_HTML
+        script = re.search(r"<script>(.*?)</script>", html, re.S).group(1)
+        # No string literal may contain an unescaped raw newline.
+        self.assertNotIn('split("\n', script)
+        # The intended two-character escape must survive into the served JS.
+        self.assertIn('split("\\n")', script)
+
     def test_api_happy_path(self):
         status, data = self._post({"bill": 100, "tip_percent": 20, "people": 4})
         self.assertEqual(status, 200)

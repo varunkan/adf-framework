@@ -89,6 +89,24 @@ def _normalise_tip_on(tip_on):
     raise TipError("tip_on must be 'total' or 'subtotal'")
 
 
+def _validate_tip_inputs(tip_percent, tax, tip_on):
+    """Coerce and validate the shared (tip_percent, tax, tip_on) prologue.
+
+    Returns ``(tip_percent, tax, mode)`` with non-negative tip/tax and a
+    normalised tip-base mode, raising ``TipError`` on any invalid input so
+    callers can fail safe.
+    """
+    tip_percent = _to_number(tip_percent, "tip_percent")
+    tax = _to_number(tax, "tax") if tax not in (None, "") else 0.0
+    mode = _normalise_tip_on(tip_on)
+
+    if tip_percent < 0:
+        raise TipError("tip_percent must not be negative")
+    if tax < 0:
+        raise TipError("tax must not be negative")
+    return tip_percent, tax, mode
+
+
 def calculate_tip(bill, tip_percent, people=1, round_total=False, tax=0, tip_on="total"):
     """Compute the tip, total and per-person split for a bill.
 
@@ -363,14 +381,7 @@ def split_by_items(people_items, tip_percent, tax=0, tip_on="subtotal"):
     Returns a dict whose ``people`` list carries each diner's ``subtotal``,
     apportioned ``tax``, ``tip`` and final ``amount``.
     """
-    tip_percent = _to_number(tip_percent, "tip_percent")
-    tax = _to_number(tax, "tax") if tax not in (None, "") else 0.0
-    mode = _normalise_tip_on(tip_on)
-
-    if tip_percent < 0:
-        raise TipError("tip_percent must not be negative")
-    if tax < 0:
-        raise TipError("tax must not be negative")
+    tip_percent, tax, mode = _validate_tip_inputs(tip_percent, tax, tip_on)
 
     if isinstance(people_items, (str, bytes)) or not hasattr(people_items, "__iter__"):
         raise TipError("people_items must be a list of item lists")
@@ -1556,14 +1567,7 @@ def split_shared_items(diners, shared_items=None, tip_percent=0, tax=0,
     ``shared``, ``subtotal``, apportioned ``tax`` and ``tip`` and final
     ``amount``. Raises ``TipError`` on invalid input so callers can fail safe.
     """
-    tip_percent = _to_number(tip_percent, "tip_percent")
-    tax = _to_number(tax, "tax") if tax not in (None, "") else 0.0
-    mode = _normalise_tip_on(tip_on)
-
-    if tip_percent < 0:
-        raise TipError("tip_percent must not be negative")
-    if tax < 0:
-        raise TipError("tax must not be negative")
+    tip_percent, tax, mode = _validate_tip_inputs(tip_percent, tax, tip_on)
 
     if isinstance(diners, (str, bytes)) or not hasattr(diners, "__iter__"):
         raise TipError("diners must be a list of item lists")
@@ -1965,6 +1969,7 @@ INDEX_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
 <title>Tip Calculator</title>
 <style>
   :root { color-scheme: light dark; }
@@ -2342,7 +2347,7 @@ document.querySelectorAll(".chip").forEach((c) =>
 calc();
 
 async function splitItems() {
-  const lines = $("items").value.split("\n").map((l) => l.trim()).filter((l) => l.length);
+  const lines = $("items").value.split("\\n").map((l) => l.trim()).filter((l) => l.length);
   const people_items = lines.map((l) =>
     l.split(",").map((s) => s.trim()).filter((s) => s.length).map(Number));
   const body = {
@@ -2379,7 +2384,7 @@ async function splitItems() {
 $("items-go").addEventListener("click", splitItems);
 
 async function settleUp() {
-  const paid = $("paid").value.split("\n").map((l) => l.trim())
+  const paid = $("paid").value.split("\\n").map((l) => l.trim())
     .filter((l) => l.length).map(Number);
   const body = {
     bill: $("bill").value,
@@ -2475,7 +2480,7 @@ async function makeChange() {
 $("change-go").addEventListener("click", makeChange);
 
 async function combineChecks() {
-  const lines = $("combine").value.split("\n").map((l) => l.trim()).filter((l) => l.length);
+  const lines = $("combine").value.split("\\n").map((l) => l.trim()).filter((l) => l.length);
   const checks = lines.map((l) => {
     const parts = l.split(",").map((s) => s.trim());
     return { bill: parts[0], tip_percent: parts[1] || 0 };
@@ -2538,7 +2543,7 @@ async function applyDiscount() {
 $("discount-go").addEventListener("click", applyDiscount);
 
 async function sharePool() {
-  const weights = $("weights").value.split("\n").map((l) => l.trim())
+  const weights = $("weights").value.split("\\n").map((l) => l.trim())
     .filter((l) => l.length).map(Number);
   const body = { pool: $("pool").value, weights };
   $("pool-rows").innerHTML = "";
@@ -2569,7 +2574,7 @@ async function sharePool() {
 $("pool-go").addEventListener("click", sharePool);
 
 async function splitCaps() {
-  let lines = $("caps").value.split("\n");
+  let lines = $("caps").value.split("\\n");
   while (lines.length && !lines[lines.length - 1].trim()) lines.pop();  // drop trailing blanks
   const caps = lines.map((l) => (l.trim() === "" ? null : Number(l.trim())));
   const body = {
@@ -2606,7 +2611,7 @@ async function splitCaps() {
 $("caps-go").addEventListener("click", splitCaps);
 
 async function buildBill() {
-  const lines = $("menu").value.split("\n").map((l) => l.trim()).filter((l) => l.length);
+  const lines = $("menu").value.split("\\n").map((l) => l.trim()).filter((l) => l.length);
   const items = lines.map((l) => l.split(",").map((s) => s.trim()).filter((s) => s.length).map(Number));
   const body = {
     items,
@@ -2748,7 +2753,7 @@ async function autoGratuity() {
 $("ag-go").addEventListener("click", autoGratuity);
 
 async function splitPercentage() {
-  const percentages = $("pct").value.split("\n").map((l) => l.trim())
+  const percentages = $("pct").value.split("\\n").map((l) => l.trim())
     .filter((l) => l.length).map(Number);
   const body = { bill: $("bill").value, tip_percent: $("tip").value, percentages };
   $("pct-rows").innerHTML = "";
@@ -2910,10 +2915,10 @@ async function grossUpTip() {
 $("fee-go").addEventListener("click", grossUpTip);
 
 async function splitSharedItems() {
-  const diners = $("shared-diners").value.split("\n").map((l) => l.trim())
+  const diners = $("shared-diners").value.split("\\n").map((l) => l.trim())
     .filter((l) => l.length)
     .map((l) => l.split(",").map((s) => s.trim()).filter((s) => s.length).map(Number));
-  const shared_items = $("shared-items").value.split("\n").map((l) => l.trim())
+  const shared_items = $("shared-items").value.split("\\n").map((l) => l.trim())
     .filter((l) => l.length).map((l) => {
       const parts = l.split(",").map((s) => s.trim());
       const price = Number(parts[0]);
@@ -3052,10 +3057,10 @@ $("excl-go").addEventListener("click", tipExcluding);
 
 // Parse "Name 30 @ 20" / "30 @ 20" lines into {name, amount, tip_percent} diners.
 function parseDinerTips(text) {
-  return text.split("\n").map((s) => s.trim()).filter((s) => s.length).map((line) => {
+  return text.split("\\n").map((s) => s.trim()).filter((s) => s.length).map((line) => {
     const [left, right] = line.split("@");
     const tip_percent = Number((right || "").trim());
-    const tokens = (left || "").trim().split(/\s+/);
+    const tokens = (left || "").trim().split(/\\s+/);
     const amount = Number(tokens.pop());
     const name = tokens.join(" ");
     const diner = { amount, tip_percent };
@@ -3112,6 +3117,11 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, INDEX_HTML, "text/html; charset=utf-8")
         elif self.path == "/health":
             self._send_json(200, {"status": "ok"})
+        elif self.path == "/favicon.ico":
+            # No icon asset to serve; answer with an empty 204 so browsers
+            # don't log a 404/console error for the implicit favicon request.
+            self.send_response(204)
+            self.end_headers()
         else:
             self._send_json(404, {"error": "not found"})
 
