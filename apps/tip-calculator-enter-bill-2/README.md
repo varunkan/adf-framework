@@ -28,6 +28,9 @@ only — no dependencies, no build step.
   tip (and effective tip %) needed to hit it.
 - **Discounts / coupons** — take a percentage or flat-dollar discount off the
   bill before tax and tip are figured.
+- **Stacked coupons** — apply several coupons in order, each one coming off
+  what's left: percentages compound and a flat amount is capped so the check
+  never drops below zero, with a per-coupon breakdown of what each knocked off.
 - **Service charge / auto-gratuity** — separate a mandatory service charge
   (common for large parties) from any additional voluntary tip, with both
   figured on the pre- or post-tax base.
@@ -46,6 +49,10 @@ only — no dependencies, no build step.
 - **Who pays whom** — turn what each diner has already paid into the *fewest*
   diner-to-diner transfers that square everyone up (the "one friend covered the
   whole bill, now pay them back" case).
+- **Server tip-out** — at close, distribute a server's collected tips to support
+  staff (busser, bartender, runner, …) as a percent of either net sales (the
+  common practice) or of the tips themselves; the server keeps the remainder,
+  and tip-outs that exceed the tips collected are rejected.
 
 ## HTTP API
 
@@ -62,6 +69,7 @@ All endpoints accept and return JSON. Validation failures return `400` with an
 | POST   | `/api/split`     | full bill split by uneven `weights`                |
 | POST   | `/api/recommend` | tip breakdown for a service-quality `rating`       |
 | POST   | `/api/items`     | split a bill by each person's itemized order       |
+| POST   | `/api/itemtips`  | each diner's own items AND own tip rate, split      |
 | POST   | `/api/target`    | tip needed to reach a desired grand `target_total` |
 | POST   | `/api/discount`  | apply a `%`/`$` discount, then tax + tip, split    |
 | POST   | `/api/service`   | mandatory service charge + optional tip, split     |
@@ -74,6 +82,9 @@ All endpoints accept and return JSON. Validation failures return `400` with an
 | POST   | `/api/category`  | tip each category (e.g. food vs bar) at its own rate |
 | POST   | `/api/tiered`    | pick the tip % from a bill-size `brackets` table    |
 | POST   | `/api/reconcile` | fewest transfers to settle who `paid` what          |
+| POST   | `/api/coupons`   | stack a list of `coupons` (in order), then tax + tip, split |
+| POST   | `/api/summary`   | aggregate several `bills` into a spend & tip report |
+| POST   | `/api/tipout`    | distribute a server's tips to support staff, keep the rest |
 
 Everything lives in `server.py` (domain logic + HTTP handler) and `index.html`
 (UI); `test_app.py` covers the domain and the API surface.

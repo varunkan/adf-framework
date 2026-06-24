@@ -16,8 +16,21 @@ import socketserver
 def _to_cents(amount):
     """Convert a currency amount (float/str) to integer cents, rounding to the
     nearest cent. Using integer cents avoids floating-point drift when we split
-    a bill so the per-person shares always sum back to the exact total."""
-    return int(round(float(amount) * 100))
+    a bill so the per-person shares always sum back to the exact total.
+
+    Rejects non-finite values (+/-inf, NaN) and amounts so large that scaling to
+    cents would overflow to infinity, raising ValueError so every money endpoint
+    surfaces a clean 400 rather than dying with a 500 (OverflowError) inside
+    int(round(inf)). This is the single chokepoint every monetary input passes
+    through, so guarding it here protects bill/tip/target/budget/pool/item/…
+    amounts uniformly."""
+    value = float(amount)
+    if not math.isfinite(value):
+        raise ValueError("amount must be a finite number")
+    scaled = value * 100
+    if not math.isfinite(scaled):
+        raise ValueError("amount is too large")
+    return int(round(scaled))
 
 
 def _from_cents(cents):
@@ -139,6 +152,38 @@ def suggest_tips(bill, people=1, percents=DEFAULT_PRESET_PERCENTS):
     return suggestions
 
 
+# A sane upper bound on how many ways a single bill can be split. Splitting
+# beyond this is never a real use case, and the cap is what stops a hostile
+# `people` value (e.g. 1_000_000_000) from driving an unbounded
+# range(people)/[0]*people allocation that would exhaust memory and hang the
+# single process (a memory-exhaustion DoS) instead of returning a clean 400.
+MAX_PEOPLE = 10000
+
+
+def _coerce_people(people):
+    """Validate `people` as a whole number in 1..MAX_PEOPLE; return it as int.
+
+    The single source of truth for the people bound, shared by `_validate_common`
+    and the item-assignment split so neither path can allocate an unbounded list
+    from a hostile request. `None` defaults to 1. Raises ValueError on anything
+    invalid so the API surfaces a clean 400 rather than a 500/MemoryError.
+    """
+    if people is None:
+        people = 1
+    try:
+        people_f = float(people)
+    except (TypeError, ValueError):
+        raise ValueError("people must be a whole number")
+    if people_f != people_f or people_f != int(people_f):  # NaN or non-integer
+        raise ValueError("people must be a whole number")
+    people = int(people_f)
+    if people < 1:
+        raise ValueError("people must be at least 1")
+    if people > MAX_PEOPLE:
+        raise ValueError("people must be at most %d" % MAX_PEOPLE)
+    return people
+
+
 def _validate_common(bill, tip_percent, people):
     """Validate and normalise the bill / tip_percent / people trio shared by the
     richer bill endpoints, returning (bill_cents, tip_percent_float, people_int).
@@ -155,15 +200,7 @@ def _validate_common(bill, tip_percent, people):
     except (TypeError, ValueError):
         raise ValueError("bill and tip_percent must be numbers")
 
-    if people is None:
-        people = 1
-    try:
-        people_f = float(people)
-    except (TypeError, ValueError):
-        raise ValueError("people must be a whole number")
-    if people_f != int(people_f):
-        raise ValueError("people must be a whole number")
-    people = int(people_f)
+    people = _coerce_people(people)
 
     if bill != bill or tip_percent != tip_percent:  # NaN check
         raise ValueError("bill and tip_percent must be numbers")
@@ -171,8 +208,6 @@ def _validate_common(bill, tip_percent, people):
         raise ValueError("bill must be non-negative")
     if tip_percent < 0 or tip_percent > 100:
         raise ValueError("tip_percent must be between 0 and 100")
-    if people < 1:
-        raise ValueError("people must be at least 1")
 
     return _to_cents(bill), tip_percent, people
 
@@ -674,6 +709,74 @@ def calculate_with_discount(bill, tip_percent, discount, discount_kind="percent"
     result["discount"] = round(float(discount), 4)
     result["discount_kind"] = discount_kind
     result["discount_amount"] = _from_cents(discount_cents)
+    return result
+
+
+def _coerce_coupons(coupons, bill_cents):
+    """Validate a STACK of coupons and apply them in order to a running subtotal.
+
+    Where `_coerce_discount` handles a single coupon, this handles a sequence:
+    `coupons` is a non-empty list of {"kind": "percent"|"amount", "value": number}
+    dicts that are applied one after another, exactly like a real register rings
+    up several coupons in turn. A "percent" coupon takes that percentage off
+    whatever subtotal is left at that point (so two stacked 50%-off coupons leave
+    25%, not 0%); an "amount" coupon takes a flat dollar amount off, capped so the
+    running subtotal can never drop below zero.
+
+    Returns (applied, final_cents) where `applied` is a list — one entry per
+    coupon, in order — of {"kind", "value", "discount" (cents knocked off by that
+    coupon), "subtotal_after" (cents remaining after it)}, and `final_cents` is
+    the fully discounted subtotal. Raises ValueError on anything invalid so the
+    API returns a clean 400.
+    """
+    if isinstance(coupons, (str, bytes)) or not isinstance(coupons, (list, tuple)):
+        raise ValueError("coupons must be a list of coupons")
+    if not coupons:
+        raise ValueError("coupons must not be empty")
+
+    running = bill_cents
+    applied = []
+    for coupon in coupons:
+        if not isinstance(coupon, dict):
+            raise ValueError("each coupon must be an object")
+        kind = coupon.get("kind", "percent")
+        # Reuse the single-coupon validator against the CURRENT running subtotal so
+        # percentages compound and flat amounts are capped at whatever is left.
+        discount_cents = _coerce_discount(coupon.get("value"), kind, running)
+        running -= discount_cents
+        applied.append({
+            "kind": kind,
+            "value": round(float(coupon.get("value")), 4),
+            "discount": _from_cents(discount_cents),
+            "subtotal_after": _from_cents(running),
+        })
+    return applied, running
+
+
+def apply_coupons(bill, tip_percent, coupons, people=1, tax_percent=0,
+                  round_total=False, tip_on="pretax"):
+    """Stack a sequence of coupons on the bill, then compute the full breakdown.
+
+    Unlike `/api/discount` (a single coupon), this applies a LIST of coupons in
+    order via `_coerce_coupons`: each one reduces the running subtotal, so percent
+    coupons compound and flat-amount coupons are capped at whatever is left. Tax
+    and tip are then figured on the FINAL discounted subtotal through
+    `calculate_bill`, so the whole stack correctly reduces both the tax and the
+    tip, and every per-person breakdown keeps the same fair-split guarantees.
+
+    Raises ValueError on any invalid input. Returns the `calculate_bill` dict
+    (whose `subtotal` is the fully discounted subtotal) plus: original_subtotal
+    (the bill before any coupon), total_discount (dollars knocked off across all
+    coupons), and coupons_applied (the per-coupon list from `_coerce_coupons`).
+    """
+    bill_cents, tip_percent, people = _validate_common(bill, tip_percent, people)
+    applied, discounted_cents = _coerce_coupons(coupons, bill_cents)
+
+    result = calculate_bill(_from_cents(discounted_cents), tip_percent, people,
+                            tax_percent, round_total, tip_on)
+    result["original_subtotal"] = _from_cents(bill_cents)
+    result["total_discount"] = _from_cents(bill_cents - discounted_cents)
+    result["coupons_applied"] = applied
     return result
 
 
@@ -1423,6 +1526,88 @@ def split_custom_tips(bill, tip_percents, tax_percent=0, tip_on="pretax"):
         tip_shares.append(tip_cents)
         per_person.append({
             "share": _from_cents(subtotal_shares[i]),
+            "tax": _from_cents(tax_shares[i]),
+            "tip": _from_cents(tip_cents),
+            "tip_percent": round(pct, 4),
+            "total": _from_cents(person_total),
+        })
+
+    total_cents = bill_cents + tax_cents + total_tip_cents
+    return {
+        "subtotal": _from_cents(bill_cents),
+        "tax": _from_cents(tax_cents),
+        "tax_percent": round(tax_percent, 4),
+        "tip": _from_cents(total_tip_cents),
+        "total": _from_cents(total_cents),
+        "people": people,
+        "tip_on": tip_on,
+        "per_person": per_person,
+        "shares": [_from_cents(c) for c in grand_shares],
+        "tip_shares": [_from_cents(c) for c in tip_shares],
+    }
+
+
+def split_items_custom_tips(items, tip_percents, tax_percent=0, tip_on="pretax"):
+    """Split a bill where each diner ordered their OWN items AND tips their OWN way.
+
+    The genuine combination of `split_by_items` (each person pays for exactly what
+    they ordered) and `split_custom_tips` (each person picks their own tip
+    percentage): here every diner has their own itemised subtotal *and* their own
+    tip rate. So the diner who ordered the $60 steak and tips 25% covers a very
+    different amount from the one who had a $12 salad and tips 10% — on the same
+    check.
+
+    `items` is the per-person order (see `_coerce_items`) and fixes the number of
+    people; `tip_percents` must carry exactly one rate per person (it cannot fall
+    back to the defaults here, since each rate is tied to a specific diner). The
+    single `tax_percent` is figured on the whole bill and apportioned to each
+    person in proportion to their own pre-tax subtotal with `split_weighted`, so
+    the tax shares sum back exactly to the tax. Each person's tip is their own
+    percentage applied to their own tip base — their subtotal ("pretax", the
+    default) or their subtotal plus their share of the tax ("posttax").
+
+    When every subtotal is zero (a fully comped table) the tax falls back to an
+    even split and every tip is zero. Raises ValueError on any invalid input,
+    including a `tip_percents` whose length does not match the number of diners.
+
+    Returns a dict with: subtotal, tax, tax_percent, tip (the summed tips), total,
+    people, tip_on, per_person (a list, one entry per diner, each with subtotal,
+    tax, tip, tip_percent, and total), shares (per-person grand totals), and
+    tip_shares (per-person tips).
+    """
+    people_items = _coerce_items(items)
+    percents = _coerce_percents(tip_percents)
+    if len(percents) != len(people_items):
+        raise ValueError("tip_percents must have one entry per person")
+    people = len(people_items)
+    tax_percent = _coerce_tax(tax_percent)
+    if tip_on not in TIP_BASES:
+        raise ValueError("tip_on must be 'pretax' or 'posttax'")
+
+    subtotals_cents = [_to_cents(sum(person)) for person in people_items]
+    bill_cents = sum(subtotals_cents)
+    tax_cents = int(round(bill_cents * tax_percent / 100.0))
+
+    # Apportion the tax by each person's share of the pre-tax subtotal, falling
+    # back to an even split when the whole table is comped (no positive weights).
+    weights = subtotals_cents if bill_cents > 0 else [1] * people
+    tax_shares = split_weighted(tax_cents, weights)
+
+    per_person = []
+    tip_shares = []
+    grand_shares = []
+    total_tip_cents = 0
+    for i, pct in enumerate(percents):
+        base_cents = subtotals_cents[i]
+        if tip_on == "posttax":
+            base_cents += tax_shares[i]
+        tip_cents = int(round(base_cents * pct / 100.0))
+        total_tip_cents += tip_cents
+        person_total = subtotals_cents[i] + tax_shares[i] + tip_cents
+        tip_shares.append(tip_cents)
+        grand_shares.append(person_total)
+        per_person.append({
+            "subtotal": _from_cents(subtotals_cents[i]),
             "tax": _from_cents(tax_shares[i]),
             "tip": _from_cents(tip_cents),
             "tip_percent": round(pct, 4),
@@ -2478,16 +2663,7 @@ def split_by_assignment(items, assignments, tip_percent, people=None,
 
     if people is None:
         people = max_idx + 1 if max_idx >= 0 else 1
-    else:
-        try:
-            people_f = float(people)
-        except (TypeError, ValueError):
-            raise ValueError("people must be a whole number")
-        if people_f != people_f or people_f != int(people_f):  # NaN or non-int
-            raise ValueError("people must be a whole number")
-        people = int(people_f)
-        if people < 1:
-            raise ValueError("people must be at least 1")
+    people = _coerce_people(people)
     if max_idx >= people:
         raise ValueError("assignment refers to a person beyond the table size")
 
@@ -2531,6 +2707,325 @@ def split_by_assignment(items, assignments, tip_percent, people=None,
     result["shares"] = [_from_cents(c) for c in totals]
     result["item_count"] = len(amounts)
     return result
+
+
+def _coerce_bill_entries(bills):
+    """Validate a list of past-bill entries for the multi-visit summary.
+
+    Each entry is an object describing one settled bill: a required `bill` (the
+    pre-tax subtotal) and `tip_percent`, plus optional `tax_percent`, `people`,
+    `tip_on`, `round_total`, and a free-text `label` for the report row. The
+    field values themselves are NOT bounds-checked here — they are validated by
+    `calculate_bill` when each entry is computed, so the rules can never drift
+    apart between the two code paths. This validator only enforces the shape:
+    a non-empty list of objects. Returns a list of normalised dicts (the same
+    keys, with defaults filled in and a label of "Bill N" when none is given).
+    Raises ValueError on anything invalid so the API surfaces a clean 400.
+    """
+    if isinstance(bills, (str, bytes)) or not isinstance(bills, (list, tuple)):
+        raise ValueError("bills must be a list of bill objects")
+    if not bills:
+        raise ValueError("bills must not be empty")
+    cleaned = []
+    for i, b in enumerate(bills):
+        if not isinstance(b, dict):
+            raise ValueError(
+                "each bill must be an object with bill and tip_percent")
+        label = b.get("label")
+        label = str(label) if label is not None else "Bill %d" % (i + 1)
+        cleaned.append({
+            "label": label,
+            "bill": b.get("bill"),
+            "tip_percent": b.get("tip_percent"),
+            "tax_percent": b.get("tax_percent", 0),
+            "people": b.get("people", 1),
+            "tip_on": b.get("tip_on", "pretax"),
+            "round_total": b.get("round_total", False),
+        })
+    return cleaned
+
+
+def summarize_bills(bills):
+    """Aggregate several settled bills into one spending-and-tip report.
+
+    Each entry in `bills` describes one past visit (see `_coerce_bill_entries`)
+    and is run through `calculate_bill`, so every figure carries the same tax
+    and fair-split semantics as the single-bill endpoint. The per-bill results
+    are then summed in integer cents (so no floating-point drift creeps into the
+    totals) into the grand totals and averages, plus the blended effective tip
+    rate (total tip / total pre-tax subtotal) and the spread of the individual
+    tip percentages — a handy "how much did I spend and tip this month?" report.
+
+    Raises ValueError on any invalid input (delegated to `calculate_bill`).
+    Returns a dict with: count, total_subtotal, total_tax, total_tip, total (the
+    grand total across every bill), average_subtotal, average_tip, average_total,
+    average_tip_percent (the blended effective rate), min_tip_percent,
+    max_tip_percent, largest_bill / smallest_bill (by pre-tax subtotal), and
+    bills (the per-bill list of {label, subtotal, tax, tip, tip_percent, total,
+    people}).
+    """
+    entries = _coerce_bill_entries(bills)
+    total_subtotal = total_tax = total_tip = total_total = 0
+    per_bill = []
+    tip_percents = []
+    for e in entries:
+        r = calculate_bill(e["bill"], e["tip_percent"], e["people"],
+                           e["tax_percent"], e["round_total"], e["tip_on"])
+        total_subtotal += _to_cents(r["subtotal"])
+        total_tax += _to_cents(r["tax"])
+        total_tip += _to_cents(r["tip"])
+        total_total += _to_cents(r["total"])
+        tip_percents.append(r["tip_percent"])
+        per_bill.append({
+            "label": e["label"],
+            "subtotal": r["subtotal"],
+            "tax": r["tax"],
+            "tip": r["tip"],
+            "tip_percent": r["tip_percent"],
+            "total": r["total"],
+            "people": r["people"],
+        })
+
+    count = len(entries)
+    # The blended rate is the only honest "average tip %": a simple mean of the
+    # per-bill rates would over-weight tiny bills. Min/max still report the
+    # spread of the individual rates.
+    blended = (total_tip / total_subtotal * 100.0) if total_subtotal else 0.0
+    # Averages are computed on the integer-cent totals and rounded to the cent,
+    # so they stay tidy and the per-bill figures still drive the grand totals.
+    avg_subtotal = int(round(total_subtotal / count))
+    avg_tip = int(round(total_tip / count))
+    avg_total = int(round(total_total / count))
+
+    subtotals = [b["subtotal"] for b in per_bill]
+    return {
+        "count": count,
+        "total_subtotal": _from_cents(total_subtotal),
+        "total_tax": _from_cents(total_tax),
+        "total_tip": _from_cents(total_tip),
+        "total": _from_cents(total_total),
+        "average_subtotal": _from_cents(avg_subtotal),
+        "average_tip": _from_cents(avg_tip),
+        "average_total": _from_cents(avg_total),
+        "average_tip_percent": round(blended, 4),
+        "min_tip_percent": round(min(tip_percents), 4),
+        "max_tip_percent": round(max(tip_percents), 4),
+        "largest_bill": max(subtotals),
+        "smallest_bill": min(subtotals),
+        "bills": per_bill,
+    }
+
+
+# A server's tip-out can be figured on their net sales (the common practice —
+# "tip out 3% of sales to the busser") or on the tips they actually collected.
+TIPOUT_BASES = ("sales", "tips")
+
+
+def _coerce_tipouts(tipouts):
+    """Validate a list of support-staff tip-out rules and return it normalised.
+
+    Each entry is a {"role": str, "percent": number} mapping naming a support
+    role (busser, bartender, runner, …) and the percentage that role is tipped
+    out. The role label is optional and defaults to "support N"; the percent is
+    required and validated against the shared 0..100 bounds via `_coerce_percent`
+    so the rule can never drift from every other percentage field. Returns a list
+    of {"role", "percent"} dicts. Raises ValueError on anything invalid so the
+    API surfaces a clean 400 rather than a 500.
+    """
+    if isinstance(tipouts, (str, bytes)) or not isinstance(tipouts, (list, tuple)):
+        raise ValueError("tipouts must be a list of {role, percent} entries")
+    if not tipouts:
+        raise ValueError("tipouts must not be empty")
+    out = []
+    for i, entry in enumerate(tipouts):
+        if not isinstance(entry, dict):
+            raise ValueError("each tipout must be an object with a percent")
+        if entry.get("percent") is None:
+            raise ValueError("each tipout needs a percent")
+        percent = _coerce_percent(entry.get("percent"), "tipout percent")
+        role = entry.get("role")
+        if role is None:
+            role = "support %d" % (i + 1)
+        else:
+            role = str(role).strip() or ("support %d" % (i + 1))
+        out.append({"role": role, "percent": percent})
+    return out
+
+
+def distribute_tipout(sales, tip_total, tipouts, basis="sales"):
+    """A server's tip-out: hand part of the collected tips to support staff.
+
+    At close, a server tips out support roles (busser, bartender, runner, …) and
+    keeps the rest. Each rule in `tipouts` names a role and a percentage; the
+    amount that role receives is `percent` of the chosen `basis`:
+
+      - basis="sales" (default): percent of the server's net `sales`, the common
+        restaurant practice ("tip out 3% of sales to the busser");
+      - basis="tips":            percent of the `tip_total` the server collected.
+
+    Every amount is computed in integer cents (so the payouts and the server's
+    take-home sum back exactly to the tips collected), summed, and subtracted
+    from `tip_total`; the server keeps the remainder. Raises ValueError if the
+    inputs are invalid or the tip-outs exceed the tips collected — a server
+    cannot pay out more than they earned.
+
+    Returns a dict with: sales, tip_total, basis, tipouts (the per-role list of
+    {role, percent, amount}), total_tipout, server_keep, and
+    server_keep_percent (the share of the tips the server keeps).
+    """
+    try:
+        sales = float(sales)
+        tip_total = float(tip_total)
+    except (TypeError, ValueError):
+        raise ValueError("sales and tip_total must be numbers")
+    if sales != sales or tip_total != tip_total:  # NaN check
+        raise ValueError("sales and tip_total must be numbers")
+    if sales < 0:
+        raise ValueError("sales must be non-negative")
+    if tip_total < 0:
+        raise ValueError("tip_total must be non-negative")
+    if basis not in TIPOUT_BASES:
+        raise ValueError("basis must be 'sales' or 'tips'")
+
+    rules = _coerce_tipouts(tipouts)
+    sales_cents = _to_cents(sales)
+    tip_cents = _to_cents(tip_total)
+    basis_cents = sales_cents if basis == "sales" else tip_cents
+
+    breakdown = []
+    total_tipout = 0
+    for rule in rules:
+        amount = int(round(basis_cents * rule["percent"] / 100.0))
+        total_tipout += amount
+        breakdown.append({
+            "role": rule["role"],
+            "percent": round(rule["percent"], 4),
+            "amount": _from_cents(amount),
+        })
+
+    if total_tipout > tip_cents:
+        raise ValueError("tip-outs exceed the tips collected")
+
+    server_keep = tip_cents - total_tipout
+    keep_percent = (server_keep / tip_cents * 100.0) if tip_cents else 0.0
+    return {
+        "sales": _from_cents(sales_cents),
+        "tip_total": _from_cents(tip_cents),
+        "basis": basis,
+        "tipouts": breakdown,
+        "total_tipout": _from_cents(total_tipout),
+        "server_keep": _from_cents(server_keep),
+        "server_keep_percent": round(keep_percent, 4),
+    }
+
+
+def _coerce_tax_categories(categories):
+    """Validate a list of spend categories, each with its own TAX rate.
+
+    The mirror of `_coerce_categories`: where that lets every part of the check
+    carry its own *tip* rate, this lets every part carry its own *tax* rate. The
+    common example is alcohol being taxed higher than food (many jurisdictions
+    levy a separate, steeper liquor/prepared-drink tax), so a single
+    `tax_percent` cannot describe the real bill. Each entry is an object with a
+    non-negative `amount` and a `tax_percent` in 0..100, plus an optional `name`
+    for the label. A missing name is filled in as "Category N". Returns a list of
+    (name, amount_float, tax_percent_float) tuples. Raises ValueError on anything
+    invalid so the API surfaces a clean 400 rather than a 500.
+    """
+    if isinstance(categories, (str, bytes)) or not isinstance(categories, (list, tuple)):
+        raise ValueError("categories must be a list")
+    if not categories:
+        raise ValueError("categories must not be empty")
+    cleaned = []
+    for i, c in enumerate(categories):
+        if not isinstance(c, dict):
+            raise ValueError(
+                "each category must be an object with amount and tax_percent")
+        amount = c.get("amount")
+        tax_percent = c.get("tax_percent")
+        if amount is None or tax_percent is None:
+            raise ValueError("each category needs amount and tax_percent")
+        if isinstance(amount, bool) or isinstance(tax_percent, bool):
+            raise ValueError("category amount and tax_percent must be numbers")
+        try:
+            amount = float(amount)
+        except (TypeError, ValueError):
+            raise ValueError("category amount and tax_percent must be numbers")
+        if amount != amount:  # NaN
+            raise ValueError("category amount and tax_percent must be numbers")
+        if amount < 0:
+            raise ValueError("category amount must be non-negative")
+        # Reuse the shared 0..100 percentage validator so per-category tax can
+        # never drift from every other percentage field in the app.
+        tax_percent = _coerce_percent(tax_percent, "category tax_percent")
+        name = c.get("name")
+        name = str(name) if name is not None else "Category %d" % (i + 1)
+        cleaned.append((name, amount, tax_percent))
+    return cleaned
+
+
+def multi_rate_tax_bill(categories, tip_percent, people=1, round_total=False,
+                        tip_on="pretax"):
+    """Tax each part of a bill at its own rate, then tip and split fairly.
+
+    The mirror of `tip_by_category`: where that applies a different *tip* rate to
+    each spend category under one tax rate, this applies a different *tax* rate to
+    each category under one tip. Real checks need this when, say, the bar tab is
+    taxed at a higher liquor rate than the food. The category amounts sum to the
+    pre-tax subtotal; each category's tax is figured on its own amount at its own
+    rate and the taxes are summed.
+
+    `tip_on` chooses whether the single `tip_percent` is figured on the pre-tax
+    subtotal ("pretax", the default and common etiquette) or on the post-tax
+    amount ("posttax"), exactly as in `calculate_bill`. The grand total
+    (subtotal + total tax + tip) is split fairly across `people` with the same
+    integer-cent guarantees as `calculate`.
+
+    When `round_total` is truthy the grand total is rounded UP to the next whole
+    dollar and the extra cents are absorbed into the tip, exactly as in
+    `calculate`. Raises ValueError on any invalid input.
+
+    Returns a `_breakdown` dict (whose `tax_percent` is the effective blended
+    rate, total tax / pre-tax subtotal) plus: categories (a per-category list of
+    {name, amount, tax_percent, tax}) and rounded (whether the round-up was
+    applied).
+    """
+    cats = _coerce_tax_categories(categories)
+    # Reuse the shared validator to normalise/bounds-check tip_percent and
+    # people; the bill comes from the categories, so pass a zero placeholder.
+    _bill_cents, tip_percent, people = _validate_common(0, tip_percent, people)
+    if tip_on not in TIP_BASES:
+        raise ValueError("tip_on must be 'pretax' or 'posttax'")
+
+    subtotal_cents = 0
+    tax_cents = 0
+    breakdown = []
+    for name, amount, pct in cats:
+        amt_cents = _to_cents(amount)
+        cat_tax = int(round(amt_cents * pct / 100.0))
+        subtotal_cents += amt_cents
+        tax_cents += cat_tax
+        breakdown.append({
+            "name": name,
+            "amount": _from_cents(amt_cents),
+            "tax_percent": round(pct, 4),
+            "tax": _from_cents(cat_tax),
+        })
+
+    tip_base = subtotal_cents if tip_on == "pretax" else subtotal_cents + tax_cents
+    tip_cents = int(round(tip_base * tip_percent / 100.0))
+    total_cents = subtotal_cents + tax_cents + tip_cents
+
+    rounded = bool(round_total)
+    if rounded:
+        bumped = int(math.ceil(total_cents / 100.0)) * 100
+        tip_cents += bumped - total_cents
+        total_cents = bumped
+
+    effective_tax = (tax_cents / subtotal_cents * 100.0) if subtotal_cents else 0.0
+    return _breakdown(subtotal_cents, tip_cents, tax_cents, total_cents, people,
+                      tip_percent, effective_tax, tip_on,
+                      extra={"categories": breakdown, "rounded": rounded})
 
 
 class RequestHandler(http.server.BaseHTTPRequestHandler):
@@ -2583,671 +3078,184 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
         if self.path == "/api/health":
             self._send_json(200, {"status": "ok"})
             return
+        if self.path == "/favicon.ico":
+            # Serve an empty 204 so browsers stop logging a 404 for the favicon
+            # they auto-request on every page load.
+            self.send_response(204)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         self._send_json(404, {"error": "not found"})
 
+    # Route table: path -> handler(data) -> JSON payload. One declarative entry
+    # per endpoint; the shared do_POST wrapper below reads the body, dispatches,
+    # and uniformly maps a ValueError to a 400. This replaces ~40 copy-pasted
+    # read/try/except/respond blocks with a single reusable code path.
+    _POST_ROUTES = {
+        "/api/tip": lambda d: calculate(
+            d.get("bill"), d.get("tip_percent"), d.get("people", 1),
+            d.get("round_total", False)),
+        "/api/presets": lambda d: {"suggestions": suggest_tips(
+            d.get("bill"), d.get("people", 1), d.get("percents"))},
+        "/api/bill": lambda d: calculate_bill(
+            d.get("bill"), d.get("tip_percent"), d.get("people", 1),
+            d.get("tax_percent", 0), d.get("round_total", False),
+            d.get("tip_on", "pretax")),
+        "/api/split": lambda d: split_bill_by_weights(
+            d.get("bill"), d.get("tip_percent"), d.get("weights"),
+            d.get("tax_percent", 0), d.get("round_total", False),
+            d.get("tip_on", "pretax")),
+        "/api/recommend": lambda d: recommend_tip(
+            d.get("bill"), d.get("rating"), d.get("people", 1),
+            d.get("tax_percent", 0), d.get("round_total", False),
+            d.get("tip_on", "pretax")),
+        "/api/items": lambda d: split_by_items(
+            d.get("items"), d.get("tip_percent"), d.get("tax_percent", 0),
+            d.get("round_total", False), d.get("tip_on", "pretax")),
+        "/api/shareditems": lambda d: split_shared_items(
+            d.get("items"), d.get("shared"), d.get("tip_percent", 0),
+            d.get("tax_percent", 0), d.get("round_total", False),
+            d.get("tip_on", "pretax")),
+        "/api/discount": lambda d: calculate_with_discount(
+            d.get("bill"), d.get("tip_percent"), d.get("discount"),
+            d.get("discount_kind", "percent"), d.get("people", 1),
+            d.get("tax_percent", 0), d.get("round_total", False),
+            d.get("tip_on", "pretax")),
+        "/api/target": lambda d: tip_for_total(
+            d.get("bill"), d.get("target_total"), d.get("people", 1),
+            d.get("tax_percent", 0), d.get("tip_on", "pretax")),
+        "/api/service": lambda d: service_charge_bill(
+            d.get("bill"), d.get("service_percent"), d.get("tip_percent", 0),
+            d.get("people", 1), d.get("tax_percent", 0),
+            d.get("round_total", False), d.get("tip_on", "pretax")),
+        "/api/roundsplit": lambda d: split_round_up_per_person(
+            d.get("bill"), d.get("tip_percent"), d.get("people", 1),
+            d.get("tax_percent", 0), d.get("tip_on", "pretax")),
+        "/api/pool": lambda d: distribute_pool(
+            d.get("pool"), d.get("weights")),
+        "/api/cashsplit": lambda d: split_to_denomination(
+            d.get("bill"), d.get("tip_percent"), d.get("people", 1),
+            d.get("denomination", 1.0), d.get("tax_percent", 0),
+            d.get("tip_on", "pretax")),
+        "/api/perperson": lambda d: tip_from_per_person(
+            d.get("bill"), d.get("per_person_target"), d.get("people", 1),
+            d.get("tax_percent", 0), d.get("tip_on", "pretax")),
+        "/api/round": lambda d: round_total_to_nearest(
+            d.get("bill"), d.get("tip_percent"), d.get("people", 1),
+            d.get("tax_percent", 0), d.get("round_to", 1.0),
+            d.get("mode", "nearest"), d.get("tip_on", "pretax")),
+        "/api/receipt": lambda d: format_receipt(
+            d.get("bill"), d.get("tip_percent"), d.get("people", 1),
+            d.get("tax_percent", 0), d.get("round_total", False),
+            d.get("tip_on", "pretax"), d.get("title", "Receipt")),
+        "/api/tipamount": lambda d: tip_from_amount(
+            d.get("bill"), d.get("tip_amount"), d.get("people", 1),
+            d.get("tax_percent", 0), d.get("tip_on", "pretax")),
+        "/api/compare": lambda d: compare_scenarios(
+            d.get("bill"), d.get("percents"), d.get("people", 1),
+            d.get("tax_percent", 0), d.get("tip_on", "pretax")),
+        "/api/multibill": lambda d: combine_bills(
+            d.get("bills"), d.get("tip_percent"), d.get("people", 1),
+            d.get("tax_percent", 0), d.get("round_total", False),
+            d.get("tip_on", "pretax")),
+        "/api/convert": lambda d: convert_currency(
+            d.get("bill"), d.get("tip_percent"), d.get("rate"),
+            d.get("symbol", "$"), d.get("people", 1), d.get("tax_percent", 0),
+            d.get("round_total", False), d.get("tip_on", "pretax")),
+        "/api/budget": lambda d: tip_within_budget(
+            d.get("bill"), d.get("budget"), d.get("people", 1),
+            d.get("tax_percent", 0), d.get("max_tip_percent", 100),
+            d.get("tip_on", "pretax")),
+        "/api/custom": lambda d: split_custom_tips(
+            d.get("bill"), d.get("tip_percents"), d.get("tax_percent", 0),
+            d.get("tip_on", "pretax")),
+        "/api/cardfee": lambda d: card_surcharge_bill(
+            d.get("bill"), d.get("tip_percent"), d.get("surcharge_percent"),
+            d.get("people", 1), d.get("tax_percent", 0),
+            d.get("round_total", False), d.get("tip_on", "pretax")),
+        "/api/comp": lambda d: comp_diner_split(
+            d.get("bill"), d.get("tip_percent"), d.get("people", 1),
+            d.get("comped"), d.get("tax_percent", 0),
+            d.get("round_total", False), d.get("tip_on", "pretax")),
+        "/api/settle": lambda d: settle_up(
+            d.get("bill"), d.get("tip_percent"), d.get("people", 1),
+            d.get("paid"), d.get("tax_percent", 0),
+            d.get("round_total", False), d.get("tip_on", "pretax")),
+        "/api/guide": lambda d: tip_guide(
+            d.get("bill"), d.get("start", 10), d.get("end", 25),
+            d.get("step", 5), d.get("people", 1), d.get("tax_percent", 0),
+            d.get("tip_on", "pretax")),
+        "/api/extracttax": lambda d: extract_tax_bill(
+            d.get("total_with_tax"), d.get("tip_percent"), d.get("people", 1),
+            d.get("tax_percent", 0), d.get("round_total", False),
+            d.get("tip_on", "pretax")),
+        "/api/charity": lambda d: charity_round_up(
+            d.get("bill"), d.get("tip_percent"), d.get("people", 1),
+            d.get("tax_percent", 0), d.get("increment", 5),
+            d.get("tip_on", "pretax")),
+        "/api/mixedpay": lambda d: split_mixed_payment(
+            d.get("bill"), d.get("tip_percent"), d.get("people", 1),
+            d.get("card_payers"), d.get("surcharge_percent", 0),
+            d.get("tax_percent", 0), d.get("round_total", False),
+            d.get("tip_on", "pretax")),
+        "/api/category": lambda d: tip_by_category(
+            d.get("categories"), d.get("people", 1), d.get("tax_percent", 0),
+            d.get("round_total", False)),
+        "/api/reconcile": lambda d: settle_payments(
+            d.get("bill"), d.get("tip_percent"), d.get("people", 1),
+            d.get("paid"), d.get("tax_percent", 0),
+            d.get("round_total", False), d.get("tip_on", "pretax")),
+        "/api/tiered": lambda d: tiered_tip(
+            d.get("bill"), d.get("brackets"), d.get("people", 1),
+            d.get("tax_percent", 0), d.get("round_total", False),
+            d.get("tip_on", "pretax")),
+        "/api/giftcard": lambda d: gift_card_split(
+            d.get("bill"), d.get("tip_percent"), d.get("people", 1),
+            d.get("gift_card"), d.get("tax_percent", 0),
+            d.get("round_total", False), d.get("tip_on", "pretax")),
+        "/api/delivery": lambda d: delivery_order(
+            d.get("bill"), d.get("tip_percent"), d.get("delivery_fee", 0),
+            d.get("service_fee", 0), d.get("people", 1),
+            d.get("tax_percent", 0), d.get("round_total", False),
+            d.get("tip_on", "pretax")),
+        "/api/percentsplit": lambda d: split_by_percentage(
+            d.get("bill"), d.get("tip_percent"), d.get("percent_shares"),
+            d.get("tax_percent", 0), d.get("round_total", False),
+            d.get("tip_on", "pretax")),
+        "/api/assign": lambda d: split_by_assignment(
+            d.get("items"), d.get("assignments"), d.get("tip_percent"),
+            d.get("people"), d.get("tax_percent", 0),
+            d.get("round_total", False), d.get("tip_on", "pretax")),
+        "/api/summary": lambda d: summarize_bills(d.get("bills")),
+        "/api/tipout": lambda d: distribute_tipout(
+            d.get("sales"), d.get("tip_total"), d.get("tipouts"),
+            d.get("basis", "sales")),
+        "/api/coupons": lambda d: apply_coupons(
+            d.get("bill"), d.get("tip_percent"), d.get("coupons"),
+            d.get("people", 1), d.get("tax_percent", 0),
+            d.get("round_total", False), d.get("tip_on", "pretax")),
+        "/api/multitax": lambda d: multi_rate_tax_bill(
+            d.get("categories"), d.get("tip_percent"), d.get("people", 1),
+            d.get("round_total", False), d.get("tip_on", "pretax")),
+        "/api/itemtips": lambda d: split_items_custom_tips(
+            d.get("items"), d.get("tip_percents"), d.get("tax_percent", 0),
+            d.get("tip_on", "pretax")),
+    }
+
     def do_POST(self):
-        if self.path == "/api/tip":
-            length = int(self.headers.get("Content-Length", 0) or 0)
-            raw = self.rfile.read(length) if length else b""
-            try:
-                data = json.loads(raw.decode("utf-8")) if raw else {}
-            except (ValueError, UnicodeDecodeError):
-                self._send_json(400, {"error": "invalid JSON"})
-                return
-            if not isinstance(data, dict):
-                self._send_json(400, {"error": "invalid JSON"})
-                return
-            try:
-                result = calculate(
-                    data.get("bill"),
-                    data.get("tip_percent"),
-                    data.get("people", 1),
-                    data.get("round_total", False),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
+        handler = self._POST_ROUTES.get(self.path)
+        if handler is None:
+            self._send_json(404, {"error": "not found"})
             return
-        if self.path == "/api/presets":
-            length = int(self.headers.get("Content-Length", 0) or 0)
-            raw = self.rfile.read(length) if length else b""
-            try:
-                data = json.loads(raw.decode("utf-8")) if raw else {}
-            except (ValueError, UnicodeDecodeError):
-                self._send_json(400, {"error": "invalid JSON"})
-                return
-            if not isinstance(data, dict):
-                self._send_json(400, {"error": "invalid JSON"})
-                return
-            try:
-                suggestions = suggest_tips(
-                    data.get("bill"),
-                    data.get("people", 1),
-                    data.get("percents"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, {"suggestions": suggestions})
+        data = self._read_json_object()
+        if data is None:
             return
-        if self.path == "/api/bill":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = calculate_bill(
-                    data.get("bill"),
-                    data.get("tip_percent"),
-                    data.get("people", 1),
-                    data.get("tax_percent", 0),
-                    data.get("round_total", False),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
+        try:
+            result = handler(data)
+        except ValueError as e:
+            self._send_json(400, {"error": str(e)})
             return
-        if self.path == "/api/split":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = split_bill_by_weights(
-                    data.get("bill"),
-                    data.get("tip_percent"),
-                    data.get("weights"),
-                    data.get("tax_percent", 0),
-                    data.get("round_total", False),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/recommend":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = recommend_tip(
-                    data.get("bill"),
-                    data.get("rating"),
-                    data.get("people", 1),
-                    data.get("tax_percent", 0),
-                    data.get("round_total", False),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/items":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = split_by_items(
-                    data.get("items"),
-                    data.get("tip_percent"),
-                    data.get("tax_percent", 0),
-                    data.get("round_total", False),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/shareditems":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = split_shared_items(
-                    data.get("items"),
-                    data.get("shared"),
-                    data.get("tip_percent", 0),
-                    data.get("tax_percent", 0),
-                    data.get("round_total", False),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/discount":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = calculate_with_discount(
-                    data.get("bill"),
-                    data.get("tip_percent"),
-                    data.get("discount"),
-                    data.get("discount_kind", "percent"),
-                    data.get("people", 1),
-                    data.get("tax_percent", 0),
-                    data.get("round_total", False),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/target":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = tip_for_total(
-                    data.get("bill"),
-                    data.get("target_total"),
-                    data.get("people", 1),
-                    data.get("tax_percent", 0),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/service":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = service_charge_bill(
-                    data.get("bill"),
-                    data.get("service_percent"),
-                    data.get("tip_percent", 0),
-                    data.get("people", 1),
-                    data.get("tax_percent", 0),
-                    data.get("round_total", False),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/roundsplit":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = split_round_up_per_person(
-                    data.get("bill"),
-                    data.get("tip_percent"),
-                    data.get("people", 1),
-                    data.get("tax_percent", 0),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/pool":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = distribute_pool(
-                    data.get("pool"),
-                    data.get("weights"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/cashsplit":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = split_to_denomination(
-                    data.get("bill"),
-                    data.get("tip_percent"),
-                    data.get("people", 1),
-                    data.get("denomination", 1.0),
-                    data.get("tax_percent", 0),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/perperson":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = tip_from_per_person(
-                    data.get("bill"),
-                    data.get("per_person_target"),
-                    data.get("people", 1),
-                    data.get("tax_percent", 0),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/round":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = round_total_to_nearest(
-                    data.get("bill"),
-                    data.get("tip_percent"),
-                    data.get("people", 1),
-                    data.get("tax_percent", 0),
-                    data.get("round_to", 1.0),
-                    data.get("mode", "nearest"),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/receipt":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = format_receipt(
-                    data.get("bill"),
-                    data.get("tip_percent"),
-                    data.get("people", 1),
-                    data.get("tax_percent", 0),
-                    data.get("round_total", False),
-                    data.get("tip_on", "pretax"),
-                    data.get("title", "Receipt"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/tipamount":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = tip_from_amount(
-                    data.get("bill"),
-                    data.get("tip_amount"),
-                    data.get("people", 1),
-                    data.get("tax_percent", 0),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/compare":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = compare_scenarios(
-                    data.get("bill"),
-                    data.get("percents"),
-                    data.get("people", 1),
-                    data.get("tax_percent", 0),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/multibill":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = combine_bills(
-                    data.get("bills"),
-                    data.get("tip_percent"),
-                    data.get("people", 1),
-                    data.get("tax_percent", 0),
-                    data.get("round_total", False),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/convert":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = convert_currency(
-                    data.get("bill"),
-                    data.get("tip_percent"),
-                    data.get("rate"),
-                    data.get("symbol", "$"),
-                    data.get("people", 1),
-                    data.get("tax_percent", 0),
-                    data.get("round_total", False),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/budget":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = tip_within_budget(
-                    data.get("bill"),
-                    data.get("budget"),
-                    data.get("people", 1),
-                    data.get("tax_percent", 0),
-                    data.get("max_tip_percent", 100),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/custom":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = split_custom_tips(
-                    data.get("bill"),
-                    data.get("tip_percents"),
-                    data.get("tax_percent", 0),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/cardfee":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = card_surcharge_bill(
-                    data.get("bill"),
-                    data.get("tip_percent"),
-                    data.get("surcharge_percent"),
-                    data.get("people", 1),
-                    data.get("tax_percent", 0),
-                    data.get("round_total", False),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/comp":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = comp_diner_split(
-                    data.get("bill"),
-                    data.get("tip_percent"),
-                    data.get("people", 1),
-                    data.get("comped"),
-                    data.get("tax_percent", 0),
-                    data.get("round_total", False),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/settle":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = settle_up(
-                    data.get("bill"),
-                    data.get("tip_percent"),
-                    data.get("people", 1),
-                    data.get("paid"),
-                    data.get("tax_percent", 0),
-                    data.get("round_total", False),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/guide":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = tip_guide(
-                    data.get("bill"),
-                    data.get("start", 10),
-                    data.get("end", 25),
-                    data.get("step", 5),
-                    data.get("people", 1),
-                    data.get("tax_percent", 0),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/extracttax":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = extract_tax_bill(
-                    data.get("total_with_tax"),
-                    data.get("tip_percent"),
-                    data.get("people", 1),
-                    data.get("tax_percent", 0),
-                    data.get("round_total", False),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/charity":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = charity_round_up(
-                    data.get("bill"),
-                    data.get("tip_percent"),
-                    data.get("people", 1),
-                    data.get("tax_percent", 0),
-                    data.get("increment", 5),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/mixedpay":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = split_mixed_payment(
-                    data.get("bill"),
-                    data.get("tip_percent"),
-                    data.get("people", 1),
-                    data.get("card_payers"),
-                    data.get("surcharge_percent", 0),
-                    data.get("tax_percent", 0),
-                    data.get("round_total", False),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/category":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = tip_by_category(
-                    data.get("categories"),
-                    data.get("people", 1),
-                    data.get("tax_percent", 0),
-                    data.get("round_total", False),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/reconcile":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = settle_payments(
-                    data.get("bill"),
-                    data.get("tip_percent"),
-                    data.get("people", 1),
-                    data.get("paid"),
-                    data.get("tax_percent", 0),
-                    data.get("round_total", False),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/tiered":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = tiered_tip(
-                    data.get("bill"),
-                    data.get("brackets"),
-                    data.get("people", 1),
-                    data.get("tax_percent", 0),
-                    data.get("round_total", False),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/giftcard":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = gift_card_split(
-                    data.get("bill"),
-                    data.get("tip_percent"),
-                    data.get("people", 1),
-                    data.get("gift_card"),
-                    data.get("tax_percent", 0),
-                    data.get("round_total", False),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/delivery":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = delivery_order(
-                    data.get("bill"),
-                    data.get("tip_percent"),
-                    data.get("delivery_fee", 0),
-                    data.get("service_fee", 0),
-                    data.get("people", 1),
-                    data.get("tax_percent", 0),
-                    data.get("round_total", False),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/percentsplit":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = split_by_percentage(
-                    data.get("bill"),
-                    data.get("tip_percent"),
-                    data.get("percent_shares"),
-                    data.get("tax_percent", 0),
-                    data.get("round_total", False),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        if self.path == "/api/assign":
-            data = self._read_json_object()
-            if data is None:
-                return
-            try:
-                result = split_by_assignment(
-                    data.get("items"),
-                    data.get("assignments"),
-                    data.get("tip_percent"),
-                    data.get("people"),
-                    data.get("tax_percent", 0),
-                    data.get("round_total", False),
-                    data.get("tip_on", "pretax"),
-                )
-            except ValueError as e:
-                self._send_json(400, {"error": str(e)})
-                return
-            self._send_json(200, result)
-            return
-        self._send_json(404, {"error": "not found"})
+        self._send_json(200, result)
 
 
 class _Server(socketserver.ThreadingMixIn, http.server.HTTPServer):

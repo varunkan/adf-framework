@@ -15,6 +15,7 @@ import urllib.request
 
 import server
 from server import (
+    _coerce_coupons,
     _coerce_discount,
     _coerce_items,
     _coerce_percents,
@@ -31,6 +32,13 @@ from server import (
     _coerce_gift_card,
     _coerce_fee,
     _coerce_percent_shares,
+    _coerce_bill_entries,
+    _coerce_tipouts,
+    _coerce_tax_categories,
+    distribute_tipout,
+    multi_rate_tax_bill,
+    summarize_bills,
+    apply_coupons,
     calculate,
     calculate_bill,
     calculate_with_discount,
@@ -59,6 +67,7 @@ from server import (
     split_shared_items,
     split_round_up_per_person,
     split_custom_tips,
+    split_items_custom_tips,
     split_to_denomination,
     settle_up,
     settle_payments,
@@ -74,6 +83,7 @@ from server import (
     DISCOUNT_KINDS,
     ROUNDING_MODES,
     SERVICE_RATINGS,
+    TIPOUT_BASES,
 )
 
 
@@ -621,6 +631,123 @@ class CalculateWithDiscountTests(unittest.TestCase):
     def test_negative_discount_raises(self):
         with self.assertRaises(ValueError):
             calculate_with_discount(100, 20, -5, "percent")
+
+
+class CoerceCouponsTests(unittest.TestCase):
+    def test_single_percent(self):
+        applied, final = _coerce_coupons([{"kind": "percent", "value": 10}],
+                                         10000)
+        self.assertEqual(final, 9000)
+        self.assertEqual(applied[0]["discount"], 10.0)
+        self.assertEqual(applied[0]["subtotal_after"], 90.0)
+
+    def test_percent_defaults_when_kind_omitted(self):
+        # A coupon with no "kind" is treated as a percent (matches the default).
+        applied, final = _coerce_coupons([{"value": 25}], 10000)
+        self.assertEqual(final, 7500)
+        self.assertEqual(applied[0]["kind"], "percent")
+
+    def test_percents_compound(self):
+        # 50% then 50% off $100 leaves 25%, not 0%.
+        applied, final = _coerce_coupons(
+            [{"kind": "percent", "value": 50}, {"kind": "percent", "value": 50}],
+            10000)
+        self.assertEqual(final, 2500)
+        self.assertEqual(applied[0]["subtotal_after"], 50.0)
+        self.assertEqual(applied[1]["subtotal_after"], 25.0)
+
+    def test_amount_then_percent_order_matters(self):
+        # $20 off then 10% off $100 -> 80 -> 72.
+        applied, final = _coerce_coupons(
+            [{"kind": "amount", "value": 20}, {"kind": "percent", "value": 10}],
+            10000)
+        self.assertEqual(final, 7200)
+
+    def test_amount_capped_at_running_subtotal(self):
+        # A flat coupon larger than what's left can't push below zero.
+        applied, final = _coerce_coupons(
+            [{"kind": "amount", "value": 80}, {"kind": "amount", "value": 50}],
+            10000)
+        self.assertEqual(final, 0)
+        self.assertEqual(applied[1]["discount"], 20.0)
+
+    def test_empty_list_raises(self):
+        with self.assertRaises(ValueError):
+            _coerce_coupons([], 10000)
+
+    def test_non_list_raises(self):
+        with self.assertRaises(ValueError):
+            _coerce_coupons("20%", 10000)
+
+    def test_non_dict_entry_raises(self):
+        with self.assertRaises(ValueError):
+            _coerce_coupons([10], 10000)
+
+    def test_bad_kind_raises(self):
+        with self.assertRaises(ValueError):
+            _coerce_coupons([{"kind": "bogus", "value": 10}], 10000)
+
+    def test_percent_over_100_raises(self):
+        with self.assertRaises(ValueError):
+            _coerce_coupons([{"kind": "percent", "value": 150}], 10000)
+
+    def test_negative_value_raises(self):
+        with self.assertRaises(ValueError):
+            _coerce_coupons([{"kind": "amount", "value": -5}], 10000)
+
+
+class ApplyCouponsTests(unittest.TestCase):
+    def test_stack_reduces_tip_and_tax(self):
+        # $100, [10% off, $5 off] -> 90 -> 85 subtotal; 20% tip on 85 = 17;
+        # total 102 (no tax).
+        r = apply_coupons(100, 20,
+                          [{"kind": "percent", "value": 10},
+                           {"kind": "amount", "value": 5}])
+        self.assertEqual(r["original_subtotal"], 100.0)
+        self.assertEqual(r["total_discount"], 15.0)
+        self.assertEqual(r["subtotal"], 85.0)
+        self.assertEqual(r["tip"], 17.0)
+        self.assertEqual(r["total"], 102.0)
+        self.assertEqual(len(r["coupons_applied"]), 2)
+
+    def test_with_tax_and_tip(self):
+        # $100, 10% off -> 90; 10% tax = 9; 20% tip on 90 = 18; total 117.
+        r = apply_coupons(100, 20, [{"kind": "percent", "value": 10}],
+                          tax_percent=10)
+        self.assertEqual(r["subtotal"], 90.0)
+        self.assertEqual(r["tax"], 9.0)
+        self.assertEqual(r["tip"], 18.0)
+        self.assertEqual(r["total"], 117.0)
+
+    def test_single_coupon_matches_calculate_with_discount(self):
+        a = apply_coupons(100, 18, [{"kind": "percent", "value": 15}],
+                          people=3, tax_percent=13)
+        d = calculate_with_discount(100, 18, 15, "percent", people=3,
+                                    tax_percent=13)
+        self.assertEqual(a["subtotal"], d["subtotal"])
+        self.assertEqual(a["total"], d["total"])
+        self.assertEqual(a["tip"], d["tip"])
+
+    def test_shares_sum_back_to_total(self):
+        r = apply_coupons(123.45, 18,
+                          [{"kind": "percent", "value": 10},
+                           {"kind": "amount", "value": 7.5}],
+                          people=3, tax_percent=13)
+        self.assertEqual(round(sum(r["shares"]), 2), r["total"])
+
+    def test_coupons_can_zero_the_bill(self):
+        r = apply_coupons(20, 20, [{"kind": "amount", "value": 100}])
+        self.assertEqual(r["subtotal"], 0.0)
+        self.assertEqual(r["total_discount"], 20.0)
+        self.assertEqual(r["total"], 0.0)
+
+    def test_empty_coupons_raises(self):
+        with self.assertRaises(ValueError):
+            apply_coupons(100, 20, [])
+
+    def test_bad_bill_raises(self):
+        with self.assertRaises(ValueError):
+            apply_coupons(-5, 20, [{"kind": "percent", "value": 10}])
 
 
 class _ServerTestBase(unittest.TestCase):
@@ -3681,6 +3808,700 @@ class HttpAssignTests(_ServerTestBase):
     def test_assign_missing_assignments_is_400(self):
         status, data = self._post(
             "/api/assign", {"items": [10, 20], "tip_percent": 0})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
+class HttpCouponsTests(_ServerTestBase):
+    def test_coupons_stack(self):
+        status, data = self._post(
+            "/api/coupons",
+            {"bill": 100, "tip_percent": 0,
+             "coupons": [{"kind": "percent", "value": 50},
+                         {"kind": "percent", "value": 50}]})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["subtotal"], 25.0)
+        self.assertEqual(data["total_discount"], 75.0)
+        self.assertEqual(len(data["coupons_applied"]), 2)
+
+    def test_coupons_with_tax_tip_split_sums_back(self):
+        status, data = self._post(
+            "/api/coupons",
+            {"bill": 123.45, "tip_percent": 18, "tax_percent": 13, "people": 3,
+             "coupons": [{"kind": "amount", "value": 10},
+                         {"kind": "percent", "value": 5}]})
+        self.assertEqual(status, 200)
+        self.assertEqual(round(sum(data["shares"]), 2), data["total"])
+
+    def test_coupons_empty_is_400(self):
+        status, data = self._post(
+            "/api/coupons", {"bill": 100, "tip_percent": 0, "coupons": []})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_coupons_missing_is_400(self):
+        status, data = self._post(
+            "/api/coupons", {"bill": 100, "tip_percent": 0})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_coupons_bad_percent_is_400(self):
+        status, data = self._post(
+            "/api/coupons",
+            {"bill": 100, "tip_percent": 0,
+             "coupons": [{"kind": "percent", "value": 150}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
+class CoerceBillEntriesTests(unittest.TestCase):
+    def test_normalises_and_fills_defaults(self):
+        entries = _coerce_bill_entries([{"bill": 50, "tip_percent": 20}])
+        self.assertEqual(len(entries), 1)
+        e = entries[0]
+        self.assertEqual(e["bill"], 50)
+        self.assertEqual(e["tip_percent"], 20)
+        self.assertEqual(e["tax_percent"], 0)
+        self.assertEqual(e["people"], 1)
+        self.assertEqual(e["tip_on"], "pretax")
+        self.assertEqual(e["round_total"], False)
+        self.assertEqual(e["label"], "Bill 1")
+
+    def test_keeps_explicit_label_and_fields(self):
+        entries = _coerce_bill_entries([
+            {"bill": 80, "tip_percent": 18, "tax_percent": 8,
+             "people": 4, "tip_on": "posttax", "round_total": True,
+             "label": "Dinner"},
+        ])
+        e = entries[0]
+        self.assertEqual(e["label"], "Dinner")
+        self.assertEqual(e["tax_percent"], 8)
+        self.assertEqual(e["people"], 4)
+        self.assertEqual(e["tip_on"], "posttax")
+        self.assertEqual(e["round_total"], True)
+
+    def test_default_labels_are_one_indexed(self):
+        entries = _coerce_bill_entries([
+            {"bill": 10, "tip_percent": 10},
+            {"bill": 20, "tip_percent": 20},
+        ])
+        self.assertEqual([e["label"] for e in entries], ["Bill 1", "Bill 2"])
+
+    def test_rejects_non_list(self):
+        with self.assertRaises(ValueError):
+            _coerce_bill_entries("nope")
+
+    def test_rejects_empty(self):
+        with self.assertRaises(ValueError):
+            _coerce_bill_entries([])
+
+    def test_rejects_non_object_entry(self):
+        with self.assertRaises(ValueError):
+            _coerce_bill_entries([[50, 20]])
+
+
+class SummarizeBillsTests(unittest.TestCase):
+    def test_single_bill_matches_calculate_bill(self):
+        s = summarize_bills([{"bill": 100, "tip_percent": 20}])
+        self.assertEqual(s["count"], 1)
+        self.assertEqual(s["total_subtotal"], 100.0)
+        self.assertEqual(s["total_tip"], 20.0)
+        self.assertEqual(s["total"], 120.0)
+        self.assertEqual(s["average_subtotal"], 100.0)
+        self.assertEqual(s["average_tip"], 20.0)
+        self.assertEqual(s["average_total"], 120.0)
+        self.assertEqual(s["average_tip_percent"], 20.0)
+
+    def test_totals_sum_across_bills(self):
+        s = summarize_bills([
+            {"bill": 100, "tip_percent": 20},
+            {"bill": 50, "tip_percent": 10},
+        ])
+        self.assertEqual(s["count"], 2)
+        self.assertEqual(s["total_subtotal"], 150.0)
+        self.assertEqual(s["total_tip"], 25.0)   # 20 + 5
+        self.assertEqual(s["total"], 175.0)
+        self.assertEqual(s["average_subtotal"], 75.0)
+        self.assertEqual(s["average_tip"], 12.5)
+        self.assertEqual(s["average_total"], 87.5)
+
+    def test_blended_rate_weights_by_subtotal(self):
+        # A big 20% bill and a small 0% bill: the blended rate is the dollar-
+        # weighted figure (20 / 110), NOT the simple mean of 20% and 0%.
+        s = summarize_bills([
+            {"bill": 100, "tip_percent": 20},
+            {"bill": 10, "tip_percent": 0},
+        ])
+        self.assertEqual(s["total_tip"], 20.0)
+        self.assertEqual(s["total_subtotal"], 110.0)
+        self.assertAlmostEqual(s["average_tip_percent"], 20.0 / 110.0 * 100.0,
+                               places=2)
+
+    def test_min_max_and_extremes(self):
+        s = summarize_bills([
+            {"bill": 30, "tip_percent": 25},
+            {"bill": 120, "tip_percent": 15},
+            {"bill": 75, "tip_percent": 18},
+        ])
+        self.assertEqual(s["min_tip_percent"], 15.0)
+        self.assertEqual(s["max_tip_percent"], 25.0)
+        self.assertEqual(s["largest_bill"], 120.0)
+        self.assertEqual(s["smallest_bill"], 30.0)
+
+    def test_includes_tax_in_totals(self):
+        s = summarize_bills([
+            {"bill": 100, "tip_percent": 20, "tax_percent": 10},
+        ])
+        self.assertEqual(s["total_tax"], 10.0)
+        self.assertEqual(s["total"], 130.0)   # 100 + 10 tax + 20 tip
+
+    def test_per_bill_breakdown_shape(self):
+        s = summarize_bills([
+            {"bill": 40, "tip_percent": 15, "label": "Lunch", "people": 2},
+        ])
+        self.assertEqual(len(s["bills"]), 1)
+        row = s["bills"][0]
+        self.assertEqual(row["label"], "Lunch")
+        self.assertEqual(row["subtotal"], 40.0)
+        self.assertEqual(row["tip"], 6.0)
+        self.assertEqual(row["total"], 46.0)
+        self.assertEqual(row["people"], 2)
+        self.assertEqual(row["tip_percent"], 15.0)
+
+    def test_grand_total_equals_sum_of_per_bill_totals(self):
+        s = summarize_bills([
+            {"bill": 19.99, "tip_percent": 18, "tax_percent": 7},
+            {"bill": 33.33, "tip_percent": 22},
+            {"bill": 5.55, "tip_percent": 10},
+        ])
+        self.assertEqual(round(sum(b["total"] for b in s["bills"]), 2),
+                         s["total"])
+        self.assertEqual(round(sum(b["tip"] for b in s["bills"]), 2),
+                         s["total_tip"])
+
+    def test_invalid_bill_propagates_value_error(self):
+        with self.assertRaises(ValueError):
+            summarize_bills([{"bill": -5, "tip_percent": 20}])
+
+    def test_invalid_tip_percent_propagates_value_error(self):
+        with self.assertRaises(ValueError):
+            summarize_bills([{"bill": 50, "tip_percent": 200}])
+
+    def test_empty_list_raises(self):
+        with self.assertRaises(ValueError):
+            summarize_bills([])
+
+
+class HttpSummaryTests(_ServerTestBase):
+    def test_summary_basic(self):
+        status, data = self._post("/api/summary", {"bills": [
+            {"bill": 100, "tip_percent": 20},
+            {"bill": 50, "tip_percent": 10},
+        ]})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["count"], 2)
+        self.assertEqual(data["total_subtotal"], 150.0)
+        self.assertEqual(data["total_tip"], 25.0)
+        self.assertEqual(data["total"], 175.0)
+        self.assertEqual(len(data["bills"]), 2)
+
+    def test_summary_reports_spread(self):
+        status, data = self._post("/api/summary", {"bills": [
+            {"bill": 30, "tip_percent": 25, "label": "Brunch"},
+            {"bill": 120, "tip_percent": 15},
+        ]})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["min_tip_percent"], 15.0)
+        self.assertEqual(data["max_tip_percent"], 25.0)
+        self.assertEqual(data["bills"][0]["label"], "Brunch")
+        self.assertEqual(data["bills"][1]["label"], "Bill 2")
+
+    def test_summary_missing_bills_is_400(self):
+        status, data = self._post("/api/summary", {})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_summary_empty_bills_is_400(self):
+        status, data = self._post("/api/summary", {"bills": []})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_summary_invalid_entry_is_400(self):
+        status, data = self._post(
+            "/api/summary", {"bills": [{"bill": -1, "tip_percent": 20}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
+class CoerceTipoutsTests(unittest.TestCase):
+    def test_normalises_roles_and_percents(self):
+        out = _coerce_tipouts([
+            {"role": "busser", "percent": 3},
+            {"role": "bartender", "percent": 1.5},
+        ])
+        self.assertEqual(out, [
+            {"role": "busser", "percent": 3.0},
+            {"role": "bartender", "percent": 1.5},
+        ])
+
+    def test_missing_role_gets_default_label(self):
+        out = _coerce_tipouts([{"percent": 2}, {"percent": 1}])
+        self.assertEqual(out[0]["role"], "support 1")
+        self.assertEqual(out[1]["role"], "support 2")
+
+    def test_blank_role_falls_back_to_default(self):
+        out = _coerce_tipouts([{"role": "   ", "percent": 2}])
+        self.assertEqual(out[0]["role"], "support 1")
+
+    def test_role_is_stripped(self):
+        out = _coerce_tipouts([{"role": "  runner ", "percent": 1}])
+        self.assertEqual(out[0]["role"], "runner")
+
+    def test_non_list_rejected(self):
+        with self.assertRaises(ValueError):
+            _coerce_tipouts("busser 3")
+
+    def test_empty_list_rejected(self):
+        with self.assertRaises(ValueError):
+            _coerce_tipouts([])
+
+    def test_non_dict_entry_rejected(self):
+        with self.assertRaises(ValueError):
+            _coerce_tipouts([["busser", 3]])
+
+    def test_missing_percent_rejected(self):
+        with self.assertRaises(ValueError):
+            _coerce_tipouts([{"role": "busser"}])
+
+    def test_out_of_range_percent_rejected(self):
+        with self.assertRaises(ValueError):
+            _coerce_tipouts([{"role": "busser", "percent": 150}])
+
+
+class DistributeTipoutTests(unittest.TestCase):
+    def test_percent_of_sales_default(self):
+        out = distribute_tipout(1000, 200, [
+            {"role": "busser", "percent": 3},
+            {"role": "bartender", "percent": 1},
+        ])
+        self.assertEqual(out["basis"], "sales")
+        self.assertEqual(out["tipouts"][0]["amount"], 30.0)
+        self.assertEqual(out["tipouts"][1]["amount"], 10.0)
+        self.assertEqual(out["total_tipout"], 40.0)
+        self.assertEqual(out["server_keep"], 160.0)
+
+    def test_percent_of_tips_basis(self):
+        out = distribute_tipout(1000, 200, [
+            {"role": "busser", "percent": 10},
+        ], basis="tips")
+        self.assertEqual(out["basis"], "tips")
+        self.assertEqual(out["tipouts"][0]["amount"], 20.0)
+        self.assertEqual(out["server_keep"], 180.0)
+
+    def test_payouts_and_keep_sum_to_tips(self):
+        out = distribute_tipout(723.45, 137.80, [
+            {"role": "busser", "percent": 3.3},
+            {"role": "bar", "percent": 1.7},
+            {"role": "runner", "percent": 0.9},
+        ])
+        paid = sum(t["amount"] for t in out["tipouts"])
+        self.assertAlmostEqual(paid + out["server_keep"], out["tip_total"], places=2)
+        self.assertAlmostEqual(out["total_tipout"], paid, places=2)
+
+    def test_keep_percent_reported(self):
+        out = distribute_tipout(1000, 200, [{"role": "b", "percent": 5}])
+        # 5% of 1000 = 50 tipped out, keep 150 of 200 = 75%.
+        self.assertEqual(out["server_keep"], 150.0)
+        self.assertEqual(out["server_keep_percent"], 75.0)
+
+    def test_zero_tips_keep_percent_is_zero(self):
+        out = distribute_tipout(1000, 0, [{"role": "b", "percent": 0}])
+        self.assertEqual(out["server_keep"], 0.0)
+        self.assertEqual(out["server_keep_percent"], 0.0)
+
+    def test_tipout_exceeding_tips_rejected(self):
+        with self.assertRaises(ValueError):
+            distribute_tipout(1000, 20, [{"role": "busser", "percent": 5}])
+
+    def test_negative_sales_rejected(self):
+        with self.assertRaises(ValueError):
+            distribute_tipout(-1, 100, [{"role": "b", "percent": 1}])
+
+    def test_negative_tips_rejected(self):
+        with self.assertRaises(ValueError):
+            distribute_tipout(1000, -1, [{"role": "b", "percent": 1}])
+
+    def test_non_numeric_sales_rejected(self):
+        with self.assertRaises(ValueError):
+            distribute_tipout("lots", 100, [{"role": "b", "percent": 1}])
+
+    def test_bad_basis_rejected(self):
+        with self.assertRaises(ValueError):
+            distribute_tipout(1000, 100, [{"role": "b", "percent": 1}],
+                              basis="profit")
+
+    def test_basis_in_tipout_bases(self):
+        self.assertIn("sales", TIPOUT_BASES)
+        self.assertIn("tips", TIPOUT_BASES)
+
+
+class HttpTipoutTests(_ServerTestBase):
+    def test_basic_tipout(self):
+        status, data = self._post("/api/tipout", {
+            "sales": 1000, "tip_total": 200,
+            "tipouts": [{"role": "busser", "percent": 3}],
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["total_tipout"], 30.0)
+        self.assertEqual(data["server_keep"], 170.0)
+
+    def test_tips_basis(self):
+        status, data = self._post("/api/tipout", {
+            "sales": 1000, "tip_total": 200, "basis": "tips",
+            "tipouts": [{"role": "busser", "percent": 25}],
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["tipouts"][0]["amount"], 50.0)
+        self.assertEqual(data["server_keep"], 150.0)
+
+    def test_excessive_tipout_is_400(self):
+        status, data = self._post("/api/tipout", {
+            "sales": 1000, "tip_total": 10,
+            "tipouts": [{"role": "busser", "percent": 5}],
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_missing_tipouts_is_400(self):
+        status, data = self._post("/api/tipout", {
+            "sales": 1000, "tip_total": 200})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_invalid_basis_is_400(self):
+        status, data = self._post("/api/tipout", {
+            "sales": 1000, "tip_total": 200, "basis": "nope",
+            "tipouts": [{"role": "b", "percent": 1}],
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
+class CoerceTaxCategoriesTests(unittest.TestCase):
+    def test_normalises_amounts_and_percents(self):
+        out = _coerce_tax_categories([
+            {"name": "Food", "amount": "80", "tax_percent": "8"},
+            {"name": "Bar", "amount": 20, "tax_percent": 18},
+        ])
+        self.assertEqual(out, [("Food", 80.0, 8.0), ("Bar", 20.0, 18.0)])
+
+    def test_missing_name_gets_default_label(self):
+        out = _coerce_tax_categories([
+            {"amount": 50, "tax_percent": 8},
+            {"amount": 10, "tax_percent": 18},
+        ])
+        self.assertEqual(out[0][0], "Category 1")
+        self.assertEqual(out[1][0], "Category 2")
+
+    def test_zero_tax_allowed(self):
+        out = _coerce_tax_categories([{"amount": 30, "tax_percent": 0}])
+        self.assertEqual(out, [("Category 1", 30.0, 0.0)])
+
+    def test_non_list_rejected(self):
+        with self.assertRaises(ValueError):
+            _coerce_tax_categories("Food 80 8")
+
+    def test_string_is_not_a_list(self):
+        with self.assertRaises(ValueError):
+            _coerce_tax_categories("nope")
+
+    def test_empty_list_rejected(self):
+        with self.assertRaises(ValueError):
+            _coerce_tax_categories([])
+
+    def test_non_dict_entry_rejected(self):
+        with self.assertRaises(ValueError):
+            _coerce_tax_categories([[80, 8]])
+
+    def test_missing_amount_rejected(self):
+        with self.assertRaises(ValueError):
+            _coerce_tax_categories([{"tax_percent": 8}])
+
+    def test_missing_tax_percent_rejected(self):
+        with self.assertRaises(ValueError):
+            _coerce_tax_categories([{"amount": 80}])
+
+    def test_negative_amount_rejected(self):
+        with self.assertRaises(ValueError):
+            _coerce_tax_categories([{"amount": -5, "tax_percent": 8}])
+
+    def test_out_of_range_tax_rejected(self):
+        with self.assertRaises(ValueError):
+            _coerce_tax_categories([{"amount": 80, "tax_percent": 150}])
+
+    def test_boolean_amount_rejected(self):
+        with self.assertRaises(ValueError):
+            _coerce_tax_categories([{"amount": True, "tax_percent": 8}])
+
+    def test_non_numeric_amount_rejected(self):
+        with self.assertRaises(ValueError):
+            _coerce_tax_categories([{"amount": "lots", "tax_percent": 8}])
+
+
+class MultiRateTaxBillTests(unittest.TestCase):
+    def test_per_category_tax_summed(self):
+        # Food 80 @ 8% -> 6.40 tax; Bar 20 @ 18% -> 3.60 tax; total tax 10.00.
+        out = multi_rate_tax_bill(
+            [{"name": "Food", "amount": 80, "tax_percent": 8},
+             {"name": "Bar", "amount": 20, "tax_percent": 18}],
+            tip_percent=20)
+        self.assertEqual(out["subtotal"], 100.0)
+        self.assertEqual(out["tax"], 10.0)
+        self.assertEqual(out["tip"], 20.0)  # 20% of pre-tax 100
+        self.assertEqual(out["total"], 130.0)
+
+    def test_per_category_breakdown_shape(self):
+        out = multi_rate_tax_bill(
+            [{"name": "Food", "amount": 80, "tax_percent": 8},
+             {"name": "Bar", "amount": 20, "tax_percent": 18}],
+            tip_percent=20)
+        self.assertEqual(out["categories"], [
+            {"name": "Food", "amount": 80.0, "tax_percent": 8.0, "tax": 6.4},
+            {"name": "Bar", "amount": 20.0, "tax_percent": 18.0, "tax": 3.6},
+        ])
+
+    def test_blended_tax_rate_reported(self):
+        # 10.00 tax on 100.00 subtotal -> 10% effective blended rate.
+        out = multi_rate_tax_bill(
+            [{"name": "Food", "amount": 80, "tax_percent": 8},
+             {"name": "Bar", "amount": 20, "tax_percent": 18}],
+            tip_percent=20)
+        self.assertEqual(out["tax_percent"], 10.0)
+
+    def test_posttax_tip_base(self):
+        # Tip on post-tax 110.00 at 20% -> 22.00 instead of 20.00.
+        out = multi_rate_tax_bill(
+            [{"name": "Food", "amount": 80, "tax_percent": 8},
+             {"name": "Bar", "amount": 20, "tax_percent": 18}],
+            tip_percent=20, tip_on="posttax")
+        self.assertEqual(out["tip"], 22.0)
+        self.assertEqual(out["total"], 132.0)
+        self.assertEqual(out["tip_on"], "posttax")
+
+    def test_shares_sum_back_to_total(self):
+        out = multi_rate_tax_bill(
+            [{"amount": 33.33, "tax_percent": 8},
+             {"amount": 11.11, "tax_percent": 18}],
+            tip_percent=17, people=3)
+        self.assertEqual(round(sum(out["shares"]), 2), out["total"])
+        self.assertEqual(len(out["shares"]), 3)
+
+    def test_round_total_absorbs_into_tip(self):
+        out = multi_rate_tax_bill(
+            [{"amount": 80, "tax_percent": 8},
+             {"amount": 20, "tax_percent": 18}],
+            tip_percent=19, round_total=True)
+        self.assertEqual(out["total"], float(int(out["total"])))
+        self.assertTrue(out["rounded"])
+        self.assertEqual(out["subtotal"] + out["tax"] + out["tip"], out["total"])
+
+    def test_single_category_matches_calculate_bill(self):
+        # One category at one rate must equal the flat calculate_bill result.
+        flat = calculate_bill(100, 20, tax_percent=8)
+        multi = multi_rate_tax_bill(
+            [{"amount": 100, "tax_percent": 8}], tip_percent=20)
+        self.assertEqual(multi["subtotal"], flat["subtotal"])
+        self.assertEqual(multi["tax"], flat["tax"])
+        self.assertEqual(multi["tip"], flat["tip"])
+        self.assertEqual(multi["total"], flat["total"])
+
+    def test_zero_tax_categories(self):
+        out = multi_rate_tax_bill(
+            [{"amount": 50, "tax_percent": 0},
+             {"amount": 50, "tax_percent": 0}],
+            tip_percent=20)
+        self.assertEqual(out["tax"], 0.0)
+        self.assertEqual(out["tax_percent"], 0.0)
+        self.assertEqual(out["total"], 120.0)
+
+    def test_invalid_tip_percent_raises(self):
+        with self.assertRaises(ValueError):
+            multi_rate_tax_bill(
+                [{"amount": 80, "tax_percent": 8}], tip_percent=150)
+
+    def test_bad_tip_on_raises(self):
+        with self.assertRaises(ValueError):
+            multi_rate_tax_bill(
+                [{"amount": 80, "tax_percent": 8}], tip_percent=20,
+                tip_on="midtax")
+
+    def test_empty_categories_raises(self):
+        with self.assertRaises(ValueError):
+            multi_rate_tax_bill([], tip_percent=20)
+
+    def test_too_many_people_raises(self):
+        with self.assertRaises(ValueError):
+            multi_rate_tax_bill(
+                [{"amount": 80, "tax_percent": 8}], tip_percent=20,
+                people=10001)
+
+
+class HttpMultiTaxTests(_ServerTestBase):
+    def test_basic_multitax(self):
+        status, data = self._post("/api/multitax", {
+            "categories": [
+                {"name": "Food", "amount": 80, "tax_percent": 8},
+                {"name": "Bar", "amount": 20, "tax_percent": 18},
+            ],
+            "tip_percent": 20,
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["subtotal"], 100.0)
+        self.assertEqual(data["tax"], 10.0)
+        self.assertEqual(data["total"], 130.0)
+        self.assertEqual(len(data["categories"]), 2)
+
+    def test_multitax_split_per_person(self):
+        status, data = self._post("/api/multitax", {
+            "categories": [
+                {"amount": 80, "tax_percent": 8},
+                {"amount": 20, "tax_percent": 18},
+            ],
+            "tip_percent": 20, "people": 4,
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["people"], 4)
+        self.assertEqual(round(sum(data["shares"]), 2), data["total"])
+
+    def test_multitax_missing_categories_is_400(self):
+        status, data = self._post("/api/multitax", {"tip_percent": 20})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_multitax_empty_categories_is_400(self):
+        status, data = self._post("/api/multitax", {
+            "categories": [], "tip_percent": 20})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_multitax_bad_tax_percent_is_400(self):
+        status, data = self._post("/api/multitax", {
+            "categories": [{"amount": 80, "tax_percent": 999}],
+            "tip_percent": 20,
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_multitax_missing_tip_is_400(self):
+        status, data = self._post("/api/multitax", {
+            "categories": [{"amount": 80, "tax_percent": 8}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
+class SplitItemsCustomTipsTests(unittest.TestCase):
+    def test_each_diner_own_items_and_own_tip(self):
+        # Person A ordered $40 and tips 25%; person B ordered $60 and tips 10%.
+        r = split_items_custom_tips([40, 60], [25, 10])
+        self.assertEqual(r["subtotal"], 100.0)
+        self.assertEqual(r["per_person"][0]["subtotal"], 40.0)
+        self.assertEqual(r["per_person"][0]["tip"], 10.0)   # 25% of 40
+        self.assertEqual(r["per_person"][1]["subtotal"], 60.0)
+        self.assertEqual(r["per_person"][1]["tip"], 6.0)    # 10% of 60
+        self.assertEqual(r["tip"], 16.0)
+        self.assertEqual(r["total"], 116.0)
+
+    def test_item_lists_are_summed_per_person(self):
+        r = split_items_custom_tips([[10, 5], [20]], [20, 20])
+        self.assertEqual(r["per_person"][0]["subtotal"], 15.0)
+        self.assertEqual(r["per_person"][1]["subtotal"], 20.0)
+        self.assertEqual(r["subtotal"], 35.0)
+
+    def test_shares_and_tip_shares_sum_back(self):
+        r = split_items_custom_tips([[12.50, 3.25], [9.99], [20.00, 5.00]],
+                                    [18, 20, 15], tax_percent=13)
+        self.assertEqual(round(sum(r["shares"]), 2), r["total"])
+        self.assertEqual(round(sum(r["tip_shares"]), 2), r["tip"])
+        for p in r["per_person"]:
+            self.assertEqual(
+                round(p["subtotal"] + p["tax"] + p["tip"], 2), p["total"])
+
+    def test_tax_apportioned_by_subtotal_share(self):
+        # $40 / $60 with 10% tax ($10) -> tax split 4 / 6 by what each ordered.
+        r = split_items_custom_tips([40, 60], [0, 0], tax_percent=10)
+        self.assertEqual(r["tax"], 10.0)
+        self.assertEqual(r["per_person"][0]["tax"], 4.0)
+        self.assertEqual(r["per_person"][1]["tax"], 6.0)
+
+    def test_posttax_tip_uses_own_taxed_share(self):
+        # Person A: $40 + $4 tax = $44 base; 25% tip -> $11.
+        r = split_items_custom_tips([40, 60], [25, 10], tax_percent=10,
+                                    tip_on="posttax")
+        self.assertEqual(r["tip_on"], "posttax")
+        self.assertEqual(r["per_person"][0]["tip"], 11.0)
+        self.assertEqual(r["per_person"][1]["tip"], 6.6)  # 10% of (60+6)
+
+    def test_fully_comped_table_zero_tips(self):
+        r = split_items_custom_tips([0, 0], [20, 15])
+        self.assertEqual(r["total"], 0.0)
+        self.assertEqual(r["tip"], 0.0)
+        self.assertEqual(r["shares"], [0.0, 0.0])
+
+    def test_mismatched_lengths_raise(self):
+        with self.assertRaises(ValueError):
+            split_items_custom_tips([40, 60], [20])
+
+    def test_empty_items_raise(self):
+        with self.assertRaises(ValueError):
+            split_items_custom_tips([], [20])
+
+    def test_negative_item_raises(self):
+        with self.assertRaises(ValueError):
+            split_items_custom_tips([40, -5], [20, 20])
+
+    def test_non_list_items_raise(self):
+        with self.assertRaises(ValueError):
+            split_items_custom_tips("40,60", [20, 20])
+
+    def test_out_of_range_tip_percent_raises(self):
+        with self.assertRaises(ValueError):
+            split_items_custom_tips([40, 60], [20, 150])
+
+    def test_bad_tax_raises(self):
+        with self.assertRaises(ValueError):
+            split_items_custom_tips([40, 60], [20, 10], tax_percent=150)
+
+    def test_invalid_tip_on_raises(self):
+        with self.assertRaises(ValueError):
+            split_items_custom_tips([40, 60], [20, 10], tip_on="midtax")
+
+
+class HttpItemTipsTests(_ServerTestBase):
+    def test_item_tips_basic(self):
+        status, data = self._post(
+            "/api/itemtips", {"items": [40, 60], "tip_percents": [25, 10]})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["subtotal"], 100.0)
+        self.assertEqual(data["per_person"][0]["tip"], 10.0)
+        self.assertEqual(data["per_person"][1]["tip"], 6.0)
+        self.assertEqual(data["total"], 116.0)
+
+    def test_item_tips_with_tax_sum_back(self):
+        status, data = self._post(
+            "/api/itemtips",
+            {"items": [[12.5, 3.25], [9.99]], "tip_percents": [18, 20],
+             "tax_percent": 13})
+        self.assertEqual(status, 200)
+        self.assertEqual(round(sum(data["shares"]), 2), data["total"])
+
+    def test_item_tips_mismatch_is_400(self):
+        status, data = self._post(
+            "/api/itemtips", {"items": [40, 60], "tip_percents": [20]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_item_tips_missing_items_is_400(self):
+        status, data = self._post("/api/itemtips", {"tip_percents": [20]})
         self.assertEqual(status, 400)
         self.assertIn("error", data)
 
