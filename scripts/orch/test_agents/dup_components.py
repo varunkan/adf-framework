@@ -48,8 +48,11 @@ def _code_dups(files):
         uniq = sorted(set(locs))
         if len(uniq) >= 2 and h not in reported:
             reported.add(h)
+            # 3+ copies of a real block is an unambiguous reuse violation (block);
+            # a 2-place dup is worth flagging but advisory.
+            sev = "high" if len(uniq) >= 3 else "medium"
             findings.append({
-                "severity": "medium",
+                "severity": sev,
                 "title": "Duplicated code block (extract a shared helper and reuse it)",
                 "detail": f"a {MIN_LINES}+-line block is repeated in {len(uniq)} places",
                 "location": ", ".join(uniq[:5]),
@@ -70,8 +73,9 @@ def _markup_dups(html):
     for key, c in counts.items():
         if c >= 2:
             snippet = re.sub(r"<[^>]+>", "", key)[:60].strip()
+            sev = "high" if c >= 3 else "medium"
             findings.append({
-                "severity": "medium",
+                "severity": sev,
                 "title": "Repeated UI markup — make it a reusable component, render it N times",
                 "detail": f'identical {len(key)}-char fragment rendered {c}x ("{snippet}…")',
                 "location": "server.py / index.html (UI template)",
@@ -85,6 +89,10 @@ def run(app_dir):
         if any(s in root for s in (".adf-", "__pycache__", ".git")):
             continue
         for n in names:
+            # Skip test files: duplicated test setup is expected and DRY-ing tests
+            # to death hurts readability — reuse enforcement targets shipped code.
+            if n.startswith("test_") or n.endswith(("_test.py", ".spec.js", ".test.js")):
+                continue
             p = os.path.join(root, n)
             try:
                 t = open(p, encoding="utf-8", errors="replace").read()

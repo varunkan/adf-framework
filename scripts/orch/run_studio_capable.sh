@@ -83,8 +83,15 @@ else
 fi
 echo "  (runner = $RUNNER_DESC)"
 
-# A Claude Code build is an agent doing many steps — give it real time.
-export ORCH_RUNNER_TIMEOUT_SEC="${ORCH_RUNNER_TIMEOUT_SEC:-1800}"
+# A Claude Code build is an agent doing many steps over a long wall-clock. Do NOT
+# cap it with a fixed budget — that killed working builds mid-flight at 30 min and
+# made them churn ("hanging, asking to try again"). Instead use a SLIDING idle
+# timeout: the run is killed only after this many seconds of TRUE SILENCE (the
+# runner streams events continuously while reasoning/running tools), then ADF
+# re-invokes. ORCH_RUNNER_MAX_SEC is the generous absolute never-hang backstop.
+export ORCH_RUNNER_IDLE_TIMEOUT_SEC="${ORCH_RUNNER_IDLE_TIMEOUT_SEC:-300}"
+export ORCH_RUNNER_MAX_SEC="${ORCH_RUNNER_MAX_SEC:-10800}"
+unset ORCH_RUNNER_TIMEOUT_SEC  # legacy fixed budget — superseded by the sliding idle timeout
 export ADF_NVIDIA_TIMEOUT_SEC="${ADF_NVIDIA_TIMEOUT_SEC:-480}"
 export ADF_RUNNER_MAX_TOKENS="${ADF_RUNNER_MAX_TOKENS:-12000}"
 

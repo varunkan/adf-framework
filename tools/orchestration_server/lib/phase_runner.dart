@@ -41,13 +41,16 @@ class PhaseRunner {
     _traces = TraceWriter(store.repoRoot);
   }
 
-  /// Outer self-heal attempts the Dart layer makes after a runner failure.
-  /// RELENTLESS by design — the north star is "embrace failure and keep fighting
-  /// until the app is actually green", so the default is generous (12) rather
-  /// than the old 3 that gave up while a fixable build was one diagnosis away.
-  /// Each attempt is diagnosis-driven (see [_healPrompt]); on a $0/token
-  /// subscription runner the cost of fighting on is just wall-clock. Tune via
-  /// ORCH_MAX_HEAL_ATTEMPTS (0 = never retry; set very high for unattended runs).
+  /// Max CONSECUTIVE no-progress self-heal attempts before the build is handed to
+  /// a human. RELENTLESS by design — the north star is "embrace failure and keep
+  /// fighting until the app is actually green". This is NOT a cap on the total
+  /// number of fixes: _reconcileDirectBuild resets heal_attempts to 0 every cycle
+  /// the defect count DROPS, so the loop fixes defects one-by-one without limit as
+  /// long as it keeps making progress. The cap only fires after this many cycles
+  /// in a row that remove no defects (genuinely stuck). Each attempt is
+  /// diagnosis-driven (see [_healPrompt]); on a $0/token subscription runner the
+  /// cost of fighting on is just wall-clock. Tune via ORCH_MAX_HEAL_ATTEMPTS
+  /// (0 = never retry; set higher to tolerate more stuck cycles).
   int get maxHealAttempts {
     final raw = int.tryParse(_env['ORCH_MAX_HEAL_ATTEMPTS']?.trim() ?? '');
     return raw != null && raw >= 0 ? raw : 12;
@@ -107,13 +110,38 @@ class PhaseRunner {
   final CostMeter _costs;
   final Map<String, String> _env;
 
-  /// Wall-clock budget for one spawned runner-CLI agent
-  /// (`ORCH_RUNNER_TIMEOUT_SEC`, default 30s). Breach kills the process
-  /// group and fails the run instead of letting it hang. Invalid or
-  /// non-positive values fall back to the default.
-  Duration get runnerTimeout {
-    final raw = int.tryParse(_env['ORCH_RUNNER_TIMEOUT_SEC']?.trim() ?? '');
-    return Duration(seconds: raw == null || raw <= 0 ? 30 : raw);
+  /// SLIDING INACTIVITY timeout for a spawned runner-CLI agent
+  /// (`ORCH_RUNNER_IDLE_TIMEOUT_SEC`, default 300s). This is NOT a fixed budget:
+  /// it RESETS on every line the runner emits. While Claude is reasoning or
+  /// running tools it streams stream-json events continuously, so an actively
+  /// working build is never killed no matter how long it legitimately takes.
+  /// Only TRUE silence — no output for this long — means the runner is stuck
+  /// (a deadlock, a hung network call, a foreground command that never returns);
+  /// then ADF kills it and re-invokes, so it never hangs forever. Falls back to
+  /// the legacy `ORCH_RUNNER_TIMEOUT_SEC` only if it is small enough to be an
+  /// idle window (≤600s); a large legacy value (the old 1800s one-shot budget)
+  /// is ignored here and instead caps [maxRunDuration].
+  Duration get runnerIdleTimeout {
+    final raw = int.tryParse(_env['ORCH_RUNNER_IDLE_TIMEOUT_SEC']?.trim() ?? '');
+    if (raw != null && raw > 0) return Duration(seconds: raw);
+    final legacy = int.tryParse(_env['ORCH_RUNNER_TIMEOUT_SEC']?.trim() ?? '');
+    if (legacy != null && legacy > 0 && legacy <= 600) {
+      return Duration(seconds: legacy);
+    }
+    return const Duration(seconds: 300);
+  }
+
+  /// Absolute hard ceiling for a single runner invocation — the never-hang
+  /// backstop that fires even if the runner keeps dribbling output forever.
+  /// Generous by design (the sliding [runnerIdleTimeout] is the real control);
+  /// a large legacy `ORCH_RUNNER_TIMEOUT_SEC` raises this rather than capping a
+  /// working build. Tune via `ORCH_RUNNER_MAX_SEC` (default 7200s = 2h).
+  Duration get maxRunDuration {
+    final raw = int.tryParse(_env['ORCH_RUNNER_MAX_SEC']?.trim() ?? '');
+    if (raw != null && raw > 0) return Duration(seconds: raw);
+    final legacy = int.tryParse(_env['ORCH_RUNNER_TIMEOUT_SEC']?.trim() ?? '');
+    if (legacy != null && legacy > 600) return Duration(seconds: legacy);
+    return const Duration(seconds: 7200);
   }
 
   RunnerHealth get health => _health;
@@ -188,7 +216,6 @@ class PhaseRunner {
   final Set<String> _userCancelled = {};
   final Map<String, Process> _processes = {};
   final Map<String, StringBuffer> _reasoningBuffers = {};
-  static const Duration maxRunDuration = Duration(minutes: 90);
   Timer? _timer;
   bool _started = false;
   Map<String, dynamic>? _cachedHealth;
@@ -812,6 +839,7 @@ class PhaseRunner {
       if (cur < 7) state['current_phase'] = 7;
       state['build_mode'] = 'agentic_direct';
       state.remove('ui_defects');
+      state.remove('heal_defect_count'); // zero defects — clear the progress meter
       store.writeState(featureId, state);
       store.appendSystemMessage(
         featureId,
@@ -826,15 +854,36 @@ class PhaseRunner {
     // never a stale green carried over from an earlier slice.
     store.setGateForPhase(state, 7, false);
 
+    // RELENTLESS, ONE-BY-ONE: count the defects that remain and compare to the
+    // previous cycle. While the count is DROPPING the loop is fixing defects one
+    // at a time and IS making progress — so reset heal_attempts to 0 so the flat
+    // attempt cap never halts a build that is steadily getting cleaner. The cap
+    // then fires ONLY after maxHealAttempts CONSECUTIVE no-progress cycles
+    // (genuinely stuck → hand to a human), not after a fixed number of fixes.
+    final curDefectCount =
+        testsOk ? (uiDefects?.length ?? 0) : 1000; // tests-red is one big wall
+    final prevDefectCount = (state['heal_defect_count'] as num?)?.toInt();
+    final progressed =
+        prevDefectCount == null || curDefectCount < prevDefectCount;
+    state['heal_defect_count'] = curDefectCount;
+    if (progressed && curDefectCount > 0) {
+      state['heal_attempts'] = 0; // still removing defects — keep fighting
+    }
+
     if (testsOk && !uiClean) {
       // The blind spot the reviewer missed: tests green but the live UI errors.
       state['ui_defects'] = uiDefects;
       store.writeState(featureId, state);
-      final shown = uiDefects!.take(6).join('; ');
+      final shown = uiDefects.take(6).join('; ');
+      final delta = prevDefectCount == null
+          ? ''
+          : progressed
+              ? ' (down from $prevDefectCount — making progress, attempt counter reset)'
+              : ' (was $prevDefectCount — no net progress this cycle)';
       store.appendSystemMessage(
         featureId,
         'Tests pass (${res.count}) but the RUNNING APP has ${uiDefects.length} '
-        'UI/runtime defect(s) — not complete. Self-healing to fix them: $shown'
+        'defect(s)$delta — not complete. Self-healing the top one first: $shown'
         '${uiDefects.length > 6 ? ' …' : ''}',
       );
       return false;
@@ -1030,23 +1079,34 @@ class PhaseRunner {
         } catch (_) {}
       }
     });
-    // Hard per-run budget: a runner that produces nothing within the budget
-    // is killed (whole process group) and the run fails with a clear reason.
-    final budget = runnerTimeout;
+    // SLIDING INACTIVITY watchdog: instead of a fixed budget that kills a build
+    // mid-work, this timer is RE-ARMED on every line the runner emits. While
+    // Claude reasons or runs tools it streams events continuously, so it is never
+    // killed for being slow — only for going truly SILENT (stuck/deadlocked) for
+    // [runnerIdleTimeout]. On a stall we kill the group and fail with a clear
+    // reason; the poller then re-invokes (the build is additive, so on-disk
+    // progress is kept) — it never hangs.
+    final idle = runnerIdleTimeout;
     var timedOut = false;
-    final timeoutTimer = Timer(budget, () {
-      if (_processes[featureId] != proc) return;
-      timedOut = true;
-      store.appendRunLog(featureId, {
-        'timestamp': DateTime.now().toUtc().toIso8601String(),
-        'level': 'error',
-        'stream': 'runner',
-        'phase': phase,
-        'message': 'timed_out after ${budget.inSeconds}s '
-            '(ORCH_RUNNER_TIMEOUT_SEC)',
+    Timer? idleTimer;
+    void armIdle() {
+      idleTimer?.cancel();
+      idleTimer = Timer(idle, () {
+        if (_processes[featureId] != proc) return;
+        timedOut = true;
+        store.appendRunLog(featureId, {
+          'timestamp': DateTime.now().toUtc().toIso8601String(),
+          'level': 'error',
+          'stream': 'runner',
+          'phase': phase,
+          'message': 'no output for ${idle.inSeconds}s — runner appears stuck; '
+              'killing and re-invoking (ORCH_RUNNER_IDLE_TIMEOUT_SEC)',
+        });
+        _killProcessGroup(proc);
       });
-      _killProcessGroup(proc);
-    });
+    }
+
+    armIdle(); // start the clock; first output must arrive within the idle window
     final stdoutLines = <String>[];
     final stderrLines = <String>[];
 
@@ -1054,6 +1114,7 @@ class PhaseRunner {
     try {
       await for (final line
           in proc.stdout.transform(utf8.decoder).transform(const LineSplitter())) {
+        armIdle(); // progress — the runner is alive; extend the deadline
         stdoutLines.add(line);
         _logLine(featureId, phase, 'stdout', line);
         _ingestAgentLine(featureId, phase, line);
@@ -1068,9 +1129,11 @@ class PhaseRunner {
       }
       await for (final line
           in proc.stderr.transform(utf8.decoder).transform(const LineSplitter())) {
+        armIdle(); // stderr output is also progress — extend the deadline
         stderrLines.add(line);
         _logLine(featureId, phase, 'stderr', line);
       }
+      idleTimer?.cancel(); // streams closed — runner is done, stop the watchdog
 
       final code = await proc.exitCode;
       final errText = stderrLines.join('\n').trim();
@@ -1080,7 +1143,8 @@ class PhaseRunner {
 
       if (timedOut) {
         final reason =
-            'timed_out after ${budget.inSeconds}s (ORCH_RUNNER_TIMEOUT_SEC)';
+            'runner stuck — no output for ${idle.inSeconds}s; killed and '
+            're-invoking (ORCH_RUNNER_IDLE_TIMEOUT_SEC)';
         store.writeRunStatus(featureId, {
           'status': 'error',
           'agent_active': false,
@@ -1100,9 +1164,9 @@ class PhaseRunner {
         );
         store.appendSystemMessage(
           featureId,
-          'Build timed out after ${budget.inSeconds}s. '
-          'Tap "Reset & retry" to run again, or open Review to see what was '
-          'written so far.',
+          'The builder went silent for ${idle.inSeconds}s and looked stuck, so '
+          'ADF stopped it and will re-invoke to continue — work written so far '
+          'is kept. Open Review to see progress.',
         );
         return {
           'success': false,
@@ -1251,7 +1315,7 @@ class PhaseRunner {
       };
     } finally {
       killTimer.cancel();
-      timeoutTimer.cancel();
+      idleTimer?.cancel();
       _processes.remove(featureId);
     }
   }
@@ -1379,19 +1443,23 @@ Instructions:
       store.writeRunStatus(featureId, {
         'status': 'blocked',
         'phase': phase,
-        'error': 'Max heal attempts ($maxHealAttempts) reached',
+        'error': '$maxHealAttempts consecutive heal attempts made no progress '
+            '(defect count did not drop) — stuck',
         'error_code': 'heal_exhausted',
         'recovery_steps': [
           'Review run-log.jsonl for this feature',
+          'Look at the top defect on the worklist — it may be a false positive or need a human',
           'Fix manually in your editor',
           'Reset heal_attempts in state.json and Retry',
         ],
       });
       store.appendSystemMessage(
         featureId,
-        'Build stopped after $maxHealAttempts attempts. '
-        'Tap "Reset & retry" to start the build over, or open Review to read '
-        'the build log and see where it got stuck.',
+        'Self-heal made no progress for $maxHealAttempts attempts in a row — the '
+        'remaining defect(s) appear stuck (a false positive or something that '
+        'needs a human). The loop fixed everything it could one-by-one before '
+        'stopping here. Open Review to see the remaining worklist, or fix the top '
+        'item and tap Retry to resume the loop.',
       );
       return;
     }
@@ -1473,17 +1541,43 @@ Instructions:
   /// A rich failure diagnosis for the heal prompt: the caller's error PLUS the
   /// tail of the last build output (where the traceback / failing assertions
   /// live), so the agent root-causes instead of blind-regenerating.
+  /// Severity rank parsed from a defect line like `[security-pentest/high] …`.
+  /// Higher = fix first. Unlabeled defects are treated as high.
+  static int _defectSeverity(String d) {
+    final m = RegExp(r'\[[^/\]]+/(\w+)\]').firstMatch(d);
+    switch (m?.group(1)?.toLowerCase()) {
+      case 'critical':
+        return 4;
+      case 'high':
+        return 3;
+      case 'medium':
+        return 2;
+      case 'low':
+        return 1;
+      default:
+        return 3;
+    }
+  }
+
   String _healDiagnosis(String featureId, String error) {
     final b = StringBuffer()..writeln(error.trim());
-    // The RUNNING-APP defects (routes + browser console/network) the UI gate
-    // found — the exact things to fix that unit tests never surface. Listed
-    // first because they are the most actionable.
-    final ui = (store.readState(featureId)['ui_defects'] as List?) ?? const [];
+    // The RUNNING-APP defects (every test agent: UI, a11y, security, dup, e2e…)
+    // the verification gate found — the exact things to fix that unit tests never
+    // surface. Sorted hardest-first and presented as a NUMBERED worklist so the
+    // heal agent fixes them ONE BY ONE, top to bottom, until the list is empty.
+    final ui = [
+      ...((store.readState(featureId)['ui_defects'] as List?) ?? const [])
+          .map((e) => e.toString())
+    ]..sort((a, z) => _defectSeverity(z).compareTo(_defectSeverity(a)));
     if (ui.isNotEmpty) {
-      b.writeln('\n--- RUNNING-APP defects to fix (from the UI verification gate) ---');
+      b.writeln('\n--- DEFECT WORKLIST (${ui.length} open; fix in this order, '
+          'highest severity first) ---');
+      var i = 1;
       for (final d in ui.take(25)) {
-        b.writeln('• $d');
+        b.writeln('$i. $d');
+        i++;
       }
+      if (ui.length > 25) b.writeln('…and ${ui.length - 25} more after these.');
     }
     final last = store.readLastAgentResponse(featureId);
     if (last != null && last.trim().isNotEmpty) {
@@ -1504,18 +1598,20 @@ Instructions:
     // and a concrete verify command so each attempt is diagnosis-driven.
     if (_health.backend.buildsAppDirectly) {
       return '''
-SELF-HEAL attempt $attempt of $maxHealAttempts — the build of `apps/$featureId` is not all-green yet. Keep fighting; do NOT start over and do NOT weaken, skip, or delete tests.
+SELF-HEAL attempt $attempt — the build of `apps/$featureId` still has open defects. This loop is RELENTLESS: it keeps running as long as the defect count drops, so your job is to KILL DEFECTS, not to start over. Do NOT regenerate the app, do NOT weaken/skip/delete tests, do NOT shrink existing coverage.
 
-What went wrong last time:
+Current state and the open defects:
 $diagnosis
 
-Fix it, methodically:
-1. Read the existing app in `apps/$featureId/` (server.py, domain.py, test_app.py, …) and the spec in `specs/$featureId/`.
-2. Re-run `python3 -m unittest -v` in `apps/$featureId/` and READ the actual failing assertions / tracebacks — find the ROOT CAUSE, do not guess.
-3. Apply the smallest change that makes the failing tests pass while keeping every existing test passing.
-4. Re-run the tests and iterate until it prints `OK` with 0 failures and 0 errors.
-5. VERIFY THE RUNNING APP, not just the tests (this is the gate that was failing): boot `python3 server.py`, then in a browser/curl exercise the UI — load `/`, and for EVERY `/api/...` route the page's JS calls, confirm it responds without a 5xx or traceback; fix any "RUNNING-APP defect" listed above (e.g. a missing route the UI calls, a 404/500, a JS console error, a missing favicon). The browser console and network tab must be clean on load AND when buttons are clicked.
-Finish with one line: the final test count AND "running app verified clean".
+Work the DEFECT WORKLIST above ONE BY ONE, from the top (highest severity) down:
+1. Take the FIRST defect on the list. Read the relevant code in `apps/$featureId/` (server.py, domain.py, the feature modules, test_app.py) and the spec in `specs/$featureId/`. Find its ROOT CAUSE — do not guess.
+2. Apply the smallest correct fix for THAT defect. If it is a duplicate-code / repeated-UI-component finding, extract ONE shared helper/component and reuse it in every place (do not copy-paste); if it is an accessibility barrier, add the missing label/alt/name/lang; if it is a security finding, remediate it properly (parameterize SQL, escape output, remove the hardcoded secret); if it is a broken route / 5xx / console error / blank view, fix the handler or the JS.
+3. Re-verify just that fix, then move to the NEXT defect. Repeat until you have addressed every item on the worklist.
+4. Keep every existing test passing and ADD a test that locks in each fix where it makes sense.
+5. Then run the FULL gate exactly as ADF will: `python3 -m unittest -v` in `apps/$featureId/` must print OK with 0 failures/0 errors, AND boot `python3 server.py` and exercise every view + every `/api/...` route the page calls — no 5xx, no traceback, no JS console error, no blank render, no accessibility barrier, no duplicated component.
+Finish with one line: the final test count, how many defects you fixed, and "running app verified clean" once the worklist is empty.
+
+If a specific defect proves a false positive, say so explicitly with the evidence — do not silently ignore it.
 ''';
     }
     return '''
