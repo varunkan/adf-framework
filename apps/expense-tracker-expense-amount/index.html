@@ -94,6 +94,30 @@
   .del:hover { background: #fecaca; }
   .empty { color: #9ca3af; text-align: center; padding: 24px 0; }
   .err { color: #dc2626; font-size: 13px; margin-top: 8px; min-height: 16px; }
+  .edit {
+    cursor: pointer;
+    border: none;
+    background: #eef2ff;
+    color: #4f46e5;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .edit:hover { background: #e0e7ff; }
+  .stat-row { display: flex; gap: 24px; flex-wrap: wrap; margin-top: 6px; color: #6b7280; font-size: 13px; }
+  .stat-row b { color: #111827; }
+  .budget-box { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+  .budget-box .field { flex: 0 1 160px; }
+  .budget-status { font-size: 14px; font-weight: 600; margin-top: 10px; min-height: 18px; }
+  .budget-ok { color: #16a34a; }
+  .budget-over { color: #dc2626; }
+  .links { margin-top: 10px; }
+  .links a { color: #4f46e5; font-size: 13px; font-weight: 600; text-decoration: none; }
+  .links a:hover { text-decoration: underline; }
+  .month-row { display: flex; align-items: center; gap: 10px; }
+  .month-label { width: 84px; font-size: 13px; font-weight: 600; }
+  .month-val { font-size: 13px; color: #374151; }
 </style>
 </head>
 <body>
@@ -139,7 +163,48 @@
       <span>Total spent:</span>
       <span class="total-amt" id="total">$0.00</span>
     </div>
+    <div class="stat-row">
+      <span>Entries: <b id="count">0</b></span>
+      <span>Average: <b id="average">$0.00</b></span>
+      <span>Top category: <b id="topCategory">—</b></span>
+      <span>Largest: <b id="largest">—</b></span>
+    </div>
     <div class="bars" id="bars"></div>
+    <div class="links">
+      <a id="exportCsv" href="/api/expenses.csv">⬇ Export CSV</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Monthly Budget</h2>
+    <div class="budget-box">
+      <div class="field">
+        <label for="budget">Budget amount</label>
+        <input type="number" id="budget" step="0.01" min="0" placeholder="e.g. 500">
+      </div>
+      <button type="button" class="btn" id="saveBudget">Save budget</button>
+      <button type="button" class="btn" id="clearBudget" style="background:#9ca3af;">Clear</button>
+    </div>
+    <div class="budget-status" id="budgetStatus"></div>
+  </div>
+
+  <div class="card">
+    <h2>Monthly Breakdown</h2>
+    <div class="bars" id="monthly"></div>
+  </div>
+
+  <div class="card">
+    <h2>Import CSV</h2>
+    <p class="sub" style="margin:0 0 12px;">Paste rows with a header like
+      <code>date,category,amount,note,tags</code> (tags semicolon-separated, optional).
+      Re-importing an exported file is safe — each row gets a fresh id.</p>
+    <textarea id="importText" rows="4"
+      style="width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:10px;font-size:13px;font-family:monospace;resize:vertical;"
+      placeholder="date,category,amount,note&#10;2024-01-01,Food,12.50,Lunch"></textarea>
+    <div style="margin-top:12px;">
+      <button type="button" class="btn" id="importBtn">Import</button>
+    </div>
+    <div class="budget-status" id="importStatus"></div>
   </div>
 
   <div class="card">
@@ -153,6 +218,27 @@
         <option>Bills</option>
         <option>Fun</option>
         <option>Other</option>
+      </select>
+      <label for="startDate">From:</label>
+      <input type="date" id="startDate">
+      <label for="endDate">To:</label>
+      <input type="date" id="endDate">
+      <button type="button" class="btn" id="clearFilters" style="background:#9ca3af;">Clear</button>
+    </div>
+    <div class="filter-row">
+      <label for="search">Search note:</label>
+      <input type="text" id="search" placeholder="e.g. lunch" style="flex:1 1 160px;">
+      <label for="sort">Sort by:</label>
+      <select id="sort">
+        <option value="">Newest</option>
+        <option value="date">Date</option>
+        <option value="amount">Amount</option>
+        <option value="category">Category</option>
+        <option value="note">Note</option>
+      </select>
+      <select id="order">
+        <option value="asc">Asc</option>
+        <option value="desc">Desc</option>
       </select>
     </div>
     <ul class="list" id="list"></ul>
@@ -169,18 +255,91 @@ const CAT_COLORS = {
 };
 const CATS = ['Food', 'Transport', 'Bills', 'Fun', 'Other'];
 
-let state = { expenses: [], total: 0, breakdown: {} };
+let state = { expenses: [], total: 0, breakdown: {}, count: 0, average: 0 };
 
 function money(n) { return '$' + Number(n).toFixed(2); }
 
+function filterQuery() {
+  const params = new URLSearchParams();
+  const cat = document.getElementById('filter').value;
+  const start = document.getElementById('startDate').value;
+  const end = document.getElementById('endDate').value;
+  const q = document.getElementById('search').value;
+  const sort = document.getElementById('sort').value;
+  const order = document.getElementById('order').value;
+  if (cat && cat !== 'All') params.set('category', cat);
+  if (start) params.set('start', start);
+  if (end) params.set('end', end);
+  if (q) params.set('q', q);
+  if (sort) { params.set('sort', sort); params.set('order', order); }
+  const qs = params.toString();
+  return qs ? '?' + qs : '';
+}
+
 async function load() {
-  const res = await fetch('/api/expenses');
-  state = await res.json();
+  const res = await fetch('/api/expenses' + filterQuery());
+  if (res.ok) state = await res.json();
   render();
+  loadMonthly();
+}
+
+async function loadBudget() {
+  const res = await fetch('/api/budget');
+  const data = await res.json();
+  if (data.budget !== null && data.budget !== undefined) {
+    document.getElementById('budget').value = data.budget;
+  }
+}
+
+async function loadMonthly() {
+  const res = await fetch('/api/summary/monthly');
+  const data = await res.json();
+  const box = document.getElementById('monthly');
+  box.innerHTML = '';
+  const months = data.monthly || {};
+  const keys = Object.keys(months);
+  if (keys.length === 0) {
+    box.innerHTML = '<div class="empty">No data yet.</div>';
+    return;
+  }
+  const max = Math.max(1, ...keys.map(k => months[k]));
+  keys.forEach(k => {
+    const val = months[k];
+    const pct = (val / max) * 100;
+    const row = document.createElement('div');
+    row.className = 'month-row';
+    row.innerHTML =
+      '<div class="month-label">' + k + '</div>' +
+      '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%;background:#6366f1"></div></div>' +
+      '<div class="month-val">' + money(val) + '</div>';
+    box.appendChild(row);
+  });
+}
+
+function renderBudget() {
+  const el = document.getElementById('budgetStatus');
+  if (state.budget === null || state.budget === undefined) {
+    el.textContent = 'No budget set.';
+    el.className = 'budget-status';
+    return;
+  }
+  if (state.over_budget) {
+    el.textContent = 'Over budget by ' + money(Math.abs(state.remaining)) + ' (budget ' + money(state.budget) + ').';
+    el.className = 'budget-status budget-over';
+  } else {
+    el.textContent = money(state.remaining) + ' remaining of ' + money(state.budget) + '.';
+    el.className = 'budget-status budget-ok';
+  }
 }
 
 function render() {
   document.getElementById('total').textContent = money(state.total);
+  document.getElementById('count').textContent = state.count || 0;
+  document.getElementById('average').textContent = money(state.average || 0);
+  document.getElementById('topCategory').textContent = state.top_category || '—';
+  document.getElementById('largest').textContent =
+    state.largest ? money(state.largest.amount) : '—';
+  renderBudget();
 
   const max = Math.max(1, ...CATS.map(c => state.breakdown[c] || 0));
   const bars = document.getElementById('bars');
@@ -197,12 +356,13 @@ function render() {
     bars.appendChild(row);
   });
 
-  const filter = document.getElementById('filter').value;
   const list = document.getElementById('list');
   list.innerHTML = '';
   let items = state.expenses.slice();
-  if (filter !== 'All') items = items.filter(e => e.category === filter);
-  items.sort((a, b) => (a.date < b.date ? 1 : -1));
+  // Respect an explicit server-side sort; otherwise default to newest first.
+  if (!document.getElementById('sort').value) {
+    items.sort((a, b) => (a.date < b.date ? 1 : -1));
+  }
 
   if (items.length === 0) {
     list.innerHTML = '<div class="empty">No expenses to show.</div>';
@@ -232,6 +392,11 @@ function render() {
     amt.className = 'exp-amt';
     amt.textContent = money(e.amount);
 
+    const edit = document.createElement('button');
+    edit.className = 'edit';
+    edit.textContent = 'Edit';
+    edit.onclick = () => editExpense(e);
+
     const del = document.createElement('button');
     del.className = 'del';
     del.textContent = 'Delete';
@@ -240,6 +405,7 @@ function render() {
     li.appendChild(pill);
     li.appendChild(main);
     li.appendChild(amt);
+    li.appendChild(edit);
     li.appendChild(del);
     list.appendChild(li);
   });
@@ -247,6 +413,45 @@ function render() {
 
 async function removeExpense(id) {
   await fetch('/api/expenses/' + id, { method: 'DELETE' });
+  await load();
+}
+
+async function editExpense(e) {
+  const raw = prompt('New amount for "' + (e.note || e.category) + '":', e.amount);
+  if (raw === null) return;
+  const amount = parseFloat(raw);
+  if (isNaN(amount) || amount <= 0) { alert('Amount must be a positive number.'); return; }
+  const res = await fetch('/api/expenses/' + e.id, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ amount: amount })
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    alert(data.error || 'Failed to update expense.');
+    return;
+  }
+  await load();
+}
+
+async function saveBudget() {
+  const raw = document.getElementById('budget').value;
+  const body = raw === '' ? { budget: null } : { budget: parseFloat(raw) };
+  await fetch('/api/budget', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  await load();
+}
+
+async function clearBudget() {
+  document.getElementById('budget').value = '';
+  await fetch('/api/budget', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ budget: null })
+  });
   await load();
 }
 
@@ -275,7 +480,48 @@ document.getElementById('addForm').addEventListener('submit', async (ev) => {
   await load();
 });
 
-document.getElementById('filter').addEventListener('change', render);
+document.getElementById('filter').addEventListener('change', load);
+document.getElementById('startDate').addEventListener('change', load);
+document.getElementById('endDate').addEventListener('change', load);
+document.getElementById('search').addEventListener('input', load);
+document.getElementById('sort').addEventListener('change', load);
+document.getElementById('order').addEventListener('change', load);
+document.getElementById('clearFilters').addEventListener('click', () => {
+  document.getElementById('filter').value = 'All';
+  document.getElementById('startDate').value = '';
+  document.getElementById('endDate').value = '';
+  document.getElementById('search').value = '';
+  document.getElementById('sort').value = '';
+  document.getElementById('order').value = 'asc';
+  load();
+});
+async function importCsv() {
+  const status = document.getElementById('importStatus');
+  const text = document.getElementById('importText').value;
+  if (!text.trim()) { status.textContent = 'Nothing to import.'; status.className = 'budget-status'; return; }
+  const res = await fetch('/api/expenses/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ csv: text })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    status.textContent = data.error || 'Import failed.';
+    status.className = 'budget-status budget-over';
+    return;
+  }
+  let msg = 'Imported ' + data.imported + ' expense' + (data.imported === 1 ? '' : 's') + '.';
+  if (data.skipped) msg += ' Skipped ' + data.skipped + ' invalid row' + (data.skipped === 1 ? '' : 's') + '.';
+  status.textContent = msg;
+  status.className = data.skipped ? 'budget-status budget-over' : 'budget-status budget-ok';
+  if (data.imported) document.getElementById('importText').value = '';
+  await load();
+}
+
+document.getElementById('saveBudget').addEventListener('click', saveBudget);
+document.getElementById('clearBudget').addEventListener('click', clearBudget);
+document.getElementById('importBtn').addEventListener('click', importCsv);
+loadBudget();
 
 // default date = today
 (function () {
