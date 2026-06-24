@@ -1,0 +1,61 @@
+# ADF app — react-vite-sqlite
+
+React + Vite + Tailwind frontend; Fastify + better-sqlite3 backend; served as a
+single process on `PORT`.
+
+    npm ci
+    npm run build      # tsc typecheck + vite build -> dist/
+    npm start          # node server/index.mjs  (serves dist/ + /api/*)
+    npm test           # vitest
+
+Generated feature code lives in `src/**` (UI), `server/api/**` (routes), and
+`schema.sql` (tables). The server serves the built SPA at `/` and the JSON API
+under `/api/*`, owning a local SQLite file.
+
+## Standalone Python build
+
+The canonical implementation is a zero-dependency Python 3 build (stdlib only):
+
+    python3 server.py            # serves http://localhost:8000
+    python3 -m unittest -v       # full test suite
+
+Domain logic and the HTTP layer both live in `server.py`; tests in `test_app.py`.
+JSON endpoints (all `POST` unless noted):
+
+- `/api/calculate` — tip + total from bill/percent, with tax-awareness, pre/post-tax
+  tipping, round-up, and per-person split (REQ-001/REQ-002).
+- `/api/suggestions` — tip/total across several tip tiers.
+- `/api/reverse` — back out the tip needed to hit a target grand total.
+- `/api/round-split` — split with each share rounded up to a clean increment.
+- `/api/split` — split the total unevenly by weighted shares.
+- `/api/items-split` — itemised split: each diner pays their own items plus a
+  fair share of tax and tip.
+- `/api/settle` — **settle up**: given what each diner already paid, report each
+  one's fair share, balance, and a minimal list of transfers (who pays whom) so
+  the table ends square (REQ-002 extension).
+- `/api/rating` — suggest a tip from a 1–5 star service rating, then calculate it.
+- `/api/change` — make cash change for a total, broken into the fewest US
+  bills/coins.
+- `/api/combine` — combine several cheques (each with its own tip rate/tax) into
+  one grand total and split it evenly.
+- `/api/discount` — apply a coupon/discount (flat amount or percent) to the bill,
+  then tip and split; choose whether to tip on the pre- or post-discount amount
+  (REQ-001 extension).
+- `/api/tip-pool` — distribute a collected tip pool among staff weighted by hours,
+  summing exactly to the pool via largest-remainder (REQ-002 extension).
+- `/api/auto-gratuity` — large-party automatic gratuity: a mandatory tip kicks in
+  once the party reaches a size threshold, and a chosen tip below it is bumped up
+  (REQ-001 extension).
+- `/api/split-percentage` — split the grand total by explicit per-diner percentages
+  that must total 100, reconciled to the cent via largest-remainder (REQ-002 extension).
+- `/api/target-per-person` — back out the tip needed so each diner pays a clean,
+  chosen per-person amount (REQ-001/002 extension).
+- `/api/round-total` — round the grand total to a clean increment (up / nearest /
+  down), folding the change into the tip; honours tax and pre/post-tax tipping and
+  splits the rounded total exactly across people (REQ-001/002 extension).
+- `/api/split-comped` — even split where some diners are treated (a birthday comp):
+  the comped diners pay nothing and their share is redistributed exactly across the
+  remaining payers (REQ-002 extension).
+- `/api/gross-up-tip` — gross up a card tip so the server still nets the intended
+  gratuity after the payment processor's percentage fee (REQ-001 extension).
+- `GET /health` — liveness probe.
