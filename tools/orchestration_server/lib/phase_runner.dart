@@ -85,6 +85,14 @@ class PhaseRunner {
     return raw != null && raw > 0 ? raw : 1;
   }
 
+  /// Base port for per-feature app-under-test isolation when parallelism is on.
+  /// Feature N gets ADF_APP_PORT_BASE + slot. Default 8000 (the ADF convention),
+  /// so a single feature keeps using :8000. Tune via ADF_APP_PORT_BASE.
+  int get appPortBase {
+    final raw = int.tryParse(_env['ADF_APP_PORT_BASE']?.trim() ?? '');
+    return raw != null && raw > 0 ? raw : 8000;
+  }
+
   /// Age in seconds of an ISO-8601 timestamp relative to [now], or null if absent
   /// / unparseable. Static → unit-testable without the wall clock.
   static int? ageSeconds(String? iso, DateTime now) {
@@ -188,6 +196,25 @@ class PhaseRunner {
           k == 'CLAUDECODE' ||
           k == 'ANTHROPIC_BASE_URL');
     }
+    // Per-feature app-under-test PORT isolation — ONLY when parallelism is enabled.
+    // At the default cap of 1 we inject nothing, so the gate keeps using its :8000
+    // defaults (byte-identical to today). At cap>1, each concurrently-active feature
+    // gets a distinct port so their gates/app servers never collide. Self-pruning
+    // (drop ports for features no longer active) makes a missed release harmless;
+    // putIfAbsent keeps a feature's port stable across its turns. Requires the app
+    // to honor ADF_SMOKE_PORT/PORT (generation template + existing-app patch).
+    if (maxBuildParallelism > 1) {
+      _featurePort.removeWhere((id, _) => !_active.contains(id));
+      final port = _featurePort.putIfAbsent(featureId, () {
+        final used = _featurePort.values.toSet();
+        for (var p = appPortBase; p < appPortBase + maxBuildParallelism; p++) {
+          if (!used.contains(p)) return p;
+        }
+        return appPortBase;
+      });
+      env['ADF_SMOKE_PORT'] = '$port';
+      env['ADF_APP_URL'] = 'http://127.0.0.1:$port';
+    }
     return env;
   }
 
@@ -228,6 +255,9 @@ class PhaseRunner {
   final Set<String> _healing = {};
   final Set<String> _userCancelled = {};
   final Map<String, Process> _processes = {};
+  // featureId -> assigned app-under-test port, while the feature is active. Only
+  // populated when maxBuildParallelism > 1 (see childEnvFor). Self-pruning.
+  final Map<String, int> _featurePort = {};
   final Map<String, StringBuffer> _reasoningBuffers = {};
   Timer? _timer;
   bool _started = false;
@@ -956,7 +986,11 @@ class PhaseRunner {
           '   - ADD the new domain logic, API endpoints, UI, and tests required by the scope above, '
           'implemented for REAL (no stubs).\n'
           '   - KEEP every existing file, feature, endpoint, and test. NEVER delete, weaken, skip, or '
-          'shrink existing functionality or tests — coverage must only GROW.\n\n'
+          'shrink existing functionality or tests — coverage must only GROW.\n'
+          '   - PORT: ensure server.py binds its port from the environment — '
+          '`run(port=int(os.environ.get("ADF_SMOKE_PORT") or os.environ.get("PORT") or 8000))` '
+          '(default 8000). If it currently hardcodes 8000, make this ONE additive change so the '
+          'verifier can run it on an isolated port; behavior is unchanged when the env is unset.\n\n'
           '3. VERIFY YOURSELF — the FULL suite (old + new) must be green:\n'
           '   - Run: cd apps/$featureId && python3 -m unittest -v\n'
           '   - Fix until ALL tests pass; confirm `python3 server.py` still boots and serves, then stop it.\n\n'
@@ -981,7 +1015,9 @@ class PhaseRunner {
         '2. BUILD (write all files under apps/$featureId/ — create the directory):\n'
         '   - Python 3 standard library ONLY (http.server, json, sqlite3, unittest, html). '
         'No pip installs, no external packages, no outbound network — it must run with `python3 server.py`.\n'
-        '   - server.py: an HTTP server exposing a JSON API and serving a single-page HTML/JS UI.\n'
+        '   - server.py: an HTTP server exposing a JSON API and serving a single-page HTML/JS UI. '
+        'Bind the port from the environment — `port = int(os.environ.get("ADF_SMOKE_PORT") or '
+        'os.environ.get("PORT") or 8000)` (default 8000) — so the verifier can run it isolated.\n'
         '$implLine'
         '   - test_app.py: a unittest suite covering the core domain logic AND the API endpoints.\n'
         '   - README.md: how to run it.\n\n'
