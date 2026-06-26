@@ -3006,8 +3006,12 @@ async function loadActivityTypes() {
 }
 
 function esc(s) {
-  return String(s).replace(/[&<>]/g, c =>
-    ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  // Escape &<> AND both quote characters: rendered values land not only in
+  // element text but inside double-quoted style/attribute contexts and inside
+  // single-quoted JS strings in onclick handlers, so an unescaped " or ' would
+  // break out (DOM-XSS). Escaping all five neutralises every such context.
+  return String(s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
 async function assemble() {
@@ -3320,8 +3324,13 @@ async function valInline() {
       html += '<li style="color:inherit"><span style="color:' + esc(g.colour) +
         ';font-weight:700">●</span> [' + esc(g.rule_id) + '] ' + esc(g.message);
       if (g.remediable) {
+        // User data (fix_id, file path) rides in double-quoted data-* attrs —
+        // safely escaped by esc() — and the inline handler is a STATIC string
+        // that reads them back via this.dataset, so a quote in a filename can
+        // never break out into the JS-string context (DOM-XSS).
         html += ' <button type="button" class="ghost" style="padding:2px 8px;font-size:12px" ' +
-          'onclick="valFix(\\'' + esc(g.fix_id) + '\\',\\'' + esc(file) + '\\')">one-click fix</button>';
+          'data-fix="' + esc(g.fix_id) + '" data-file="' + esc(file) + '" ' +
+          'onclick="valFix(this.dataset.fix, this.dataset.file)">one-click fix</button>';
       }
       html += '</li>';
     }

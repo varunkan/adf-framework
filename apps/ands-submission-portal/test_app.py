@@ -239,6 +239,30 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn("'</td><td>' + s.drug_product +", page)
         self.assertNotIn("'<li>' + e.message + '</li>'", page)
 
+    def test_client_esc_also_escapes_quotes(self):
+        # Security: esc() values land inside double-quoted style/attribute
+        # contexts (e.g. data-* attrs), so esc() must escape both quote chars,
+        # not only &<>. A &<>-only escaper lets a " or ' break out (DOM-XSS).
+        with urllib.request.urlopen(self._url("/")) as resp:
+            page = resp.read().decode()
+        self.assertIn("&quot;", page)
+        self.assertIn("&#39;", page)
+        self.assertIn("/[&<>\"']/g", page)
+
+    def test_inline_fix_button_uses_static_handler_not_interpolated_quotes(self):
+        # Security: the one-click-fix button must carry user-controlled fix_id
+        # and file path in data-* attributes and call a STATIC onclick handler
+        # reading this.dataset — never interpolate them into a single-quoted JS
+        # string, where a quote in a filename would break out (DOM-XSS).
+        with urllib.request.urlopen(self._url("/")) as resp:
+            page = resp.read().decode()
+        self.assertIn("onclick=\"valFix(this.dataset.fix, this.dataset.file)\"",
+                      page)
+        self.assertIn("data-fix=", page)
+        self.assertIn("data-file=", page)
+        # The old, injectable inline form must be gone.
+        self.assertNotIn("valFix(\\'", page)
+
     def test_malformed_content_length_does_not_crash(self):
         # Regression: a non-numeric Content-Length must be handled gracefully
         # (treated as an empty body) rather than raising inside the handler.
@@ -2374,6 +2398,26 @@ class MediaPackageTests(unittest.TestCase):
         self.assertEqual(pkg["checksums"]["index.xml"],
                          transmission.md5_hex("<x/>"))
 
+    def test_placeholder_backbones_escape_injected_xml(self):
+        # SECURITY: a dossier_id/sequence carrying XML metacharacters must be
+        # escaped into the placeholder backbones, never breaking out of the
+        # attribute/element to produce malformed or attacker-shaped XML.
+        from xml.dom.minidom import parseString
+        hostile = {"dossier_id": "e1' onload='x\"><inject>&",
+                   "sequence": "00<00", "size_gb": 14.0}
+        pkg = transmission.build_media_package(hostile)
+        idx = pkg["backbones"]["index.xml"]
+        reg = pkg["backbones"]["m1/ca/ca-regional.xml"]
+        # No raw injection markers survive into the serialized XML.
+        self.assertNotIn("<inject>", idx)
+        self.assertNotIn("<inject>", reg)
+        # Both backbones remain well-formed and round-trip the real value.
+        parseString(idx)
+        dom = parseString(reg)
+        self.assertEqual(
+            dom.getElementsByTagName("dossier-id")[0].firstChild.data,
+            hostile["dossier_id"])
+
 
 # -- REQ-027 / REQ-046 / REQ-058: the per-dossier ledger --------------------
 
@@ -4495,6 +4539,607 @@ class ResponseBuilderApiTests(unittest.TestCase):
             "answers": [{"section": "", "answer": "a"}]})
         self.assertEqual(status, 422)
         self.assertFalse(data["valid"])
+
+
+# ==========================================================================
+# Coverage backfill: requirements with real implementations that previously
+# had no dedicated test. Each class below locks in an existing behaviour so a
+# regression would be caught. No production code is changed by these tests.
+# ==========================================================================
+
+
+def _rule_ids(ctx, version="5.3"):
+    return {f["rule_id"] for f in validation.run_validation(ctx, version)["findings"]}
+
+
+class PdfConformanceTests(unittest.TestCase):
+    """REQ-010 / REQ-069: PDF version, OCR/searchable, Track Changes, and the
+    DRM/IRM/restricted-access/rights-management security-settings block."""
+
+    def test_pdf_version_outside_1_4_to_1_7_is_blocked(self):
+        ctx = _vctx()
+        ctx["files"][0]["pdf_version"] = "2.0"
+        self.assertIn("D03", _rule_ids(ctx))
+
+    def test_pdf_version_1_4_to_1_7_passes(self):
+        ctx = _vctx()
+        ctx["files"][0]["pdf_version"] = "1.7"
+        self.assertNotIn("D03", _rule_ids(ctx))
+
+    def test_scanned_non_searchable_pdf_flagged_for_ocr(self):
+        ctx = _vctx()
+        ctx["files"][0]["scanned"] = True
+        ctx["files"][0]["searchable"] = False
+        self.assertIn("B49", _rule_ids(ctx))
+
+    def test_track_changes_enabled_is_blocked(self):
+        ctx = _vctx()
+        ctx["files"][0]["track_changes"] = True
+        self.assertIn("D04", _rule_ids(ctx))
+
+    def test_drm_irm_security_settings_blocked_distinct_from_a09(self):
+        # REQ-069: DRM/IRM/restricted-access/rights-management is its own rule
+        # (A10), separate from the A09 password/encryption check.
+        for flag in ("drm", "irm", "restricted_access", "rights_management"):
+            ctx = _vctx()
+            ctx["files"][0][flag] = True
+            ids = _rule_ids(ctx)
+            self.assertIn("A10", ids, f"{flag} should raise A10")
+            self.assertNotIn("A09", ids, f"{flag} must not be reported as A09")
+
+    def test_clean_pdf_raises_no_conformance_defect(self):
+        ids = _rule_ids(_vctx())
+        for rid in ("D03", "D04", "B49", "A10"):
+            self.assertNotIn(rid, ids)
+
+
+class PdfBookmarkAndHyperlinkTests(unittest.TestCase):
+    """REQ-011: bookmarks (A11 warning); REQ-012: relative-only hyperlinks (D12)."""
+
+    def test_pdf_without_bookmarks_warns_non_blocking(self):
+        ctx = _vctx()
+        ctx["files"][0]["bookmarks"] = False
+        result = validation.run_validation(ctx, "5.3")
+        ids = {f["rule_id"] for f in result["findings"]}
+        self.assertIn("A11", ids)
+        a11 = [f for f in result["findings"] if f["rule_id"] == "A11"][0]
+        self.assertEqual(a11["severity"], validation.SEVERITY_WARNING)
+        self.assertFalse(result["blocking"])
+
+    def test_external_absolute_hyperlink_is_blocked(self):
+        ctx = _vctx()
+        ctx["files"][0]["links"] = ["https://example.com/external"]
+        self.assertIn("D12", _rule_ids(ctx))
+
+    def test_relative_internal_hyperlink_passes(self):
+        ctx = _vctx()
+        ctx["files"][0]["links"] = ["../m3/quality.pdf"]
+        self.assertNotIn("D12", _rule_ids(ctx))
+
+    def test_broken_link_flagged(self):
+        ctx = _vctx()
+        ctx["files"][0]["links"] = [{"target": "../m3/quality.pdf", "broken": True}]
+        self.assertIn("D12", _rule_ids(ctx))
+
+
+class FileSizeBandTests(unittest.TestCase):
+    """REQ-013: A03a warn 150-200 MB band; A03b block >= 200 MB."""
+
+    def test_170mb_warns_non_blocking(self):
+        ctx = _vctx()
+        ctx["files"][0]["size_mb"] = 170
+        result = validation.run_validation(ctx, "5.3")
+        ids = {f["rule_id"] for f in result["findings"]}
+        self.assertIn("A03a", ids)
+        self.assertNotIn("A03b", ids)
+        self.assertFalse(result["blocking"])
+
+    def test_210mb_blocks(self):
+        ctx = _vctx()
+        ctx["files"][0]["size_mb"] = 210
+        result = validation.run_validation(ctx, "5.3")
+        ids = {f["rule_id"] for f in result["findings"]}
+        self.assertIn("A03b", ids)
+        self.assertTrue(result["blocking"])
+
+    def test_200mb_boundary_blocks(self):
+        ctx = _vctx()
+        ctx["files"][0]["size_mb"] = 200
+        self.assertIn("A03b", _rule_ids(ctx))
+
+    def test_small_file_clean(self):
+        ctx = _vctx()
+        ctx["files"][0]["size_mb"] = 10
+        ids = _rule_ids(ctx)
+        self.assertNotIn("A03a", ids)
+        self.assertNotIn("A03b", ids)
+
+
+class NamingHygieneTests(unittest.TestCase):
+    """REQ-020: B08 path length, B32 naming charset, B47 unique leaf IDs,
+    B48 reserved Windows device names."""
+
+    def test_path_over_200_chars_blocks_b08(self):
+        ctx = _vctx()
+        long_path = "0000/m1/ca/" + ("a" * 200) + ".pdf"
+        ctx["files"].append({"path": long_path, "kind": "pdf", "readable": True})
+        self.assertIn("B08", _rule_ids(ctx))
+
+    def test_uppercase_or_space_name_blocks_b32(self):
+        ctx = _vctx()
+        ctx["files"].append(
+            {"path": "0000/m1/ca/Cover Letter.pdf", "kind": "pdf",
+             "readable": True})
+        self.assertIn("B32", _rule_ids(ctx))
+
+    def test_reserved_windows_name_blocks_b48(self):
+        ctx = _vctx()
+        ctx["files"].append(
+            {"path": "0000/m1/ca/con.pdf", "kind": "pdf", "readable": True})
+        self.assertIn("B48", _rule_ids(ctx))
+
+    def test_duplicate_leaf_ids_block_b47(self):
+        ctx = _vctx()
+        ctx["leaves"].append(
+            {"leaf_id": "cl-0000", "href": "0000/m1/ca/cover.pdf",
+             "operation": "new", "checksum": ectd.md5_hex("x"), "content": "x"})
+        self.assertIn("B47", _rule_ids(ctx))
+
+    def test_compliant_names_pass(self):
+        ids = _rule_ids(_vctx())
+        for rid in ("B08", "B32", "B47", "B48"):
+            self.assertNotIn(rid, ids)
+
+
+class EmptyFolderTests(unittest.TestCase):
+    """REQ-021 / rule A01: a sequence may not contain an empty folder."""
+
+    def test_empty_folder_blocks_a01(self):
+        ctx = _vctx()
+        ctx["files"].append(
+            {"path": "0000/m4", "is_dir": True, "empty": True, "readable": True})
+        result = validation.run_validation(ctx, "5.3")
+        ids = {f["rule_id"] for f in result["findings"]}
+        self.assertIn("A01", ids)
+        self.assertTrue(result["blocking"])
+        a01 = [f for f in result["findings"] if f["rule_id"] == "A01"][0]
+        self.assertEqual(a01["file"], "0000/m4")
+
+    def test_non_empty_folders_pass(self):
+        self.assertNotIn("A01", _rule_ids(_vctx()))
+
+
+class SequenceGapTests(unittest.TestCase):
+    """REQ-016: auto-assigned 4-digit sequences, no gaps/repeats (A05/A07)."""
+
+    def test_next_expected_first_is_0000(self):
+        self.assertEqual(domain.next_expected_sequence([]), "0000")
+
+    def test_next_expected_is_strict_increment(self):
+        self.assertEqual(domain.next_expected_sequence(["0000", "0001"]), "0002")
+
+    def test_gap_is_blocked_by_intake(self):
+        # Filing 0002 while only 0000 exists must raise the lifecycle defect.
+        errs = domain.validate_intake(
+            {"applicant": "Acme", "drug_product": "Metformin",
+             "dossier_id": "e123456", "sequence": "0002",
+             "submission_type": "ANDS", "contact_email": "ra@acme.example"},
+            prior_sequences=["0000"])
+        rules = {e["rule"] for e in errs}
+        self.assertIn("sequence_lifecycle", rules)
+
+    def test_in_order_sequence_accepted(self):
+        errs = domain.validate_intake(
+            {"applicant": "Acme", "drug_product": "Metformin",
+             "dossier_id": "e123456", "sequence": "0001",
+             "submission_type": "ANDS", "contact_email": "ra@acme.example"},
+            prior_sequences=["0000"])
+        rules = {e["rule"] for e in errs}
+        self.assertNotIn("sequence_lifecycle", rules)
+
+
+class DstsLifecycleTests(unittest.TestCase):
+    """REQ-030: Processing -> Screening -> Review -> decision; type-derived
+    Inactive window. REQ-031: deadline timers + clock-stop. REQ-062: 25% fee
+    credit on a missed service standard."""
+
+    def _ands(self):
+        lc = lifecycle.Lifecycle("e123456", "ANDS", fee_paid=70750.0)
+        lc.start(now="2026-01-01")
+        return lc
+
+    def test_phases_advance_processing_screening_review(self):
+        lc = self._ands()
+        self.assertEqual(lc.phase, lifecycle.PHASE_PROCESSING)
+        lc.to_screening(now="2026-01-11")
+        self.assertEqual(lc.phase, lifecycle.PHASE_SCREENING)
+        lc.record_screening_outcome("SAL", now="2026-02-01")  # SAL -> Review
+        self.assertEqual(lc.phase, lifecycle.PHASE_REVIEW)
+
+    def test_sdn_sets_inactive_45_and_opens_timer(self):
+        lc = self._ands()
+        lc.to_screening(now="2026-01-11")
+        status = lc.record_screening_outcome("SDN", now="2026-02-01")
+        self.assertEqual(status, lifecycle.STATUS_INACTIVE_45)
+        kinds = {t["kind"] for t in lc.open_timers()}
+        self.assertIn("SDN", kinds)
+
+    def test_nod_inactive_window_is_type_derived_not_hardcoded(self):
+        # ANDS (non-DIN) -> Inactive-90; DIN -> Inactive-45.
+        self.assertEqual(lifecycle.inactive_window_days("ANDS"), 90)
+        self.assertEqual(lifecycle.inactive_window_days("DIN"), 45)
+        lc = self._ands()
+        lc.to_screening(now="2026-01-11")
+        lc.record_screening_outcome("SAL", now="2026-02-01")
+        status = lc.record_decision("NOD", now="2026-03-01")
+        self.assertEqual(status, lifecycle.STATUS_INACTIVE_90)
+
+    def test_noc_approves(self):
+        lc = self._ands()
+        lc.to_screening(now="2026-01-11")
+        lc.record_screening_outcome("SAL", now="2026-02-01")
+        status = lc.record_decision("NOC", now="2026-03-01")
+        self.assertEqual(status, lifecycle.STATUS_APPROVED)
+
+    def test_clarifax_overridable_window_and_clock_stop(self):
+        lc = self._ands()
+        lc.to_screening(now="2026-01-11")
+        lc.record_screening_outcome("SAL", now="2026-02-01")
+        timer = lc.issue_clarifax(response_days=2, now="2026-02-15")
+        self.assertEqual(timer["days"], 2)
+        self.assertTrue(timer["overridden"])
+        # a 2-day window is outside the nominal 2-15? 2 is the min, so inside.
+        self.assertTrue(any(cs.get("reason") == "clarifax response window"
+                            for cs in lc.clock_stops))
+        lc.resume_clock(now="2026-02-17")
+        self.assertEqual(lc.status, lifecycle.STATUS_ACTIVE)
+
+    def test_missed_service_standard_triggers_25pct_fee_credit(self):
+        lc = self._ands()
+        lc.to_screening(now="2026-01-11")
+        lc.record_screening_outcome("SAL", now="2026-02-01")
+        # 200 calendar days in Review with no decision > 180-day ANDS target.
+        result = lc.check_service_standard(now="2026-08-20")
+        self.assertTrue(result["missed_standard"])
+        self.assertIsNotNone(result["fee_credit"])
+        self.assertEqual(result["fee_credit"]["rate"], 0.25)
+        self.assertAlmostEqual(result["fee_credit"]["amount"], round(70750.0 * 0.25, 2))
+        self.assertEqual(result["fee_credit"]["authority"], "SOR/2019-124")
+
+    def test_on_time_review_has_no_fee_credit(self):
+        lc = self._ands()
+        lc.to_screening(now="2026-01-11")
+        lc.record_screening_outcome("SAL", now="2026-02-01")
+        result = lc.check_service_standard(now="2026-02-20")  # ~19 days < 180
+        self.assertFalse(result["missed_standard"])
+        self.assertIsNone(result["fee_credit"])
+
+
+class WithdrawalStatusTests(unittest.TestCase):
+    """REQ-033: withdrawal / refiling / reconsideration with HC's exact
+    hyphenated NOD-W / NON-W acronyms."""
+
+    def _to_review(self):
+        lc = lifecycle.Lifecycle("e123456", "ANDS")
+        lc.start(now="2026-01-01")
+        lc.to_screening(now="2026-01-11")
+        lc.record_screening_outcome("SAL", now="2026-02-01")
+        return lc
+
+    def test_explicit_withdrawal_lands_in_withdrawn(self):
+        lc = self._to_review()
+        status = lc.withdraw(now="2026-03-01", reason="sponsor decision")
+        self.assertEqual(status, lifecycle.STATUS_WITHDRAWN)
+        self.assertTrue(lc.withdrawn)
+
+    def test_auto_interpreted_nod_lapse_uses_hyphenated_nod_w(self):
+        lc = self._to_review()
+        lc.record_decision("NOD", now="2026-03-01")
+        status = lc.withdraw(now="2026-07-01", auto=True,
+                             w_status=lifecycle.STATUS_WITHDRAWN_NOD)
+        self.assertEqual(status, "NOD-W")
+        self.assertTrue(lc.withdrawal["auto"])
+
+    def test_refile_after_withdrawal_allowed(self):
+        lc = self._to_review()
+        lc.withdraw(now="2026-03-01")
+        result = lc.refile(now="2026-04-01")
+        self.assertIsNotNone(result)
+        self.assertTrue(lc.refilings)
+
+    def test_cannot_withdraw_twice(self):
+        lc = self._to_review()
+        lc.withdraw(now="2026-03-01")
+        with self.assertRaises(lifecycle.LifecycleError):
+            lc.withdraw(now="2026-03-02")
+
+
+class PortfolioServiceStandardTests(unittest.TestCase):
+    """REQ-034: ANDS measured against 100% on-time; NC/CTA against 90%."""
+
+    def test_ands_held_to_100pct_standard(self):
+        std = lifecycle.service_standard("ANDS")
+        self.assertEqual(std["on_time_pct"], 100)
+        self.assertEqual(std["review_target_days"], 180)
+
+    def test_nc_and_cta_held_to_90pct(self):
+        self.assertEqual(lifecycle.service_standard("NC")["on_time_pct"], 90)
+        self.assertEqual(lifecycle.service_standard("CTA")["on_time_pct"], 90)
+
+
+class RbacTenantIsolationTests(unittest.TestCase):
+    """REQ-038: least-privilege roles, hard tenant isolation, per-dossier scope;
+    every denial is audit-logged."""
+
+    def test_cross_org_access_denied_and_audited(self):
+        p = rbac.Principal("u1", "orgA", [rbac.ROLE_REGULATORY_AUTHOR])
+        decision = rbac.authorize(p, rbac.CAP_READ,
+                                  {"org_id": "orgB", "dossier_id": "e1"})
+        self.assertFalse(decision["allowed"])
+        self.assertEqual(decision["rule"], "tenant_isolation")
+        self.assertFalse(decision["audit"]["allowed"])
+
+    def test_read_only_user_cannot_author_or_transmit(self):
+        p = rbac.Principal("u2", "orgA", [rbac.ROLE_READ_ONLY])
+        self.assertTrue(rbac.authorize(p, rbac.CAP_READ,
+                                       {"org_id": "orgA"})["allowed"])
+        self.assertFalse(rbac.authorize(p, rbac.CAP_AUTHOR,
+                                        {"org_id": "orgA"})["allowed"])
+        self.assertFalse(rbac.authorize(p, rbac.CAP_TRANSMIT,
+                                        {"org_id": "orgA"})["allowed"])
+
+    def test_per_dossier_scope_enforced(self):
+        p = rbac.Principal("u3", "orgA", [rbac.ROLE_REGULATORY_AUTHOR],
+                           dossier_scope=["e111111"])
+        ok = rbac.authorize(p, rbac.CAP_AUTHOR,
+                            {"org_id": "orgA", "dossier_id": "e111111"})
+        no = rbac.authorize(p, rbac.CAP_AUTHOR,
+                            {"org_id": "orgA", "dossier_id": "e222222"})
+        self.assertTrue(ok["allowed"])
+        self.assertFalse(no["allowed"])
+        self.assertEqual(no["rule"], "dossier_scope")
+
+    def test_org_admin_can_manage_users(self):
+        p = rbac.Principal("u4", "orgA", [rbac.ROLE_ORG_ADMIN])
+        self.assertTrue(rbac.authorize(p, rbac.CAP_MANAGE_USERS,
+                                       {"org_id": "orgA"})["allowed"])
+
+
+class FeeMitigationTests2(unittest.TestCase):
+    """REQ-036: 100% first-submission remission, 50% subsequent-ANDS gated on
+    attestation, deferral-until-NOC."""
+
+    def test_first_submission_100pct_remission(self):
+        r = fees.evaluate_fee_mitigation(
+            {"fee": 70750.0, "small_business": True, "first_submission": True})
+        self.assertEqual(r["remission_rate"], 1.0)
+        self.assertEqual(r["net_fee"], 0.0)
+
+    def test_subsequent_ands_requires_attestation(self):
+        without = fees.evaluate_fee_mitigation(
+            {"fee": 70750.0, "small_business": True, "first_submission": False,
+             "attestation_uploaded": False})
+        self.assertTrue(without["requires_attestation"])
+        self.assertEqual(without["remission_rate"], 0.0)
+        with_att = fees.evaluate_fee_mitigation(
+            {"fee": 70750.0, "small_business": True, "first_submission": False,
+             "attestation_uploaded": True})
+        self.assertEqual(with_att["remission_rate"], 0.5)
+
+    def test_deferral_until_noc(self):
+        r = fees.evaluate_fee_mitigation(
+            {"fee": 70750.0, "small_business": False, "defer_until_noc": True})
+        self.assertEqual(r["invoice_status"], fees.INVOICE_DEFERRED)
+
+
+class RightToSellTests2(unittest.TestCase):
+    """REQ-037: per-DIN annual Right-to-Sell fee by drug type, Oct-1 due date,
+    outstanding-balance flag."""
+
+    def test_amount_by_drug_type_and_oct_1_due_date(self):
+        rec = fees.resolve_right_to_sell("prescription", "2025-11-01")
+        self.assertEqual(rec["amount"], 5531.0)
+        self.assertTrue(rec["due_date"].endswith("-10-01"))
+
+    def test_unpaid_shows_outstanding_balance(self):
+        rec = fees.right_to_sell_status("prescription", "2025-09-15", paid=False)
+        self.assertTrue(rec["outstanding_balance"])
+
+    def test_unknown_drug_type_raises(self):
+        with self.assertRaises(ValueError):
+            fees.resolve_right_to_sell("nonsense", "2025-11-01")
+
+
+class HcCalendarDeadlineTests(unittest.TestCase):
+    """REQ-052: HC calendar conventions — calendar vs business days, statutory
+    holidays, no silent weekend/holiday roll."""
+
+    def test_weekend_deadline_rolls_forward_and_is_surfaced(self):
+        # 2026-01-01 + 2 calendar days = 2026-01-03 (Saturday) -> rolls to Mon.
+        result = hc_calendar.compute_deadline("2026-01-01", 2, basis="calendar")
+        self.assertTrue(result["adjusted"])
+        self.assertIsNotNone(result["adjustment_reason"])
+        # Adjusted due date must be a business day.
+        self.assertTrue(
+            hc_calendar.is_business_day(hc_calendar._as_date(result["due"])))
+
+    def test_business_basis_lands_on_business_day(self):
+        result = hc_calendar.compute_deadline("2026-01-01", 5, basis="business")
+        self.assertEqual(result["basis"], "business")
+        self.assertTrue(
+            hc_calendar.is_business_day(hc_calendar._as_date(result["due"])))
+
+    def test_statutory_holiday_recognised(self):
+        holidays = hc_calendar.statutory_holidays(2026)
+        # Canada Day, July 1, is a federal statutory holiday.
+        self.assertTrue(hc_calendar.is_holiday(
+            hc_calendar._as_date("2026-07-01"), holidays))
+
+
+class RejectionReportIngestTests(unittest.TestCase):
+    """REQ-029: ingest the emailed validation report, correlate by Core ID, map
+    each error back to the exact leaf/node, target the next sequence."""
+
+    REPORT = (
+        "Core ID: CORE-789\n"
+        "Dossier ID: e123456\n"
+        "Sequence: 0001\n"
+        "Validation Result: FAILED\n"
+        "[Error] B07|0001/index.xml|backbone checksum mismatch\n"
+        "[Error] A09|0001/m1/ca/cover.pdf|PDF is encrypted\n"
+    )
+
+    def test_parse_extracts_header_and_errors(self):
+        parsed = report_ingest.parse_validation_report(self.REPORT)
+        self.assertEqual(parsed["core_id"], "CORE-789")
+        self.assertEqual(parsed["dossier_id"], "e123456")
+        self.assertEqual(len(parsed["errors"]), 2)
+        self.assertEqual(parsed["errors"][0]["rule_id"], "B07")
+
+    def test_empty_report_raises(self):
+        with self.assertRaises(report_ingest.ReportParseError):
+            report_ingest.parse_validation_report("   ")
+
+    def test_correlate_by_core_id_and_map_to_leaf(self):
+        transactions = [{"core_id": "CORE-789", "sequence": "0001",
+                         "state": "HC_REJECTED"}]
+        leaves = [{"leaf_id": "cover-0001", "href": "0001/m1/ca/cover.pdf",
+                   "heading": "1.0", "title": "Cover Letter"}]
+        result = report_ingest.correlate_rejection(
+            self.REPORT, transactions=transactions, leaves=leaves,
+            existing_sequences=["0000", "0001"])
+        self.assertTrue(result["correlated"])
+        self.assertEqual(result["remediation"]["next_sequence"], "0002")
+        mapped = [e for e in result["errors"] if e["mapped"]]
+        self.assertTrue(mapped)  # cover.pdf error maps to the leaf
+
+    def test_uncorrelated_when_core_id_unknown(self):
+        result = report_ingest.correlate_rejection(
+            self.REPORT, transactions=[{"core_id": "OTHER"}], leaves=[])
+        self.assertFalse(result["correlated"])
+
+
+class EsignManifestTamperTests(unittest.TestCase):
+    """REQ-053: immutable signature manifest binding artifact checksums at
+    signing time + post-signature tamper detection. REQ-068: HPFB anchoring."""
+
+    def _signed(self):
+        return esign.sign({
+            "signer": "jane.qa", "role": esign.ROLE_SIGNER,
+            "auth_method": "password+otp", "meaning": "approved",
+            "at": "2026-03-01T10:00:00", "tz": "America/Toronto",
+            "artifacts": [{"id": "seq-0001", "kind": "sequence",
+                           "content": "the-signed-bytes"}],
+        })
+
+    def test_sign_emits_manifest_with_checksums_and_policy(self):
+        result = self._signed()
+        self.assertTrue(result["valid"])
+        man = result["manifest"]
+        self.assertTrue(man["immutable"])
+        self.assertEqual(man["artifacts"][0]["checksum"],
+                         esign.artifact_checksum("the-signed-bytes"))
+        self.assertEqual(man["policy"], esign.HPFB_POLICY["name"])
+        self.assertIn("manifest_id", man)
+
+    def test_unsigned_role_cannot_sign(self):
+        result = esign.sign({
+            "signer": "bob", "role": "regulatory_author",
+            "auth_method": "password", "meaning": "approved",
+            "artifacts": [{"id": "x", "content": "y"}]})
+        self.assertFalse(result["valid"])
+        rules = {e["rule"] for e in result["errors"]}
+        self.assertIn("role_not_permitted", rules)
+
+    def test_post_signature_modification_invalidates(self):
+        man = self._signed()["manifest"]
+        verdict = esign.verify_manifest(man, {"seq-0001": "DIFFERENT-bytes"})
+        self.assertFalse(verdict["valid"])
+        self.assertTrue(verdict["tampered"])
+
+    def test_unmodified_content_verifies(self):
+        man = self._signed()["manifest"]
+        verdict = esign.verify_manifest(
+            man, {"seq-0001": esign.artifact_checksum("the-signed-bytes")})
+        self.assertTrue(verdict["valid"])
+
+    def test_hpfb_acceptance_workflow(self):
+        # REQ-068: request + record HC's case-by-case acceptance.
+        req = esign.request_hc_acceptance(
+            {"approach": "OTP-backed e-sig", "org": "Acme Generics"})
+        self.assertTrue(req["valid"])
+        self.assertEqual(req["request"]["to"], esign.HPFB_POLICY["request_contact"])
+        rec = esign.record_hc_acceptance(
+            {"approach": "OTP-backed e-sig", "accepted": True, "org": "Acme"})
+        self.assertTrue(rec["acceptance"]["accepted"])
+
+
+class RetentionLegalHoldTests(unittest.TestCase):
+    """REQ-054: retention windows >= PIPEDA 24-month minimum, legal-hold block,
+    disposition logging (including blocked attempts)."""
+
+    def test_breach_record_minimum_is_pipeda_24_months(self):
+        self.assertEqual(retention.retention_months("breach_record"), 24)
+        self.assertGreaterEqual(
+            retention.PIPEDA_BREACH_RECORD_MIN_MONTHS, 24)
+
+    def test_within_window_disposition_blocked(self):
+        rec = {"record_class": "submission", "created_at": "2026-01-01",
+               "record_id": "s1"}
+        verdict = retention.can_dispose(rec, "2026-06-01")
+        self.assertFalse(verdict["allowed"])
+        rules = {b["rule"] for b in verdict["blockers"]}
+        self.assertIn("within_retention", rules)
+
+    def test_legal_hold_blocks_even_after_window(self):
+        rec = {"record_class": "submission", "created_at": "2000-01-01",
+               "legal_hold": True, "record_id": "s2"}
+        verdict = retention.can_dispose(rec, "2026-06-01")
+        self.assertFalse(verdict["allowed"])
+        rules = {b["rule"] for b in verdict["blockers"]}
+        self.assertIn("legal_hold", rules)
+
+    def test_blocked_disposition_is_logged(self):
+        rec = {"record_class": "submission", "created_at": "2026-01-01",
+               "record_id": "s3", "legal_hold": True}
+        event = retention.disposition_event(rec, actor="ops", now="2026-06-01")
+        self.assertTrue(event["blocked"])
+        self.assertFalse(event["executed"])
+        self.assertEqual(event["actor"], "ops")
+
+    def test_past_window_no_hold_disposes_and_logs(self):
+        rec = {"record_class": "submission", "created_at": "2000-01-01",
+               "record_id": "s4"}
+        event = retention.disposition_event(rec, actor="ops", now="2026-06-01")
+        self.assertTrue(event["executed"])
+        self.assertFalse(event["blocked"])
+
+
+class AuditExportTests(unittest.TestCase):
+    """REQ-060: complete, time-ordered, human-readable audit export."""
+
+    def setUp(self):
+        self.audits = server.AuditStore(":memory:")
+
+    def tearDown(self):
+        self.audits.close()
+
+    def test_export_is_time_ordered_and_complete(self):
+        self.audits.append("auth", "login", actor="jane", dossier_id="e123456")
+        self.audits.append("transmit", "send", actor="ops", dossier_id="e123456",
+                           allowed=False, rule="not_signed")
+        text = self.audits.export_text("e123456")
+        self.assertIn("AUDIT TRAIL", text)
+        self.assertIn("auth/login", text)
+        self.assertIn("DENIED (not_signed)", text)
+        self.assertIn("Events: 2", text)
+
+    def test_export_scoped_by_dossier(self):
+        self.audits.append("auth", "login", actor="a", dossier_id="e111111")
+        self.audits.append("auth", "login", actor="b", dossier_id="e222222")
+        text = self.audits.export_text("e111111")
+        self.assertIn("e111111", text)
+        self.assertIn("Events: 1", text)
 
 
 if __name__ == "__main__":

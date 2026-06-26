@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime, timezone
+from xml.sax.saxutils import escape as _xml_escape, quoteattr as _xml_attr
 
 # ---------------------------------------------------------------------------
 # REQ-003 — ESG environment + account constants
@@ -269,10 +270,16 @@ def build_media_package(transaction: dict, tree: dict = None) -> dict:
     sequence = transaction.get("sequence", "")
     folders = list(tree.get("folders") or [f"{sequence}/m1/ca", f"{sequence}/m3",
                                             f"{sequence}/m5"])
+    # The dossier_id/sequence are HC-assigned tokens, but they reach this
+    # function from caller-supplied transaction data, so escape them the same
+    # way every other XML emitter in the portal does — an injected ' or < must
+    # never produce malformed or attacker-shaped backbone XML.
     backbones = dict(tree.get("backbones") or {
-        "index.xml": f"<ectd-index dossier='{dossier_id}' seq='{sequence}'/>",
-        "m1/ca/ca-regional.xml": f"<ca-regional><dossier-id>{dossier_id}"
-                                 f"</dossier-id></ca-regional>",
+        "index.xml": (f"<ectd-index dossier={_xml_attr(str(dossier_id))} "
+                      f"seq={_xml_attr(str(sequence))}/>"),
+        "m1/ca/ca-regional.xml": (f"<ca-regional><dossier-id>"
+                                  f"{_xml_escape(str(dossier_id))}"
+                                  f"</dossier-id></ca-regional>"),
     })
     files = list(tree.get("files") or [])
     checksums = {f["path"]: md5_hex(f.get("content", f["path"]))
