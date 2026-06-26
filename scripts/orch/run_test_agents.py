@@ -64,13 +64,19 @@ def _boot_app(app_dir):
     ignore $PORT), so we free and use that fixed port. Returns (proc, base_url);
     proc is None when nothing was booted (already-live server, or boot failed —
     ui-visual then still falls back to booting its own)."""
-    if _alive(BASE_URL):
+    # Adopt an already-live server ONLY when a parent in THIS gate run booted it
+    # (signaled via ADF_APP_URL — the same handshake app_verify uses). A bare alive
+    # :8000 with no ADF_APP_URL is an ORPHAN from a prior run/agent serving STALE
+    # code; adopting it makes the gate re-report already-fixed defects forever
+    # (the phantom-worklist stall). Override with ADF_GATE_ADOPT_LIVE=1.
+    if _alive(BASE_URL) and (os.environ.get("ADF_APP_URL")
+                             or os.environ.get("ADF_GATE_ADOPT_LIVE") == "1"):
         return None, BASE_URL
     if not os.path.exists(os.path.join(app_dir, "server.py")):
         return None, BASE_URL
     port = int(os.environ.get("ADF_SMOKE_PORT", "8000"))
     base = f"http://127.0.0.1:{port}"
-    _free_fixed_port(port)
+    _free_fixed_port(port)   # kill any orphan/stale server before booting fresh
     env = dict(os.environ, ADF_SMOKE_PORT=str(port), PORT=str(port))
     proc = subprocess.Popen([sys.executable, "server.py"], cwd=app_dir,
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
