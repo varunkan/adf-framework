@@ -145,7 +145,8 @@ ICH_ECTD_DTD = {
 CA_M1_XSD = {
     "version": CA_M1_SCHEMA_VERSION,
     "date": CA_M1_SCHEMA_DATE,
-    "root_element": "ectd_ca:ectd_ca",
+    # Root element of the CA Module 1 Schema v2.2 (2012-07-06): <hcsc_ectd>.
+    "root_element": "hcsc_ectd",
     "util_path": "util/dtd/ca-regional-2-2.xsd",
 }
 
@@ -353,8 +354,7 @@ def build_ca_regional_xml(dossier_id: str, sequence: str, leaves) -> str:
     body = "".join(_leaf_xml(lf, "      ") for lf in m1_leaves)
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
-        f'<{root} xmlns:ectd_ca="http://www.hc-sc.gc.ca/ectd_ca" '
-        'xmlns:xlink="http://www.w3.org/1999/xlink" '
+        f'<{root} xmlns:xlink="http://www.w3.org/1999/xlink" '
         f'ca-schema-version="{CA_M1_SCHEMA_VERSION}">\n'
         "  <ca-regional-information>\n"
         f"    <dossier-id>{_xml_escape(str(dossier_id).strip())}</dossier-id>\n"

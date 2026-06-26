@@ -28,6 +28,8 @@ import re
 from datetime import datetime, timezone
 from xml.sax.saxutils import escape as _xml_escape
 
+import cv
+
 
 # ---------------------------------------------------------------------------
 # Pinned REP / reference-data versions (REQ-006 / REQ-040)
@@ -143,18 +145,11 @@ def validate_identifiers(data: dict) -> list:
 # Regulatory-activity controlled vocabulary (REQ-005)
 # ---------------------------------------------------------------------------
 
-# HC Module-1 regulatory-activity-type controlled vocabulary (keyed to the
-# Module 1 schema version). Out-of-vocabulary values are rejected, mirroring
+# HC Module-1 regulatory-activity-type controlled vocabulary, SOURCED FROM the
+# ingested CV (cv.py) keyed to the Module 1 schema version — not a hand-
+# maintained list (REQ-066). Out-of-vocabulary values are rejected, mirroring
 # eCTD validation rule I08. ANDS is present, as required.
-ACTIVITY_TYPES = {
-    "NDS": "New Drug Submission (NDS)",
-    "ANDS": "Abbreviated New Drug Submission (ANDS)",
-    "SNDS": "Supplement to a New Drug Submission (SNDS)",
-    "SANDS": "Supplement to an Abbreviated New Drug Submission (SANDS)",
-    "DINA": "Drug Identification Number Application (DINA)",
-    "NC": "Notifiable Change (NC)",
-    "CTA": "Clinical Trial Application (CTA)",
-}
+ACTIVITY_TYPES = cv.vocabulary("activity_type")
 
 
 def is_valid_activity_type(value: str) -> bool:
@@ -289,7 +284,7 @@ def build_ca_regional_xml(data: dict) -> str:
     code = str(data.get("activity_type", "") or "").strip()
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
-        f'<ectd-ca-regional schema-version="{CA_MODULE1_SCHEMA_VERSION}">\n'
+        f'<hcsc_ectd schema-version="{CA_MODULE1_SCHEMA_VERSION}">\n'
         "  <transaction-metadata>\n"
         f"    <dossier-id>{_e(data.get('dossier_id'))}</dossier-id>\n"
         f"    <company-id>{_e(data.get('company_id'))}</company-id>\n"
@@ -297,7 +292,7 @@ def build_ca_regional_xml(data: dict) -> str:
         f"{_e(activity_type_label(code))}</regulatory-activity-type>\n"
         f"    <sequence>{_e(data.get('sequence'))}</sequence>\n"
         "  </transaction-metadata>\n"
-        "</ectd-ca-regional>\n"
+        "</hcsc_ectd>\n"
     )
 
 

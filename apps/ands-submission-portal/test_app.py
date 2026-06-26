@@ -20,6 +20,7 @@ from http.server import ThreadingHTTPServer
 import backbone
 import bioequivalence
 import content_model
+import cv
 import domain
 import dr
 import ectd
@@ -302,6 +303,35 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status, 422)
         self.assertFalse(data["valid"])
         self.assertIn("dossier_id_format", {e["rule"] for e in data["errors"]})
+
+    def test_favicon_served_not_404(self):
+        # Regression: the browser's automatic /favicon.ico request must not 404
+        # (it dirtied the console as a "Failed to load resource" error). The
+        # route serves an inline SVG icon with a 200.
+        with urllib.request.urlopen(self._url("/favicon.ico")) as resp:
+            self.assertEqual(resp.status, 200)
+            self.assertEqual(resp.headers.get("Content-Type"), "image/svg+xml")
+            self.assertTrue(resp.read())  # non-empty body
+
+    def test_add_leaf_guarded_before_dossier_selected(self):
+        # Regression: clicking "Add leaf" before a dossier was created/opened
+        # fired POST /api/ectd/dossiers/null/leaves (CURRENT_DOSSIER === null),
+        # which 404'd. addLeaf() must short-circuit on the null guard BEFORE the
+        # /leaves fetch, rendering an inline "create or open a dossier first".
+        with urllib.request.urlopen(self._url("/")) as resp:
+            page = resp.read().decode()
+        idx_guard = page.index("create or open a dossier first")
+        idx_fetch = page.index("/leaves'")
+        self.assertLess(idx_guard, idx_fetch,
+                        "the null-dossier guard must precede the /leaves fetch")
+        # Server still 404s a literal 'null' id — the guard is what prevents the
+        # doomed request from ever firing (defence in depth).
+        try:
+            with urllib.request.urlopen(self._url(
+                    "/api/ectd/dossiers/null/leaves")) as resp:
+                self.fail("expected 404 for a non-existent dossier")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 404)
 
     def test_validate_dry_run_does_not_store(self):
         status, data = self._post("/api/validate", _base())
@@ -4001,6 +4031,382 @@ class PrivacyApiTests(unittest.TestCase):
         status, data = self._post("/api/privacy/data-subject-request",
                                   {"kind": "delete", "subject": "Jane"})
         self.assertEqual(status, 422)
+
+
+# ---------------------------------------------------------------------------
+# REQ-040 / REQ-056 — Management-of-drug-submissions guidance edition pinned.
+# Closes OPEN C33 / G18: the day-count tables (processing/screening targets,
+# service standards, clarifax + inactive windows) must trace to a pinned,
+# version-tracked HC guidance edition, recorded on each transaction at build.
+# ---------------------------------------------------------------------------
+
+class GuidanceEditionTests(unittest.TestCase):
+    def test_mosp_guidance_edition_pinned(self):
+        self.assertEqual(lifecycle.GUIDANCE_EDITION, "2025-10-01")
+        ref = lifecycle.guidance_reference()
+        self.assertEqual(ref["edition"], "2025-10-01")
+        self.assertIn("Management", ref["title"])
+        # it governs the day-count tables in this module.
+        self.assertIn("screening_target_days", ref["governs"])
+        self.assertIn("service_standards", ref["governs"])
+
+    def test_status_view_pins_guidance_edition(self):
+        lc = lifecycle.Lifecycle("e123456", "ANDS")
+        lc.start(now="2026-01-01")
+        view = lc.status_view(now="2026-01-02")
+        self.assertEqual(view["guidance_edition"], "2025-10-01")
+
+
+# ---------------------------------------------------------------------------
+# REQ-005 / REQ-040 / REQ-066 — HC Module 1 controlled-vocabulary ingestion.
+# Closes OPEN G34: enumerations are ingested as VERSIONED DATA keyed to the
+# schema version (a single source, updatable without code), and out-of-vocab
+# metadata is rejected via rules I08 (activity/submission type) / H08 (other
+# Module-1 attribute/enumeration values). rep sources its activity types here.
+# ---------------------------------------------------------------------------
+
+class ControlledVocabularyTests(unittest.TestCase):
+    def test_load_cv_keyed_to_schema_version(self):
+        cvset = cv.load_cv("2.2")
+        self.assertIn("activity_type", cvset)
+        self.assertIn("ANDS", cvset["activity_type"])
+        self.assertIn("dosage_form", cvset)
+        self.assertIn("route_of_administration", cvset)
+
+    def test_unknown_schema_version_raises(self):
+        with self.assertRaises(cv.ControlledVocabularyError):
+            cv.load_cv("9.9")
+
+    def test_activity_type_out_of_cv_raises_i08(self):
+        errs = cv.validate_value("activity_type", "BOGUS")
+        self.assertEqual(len(errs), 1)
+        self.assertEqual(errs[0]["rule"], "I08")
+        self.assertEqual(errs[0]["severity"], "Error")
+
+    def test_dosage_form_out_of_cv_raises_h08(self):
+        errs = cv.validate_value("dosage_form", "frisbee")
+        self.assertEqual(len(errs), 1)
+        self.assertEqual(errs[0]["rule"], "H08")
+
+    def test_valid_values_pass(self):
+        self.assertEqual(cv.validate_value("activity_type", "ANDS"), [])
+        self.assertEqual(cv.validate_value("dosage_form", "tablet"), [])
+        self.assertEqual(cv.validate_value("route_of_administration", "oral"), [])
+
+    def test_empty_value_is_not_a_cv_violation(self):
+        # Emptiness is a separate required-field concern, not an I08/H08.
+        self.assertEqual(cv.validate_value("activity_type", ""), [])
+
+    def test_validate_metadata_collects_all_violations(self):
+        errs = cv.validate_metadata({
+            "activity_type": "ANDS",                  # ok
+            "dosage_form": "frisbee",                 # H08
+            "route_of_administration": "teleport"})   # H08
+        self.assertEqual(sorted(e["rule"] for e in errs), ["H08", "H08"])
+
+    def test_returned_cv_is_a_copy_not_canonical(self):
+        cvset = cv.load_cv("2.2")
+        cvset["activity_type"]["ZZZ"] = "Injected"
+        self.assertFalse(cv.is_in_cv("activity_type", "ZZZ"))
+
+    def test_rep_activity_types_sourced_from_cv(self):
+        # REQ-066: rep's selectable activity types come from the ingested CV.
+        self.assertEqual(set(rep.ACTIVITY_TYPES),
+                         set(cv.vocabulary("activity_type")))
+        self.assertTrue(rep.is_valid_activity_type("ANDS"))
+        self.assertIn("Abbreviated", rep.activity_type_label("ANDS"))
+
+
+class CvApiTests(unittest.TestCase):
+    def setUp(self):
+        self.store = server.SubmissionStore(":memory:")
+        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0),
+                                         server.make_handler(self.store))
+        self.port = self.httpd.server_address[1]
+        self.thread = threading.Thread(target=self.httpd.serve_forever,
+                                       daemon=True)
+        self.thread.start()
+
+    def tearDown(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+        self.thread.join()
+        self.store.close()
+
+    def _url(self, path):
+        return f"http://127.0.0.1:{self.port}{path}"
+
+    def _post(self, path, body):
+        req = urllib.request.Request(
+            self._url(path), data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read().decode())
+
+    def _get(self, path):
+        try:
+            with urllib.request.urlopen(self._url(path)) as resp:
+                return resp.status, json.loads(resp.read().decode())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read().decode())
+
+    def test_cv_list_endpoint(self):
+        status, data = self._get("/api/cv")
+        self.assertEqual(status, 200)
+        self.assertEqual(data["schema_version"], "2.2")
+        self.assertIn("activity_type", data["vocabularies"])
+
+    def test_cv_validate_flags_out_of_vocab_h08(self):
+        status, data = self._post("/api/cv/validate", {
+            "metadata": {"activity_type": "ANDS", "dosage_form": "frisbee"}})
+        self.assertEqual(status, 422)
+        self.assertFalse(data["valid"])
+        self.assertIn("H08", {e["rule"] for e in data["errors"]})
+
+    def test_cv_validate_clean_metadata(self):
+        status, data = self._post("/api/cv/validate", {
+            "metadata": {"activity_type": "ANDS", "dosage_form": "tablet"}})
+        self.assertEqual(status, 200)
+        self.assertTrue(data["valid"])
+
+
+# ---------------------------------------------------------------------------
+# REQ-014 — ca-regional.xml root element is <hcsc_ectd> (CA Module 1 Schema v2.2).
+# Closes OPEN C29: both backbone builders emitted the wrong root; the structural
+# validator resolves the required root FROM the pinned schema descriptor.
+# ---------------------------------------------------------------------------
+
+class CaRegionalRootTests(unittest.TestCase):
+    def test_ca_module1_root_is_hcsc_ectd(self):
+        self.assertEqual(ectd.CA_M1_XSD["root_element"], "hcsc_ectd")
+
+    def test_build_ca_regional_emits_hcsc_ectd_and_validates(self):
+        ca = ectd.build_ca_regional_xml("e123456", "0000", [])
+        self.assertIn("<hcsc_ectd", ca)
+        self.assertIn("</hcsc_ectd>", ca)
+        ectd.validate_backbone(ca, ectd.CA_M1_XSD)  # must not raise
+
+    def test_validate_backbone_rejects_legacy_root(self):
+        bad = ('<?xml version="1.0"?>'
+               '<ectd_ca><dossier-id>e123456</dossier-id></ectd_ca>')
+        with self.assertRaises(ectd.SchemaValidationError):
+            ectd.validate_backbone(bad, ectd.CA_M1_XSD)
+
+    def test_rep_ca_regional_uses_hcsc_ectd_root(self):
+        xml = rep.build_ca_regional_xml(
+            {"dossier_id": "e123456", "company_id": "K18276",
+             "activity_type": "ANDS", "sequence": "0000"})
+        self.assertIn("<hcsc_ectd", xml)
+        self.assertIn("</hcsc_ectd>", xml)
+        # metadata children still present (no regression).
+        self.assertIn("<dossier-id>e123456</dossier-id>", xml)
+
+
+# ---------------------------------------------------------------------------
+# REQ-032 — Q&A response-sequence builder (domain)
+# ---------------------------------------------------------------------------
+import response_builder
+
+
+class ResponseBuilderTests(unittest.TestCase):
+    """REQ-032: attach the original notice, author section-referencing answers,
+    and file the response as the next valid eCTD sequence in the same format."""
+
+    def _dossier(self, *sequences):
+        d = ectd.Dossier("e123456")
+        for i, seq in enumerate(sequences):
+            d.add_sequence(seq)
+            # give each prior sequence a content leaf so it is non-trivial
+            d.add_leaf(seq, {"leaf_id": f"seed-{seq}", "operation": "new",
+                             "heading": "1.0", "title": "Cover",
+                             "content": f"seed {i}"})
+        return d
+
+    def _notice(self, kind="SDN"):
+        return {"kind": kind, "notice_id": "sdn-1",
+                "issued_at": "2026-01-10",
+                "content": "Deficiency: please clarify the dissolution method."}
+
+    def _answers(self):
+        return [
+            {"section": "2.7.1", "question": "Clarify dissolution method?",
+             "answer": "Method per USP <711>, Apparatus 2, 50 rpm."},
+            {"section": "3.2.P.5.1", "question": "Provide the spec table?",
+             "answer": "Updated specification provided in 3.2.P.5.1."},
+        ]
+
+    # -- AC1: the builder attaches a COPY of the original notice --------------
+    def test_response_attaches_copy_of_original_notice(self):
+        d = self._dossier("0000")
+        result = response_builder.file_response_sequence(
+            d, self._notice("SDN"), self._answers())
+        # the notice copy is in the result and is marked a copy
+        self.assertTrue(result["notice"]["is_copy"])
+        self.assertEqual(result["notice"]["kind"], "SDN")
+        self.assertEqual(
+            result["notice"]["content"],
+            "Deficiency: please clarify the dissolution method.")
+        # and a leaf carrying the notice bytes lives in the new sequence
+        seq = d._get_sequence(result["sequence"])
+        notice_leaf = next(lf for lf in seq["leaves"]
+                           if lf["leaf_id"] == result["notice_leaf_id"])
+        self.assertEqual(notice_leaf["content"],
+                         "Deficiency: please clarify the dissolution method.")
+        self.assertEqual(notice_leaf["operation"], "new")
+
+    def test_all_notice_kinds_accepted(self):
+        for kind in ("SDN", "clarifax", "NOD", "NON"):
+            d = self._dossier("0000")
+            result = response_builder.file_response_sequence(
+                d, self._notice(kind), self._answers())
+            self.assertEqual(result["notice"]["kind"],
+                             response_builder.normalize_kind(kind))
+
+    def test_unknown_notice_kind_rejected(self):
+        d = self._dossier("0000")
+        with self.assertRaises(response_builder.ResponseBuilderError):
+            response_builder.file_response_sequence(
+                d, {"kind": "bogus", "content": "x"}, self._answers())
+
+    # -- AC2: each answer references the applicable submission section --------
+    def test_each_answer_references_a_submission_section(self):
+        d = self._dossier("0000")
+        result = response_builder.file_response_sequence(
+            d, self._notice(), self._answers())
+        refs = [a["section_ref"] for a in result["answers"]]
+        self.assertEqual(refs, ["2.7.1", "3.2.P.5.1"])
+        # the rendered Q&A document threads the section next to each answer
+        self.assertIn("2.7.1", result["answers_document"])
+        self.assertIn("3.2.P.5.1", result["answers_document"])
+
+    def test_answer_without_section_is_rejected(self):
+        d = self._dossier("0000")
+        bad = [{"section": "", "question": "q", "answer": "a"}]
+        with self.assertRaises(response_builder.ResponseBuilderError):
+            response_builder.file_response_sequence(d, self._notice(), bad)
+        # dossier left unchanged — no new sequence appended
+        self.assertEqual(d.sequence_numbers(), ["0000"])
+
+    def test_empty_answer_set_rejected(self):
+        errs = response_builder.validate_answers([])
+        self.assertTrue(any(e["rule"] == "answers_required" for e in errs))
+
+    # -- AC3: files as the next valid eCTD sequence in the same format --------
+    def test_next_sequence_number_is_monotonic(self):
+        self.assertEqual(
+            response_builder.next_sequence_number(self._dossier()), "0000")
+        self.assertEqual(
+            response_builder.next_sequence_number(self._dossier("0000")),
+            "0001")
+        self.assertEqual(
+            response_builder.next_sequence_number(
+                self._dossier("0000", "0001", "0002")), "0003")
+
+    def test_filed_response_is_next_ectd_sequence_in_same_format(self):
+        d = self._dossier("0000", "0001")
+        result = response_builder.file_response_sequence(
+            d, self._notice(), self._answers())
+        # next valid 4-digit eCTD sequence
+        self.assertEqual(result["sequence"], "0002")
+        self.assertEqual(result["format"], "eCTD")
+        self.assertIn("0002", d.sequence_numbers())
+        # built in the SAME eCTD format: index.xml + ca-regional backbones
+        self.assertIn("index.xml", result["files"])
+        self.assertIn("m1/ca/ca-regional.xml", result["files"])
+        # and the new sequence exports cleanly (checksums verify)
+        export = d.export_sequence("0002")
+        self.assertTrue(export["valid"])
+
+    def test_explicit_sequence_override_respected(self):
+        d = self._dossier("0000")
+        result = response_builder.file_response_sequence(
+            d, self._notice(), self._answers(), sequence="0005")
+        self.assertEqual(result["sequence"], "0005")
+
+
+class ResponseBuilderApiTests(unittest.TestCase):
+    """REQ-032: the /api/response/file route files a Q&A response sequence."""
+
+    def setUp(self):
+        self.store = server.SubmissionStore(":memory:")
+        self.companies = server.CompanyStore(":memory:")
+        self.dossiers = server.DossierStore(":memory:")
+        self.httpd = ThreadingHTTPServer(
+            ("127.0.0.1", 0),
+            server.make_handler(self.store, self.companies, self.dossiers))
+        self.port = self.httpd.server_address[1]
+        self.thread = threading.Thread(target=self.httpd.serve_forever,
+                                        daemon=True)
+        self.thread.start()
+
+    def tearDown(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+        self.thread.join()
+        self.store.close()
+        self.companies.close()
+        self.dossiers.close()
+
+    def _url(self, path):
+        return f"http://127.0.0.1:{self.port}{path}"
+
+    def _post(self, path, body):
+        req = urllib.request.Request(
+            self._url(path), data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read().decode())
+
+    def _seed_dossier(self):
+        self._post("/api/ectd/dossiers", {"dossier_id": "e123456"})
+        self._post("/api/ectd/dossiers/e123456/leaves",
+                   {"sequence": "0000", "leaf_id": "cl-0000",
+                    "operation": "new", "heading": "1.0",
+                    "title": "Cover Letter", "content": "cover"})
+
+    def test_file_response_creates_next_sequence(self):
+        self._seed_dossier()
+        status, data = self._post("/api/response/file", {
+            "dossier_id": "e123456",
+            "notice": {"kind": "SDN", "notice_id": "sdn-1",
+                       "content": "please clarify dissolution"},
+            "answers": [
+                {"section": "2.7.1", "question": "q1", "answer": "a1"},
+                {"section": "3.2.P.5.1", "question": "q2", "answer": "a2"}]})
+        self.assertEqual(status, 201)
+        self.assertTrue(data["valid"])
+        # AC1: a copy of the notice attached
+        self.assertTrue(data["response"]["notice"]["is_copy"])
+        # AC2: each answer carries its section reference
+        self.assertEqual(
+            [a["section_ref"] for a in data["response"]["answers"]],
+            ["2.7.1", "3.2.P.5.1"])
+        # AC3: filed as next eCTD sequence in the same format
+        self.assertEqual(data["response"]["sequence"], "0001")
+        self.assertEqual(data["response"]["format"], "eCTD")
+        self.assertIn("index.xml", data["response"]["files"])
+
+    def test_file_response_unknown_dossier_404(self):
+        status, data = self._post("/api/response/file", {
+            "dossier_id": "e999999",
+            "notice": {"kind": "SDN", "content": "x"},
+            "answers": [{"section": "2.7.1", "answer": "a"}]})
+        self.assertEqual(status, 404)
+
+    def test_file_response_missing_section_422(self):
+        self._seed_dossier()
+        status, data = self._post("/api/response/file", {
+            "dossier_id": "e123456",
+            "notice": {"kind": "SDN", "content": "x"},
+            "answers": [{"section": "", "answer": "a"}]})
+        self.assertEqual(status, 422)
+        self.assertFalse(data["valid"])
 
 
 if __name__ == "__main__":

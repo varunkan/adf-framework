@@ -60,3 +60,6 @@ adf-signing.key
 
 # ADF visual-validation screenshots (evidence, regenerated each run)
 apps/*/.adf-visual/
+
+# ADF runner per-app working context (compaction snapshots, not source)
+apps/*/.adf-context/

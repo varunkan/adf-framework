@@ -103,6 +103,27 @@ TERMINAL_STATUSES = frozenset({STATUS_APPROVED, STATUS_SCREENING_REJECTED})
 PROCESSING_TARGET_DAYS = 10        # ~10 working days
 SCREENING_TARGET_DAYS = 45         # screening performance target
 
+# REQ-040 / REQ-056 — the governing HC guidance edition for every day-count
+# table in this module (processing/screening targets, service standards,
+# clarifax + inactive + NOD windows). Pinned as version-tracked reference data
+# so a transaction can be tied to the edition effective at its build time.
+GUIDANCE_EDITION = "2025-10-01"
+MOSP_GUIDANCE = {
+    "edition": GUIDANCE_EDITION,
+    "title": "Guidance Document: Management of Drug Submissions and Applications",
+    "governs": [
+        "processing_target_days", "screening_target_days",
+        "service_standards", "clarifax_windows",
+        "inactive_windows", "nod_windows",
+    ],
+}
+
+
+def guidance_reference() -> dict:
+    """REQ-040/056: the pinned management-of-drug-submissions guidance edition
+    that governs every day-count table in this module."""
+    return dict(MOSP_GUIDANCE)
+
 # ---------------------------------------------------------------------------
 # REQ-030 / REQ-034 / REQ-062 — service standards by submission class
 # ---------------------------------------------------------------------------
@@ -252,6 +273,8 @@ class Lifecycle:
         self.core_id = str(core_id or "").strip()
         self.fee_paid = (float(fee_paid) if fee_paid not in (None, "")
                          else ANDS_COMPARATIVE_STUDIES_FEE)
+        # REQ-056: pin the governing guidance edition at build time.
+        self.guidance_edition = GUIDANCE_EDITION
         self.phase = None
         self.status = None
         self.started_at = None
@@ -711,5 +734,7 @@ class Lifecycle:
         snap["review_days_elapsed"] = self.review_days_elapsed(now)
         snap["service_standard"] = service_standard(self.submission_type)
         snap["inactive_window_days"] = inactive_window_days(self.submission_type)
+        snap["guidance_edition"] = getattr(self, "guidance_edition",
+                                           GUIDANCE_EDITION)
         snap["withdrawn"] = self.withdrawn
         return snap

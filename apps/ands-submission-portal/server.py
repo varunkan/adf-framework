@@ -24,6 +24,7 @@ from urllib.parse import urlparse, parse_qs
 import backbone
 import bioequivalence
 import content_model
+import cv
 import domain
 import dr
 import ectd
@@ -36,6 +37,7 @@ import qos
 import rbac
 import rep
 import report_ingest
+import response_builder
 import retention
 import stf
 import transmission
@@ -60,10 +62,13 @@ RECORD_COLUMNS = (
 # Persistence (sqlite, stdlib)
 # ---------------------------------------------------------------------------
 
-class SubmissionStore:
-    """Stores accepted submissions and answers the lifecycle's prior-sequence
-    question. Thread-safe (the server is threaded) via a single guarded
-    connection."""
+class _SqliteStore:
+    """Shared SQLite plumbing for every store in this module.
+
+    Holds a single thread-guarded connection (the server is threaded) with a
+    row factory, and tears it down on ``close``. Subclasses implement
+    ``_init_db`` to create their own tables — the connection, lock and teardown
+    live here so there is exactly one correct implementation."""
 
     def __init__(self, db_path: str = DB_PATH):
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -71,135 +76,143 @@ class SubmissionStore:
         self._lock = threading.Lock()
         self._init_db()
 
-    def _init_db(self) -> None:
+    def _init_db(self) -> None:  # pragma: no cover - overridden by subclasses
+        raise NotImplementedError
+
+    # -- shared, thread-guarded query plumbing --------------------------------
+    # Every store used to repeat the same ``with self._lock: execute(...)``
+    # dance for each read/write. That plumbing lives here exactly once; callers
+    # pass a literal, parameterized SQL string (``?`` placeholders only — never
+    # string-built) plus its params, so there is one correct, injection-safe
+    # implementation of locking + execution.
+    def _exec(self, sql: str, params: tuple = ()):
+        """Run a write/DDL statement under the lock, commit, return the cursor."""
         with self._lock:
-            self._conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS submissions (
-                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                    applicant       TEXT NOT NULL,
-                    drug_product    TEXT NOT NULL,
-                    dossier_id      TEXT NOT NULL,
-                    submission_type TEXT NOT NULL,
-                    sequence        TEXT NOT NULL,
-                    contact_email   TEXT NOT NULL,
-                    created_at      TEXT NOT NULL
-                )
-                """
-            )
+            cur = self._conn.execute(sql, params)
             self._conn.commit()
+            return cur
 
-    def prior_sequences(self, dossier_id: str) -> list:
-        """Already-accepted sequences for a dossier (for the lifecycle check)."""
+    def _fetchone(self, sql: str, params: tuple = ()):
+        """Run a read under the lock and return the first row (or ``None``)."""
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT sequence FROM submissions WHERE dossier_id = ? "
-                "ORDER BY sequence",
-                (str(dossier_id or "").strip(),),
-            ).fetchall()
-        return [r["sequence"] for r in rows]
+            return self._conn.execute(sql, params).fetchone()
 
-    def add(self, data: dict) -> dict:
-        """Insert an accepted submission and return the stored record."""
-        created_at = datetime.now(timezone.utc).isoformat()
+    def _fetchall(self, sql: str, params: tuple = ()) -> list:
+        """Run a read under the lock and return all rows."""
         with self._lock:
-            cur = self._conn.execute(
-                """
-                INSERT INTO submissions
-                    (applicant, drug_product, dossier_id, submission_type,
-                     sequence, contact_email, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    str(data.get("applicant", "")).strip(),
-                    str(data.get("drug_product", "")).strip(),
-                    str(data.get("dossier_id", "")).strip(),
-                    domain.MVP_SUBMISSION_TYPE,
-                    str(data.get("sequence", "")).strip(),
-                    str(data.get("contact_email", "")).strip(),
-                    created_at,
-                ),
-            )
-            self._conn.commit()
-            new_id = cur.lastrowid
-        return self.get(new_id)
-
-    def list(self) -> list:
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT * FROM submissions ORDER BY id"
-            ).fetchall()
-        return [dict(r) for r in rows]
-
-    def get(self, submission_id: int):
-        with self._lock:
-            row = self._conn.execute(
-                "SELECT * FROM submissions WHERE id = ?", (submission_id,)
-            ).fetchone()
-        return dict(row) if row else None
+            return self._conn.execute(sql, params).fetchall()
 
     def close(self) -> None:
         with self._lock:
             self._conn.close()
 
 
-class CompanyStore:
+class SubmissionStore(_SqliteStore):
+    """Stores accepted submissions and answers the lifecycle's prior-sequence
+    question. Thread-safe (the server is threaded) via a single guarded
+    connection."""
+
+    def _init_db(self) -> None:
+        self._exec(
+            """
+            CREATE TABLE IF NOT EXISTS submissions (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                applicant       TEXT NOT NULL,
+                drug_product    TEXT NOT NULL,
+                dossier_id      TEXT NOT NULL,
+                submission_type TEXT NOT NULL,
+                sequence        TEXT NOT NULL,
+                contact_email   TEXT NOT NULL,
+                created_at      TEXT NOT NULL
+            )
+            """
+        )
+
+    def prior_sequences(self, dossier_id: str) -> list:
+        """Already-accepted sequences for a dossier (for the lifecycle check)."""
+        rows = self._fetchall(
+            "SELECT sequence FROM submissions WHERE dossier_id = ? "
+            "ORDER BY sequence",
+            (str(dossier_id or "").strip(),),
+        )
+        return [r["sequence"] for r in rows]
+
+    def add(self, data: dict) -> dict:
+        """Insert an accepted submission and return the stored record."""
+        created_at = datetime.now(timezone.utc).isoformat()
+        cur = self._exec(
+            """
+            INSERT INTO submissions
+                (applicant, drug_product, dossier_id, submission_type,
+                 sequence, contact_email, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(data.get("applicant", "")).strip(),
+                str(data.get("drug_product", "")).strip(),
+                str(data.get("dossier_id", "")).strip(),
+                domain.MVP_SUBMISSION_TYPE,
+                str(data.get("sequence", "")).strip(),
+                str(data.get("contact_email", "")).strip(),
+                created_at,
+            ),
+        )
+        return self.get(cur.lastrowid)
+
+    def list(self) -> list:
+        rows = self._fetchall("SELECT * FROM submissions ORDER BY id")
+        return [dict(r) for r in rows]
+
+    def get(self, submission_id: int):
+        row = self._fetchone(
+            "SELECT * FROM submissions WHERE id = ?", (submission_id,))
+        return dict(row) if row else None
+
+
+class CompanyStore(_SqliteStore):
     """REQ-001: records the HC-assigned Company ID and the machine-generated,
     immutable REP CO filename against the sponsor org, plus saved contacts.
     Thread-safe via a single guarded connection."""
 
-    def __init__(self, db_path: str = DB_PATH):
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._lock = threading.Lock()
-        self._init_db()
-
     def _init_db(self) -> None:
-        with self._lock:
-            self._conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS companies (
-                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                    company_id   TEXT NOT NULL,
-                    company_name TEXT NOT NULL,
-                    co_filename  TEXT NOT NULL,
-                    co_xml       TEXT NOT NULL,
-                    contacts     TEXT NOT NULL,
-                    created_at   TEXT NOT NULL
-                )
-                """
+        self._exec(
+            """
+            CREATE TABLE IF NOT EXISTS companies (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                company_id   TEXT NOT NULL,
+                company_name TEXT NOT NULL,
+                co_filename  TEXT NOT NULL,
+                co_xml       TEXT NOT NULL,
+                contacts     TEXT NOT NULL,
+                created_at   TEXT NOT NULL
             )
-            self._conn.commit()
+            """
+        )
 
     def add(self, data: dict, co_filename: str, co_xml: str) -> dict:
         created_at = datetime.now(timezone.utc).isoformat()
         contacts = json.dumps(data.get("contacts") or [])
-        with self._lock:
-            cur = self._conn.execute(
-                """
-                INSERT INTO companies
-                    (company_id, company_name, co_filename, co_xml, contacts,
-                     created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    str(data.get("company_id", "")).strip(),
-                    str(data.get("applicant", "")).strip(),
-                    co_filename,
-                    co_xml,
-                    contacts,
-                    created_at,
-                ),
-            )
-            self._conn.commit()
-            new_id = cur.lastrowid
-        return self.get(new_id)
+        cur = self._exec(
+            """
+            INSERT INTO companies
+                (company_id, company_name, co_filename, co_xml, contacts,
+                 created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(data.get("company_id", "")).strip(),
+                str(data.get("applicant", "")).strip(),
+                co_filename,
+                co_xml,
+                contacts,
+                created_at,
+            ),
+        )
+        return self.get(cur.lastrowid)
 
     def get(self, company_id: int):
-        with self._lock:
-            row = self._conn.execute(
-                "SELECT * FROM companies WHERE id = ?", (company_id,)
-            ).fetchone()
+        row = self._fetchone(
+            "SELECT * FROM companies WHERE id = ?", (company_id,))
         if not row:
             return None
         rec = dict(row)
@@ -207,10 +220,7 @@ class CompanyStore:
         return rec
 
     def list(self) -> list:
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT * FROM companies ORDER BY id"
-            ).fetchall()
+        rows = self._fetchall("SELECT * FROM companies ORDER BY id")
         out = []
         for r in rows:
             rec = dict(r)
@@ -218,12 +228,8 @@ class CompanyStore:
             out.append(rec)
         return out
 
-    def close(self) -> None:
-        with self._lock:
-            self._conn.close()
 
-
-class DossierStore:
+class DossierStore(_SqliteStore):
     """REQ-014/015/017/018/019: persists multi-sequence eCTD dossiers as JSON.
 
     A dossier aggregate (``ectd.Dossier``) carries nested sequences, leaves,
@@ -231,72 +237,54 @@ class DossierStore:
     JSON blob keyed by Dossier ID. Thread-safe via a single guarded connection.
     """
 
-    def __init__(self, db_path: str = DB_PATH):
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._lock = threading.Lock()
-        self._init_db()
-
     def _init_db(self) -> None:
-        with self._lock:
-            self._conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS dossiers (
-                    dossier_id TEXT PRIMARY KEY,
-                    payload    TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                )
-                """
+        self._exec(
+            """
+            CREATE TABLE IF NOT EXISTS dossiers (
+                dossier_id TEXT PRIMARY KEY,
+                payload    TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
             )
-            self._conn.commit()
+            """
+        )
 
     def create(self, dossier_id: str) -> "ectd.Dossier":
         """Create an empty dossier; raises if the Dossier ID already exists."""
         dossier_id = str(dossier_id or "").strip()
         now = datetime.now(timezone.utc).isoformat()
         dossier = ectd.Dossier(dossier_id)
-        with self._lock:
-            exists = self._conn.execute(
-                "SELECT 1 FROM dossiers WHERE dossier_id = ?", (dossier_id,)
-            ).fetchone()
-            if exists:
-                raise ectd.LeafOperationError(
-                    f"dossier {dossier_id} already exists")
-            self._conn.execute(
-                "INSERT INTO dossiers (dossier_id, payload, created_at, "
-                "updated_at) VALUES (?, ?, ?, ?)",
-                (dossier_id, json.dumps(dossier.to_dict()), now, now),
-            )
-            self._conn.commit()
+        if self._fetchone(
+                "SELECT 1 FROM dossiers WHERE dossier_id = ?", (dossier_id,)):
+            raise ectd.LeafOperationError(
+                f"dossier {dossier_id} already exists")
+        self._exec(
+            "INSERT INTO dossiers (dossier_id, payload, created_at, "
+            "updated_at) VALUES (?, ?, ?, ?)",
+            (dossier_id, json.dumps(dossier.to_dict()), now, now),
+        )
         return dossier
 
     def get(self, dossier_id: str):
-        dossier_id = str(dossier_id or "").strip()
-        with self._lock:
-            row = self._conn.execute(
-                "SELECT payload FROM dossiers WHERE dossier_id = ?",
-                (dossier_id,),
-            ).fetchone()
+        row = self._fetchone(
+            "SELECT payload FROM dossiers WHERE dossier_id = ?",
+            (str(dossier_id or "").strip(),),
+        )
         if not row:
             return None
         return ectd.Dossier.from_dict(json.loads(row["payload"]))
 
     def save(self, dossier: "ectd.Dossier") -> None:
         now = datetime.now(timezone.utc).isoformat()
-        with self._lock:
-            self._conn.execute(
-                "UPDATE dossiers SET payload = ?, updated_at = ? "
-                "WHERE dossier_id = ?",
-                (json.dumps(dossier.to_dict()), now, dossier.dossier_id),
-            )
-            self._conn.commit()
+        self._exec(
+            "UPDATE dossiers SET payload = ?, updated_at = ? "
+            "WHERE dossier_id = ?",
+            (json.dumps(dossier.to_dict()), now, dossier.dossier_id),
+        )
 
     def list(self) -> list:
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT dossier_id, payload FROM dossiers ORDER BY dossier_id"
-            ).fetchall()
+        rows = self._fetchall(
+            "SELECT dossier_id, payload FROM dossiers ORDER BY dossier_id")
         out = []
         for r in rows:
             d = ectd.Dossier.from_dict(json.loads(r["payload"]))
@@ -305,35 +293,23 @@ class DossierStore:
                         "live_leaves": len(d.live_leaf_ids())})
         return out
 
-    def close(self) -> None:
-        with self._lock:
-            self._conn.close()
 
-
-class TransmissionStore:
+class TransmissionStore(_SqliteStore):
     """REQ-003/025/026/027/046/058: persists the per-dossier transmission ledger
     (ESG config + transactions + queue + audit) as a JSON blob keyed by Dossier
     ID. Thread-safe via a single guarded connection."""
 
-    def __init__(self, db_path: str = DB_PATH):
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._lock = threading.Lock()
-        self._init_db()
-
     def _init_db(self) -> None:
-        with self._lock:
-            self._conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS transmissions (
-                    dossier_id TEXT PRIMARY KEY,
-                    payload    TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                )
-                """
+        self._exec(
+            """
+            CREATE TABLE IF NOT EXISTS transmissions (
+                dossier_id TEXT PRIMARY KEY,
+                payload    TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
             )
-            self._conn.commit()
+            """
+        )
 
     def get_or_create(self, dossier_id: str) -> "transmission.TransmissionLedger":
         dossier_id = str(dossier_id or "").strip()
@@ -342,22 +318,18 @@ class TransmissionStore:
             return led
         now = datetime.now(timezone.utc).isoformat()
         led = transmission.TransmissionLedger(dossier_id)
-        with self._lock:
-            self._conn.execute(
-                "INSERT OR IGNORE INTO transmissions (dossier_id, payload, "
-                "created_at, updated_at) VALUES (?, ?, ?, ?)",
-                (dossier_id, json.dumps(led.to_dict()), now, now),
-            )
-            self._conn.commit()
+        self._exec(
+            "INSERT OR IGNORE INTO transmissions (dossier_id, payload, "
+            "created_at, updated_at) VALUES (?, ?, ?, ?)",
+            (dossier_id, json.dumps(led.to_dict()), now, now),
+        )
         return led
 
     def get(self, dossier_id: str):
-        dossier_id = str(dossier_id or "").strip()
-        with self._lock:
-            row = self._conn.execute(
-                "SELECT payload FROM transmissions WHERE dossier_id = ?",
-                (dossier_id,),
-            ).fetchone()
+        row = self._fetchone(
+            "SELECT payload FROM transmissions WHERE dossier_id = ?",
+            (str(dossier_id or "").strip(),),
+        )
         if not row:
             return None
         return transmission.TransmissionLedger.from_dict(
@@ -365,21 +337,17 @@ class TransmissionStore:
 
     def save(self, led: "transmission.TransmissionLedger") -> None:
         now = datetime.now(timezone.utc).isoformat()
-        with self._lock:
-            self._conn.execute(
-                "INSERT INTO transmissions (dossier_id, payload, created_at, "
-                "updated_at) VALUES (?, ?, ?, ?) "
-                "ON CONFLICT(dossier_id) DO UPDATE SET payload = excluded.payload, "
-                "updated_at = excluded.updated_at",
-                (led.dossier_id, json.dumps(led.to_dict()), now, now),
-            )
-            self._conn.commit()
+        self._exec(
+            "INSERT INTO transmissions (dossier_id, payload, created_at, "
+            "updated_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(dossier_id) DO UPDATE SET payload = excluded.payload, "
+            "updated_at = excluded.updated_at",
+            (led.dossier_id, json.dumps(led.to_dict()), now, now),
+        )
 
     def list(self) -> list:
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT payload FROM transmissions ORDER BY dossier_id"
-            ).fetchall()
+        rows = self._fetchall(
+            "SELECT payload FROM transmissions ORDER BY dossier_id")
         out = []
         for r in rows:
             led = transmission.TransmissionLedger.from_dict(
@@ -389,43 +357,29 @@ class TransmissionStore:
                         "transactions": len(led.transactions)})
         return out
 
-    def close(self) -> None:
-        with self._lock:
-            self._conn.close()
 
-
-class LifecycleStore:
+class LifecycleStore(_SqliteStore):
     """REQ-030/031/052/062: persists the per-dossier post-receipt DSTS lifecycle
     (phase/status state machine, deadline timers, clock-stops and the fee-credit
     entitlement) as a JSON blob keyed by Dossier ID."""
 
-    def __init__(self, db_path: str = DB_PATH):
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._lock = threading.Lock()
-        self._init_db()
-
     def _init_db(self) -> None:
-        with self._lock:
-            self._conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS lifecycles (
-                    dossier_id TEXT PRIMARY KEY,
-                    payload    TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                )
-                """
+        self._exec(
+            """
+            CREATE TABLE IF NOT EXISTS lifecycles (
+                dossier_id TEXT PRIMARY KEY,
+                payload    TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
             )
-            self._conn.commit()
+            """
+        )
 
     def get(self, dossier_id: str):
-        dossier_id = str(dossier_id or "").strip()
-        with self._lock:
-            row = self._conn.execute(
-                "SELECT payload FROM lifecycles WHERE dossier_id = ?",
-                (dossier_id,),
-            ).fetchone()
+        row = self._fetchone(
+            "SELECT payload FROM lifecycles WHERE dossier_id = ?",
+            (str(dossier_id or "").strip(),),
+        )
         if not row:
             return None
         return lifecycle.Lifecycle.from_dict(json.loads(row["payload"]))
@@ -467,21 +421,11 @@ class LifecycleStore:
                         "fee_credit": bool(lc.fee_credit)})
         return out
 
-    def close(self) -> None:
-        with self._lock:
-            self._conn.close()
 
-
-class RejectionStore:
+class RejectionStore(_SqliteStore):
     """REQ-029: persists ingested eCTD Validation Reports (rejections),
     correlated by Core ID, as JSON blobs so a rejection can be re-fetched and
     its remediation worked into the next sequence."""
-
-    def __init__(self, db_path: str = DB_PATH):
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._lock = threading.Lock()
-        self._init_db()
 
     def _init_db(self) -> None:
         with self._lock:
@@ -533,12 +477,8 @@ class RejectionStore:
                  "dossier_id": r["dossier_id"], "created_at": r["created_at"]}
                 for r in rows]
 
-    def close(self) -> None:
-        with self._lock:
-            self._conn.close()
 
-
-class AuditStore:
+class AuditStore(_SqliteStore):
     """REQ-038/054/060/NFR-002: an append-only audit trail.
 
     Records every access decision (RBAC), disposition attempt (retention) and
@@ -546,12 +486,6 @@ class AuditStore:
     NO update or delete path — the trail cannot be redacted (REQ-060) — and an
     inspection export reads it back complete and human-readable. Thread-safe via
     a single guarded connection."""
-
-    def __init__(self, db_path: str = DB_PATH):
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._lock = threading.Lock()
-        self._init_db()
 
     def _init_db(self) -> None:
         with self._lock:
@@ -612,10 +546,12 @@ class AuditStore:
             clauses.append("category = ?")
             params.append(str(category).strip())
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        # Parameterized: ``where`` is built only from hardcoded clause fragments
+        # ("dossier_id = ?", "category = ?"); every user value flows through the
+        # ``params`` placeholders, never the SQL text.
+        sql = "SELECT * FROM audit_events" + where + " ORDER BY id"
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT * FROM audit_events" + where + " ORDER BY id", params
-            ).fetchall()
+            rows = self._conn.execute(sql, params).fetchall()
         out = []
         for r in rows:
             rec = dict(r)
@@ -648,20 +584,10 @@ class AuditStore:
                                                           sort_keys=True))
         return "\n".join(lines) + "\n"
 
-    def close(self) -> None:
-        with self._lock:
-            self._conn.close()
 
-
-class PortfolioStore:
+class PortfolioStore(_SqliteStore):
     """REQ-047: persists a sponsor org's multi-dossier / multi-product portfolio
     (an ``rbac.Portfolio`` aggregate) as a JSON blob keyed by org id."""
-
-    def __init__(self, db_path: str = DB_PATH):
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._lock = threading.Lock()
-        self._init_db()
 
     def _init_db(self) -> None:
         with self._lock:
@@ -698,10 +624,6 @@ class PortfolioStore:
                 "payload = excluded.payload, updated_at = excluded.updated_at",
                 (portfolio.org_id, json.dumps(portfolio.to_dict()), now))
             self._conn.commit()
-
-    def close(self) -> None:
-        with self._lock:
-            self._conn.close()
 
 
 def _portfolio_from_dict(data: dict) -> "rbac.Portfolio":
@@ -917,6 +839,20 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
                         "HC 8-week MAXIMUM (warn-only; never gates)",
                     "dsts_ia_lookup": rep.DSTS_IA_LOOKUP_CONTACT,
                 })
+                return
+            if path == "/api/cv":
+                # REQ-066: the ingested HC Module-1 controlled vocabularies,
+                # keyed to the CA Module 1 schema version.
+                qs = parse_qs(urlparse(self.path).query)
+                version = (qs.get("schema_version")
+                           or [cv.DEFAULT_SCHEMA_VERSION])[0]
+                try:
+                    vocabs = cv.load_cv(version)
+                except cv.ControlledVocabularyError as exc:
+                    self._send_json({"error": str(exc)}, 404)
+                    return
+                self._send_json({"schema_version": version,
+                                 "vocabularies": vocabs})
                 return
             if path == "/api/crp/fields":
                 # REQ-007: the structured CRP fields the form requires.
@@ -1150,6 +1086,9 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
             if path == "/api/privacy/data-subject-request":
                 self._handle_privacy_dsr()
                 return
+            if path == "/api/cv/validate":
+                self._handle_cv_validate()
+                return
             if path == "/api/validation/run":
                 self._handle_validation_run()
                 return
@@ -1179,6 +1118,9 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
                 return
             if path.startswith("/api/ectd/dossiers/"):
                 self._handle_dossier_post(path)
+                return
+            if path == "/api/response/file":
+                self._handle_response_file()
                 return
             if path == "/api/backbone/generate":
                 self._handle_backbone_generate()
@@ -1415,28 +1357,31 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
                 "inline": validation.inline_findings(new_ctx, version),
             })
 
-        def _handle_validation_report(self):
-            """REQ-024: the downloadable pre-submission validation report (JSON)."""
+        def _build_validation_report_or_422(self):
+            """REQ-024 (shared): parse the request, build the validation report,
+            and send a 422 on an unknown ruleset. Returns the report dict, or
+            ``None`` if a 422 was already sent (caller must then return)."""
             data = self._read_json()
             ctx = validation.context_from_request(data.get("context", data))
             try:
-                report = validation.build_validation_report(
+                return validation.build_validation_report(
                     ctx, self._validation_version(data))
             except validation.UnknownRulesetError as exc:
                 self._send_json({"error": str(exc)}, 422)
+                return None
+
+        def _handle_validation_report(self):
+            """REQ-024: the downloadable pre-submission validation report (JSON)."""
+            report = self._build_validation_report_or_422()
+            if report is None:
                 return
             report["text"] = validation.render_report_text(report)
             self._send_json(report)
 
         def _handle_validation_report_download(self):
             """REQ-024: the report as a downloadable plain-text attachment."""
-            data = self._read_json()
-            ctx = validation.context_from_request(data.get("context", data))
-            try:
-                report = validation.build_validation_report(
-                    ctx, self._validation_version(data))
-            except validation.UnknownRulesetError as exc:
-                self._send_json({"error": str(exc)}, 422)
+            report = self._build_validation_report_or_422()
+            if report is None:
                 return
             self._send_text(
                 validation.render_report_text(report),
@@ -1555,6 +1500,19 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
                      or datetime.now(timezone.utc).isoformat())
             result = privacy.handle_data_subject_request(data, at=at)
             self._send_json(result, 201 if result["valid"] else 422)
+
+        def _handle_cv_validate(self):
+            """REQ-066: reject out-of-vocabulary Module-1 metadata (I08/H08)."""
+            data = self._read_json()
+            version = str(data.get("schema_version", "")
+                          or cv.DEFAULT_SCHEMA_VERSION)
+            try:
+                errors = cv.validate_metadata(data.get("metadata") or {}, version)
+            except cv.ControlledVocabularyError as exc:
+                self._send_json({"valid": False, "error": str(exc)}, 422)
+                return
+            self._send_json({"valid": not errors, "errors": errors},
+                            200 if not errors else 422)
 
         # -- CRP / bioequivalence / CS-BE handlers (REQ-007/008/063) --------
         def _handle_crp_validate(self):
@@ -1768,6 +1726,31 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
                 return
 
             self._send_json({"error": "not found"}, 404)
+
+        # -- Q&A response-sequence builder (REQ-032) ------------------------
+        def _handle_response_file(self):
+            """REQ-032: file a Q&A response to a deficiency notice as the next
+            eCTD sequence of an existing dossier.
+
+            404 when the dossier is unknown; 422 when the notice/answers fail
+            validation (no mutation in that case); 201 with the filed sequence
+            on success."""
+            data = self._read_json()
+            dossier_id = str(data.get("dossier_id", "") or "").strip()
+            dossier = self._dossier_or_404(dossier_id)
+            if dossier is None:
+                return
+            try:
+                result = response_builder.file_response_sequence(
+                    dossier,
+                    data.get("notice") or {},
+                    data.get("answers") or [],
+                    sequence=str(data.get("sequence", "") or "").strip() or None)
+            except response_builder.ResponseBuilderError as exc:
+                self._send_json({"valid": False, "error": str(exc)}, 422)
+                return
+            dossiers.save(dossier)
+            self._send_json({"valid": True, "response": result}, 201)
 
         # -- transmission / ESG console handlers ----------------------------
         #    (REQ-003/025/026/027/046/058)
@@ -2036,17 +2019,25 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
             self._send_json({"valid": True, "status": lc.status_view(
                 now=data.get("now"))}, 201)
 
-        def _handle_lifecycle_transition(self):
-            """REQ-030/031: drive the DSTS state machine — ``action`` is one of
-            'to_screening', 'screening_outcome', 'clarifax', 'resume_clock' or
-            'decision'."""
-            data = self._read_json()
+        def _lifecycle_or_404(self, data):
+            """REQ-030/062 (shared): resolve the lifecycle for the request's
+            ``dossier_id``; send a 404 and return ``None`` if there is none.
+            On success returns the lifecycle aggregate."""
             dossier_id = str(data.get("dossier_id", "") or "").strip()
             lc = lifecycles.get(dossier_id)
             if lc is None:
                 self._send_json(
                     {"valid": False,
                      "error": f"no lifecycle for '{dossier_id}'"}, 404)
+            return lc
+
+        def _handle_lifecycle_transition(self):
+            """REQ-030/031: drive the DSTS state machine — ``action`` is one of
+            'to_screening', 'screening_outcome', 'clarifax', 'resume_clock' or
+            'decision'."""
+            data = self._read_json()
+            lc = self._lifecycle_or_404(data)
+            if lc is None:
                 return
             action = str(data.get("action", "") or "").strip()
             now = data.get("now")
@@ -2087,12 +2078,8 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
             statutory 25% fee-credit entitlement (SOR/2019-124) when Health
             Canada has missed the applicable service standard."""
             data = self._read_json()
-            dossier_id = str(data.get("dossier_id", "") or "").strip()
-            lc = lifecycles.get(dossier_id)
+            lc = self._lifecycle_or_404(data)
             if lc is None:
-                self._send_json(
-                    {"valid": False,
-                     "error": f"no lifecycle for '{dossier_id}'"}, 404)
                 return
             assessment = lc.check_service_standard(now=data.get("now"))
             lifecycles.save(lc)
@@ -2330,26 +2317,26 @@ INDEX_HTML = """<!DOCTYPE html>
   <section class="card">
     <h2>New submission</h2>
     <form id="form">
-      <label>Applicant / company name</label>
-      <input name="applicant" placeholder="Acme Generics Inc." value="Acme Generics Inc.">
-      <label>Drug product name</label>
-      <input name="drug_product" placeholder="Metformin HCl 500 mg tablets" value="Metformin HCl 500 mg tablets">
+      <label for="fld1">Applicant / company name</label>
+      <input id="fld1" name="applicant" aria-label="Applicant / company name" placeholder="Acme Generics Inc." value="Acme Generics Inc.">
+      <label for="fld2">Drug product name</label>
+      <input id="fld2" name="drug_product" aria-label="Drug product name" placeholder="Metformin HCl 500 mg tablets" value="Metformin HCl 500 mg tablets">
       <div class="row">
         <div>
-          <label>Dossier ID</label>
-          <input name="dossier_id" placeholder="e123456" value="e123456">
+          <label for="fld3">Dossier ID</label>
+          <input id="fld3" name="dossier_id" aria-label="Dossier ID" placeholder="e123456" value="e123456">
           <div class="hint">lowercase 'e' + 6 or 7 digits</div>
         </div>
         <div>
-          <label>Sequence</label>
-          <input name="sequence" placeholder="0000" value="0000">
+          <label for="fld4">Sequence</label>
+          <input id="fld4" name="sequence" aria-label="Sequence" placeholder="0000" value="0000">
           <div class="hint">4 digits; first must be 0000</div>
         </div>
       </div>
-      <label>Submission type</label>
-      <input name="submission_type" value="ANDS" readonly>
-      <label>Contact email</label>
-      <input name="contact_email" placeholder="ra@acme.example" value="ra@acme.example">
+      <label for="fld5">Submission type</label>
+      <input id="fld5" name="submission_type" aria-label="Submission type" value="ANDS" readonly>
+      <label for="fld6">Contact email</label>
+      <input id="fld6" name="contact_email" aria-label="Contact email" placeholder="ra@acme.example" value="ra@acme.example">
       <div class="actions">
         <button type="button" class="ghost" onclick="run('/api/validate')">Validate</button>
         <button type="button" class="primary" onclick="run('/api/submissions')">Submit</button>
@@ -2372,45 +2359,45 @@ INDEX_HTML = """<!DOCTYPE html>
     <form id="repform">
       <div class="row">
         <div>
-          <label>Company ID (HC-assigned opaque token)</label>
-          <input name="company_id" placeholder="K18276" value="K18276">
+          <label for="fld7">Company ID (HC-assigned opaque token)</label>
+          <input id="fld7" name="company_id" aria-label="Company ID (HC-assigned opaque token)" placeholder="K18276" value="K18276">
           <div class="hint">alphanumeric token — not a 5-digit number</div>
         </div>
         <div>
-          <label>Dossier ID</label>
-          <input name="dossier_id" placeholder="e123456" value="e123456">
+          <label for="fld8">Dossier ID</label>
+          <input id="fld8" name="dossier_id" aria-label="Dossier ID" placeholder="e123456" value="e123456">
           <div class="hint">'e' + 6 or 7 digits</div>
         </div>
       </div>
       <div class="row">
         <div>
-          <label>Regulatory activity type</label>
-          <select name="activity_type" id="activitySelect"></select>
+          <label for="activitySelect">Regulatory activity type</label>
+          <select name="activity_type" id="activitySelect" aria-label="Regulatory activity type"></select>
           <div class="hint">from HC's Module 1 controlled vocabulary</div>
         </div>
         <div>
-          <label>Sequence</label>
-          <input name="sequence" placeholder="0000" value="0000">
+          <label for="fld9">Sequence</label>
+          <input id="fld9" name="sequence" aria-label="Sequence" placeholder="0000" value="0000">
         </div>
       </div>
       <div class="row">
         <div>
-          <label>Applicant / company name</label>
-          <input name="applicant" placeholder="Acme Generics Inc." value="Acme Generics Inc.">
+          <label for="fld10">Applicant / company name</label>
+          <input id="fld10" name="applicant" aria-label="Applicant / company name" placeholder="Acme Generics Inc." value="Acme Generics Inc.">
         </div>
         <div>
-          <label>Drug product name</label>
-          <input name="drug_product" placeholder="Metformin HCl 500 mg tablets" value="Metformin HCl 500 mg tablets">
+          <label for="fld11">Drug product name</label>
+          <input id="fld11" name="drug_product" aria-label="Drug product name" placeholder="Metformin HCl 500 mg tablets" value="Metformin HCl 500 mg tablets">
         </div>
       </div>
       <div class="row">
         <div>
-          <label>DIN (optional, 8 digits)</label>
-          <input name="din" placeholder="02123456">
+          <label for="fld12">DIN (optional, 8 digits)</label>
+          <input id="fld12" name="din" aria-label="DIN (optional, 8 digits)" placeholder="02123456">
         </div>
         <div>
-          <label>PI template required?</label>
-          <input type="checkbox" name="pi_required" style="width:auto">
+          <label for="fld13">PI template required?</label>
+          <input id="fld13" type="checkbox" name="pi_required" aria-label="PI template required" style="width:auto">
         </div>
       </div>
       <div class="actions">
@@ -2432,8 +2419,8 @@ INDEX_HTML = """<!DOCTYPE html>
 
     <div class="row" style="align-items:flex-end">
       <div>
-        <label>New dossier ID</label>
-        <input id="newDossierId" placeholder="e123456">
+        <label for="newDossierId">New dossier ID</label>
+        <input aria-label="New dossier ID" id="newDossierId" placeholder="e123456">
         <div class="hint">'e' + 6 or 7 digits</div>
       </div>
       <div style="flex:0 0 auto">
@@ -2441,8 +2428,8 @@ INDEX_HTML = """<!DOCTYPE html>
           onclick="createDossier()">Create dossier</button>
       </div>
       <div>
-        <label>Open existing dossier</label>
-        <select id="dossierSelect" onchange="loadDossier(this.value)"></select>
+        <label for="dossierSelect">Open existing dossier</label>
+        <select aria-label="Open existing dossier" id="dossierSelect" onchange="loadDossier(this.value)"></select>
       </div>
     </div>
     <div id="dossierMsg" class="hint" style="margin-top:8px"></div>
@@ -2455,12 +2442,12 @@ INDEX_HTML = """<!DOCTYPE html>
       <form id="leafForm">
         <div class="row">
           <div>
-            <label>Sequence</label>
-            <input name="sequence" placeholder="0000" value="0000">
+            <label for="fld14">Sequence</label>
+            <input id="fld14" name="sequence" aria-label="Sequence" placeholder="0000" value="0000">
           </div>
           <div>
-            <label>Operation</label>
-            <select name="operation">
+            <label for="fld15">Operation</label>
+            <select id="fld15" aria-label="Operation" name="operation">
               <option value="new">new</option>
               <option value="replace">replace</option>
               <option value="append">append</option>
@@ -2468,32 +2455,32 @@ INDEX_HTML = """<!DOCTYPE html>
             </select>
           </div>
           <div>
-            <label>Heading</label>
-            <select name="heading" id="leafHeading"></select>
+            <label for="leafHeading">Heading</label>
+            <select aria-label="Heading" name="heading" id="leafHeading"></select>
           </div>
         </div>
         <div class="row">
           <div>
-            <label>Leaf ID</label>
-            <input name="leaf_id" placeholder="m1-0-1-cover-letter-0000">
+            <label for="fld16">Leaf ID</label>
+            <input id="fld16" aria-label="Leaf ID" name="leaf_id" placeholder="m1-0-1-cover-letter-0000">
           </div>
           <div>
-            <label>Title</label>
-            <input name="title" placeholder="Cover Letter">
+            <label for="fld17">Title</label>
+            <input id="fld17" aria-label="Title" name="title" placeholder="Cover Letter">
           </div>
         </div>
         <div class="row">
           <div>
-            <label>Modifies prior leaf (replace/append/delete)</label>
-            <input name="modified_leaf" placeholder="leaf id in current view">
+            <label for="fld18">Modifies prior leaf (replace/append/delete)</label>
+            <input id="fld18" aria-label="Modifies prior leaf (replace/append/delete)" name="modified_leaf" placeholder="leaf id in current view">
           </div>
           <div>
-            <label>Reuse file from prior leaf (REQ-019)</label>
-            <input name="reused_from" placeholder="prior leaf id (optional)">
+            <label for="fld19">Reuse file from prior leaf (REQ-019)</label>
+            <input id="fld19" aria-label="Reuse file from prior leaf (REQ-019)" name="reused_from" placeholder="prior leaf id (optional)">
           </div>
         </div>
-        <label>File content (bytes shipped for this leaf)</label>
-        <input name="content" placeholder="document bytes…">
+        <label for="fld20">File content (bytes shipped for this leaf)</label>
+        <input id="fld20" aria-label="File content (bytes shipped for this leaf)" name="content" placeholder="document bytes…">
         <div class="actions">
           <button type="button" class="primary" onclick="addLeaf()">Add leaf</button>
         </div>
@@ -2506,8 +2493,8 @@ INDEX_HTML = """<!DOCTYPE html>
       <h2 style="margin-top:18px">Export sequence</h2>
       <div class="row" style="align-items:flex-end">
         <div>
-          <label>Sequence to export</label>
-          <input id="exportSeq" placeholder="0000">
+          <label for="exportSeq">Sequence to export</label>
+          <input aria-label="Sequence to export" id="exportSeq" placeholder="0000">
         </div>
         <div style="flex:0 0 auto">
           <button type="button" class="primary"
@@ -2530,8 +2517,8 @@ INDEX_HTML = """<!DOCTYPE html>
 
     <div class="row" style="align-items:flex-end">
       <div style="flex:0 0 auto">
-        <label>Ruleset version</label>
-        <select id="rulesetSelect"></select>
+        <label for="rulesetSelect">Ruleset version</label>
+        <select aria-label="Ruleset version" id="rulesetSelect"></select>
         <div class="hint" id="rulesetHint"></div>
       </div>
       <div style="flex:0 0 auto">
@@ -2541,7 +2528,7 @@ INDEX_HTML = """<!DOCTYPE html>
     <div id="rulesetTable" style="margin-top:10px"></div>
 
     <label style="margin-top:14px">Transaction context (JSON)</label>
-    <textarea id="valCtx" rows="14" spellcheck="false"
+    <textarea aria-label="Transaction context (JSON)" id="valCtx" rows="14" spellcheck="false"
       style="width:100%;font:12px/1.45 ui-monospace,Menlo,monospace;
              border:1px solid var(--line);border-radius:6px;padding:10px"></textarea>
     <div class="hint">Edit to model files / leaves / REP / cover_letter /
@@ -2569,6 +2556,7 @@ INDEX_HTML = """<!DOCTYPE html>
       proposed generic — the portal checks pharmaceutical equivalence (identical
       medicinal ingredient(s) in a comparable dosage form).</p>
     <textarea id="crpCtx" rows="13" spellcheck="false"
+      aria-label="Canadian Reference Product context (JSON)"
       style="width:100%;font:12px/1.45 ui-monospace,Menlo,monospace;
              border:1px solid var(--line);border-radius:6px;padding:10px"></textarea>
     <div class="actions"><button type="button" class="primary"
@@ -2586,6 +2574,7 @@ INDEX_HTML = """<!DOCTYPE html>
       80.00–125.00% under ICH M13A (IR solid oral, effective 2025-12-27). The
       CS-BE template is DRAFT (2004-05-18).</p>
     <textarea id="csbeCtx" rows="16" spellcheck="false"
+      aria-label="CS-BE bioequivalence study context (JSON)"
       style="width:100%;font:12px/1.45 ui-monospace,Menlo,monospace;
              border:1px solid var(--line);border-radius:6px;padding:10px"></textarea>
     <div class="actions">
@@ -2601,6 +2590,7 @@ INDEX_HTML = """<!DOCTYPE html>
       or structurally-incomplete QOS-CE is flagged as a screening-deficiency
       risk.</p>
     <textarea id="qosCtx" rows="12" spellcheck="false"
+      aria-label="Quality Overall Summary (QOS-CE) context (JSON)"
       style="width:100%;font:12px/1.45 ui-monospace,Menlo,monospace;
              border:1px solid var(--line);border-radius:6px;padding:10px"></textarea>
     <div class="actions">
@@ -2616,6 +2606,7 @@ INDEX_HTML = """<!DOCTYPE html>
       generates conformant STF leaves and validates them as their own HC eCTD
       validation category — independent of the other validation categories.</p>
     <textarea id="stfCtx" rows="12" spellcheck="false"
+      aria-label="Study Tagging File (STF) context (JSON)"
       style="width:100%;font:12px/1.45 ui-monospace,Menlo,monospace;
              border:1px solid var(--line);border-radius:6px;padding:10px"></textarea>
     <div class="actions">
@@ -2634,30 +2625,30 @@ INDEX_HTML = """<!DOCTYPE html>
       reconcile every transaction by Core&nbsp;ID.</p>
     <div class="row">
       <div>
-        <label>Dossier ID</label>
-        <input id="txnDossier" value="e123456">
+        <label for="txnDossier">Dossier ID</label>
+        <input aria-label="Dossier ID" id="txnDossier" value="e123456">
       </div>
       <div>
-        <label>Sequence</label>
-        <input id="txnSequence" value="0000">
+        <label for="txnSequence">Sequence</label>
+        <input aria-label="Sequence" id="txnSequence" value="0000">
       </div>
       <div>
-        <label>Package size (GB)</label>
-        <input id="txnSize" value="6" type="number" step="0.1">
+        <label for="txnSize">Package size (GB)</label>
+        <input aria-label="Package size (GB)" id="txnSize" value="6" type="number" step="0.1">
       </div>
     </div>
     <div class="row">
       <div>
-        <label>ESG account type</label>
-        <select id="txnAccount" style="width:100%;padding:9px 10px;
+        <label for="txnAccount">ESG account type</label>
+        <select aria-label="ESG account type" id="txnAccount" style="width:100%;padding:9px 10px;
           border:1px solid var(--line);border-radius:6px;font:inherit">
           <option value="WebTrader">WebTrader (browser upload)</option>
           <option value="AS2">AS2 / EDIINT (machine-to-machine)</option>
         </select>
       </div>
       <div>
-        <label>X.509 certificate (PEM)</label>
-        <input id="txnCert" value="-----BEGIN CERTIFICATE-----demo-----END CERTIFICATE-----">
+        <label for="txnCert">X.509 certificate (PEM)</label>
+        <input aria-label="X.509 certificate (PEM)" id="txnCert" value="-----BEGIN CERTIFICATE-----demo-----END CERTIFICATE-----">
       </div>
     </div>
     <div class="actions" style="flex-wrap:wrap">
@@ -2693,12 +2684,12 @@ INDEX_HTML = """<!DOCTYPE html>
       missed service standard surfaces the statutory 25% fee credit.</p>
     <div class="row">
       <div>
-        <label>Dossier ID</label>
-        <input id="lcDossier" value="e654321">
+        <label for="lcDossier">Dossier ID</label>
+        <input aria-label="Dossier ID" id="lcDossier" value="e654321">
       </div>
       <div>
-        <label>Submission type</label>
-        <select id="lcType" style="width:100%;padding:9px 10px;
+        <label for="lcType">Submission type</label>
+        <select aria-label="Submission type" id="lcType" style="width:100%;padding:9px 10px;
           border:1px solid var(--line);border-radius:6px;font:inherit">
           <option value="ANDS">ANDS (180 d, Inactive-90)</option>
           <option value="SANDS">SANDS (180 d)</option>
@@ -2707,26 +2698,26 @@ INDEX_HTML = """<!DOCTYPE html>
         </select>
       </div>
       <div>
-        <label>Core ID</label>
-        <input id="lcCore" value="CORE-654321">
+        <label for="lcCore">Core ID</label>
+        <input aria-label="Core ID" id="lcCore" value="CORE-654321">
       </div>
     </div>
     <div class="row">
       <div>
-        <label>Fee paid (CAD)</label>
-        <input id="lcFee" value="70750" type="number" step="0.01">
+        <label for="lcFee">Fee paid (CAD)</label>
+        <input aria-label="Fee paid (CAD)" id="lcFee" value="70750" type="number" step="0.01">
       </div>
       <div>
-        <label>Clarifax tier</label>
-        <select id="lcTier" style="width:100%;padding:9px 10px;
+        <label for="lcTier">Clarifax tier</label>
+        <select aria-label="Clarifax tier" id="lcTier" style="width:100%;padding:9px 10px;
           border:1px solid var(--line);border-radius:6px;font:inherit">
           <option value="180-300">180-300 day standard (default 15 d)</option>
           <option value="0-90">0-90 day standard (default 5 d)</option>
         </select>
       </div>
       <div>
-        <label>Clarifax override (days, optional)</label>
-        <input id="lcOverride" placeholder="e.g. 2" type="number">
+        <label for="lcOverride">Clarifax override (days, optional)</label>
+        <input aria-label="Clarifax override (days, optional)" id="lcOverride" placeholder="e.g. 2" type="number">
       </div>
     </div>
     <div class="actions" style="flex-wrap:wrap">
@@ -2755,18 +2746,18 @@ INDEX_HTML = """<!DOCTYPE html>
       surfaced &mdash; never silent.</p>
     <div class="row">
       <div>
-        <label>Start date</label>
-        <input id="calStart" value="2025-06-30">
+        <label for="calStart">Start date</label>
+        <input aria-label="Start date" id="calStart" value="2025-06-30">
       </div>
       <div>
-        <label>Days</label>
-        <input id="calDays" value="1" type="number">
+        <label for="calDays">Days</label>
+        <input aria-label="Days" id="calDays" value="1" type="number">
       </div>
     </div>
     <div class="row">
       <div>
-        <label>Notice type</label>
-        <select id="calNotice" style="width:100%;padding:9px 10px;
+        <label for="calNotice">Notice type</label>
+        <select aria-label="Notice type" id="calNotice" style="width:100%;padding:9px 10px;
           border:1px solid var(--line);border-radius:6px;font:inherit">
           <option value="clarifax">clarifax (calendar)</option>
           <option value="sdn">SDN (calendar)</option>
@@ -2776,8 +2767,8 @@ INDEX_HTML = """<!DOCTYPE html>
         </select>
       </div>
       <div>
-        <label>Basis override (optional)</label>
-        <select id="calBasis" style="width:100%;padding:9px 10px;
+        <label for="calBasis">Basis override (optional)</label>
+        <select aria-label="Basis override (optional)" id="calBasis" style="width:100%;padding:9px 10px;
           border:1px solid var(--line);border-radius:6px;font:inherit">
           <option value="">(per notice type)</option>
           <option value="calendar">calendar</option>
@@ -2798,10 +2789,10 @@ INDEX_HTML = """<!DOCTYPE html>
       the originating transaction by <strong>Core ID</strong> and each reported
       error is mapped back to the exact leaf/node in the dossier tree for
       correction in the next sequence.</p>
-    <label>Dossier ID (for tree/ledger correlation)</label>
-    <input id="rejDossier" value="e654321">
-    <label>Validation report text</label>
-    <textarea id="rejReport" rows="7" style="width:100%;padding:9px 10px;
+    <label for="rejDossier">Dossier ID (for tree/ledger correlation)</label>
+    <input aria-label="Dossier ID (for tree/ledger correlation)" id="rejDossier" value="e654321">
+    <label for="rejReport">Validation report text</label>
+    <textarea aria-label="Validation report text" id="rejReport" rows="7" style="width:100%;padding:9px 10px;
       border:1px solid var(--line);border-radius:6px;font:13px monospace">Core ID: CORE-654321
 Dossier ID: e654321
 Validation Result: FAIL
@@ -2824,16 +2815,16 @@ Validation Result: FAIL
       fee is separate, varies by drug type, and is due each October&nbsp;1.</p>
     <div class="row">
       <div>
-        <label>Submission date</label>
-        <input id="feeDate" value="2025-06-30">
+        <label for="feeDate">Submission date</label>
+        <input aria-label="Submission date" id="feeDate" value="2025-06-30">
       </div>
       <div>
-        <label>Gross fee (CAD, for mitigation)</label>
-        <input id="feeGross" value="70750" type="number" step="0.01">
+        <label for="feeGross">Gross fee (CAD, for mitigation)</label>
+        <input aria-label="Gross fee (CAD, for mitigation)" id="feeGross" value="70750" type="number" step="0.01">
       </div>
       <div>
-        <label>Drug type (Right-to-Sell)</label>
-        <select id="feeDrugType" style="width:100%;padding:9px 10px;
+        <label for="feeDrugType">Drug type (Right-to-Sell)</label>
+        <select aria-label="Drug type (Right-to-Sell)" id="feeDrugType" style="width:100%;padding:9px 10px;
           border:1px solid var(--line);border-radius:6px;font:inherit">
           <option value="prescription">Prescription drug</option>
           <option value="non-prescription">Non-prescription drug</option>
