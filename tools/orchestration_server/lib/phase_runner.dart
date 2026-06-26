@@ -1015,10 +1015,31 @@ class PhaseRunner {
     );
   }
 
+  /// Per-turn model tiering (Phase 1 of the runner-efficiency plan). OFF unless
+  /// `ADF_TIER_BUILD=1`. When on, mechanical work runs on the cheaper/faster
+  /// Sonnet and critical work stays on the default (Opus). Returns a model id to
+  /// override the backend default for this spawn, or null to use the default.
+  ///
+  /// Conservative policy with an escalation guardrail: the FIRST self-heal attempt
+  /// on a defect set is treated as mechanical (Sonnet); if it doesn't stick, every
+  /// later attempt escalates back to the default model so a misjudged hard fix can
+  /// never lengthen the loop. Initial build + spec/plan/test phases stay on default.
+  String? _modelForTurn({required bool isHeal, int healAttempt = 0}) {
+    if ((Platform.environment['ADF_TIER_BUILD']?.trim() ?? '0') != '1') {
+      return null; // tiering off → backend default (behavior unchanged)
+    }
+    if (!_health.backend.buildsAppDirectly) return null; // agentic build path only
+    final sonnet =
+        (Platform.environment['ADF_RUNNER_SONNET_MODEL']?.trim() ?? 'sonnet');
+    if (isHeal && healAttempt <= 1) return sonnet; // cheap first pass at a defect
+    return null; // critical / escalated heal → default (Opus)
+  }
+
   Future<Map<String, dynamic>> _spawnAgent({
     required String featureId,
     required int phase,
     required String prompt,
+    String? model,
   }) async {
     if (!await isHeadlessReady(refresh: true)) {
       final h = await getHealth(refresh: false);
@@ -1046,13 +1067,15 @@ class PhaseRunner {
       return {'success': false, 'exit_code': -1};
     }
 
-    final args = _health.backend.streamArgs(prompt, repoRoot, partial: true);
+    final args =
+        _health.backend.streamArgs(prompt, repoRoot, partial: true, model: model);
 
     store.appendRunLog(featureId, {
       'timestamp': DateTime.now().toUtc().toIso8601String(),
       'level': 'info',
       'stream': 'command',
       'message': prompt,
+      'model': model ?? '(default)',
     });
 
     final cwd = await _resolveWorkingDirectory(featureId, phase);
@@ -1614,6 +1637,7 @@ Instructions:
         featureId: featureId,
         phase: effectivePhase,
         prompt: healPrompt,
+        model: _modelForTurn(isHeal: true, healAttempt: nextAttempt),
       );
     } finally {
       _active.remove(featureId);

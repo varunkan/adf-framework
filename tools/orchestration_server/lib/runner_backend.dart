@@ -35,11 +35,13 @@ abstract class RunnerBackend {
   String? resolveExecutable();
 
   /// Argv for a streaming (stream-json) run of [prompt] scoped to [workspace].
+  /// [model] overrides the backend's default model for THIS call only (per-turn
+  /// tiering — e.g. a cheaper/faster model for mechanical work); null = default.
   List<String> streamArgs(String prompt, String workspace,
-      {bool partial = true});
+      {bool partial = true, String? model});
 
-  /// Argv for a plain-text run (used by liveness probes).
-  List<String> textArgs(String prompt, String workspace);
+  /// Argv for a plain-text run (used by liveness probes). [model] as above.
+  List<String> textArgs(String prompt, String workspace, {String? model});
 
   /// Argv that reports auth/login status, or null if the CLI has no such verb.
   List<String>? statusArgs();
@@ -177,8 +179,8 @@ class ClaudeBackend extends RunnerBackend {
   /// mistakes the prompt for a flag value or swallows it as a directory
   /// ("Input must be provided … when using --print"). cwd is set by the caller.
   List<String> _args(String prompt, String workspace, String outputFormat,
-      {bool verbose = false}) {
-    final m = model;
+      {bool verbose = false, String? modelOverride}) {
+    final m = modelOverride ?? model;
     return [
       '-p',
       prompt,
@@ -204,12 +206,13 @@ class ClaudeBackend extends RunnerBackend {
 
   @override
   List<String> streamArgs(String prompt, String workspace,
-          {bool partial = true}) =>
-      _args(prompt, workspace, 'stream-json', verbose: true);
+          {bool partial = true, String? model}) =>
+      _args(prompt, workspace, 'stream-json',
+          verbose: true, modelOverride: model);
 
   @override
-  List<String> textArgs(String prompt, String workspace) =>
-      _args(prompt, workspace, 'text');
+  List<String> textArgs(String prompt, String workspace, {String? model}) =>
+      _args(prompt, workspace, 'text', modelOverride: model);
 
   @override
   List<String>? statusArgs() => null; // Claude Code has no `status` verb.
@@ -279,12 +282,14 @@ class CustomBackend extends RunnerBackend {
   }
 
   @override
+  // [model] is accepted for interface parity; the custom runner picks its model
+  // via ADF_RUNNER_MODEL / the ADF_RUNNER_ARGS template, not a CLI flag.
   List<String> streamArgs(String prompt, String workspace,
-          {bool partial = true}) =>
+          {bool partial = true, String? model}) =>
       _expand(prompt, workspace);
 
   @override
-  List<String> textArgs(String prompt, String workspace) =>
+  List<String> textArgs(String prompt, String workspace, {String? model}) =>
       _expand(prompt, workspace);
 
   @override

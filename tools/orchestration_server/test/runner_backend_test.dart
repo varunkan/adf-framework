@@ -44,6 +44,24 @@ void main() {
       expect(args[1], 'hi');
     });
 
+    test('per-call model override wins over the backend default (tiering)', () {
+      // Mechanical turn asks for sonnet even though the backend default is opus.
+      final args = _OpusClaude().streamArgs('hi', '/repo', model: 'sonnet');
+      final mi = args.indexOf('--model');
+      expect(mi, greaterThanOrEqualTo(0));
+      expect(args[mi + 1], 'sonnet',
+          reason: 'per-call model must override the env/default model');
+      // And textArgs honors the override too.
+      final t = _OpusClaude().textArgs('hi', '/repo', model: 'sonnet');
+      expect(t, containsAllInOrder(['--model', 'sonnet']));
+    });
+
+    test('no override falls back to the backend default model', () {
+      final args = _OpusClaude().streamArgs('hi', '/repo');
+      final mi = args.indexOf('--model');
+      expect(args[mi + 1], 'opus', reason: 'null override → backend default');
+    });
+
     test('claude builds app directly (real prompt); custom uses ADF protocol', () {
       expect(ClaudeBackend().buildsAppDirectly, isTrue,
           reason: 'Claude Code writes files via its own tools — needs a real prompt');
@@ -89,7 +107,7 @@ class _CustomShim extends CustomBackend {
   final String args;
   @override
   List<String> streamArgs(String prompt, String workspace,
-      {bool partial = true}) {
+      {bool partial = true, String? model}) {
     final out = <String>[];
     for (final tok in args.split(RegExp(r'\s+'))) {
       if (tok == '{prompt}') {
