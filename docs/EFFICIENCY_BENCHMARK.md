@@ -32,16 +32,21 @@ From 25 recorded ANDS build turns (`measure_efficiency.py --feature ands-submiss
   non-model harness is a small slice of a turn, which is exactly why "100× single-build latency"
   is not achievable without changing the model).
 
-## Pending — the controlled A/B (rigorous per-lever attribution)
-Run a small fixed slice (e.g. fresh `unit-converter`), N=3, under each config; score each window with
-the harness (`--since`). Not yet run (quota-heavy; competes with the live ANDS build).
-| id | RESUME | TIER | VERIFY | purpose |
-|----|--------|------|--------|---------|
-| C0 | off | off | off | baseline |
-| C1 | on | off | off | warm session |
-| C2 | off | on | off | model tiering (Sonnet share + $) |
-| C3 | off | off | on | incremental verify (gate full-vs-defer) |
-| C4 | on | on | on | shipped |
+## Incremental-verify (lever #3): currently DORMANT — measured by registry inspection
+The gate's deep LLM agents — `e2e`, `integration`, `black-box`, `white-box` — are all
+**`enabled: false`** in `scripts/orch/test_agents/registry.json`. So the live gate is **all
+deterministic** (ui-visual, accessibility, dup, security, functional ≈ ~6s post-settle), and the
+incremental lever has **nothing to defer → ~0 effect in the current config**. The lever is correct
+and ready; its saving only materializes once the deep LLM agents are enabled (then deferring them on
+a deterministically-failing cycle saves their multi-minute run). Honest current value: **0×** (no-op).
+
+## Controlled A/B — assessed NOT worth the quota (and why)
+A 5-config × N=3 LLM build campaign was planned for clean per-lever attribution, but inspection shows
+low marginal value: warm-session is already cleanly spiked (~9×), incremental-verify is dormant
+(above), and model-tiering's $ benefit is the known Sonnet/Opus price ratio. The campaign (~15 LLM
+builds + restarts) would mostly re-confirm warm-session while consuming the shared weekly rate budget
+the ANDS build needs. **Decision: skip it; the clean measurements + this finding suffice.** If the
+deep agents are later enabled, re-run a C-incremental A/B to quantify lever #3.
 
 ## Honest caveats
 - **Single-build latency is NOT 100×** and won't be without changing the model — the model turn (~10
