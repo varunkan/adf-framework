@@ -62,6 +62,32 @@ void main() {
       expect(args[mi + 1], 'opus', reason: 'null override → backend default');
     });
 
+    test('warm session: first turn passes --session-id, before --add-dir', () {
+      final args = ClaudeBackend()
+          .streamArgs('hi', '/repo', sessionId: 'abc-123', resumeSession: false);
+      final si = args.indexOf('--session-id');
+      expect(si, greaterThanOrEqualTo(0));
+      expect(args[si + 1], 'abc-123');
+      expect(args, isNot(contains('--resume')));
+      expect(si < args.indexOf('--add-dir'), isTrue);
+      expect(args[1], 'hi', reason: 'prompt still right after -p');
+    });
+
+    test('warm session: later turn passes --resume', () {
+      final args = ClaudeBackend()
+          .streamArgs('hi', '/repo', sessionId: 'abc-123', resumeSession: true);
+      final ri = args.indexOf('--resume');
+      expect(ri, greaterThanOrEqualTo(0));
+      expect(args[ri + 1], 'abc-123');
+      expect(args, isNot(contains('--session-id')));
+    });
+
+    test('no session id → no session flags (unchanged behavior)', () {
+      final args = ClaudeBackend().streamArgs('hi', '/repo');
+      expect(args, isNot(contains('--session-id')));
+      expect(args, isNot(contains('--resume')));
+    });
+
     test('claude builds app directly (real prompt); custom uses ADF protocol', () {
       expect(ClaudeBackend().buildsAppDirectly, isTrue,
           reason: 'Claude Code writes files via its own tools — needs a real prompt');
@@ -107,7 +133,10 @@ class _CustomShim extends CustomBackend {
   final String args;
   @override
   List<String> streamArgs(String prompt, String workspace,
-      {bool partial = true, String? model}) {
+      {bool partial = true,
+      String? model,
+      String? sessionId,
+      bool resumeSession = false}) {
     final out = <String>[];
     for (final tok in args.split(RegExp(r'\s+'))) {
       if (tok == '{prompt}') {

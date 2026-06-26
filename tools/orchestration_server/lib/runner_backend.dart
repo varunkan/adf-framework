@@ -37,8 +37,14 @@ abstract class RunnerBackend {
   /// Argv for a streaming (stream-json) run of [prompt] scoped to [workspace].
   /// [model] overrides the backend's default model for THIS call only (per-turn
   /// tiering — e.g. a cheaper/faster model for mechanical work); null = default.
+  /// [sessionId] (a UUID) enables warm-session continuity: the first turn passes
+  /// it as `--session-id`; later turns set [resumeSession] to pass `--resume`,
+  /// which reuses the prompt cache across separate invocations.
   List<String> streamArgs(String prompt, String workspace,
-      {bool partial = true, String? model});
+      {bool partial = true,
+      String? model,
+      String? sessionId,
+      bool resumeSession = false});
 
   /// Argv for a plain-text run (used by liveness probes). [model] as above.
   List<String> textArgs(String prompt, String workspace, {String? model});
@@ -179,12 +185,18 @@ class ClaudeBackend extends RunnerBackend {
   /// mistakes the prompt for a flag value or swallows it as a directory
   /// ("Input must be provided … when using --print"). cwd is set by the caller.
   List<String> _args(String prompt, String workspace, String outputFormat,
-      {bool verbose = false, String? modelOverride}) {
+      {bool verbose = false,
+      String? modelOverride,
+      String? sessionId,
+      bool resumeSession = false}) {
     final m = modelOverride ?? model;
     return [
       '-p',
       prompt,
       if (m != null) ...['--model', m],
+      // Warm-session continuity: --session-id on the first turn, --resume after.
+      if (sessionId != null && sessionId.isNotEmpty)
+        ...[resumeSession ? '--resume' : '--session-id', sessionId],
       '--output-format',
       outputFormat,
       if (verbose) '--verbose',
@@ -206,9 +218,15 @@ class ClaudeBackend extends RunnerBackend {
 
   @override
   List<String> streamArgs(String prompt, String workspace,
-          {bool partial = true, String? model}) =>
+          {bool partial = true,
+          String? model,
+          String? sessionId,
+          bool resumeSession = false}) =>
       _args(prompt, workspace, 'stream-json',
-          verbose: true, modelOverride: model);
+          verbose: true,
+          modelOverride: model,
+          sessionId: sessionId,
+          resumeSession: resumeSession);
 
   @override
   List<String> textArgs(String prompt, String workspace, {String? model}) =>
@@ -282,10 +300,14 @@ class CustomBackend extends RunnerBackend {
   }
 
   @override
-  // [model] is accepted for interface parity; the custom runner picks its model
-  // via ADF_RUNNER_MODEL / the ADF_RUNNER_ARGS template, not a CLI flag.
+  // [model]/[sessionId]/[resumeSession] are accepted for interface parity; the
+  // custom runner picks its model via ADF_RUNNER_MODEL / the ADF_RUNNER_ARGS
+  // template and has no session-resume concept.
   List<String> streamArgs(String prompt, String workspace,
-          {bool partial = true, String? model}) =>
+          {bool partial = true,
+          String? model,
+          String? sessionId,
+          bool resumeSession = false}) =>
       _expand(prompt, workspace);
 
   @override

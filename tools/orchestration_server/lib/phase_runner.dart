@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'code_heuristics.dart';
 import 'cost_meter.dart';
@@ -1035,6 +1036,17 @@ class PhaseRunner {
     return null; // critical / escalated heal → default (Opus)
   }
 
+  /// RFC-4122 v4 UUID — the `--session-id` flag requires a valid UUID.
+  String _uuidV4() {
+    final r = Random.secure();
+    final b = List<int>.generate(16, (_) => r.nextInt(256));
+    b[6] = (b[6] & 0x0f) | 0x40; // version 4
+    b[8] = (b[8] & 0x3f) | 0x80; // variant 10
+    String h(int i) => b[i].toRadixString(16).padLeft(2, '0');
+    return '${h(0)}${h(1)}${h(2)}${h(3)}-${h(4)}${h(5)}-${h(6)}${h(7)}'
+        '-${h(8)}${h(9)}-${h(10)}${h(11)}${h(12)}${h(13)}${h(14)}${h(15)}';
+  }
+
   Future<Map<String, dynamic>> _spawnAgent({
     required String featureId,
     required int phase,
@@ -1067,8 +1079,30 @@ class PhaseRunner {
       return {'success': false, 'exit_code': -1};
     }
 
-    final args =
-        _health.backend.streamArgs(prompt, repoRoot, partial: true, model: model);
+    // Warm-session continuity (Phase 1, lever 1). OFF unless ADF_RUNNER_RESUME=1.
+    // First turn for a feature passes --session-id <uuid> (stored in state); later
+    // turns pass --resume <uuid>, which reuses the prompt cache (spike: ~9× cheaper).
+    String? sessionId;
+    var resumeSession = false;
+    if ((Platform.environment['ADF_RUNNER_RESUME']?.trim() ?? '0') == '1' &&
+        _health.backend.buildsAppDirectly) {
+      final st = store.readState(featureId);
+      final existing = (st['runner_session_id'] as String?)?.trim();
+      if (existing != null && existing.isNotEmpty) {
+        sessionId = existing;
+        resumeSession = true;
+      } else {
+        sessionId = _uuidV4();
+        st['runner_session_id'] = sessionId;
+        store.writeState(featureId, st);
+      }
+    }
+
+    final args = _health.backend.streamArgs(prompt, repoRoot,
+        partial: true,
+        model: model,
+        sessionId: sessionId,
+        resumeSession: resumeSession);
 
     store.appendRunLog(featureId, {
       'timestamp': DateTime.now().toUtc().toIso8601String(),
@@ -1333,10 +1367,15 @@ class PhaseRunner {
             ? outcomeHead
             : '$outcomeHead\n\n${resultTail.length > 600 ? resultTail.substring(resultTail.length - 600) : resultTail}',
       );
-      if (((after['heal_attempts'] as num?)?.toInt() ?? 0) > 0 ||
-          ((after['orphan_resumes'] as num?)?.toInt() ?? 0) > 0) {
+      // A clean finish clears the interruption counters AND ends the warm runner
+      // session, so the next build/edit starts fresh rather than resuming a
+      // completed (and ever-growing) conversation.
+      final hadChurn = ((after['heal_attempts'] as num?)?.toInt() ?? 0) > 0 ||
+          ((after['orphan_resumes'] as num?)?.toInt() ?? 0) > 0;
+      if (hadChurn || after.containsKey('runner_session_id')) {
         after['heal_attempts'] = 0;
-        after['orphan_resumes'] = 0; // a clean finish clears the interruption counter
+        after['orphan_resumes'] = 0;
+        after.remove('runner_session_id');
         store.writeState(featureId, after);
       }
       return {
