@@ -160,21 +160,20 @@ def main(app_dir):
                     pass
 
 
-def _run_all(reg, app_dir):
-    results, defects, advisory = [], [], []
-    enabled = [a for a in reg["agents"] if a.get("enabled", True)]
-    # Concurrency model: the deep LLM agents (pure Opus calls) and the static
-    # agents (read files) run CONCURRENTLY — that's what keeps the whole gate well
-    # under the orchestrator timeout despite the slow deep agents. But the
-    # 'dynamic' BROWSER agents (ui-visual, accessibility) each drive the ONE shared
-    # app via headless Chrome; running two at once corrupts each other's crawl
-    # (ui-visual's form submits change the DOM accessibility is auditing), so those
-    # run SEQUENTIALLY in this thread while the rest run in the pool. Aggregation
-    # below stays in registry order for stable output.
-    dynamic = [a for a in enabled if a.get("kind") == "dynamic"]
-    rest = [a for a in enabled if a.get("kind") != "dynamic"]
-    max_workers = int(os.environ.get("ADF_GATE_CONCURRENCY", str(min(8, max(1, len(rest))))))
+def _run_set(agents, app_dir):
+    """Run a set of agents concurrently and return {id: result}.
+
+    Concurrency model: deep LLM agents (Opus calls) and static agents (read files)
+    run CONCURRENTLY — that's what keeps the gate under the orchestrator timeout
+    despite the slow deep agents. But 'dynamic' BROWSER agents each drive the ONE
+    shared app via headless Chrome; running two at once corrupts each other's crawl,
+    so those run SEQUENTIALLY in this thread while the rest run in the pool.
+    """
     import concurrent.futures
+    dynamic = [a for a in agents if a.get("kind") == "dynamic"]
+    rest = [a for a in agents if a.get("kind") != "dynamic"]
+    max_workers = int(os.environ.get("ADF_GATE_CONCURRENCY",
+                                     str(min(8, max(1, len(rest) or 1)))))
 
     def _safe(a):
         try:
@@ -191,7 +190,43 @@ def _run_all(reg, app_dir):
             res_by_id[a["id"]] = _safe(a)
         for fut in concurrent.futures.as_completed(futs):
             res_by_id[futs[fut]["id"]] = fut.result()
+    return res_by_id
+
+
+def _run_all(reg, app_dir):
+    enabled = [a for a in reg["agents"] if a.get("enabled", True)]
+    deferred = set()
+    # Incremental gate (ADF_VERIFY_INCREMENTAL=1): run the CHEAP deterministic
+    # agents first; if they already have BLOCKING defects, DEFER the slow deep LLM
+    # agents this cycle — the heal loop fixes the cheap defects first. This NEVER
+    # skips deep agents before completion: a build can only be called clean when
+    # the deterministic tier is clean, and on THAT cycle the deep agents run and
+    # gate as usual. Off by default → all agents run together (unchanged).
+    if os.environ.get("ADF_VERIFY_INCREMENTAL", "0") == "1":
+        det = [a for a in enabled if a.get("kind") != "llm"]
+        deep = [a for a in enabled if a.get("kind") == "llm"]
+        res_by_id = _run_set(det, app_dir)
+        if deep and _aggregate(det, res_by_id, set())["defects"]:
+            deferred = {a["id"] for a in deep}      # cheap tier failing → defer deep
+        elif deep:
+            res_by_id.update(_run_set(deep, app_dir))
+    else:
+        res_by_id = _run_set(enabled, app_dir)
+    return _aggregate(enabled, res_by_id, deferred)
+
+
+def _aggregate(enabled, res_by_id, deferred):
+    results, defects, advisory = [], [], []
     for agent in enabled:
+        if agent["id"] in deferred or agent["id"] not in res_by_id:
+            # Deferred deep agent: advisory only, and explicitly NOT ok — but this
+            # only happens when the deterministic tier already produced blocking
+            # defects, so the overall result is already not-clean regardless.
+            advisory.append(f"{agent['id']}: deep agent deferred "
+                            "(deterministic tier not yet clean)")
+            results.append({"id": agent["id"], "ok": False, "gate": agent["gate"],
+                            "deferred": True, "findings": []})
+            continue
         res = res_by_id[agent["id"]]
         results.append(res)
         if not res.get("implemented", True):
