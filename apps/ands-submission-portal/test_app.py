@@ -10,6 +10,9 @@ Run:  python3 -m unittest -v
 """
 
 import json
+import os
+import shutil
+import tempfile
 import threading
 import unittest
 import urllib.error
@@ -5140,6 +5143,451 @@ class AuditExportTests(unittest.TestCase):
         text = self.audits.export_text("e111111")
         self.assertIn("e111111", text)
         self.assertIn("Events: 1", text)
+
+
+# ===========================================================================
+# Phase A — multi-tenant SaaS control plane (REQ-077..084)
+# ===========================================================================
+
+import auth as auth_mod
+import entitlements as entitlements_mod
+import tenancy as tenancy_mod
+
+
+class PasswordHashTests(unittest.TestCase):
+    """REQ-077/083: passwords are salted + hashed, never stored in clear."""
+
+    def test_hash_is_salted_and_verifiable(self):
+        salt, h = auth_mod.hash_password("hunter2")
+        self.assertNotEqual(h, "hunter2")
+        self.assertTrue(auth_mod.verify_password("hunter2", salt, h))
+        self.assertFalse(auth_mod.verify_password("wrong", salt, h))
+
+    def test_distinct_salts_for_same_password(self):
+        s1, h1 = auth_mod.hash_password("same")
+        s2, h2 = auth_mod.hash_password("same")
+        self.assertNotEqual(s1, s2)
+        self.assertNotEqual(h1, h2)
+
+    def test_empty_password_rejected(self):
+        with self.assertRaises(ValueError):
+            auth_mod.hash_password("")
+
+
+class AuthStoreTests(unittest.TestCase):
+    def setUp(self):
+        self.auth = auth_mod.AuthStore(":memory:")
+
+    def tearDown(self):
+        self.auth.close()
+
+    def test_create_and_authenticate(self):
+        u = self.auth.create_user("tenA", "a@x.com", "pw", "tenant-admin")
+        self.assertEqual(u["role"], "tenant-admin")
+        self.assertIsNotNone(self.auth.authenticate("tenA", "a@x.com", "pw"))
+        self.assertIsNone(self.auth.authenticate("tenA", "a@x.com", "bad"))
+
+    def test_credentials_are_tenant_scoped(self):
+        # REQ-083: a tenant-A credential must NEVER authenticate into tenant B.
+        self.auth.create_user("tenA", "a@x.com", "pw", "user")
+        self.assertIsNone(self.auth.authenticate("tenB", "a@x.com", "pw"))
+
+    def test_duplicate_email_in_tenant_rejected(self):
+        self.auth.create_user("tenA", "a@x.com", "pw", "user")
+        with self.assertRaises(ValueError):
+            self.auth.create_user("tenA", "a@x.com", "pw2", "user")
+
+    def test_same_email_different_tenants_allowed(self):
+        self.auth.create_user("tenA", "a@x.com", "pw", "user")
+        self.auth.create_user("tenB", "a@x.com", "pw", "user")  # no raise
+
+    def test_session_lifecycle(self):
+        u = self.auth.create_user("tenA", "a@x.com", "pw", "user")
+        tok = self.auth.start_session(u)
+        sess = self.auth.resolve_session(tok)
+        self.assertEqual(sess["tenant_id"], "tenA")
+        self.auth.end_session(tok)
+        self.assertIsNone(self.auth.resolve_session(tok))
+
+    def test_resolve_unknown_token_is_none(self):
+        self.assertIsNone(self.auth.resolve_session("nope"))
+
+    def test_ensure_owner_idempotent(self):
+        o1 = self.auth.ensure_owner("owner@p", "pw")
+        o2 = self.auth.ensure_owner("owner@p", "pw")
+        self.assertEqual(o1["id"], o2["id"])
+        self.assertEqual(o1["role"], "owner")
+
+
+class EntitlementStoreTests(unittest.TestCase):
+    def setUp(self):
+        self.ent = entitlements_mod.EntitlementStore(":memory:")
+
+    def tearDown(self):
+        self.ent.close()
+
+    def test_default_plan_grants_all_features(self):
+        plan = self.ent.get_plan(entitlements_mod.DEFAULT_PLAN_ID)
+        self.assertEqual(set(plan["features"]), set(entitlements_mod.FEATURES))
+
+    def test_new_tenant_effective_is_all_features(self):
+        # REQ-081: a brand-new tenant (default plan, no overrides) = ALL on.
+        eff = self.ent.effective("t1", entitlements_mod.DEFAULT_PLAN_ID)
+        self.assertTrue(all(v["enabled"] for v in eff.values()))
+        self.assertTrue(all(v["source"] == "plan" for v in eff.values()))
+
+    def test_create_plan_normalizes_features(self):
+        plan = self.ent.create_plan("Basic", ["dashboard", "bogus", "fees"])
+        self.assertEqual(plan["features"], ["dashboard", "fees"])
+
+    def test_override_wins_over_plan(self):
+        # REQ-081: explicit per-tenant override beats the plan grant.
+        self.ent.set_override("t1", "fees", False)
+        eff = self.ent.effective("t1", entitlements_mod.DEFAULT_PLAN_ID)
+        self.assertFalse(eff["fees"]["enabled"])
+        self.assertEqual(eff["fees"]["source"], "override")
+        self.assertFalse(
+            self.ent.is_entitled("t1", entitlements_mod.DEFAULT_PLAN_ID, "fees"))
+
+    def test_remove_override_reverts_to_plan(self):
+        self.ent.set_override("t1", "fees", False)
+        self.ent.remove_override("t1", "fees")
+        self.assertTrue(
+            self.ent.is_entitled("t1", entitlements_mod.DEFAULT_PLAN_ID, "fees"))
+
+    def test_enable_override_grants_feature_plan_lacks(self):
+        basic = self.ent.create_plan("Lite", ["dashboard"])
+        self.assertFalse(self.ent.is_entitled("t1", basic["id"], "fees"))
+        self.ent.set_override("t1", "fees", True)
+        self.assertTrue(self.ent.is_entitled("t1", basic["id"], "fees"))
+
+    def test_update_plan_changes_baseline(self):
+        basic = self.ent.create_plan("Trial", ["dashboard"])
+        self.ent.update_plan(basic["id"], ["dashboard", "validation"])
+        self.assertTrue(self.ent.is_entitled("t1", basic["id"], "validation"))
+
+    def test_unknown_feature_override_rejected(self):
+        with self.assertRaises(ValueError):
+            self.ent.set_override("t1", "telepathy", True)
+
+
+class TenancyStoreTests(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="ands-tentest-")
+        self.ten = tenancy_mod.TenancyStore(":memory:", tenants_root=self.root)
+
+    def tearDown(self):
+        self.ten.close()
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_create_tenant_has_immutable_id_and_active(self):
+        t = self.ten.create_tenant("Acme Pharma", "reg@acme.com")
+        self.assertTrue(t["id"])
+        self.assertEqual(t["status"], "active")
+        self.assertEqual(t["plan_id"], "all-features")
+
+    def test_duplicate_registration_email_routes_not_duplicates(self):
+        # REQ-077: a duplicate registration email must NOT silently duplicate.
+        t = self.ten.create_tenant("Acme", "reg@acme.com")
+        with self.assertRaises(tenancy_mod.DuplicateTenant) as ctx:
+            self.ten.create_tenant("Acme Two", "reg@acme.com")
+        self.assertEqual(ctx.exception.existing["id"], t["id"])
+
+    def test_per_tenant_db_files_are_isolated(self):
+        # REQ-078: data written to tenant A is NEVER visible to tenant B.
+        a = self.ten.create_tenant("Acme", "a@acme.com")
+        b = self.ten.create_tenant("Beta", "b@beta.com")
+        da = tenancy_mod.TenantData(self.ten.tenant_db_path(a["id"]))
+        da.add("submission", {"drug": "X"})
+        db = tenancy_mod.TenantData(self.ten.tenant_db_path(b["id"]))
+        self.assertEqual(da.count(), 1)
+        self.assertEqual(db.count(), 0)
+        self.assertNotEqual(self.ten.tenant_db_path(a["id"]),
+                            self.ten.tenant_db_path(b["id"]))
+        da.close()
+        db.close()
+
+    def test_suspend_resume_audited_with_before_after(self):
+        t = self.ten.create_tenant("Acme", "a@acme.com")
+        self.ten.suspend(t["id"], "owner@p")
+        self.assertEqual(self.ten.get_tenant(t["id"])["status"], "suspended")
+        self.ten.resume(t["id"], "owner@p")
+        self.assertEqual(self.ten.get_tenant(t["id"])["status"], "active")
+        actions = [a["action"] for a in self.ten.list_audit()]
+        self.assertIn("tenant.suspended", actions)
+        self.assertIn("tenant.active", actions)
+        # Audit records before/after state (REQ-084).
+        suspend_evt = next(a for a in self.ten.list_audit()
+                           if a["action"] == "tenant.suspended")
+        self.assertEqual(suspend_evt["before"]["status"], "active")
+        self.assertEqual(suspend_evt["after"]["status"], "suspended")
+
+    def test_delete_archives_db_file(self):
+        t = self.ten.create_tenant("Acme", "a@acme.com")
+        path = self.ten.tenant_db_path(t["id"])
+        self.assertTrue(os.path.exists(path))
+        result = self.ten.delete(t["id"], "owner@p", archive=True)
+        self.assertEqual(result["status"], "deleted")
+        self.assertEqual(result["retention"], "archived")
+        self.assertFalse(os.path.exists(path))
+
+    def test_deleted_tenant_excluded_from_active_list(self):
+        t = self.ten.create_tenant("Acme", "a@acme.com")
+        self.ten.delete(t["id"], "owner@p")
+        ids = [x["id"] for x in self.ten.list_tenants()]
+        self.assertNotIn(t["id"], ids)
+        ids_all = [x["id"] for x in self.ten.list_tenants(include_deleted=True)]
+        self.assertIn(t["id"], ids_all)
+
+
+class ControlPlaneApiTests(unittest.TestCase):
+    """End-to-end HTTP tests for the multi-tenant control plane."""
+
+    def setUp(self):
+        self.store = server.SubmissionStore(":memory:")
+        self.auth = auth_mod.AuthStore(":memory:")
+        self.auth.ensure_owner("owner@platform", "ownerpw")
+        self.ent = entitlements_mod.EntitlementStore(":memory:")
+        self.root = tempfile.mkdtemp(prefix="ands-cpapi-")
+        self.ten = tenancy_mod.TenancyStore(":memory:", tenants_root=self.root)
+        self.httpd = ThreadingHTTPServer(
+            ("127.0.0.1", 0),
+            server.make_handler(self.store, auth_store=self.auth,
+                                tenancy_store=self.ten,
+                                entitlement_store=self.ent))
+        self.port = self.httpd.server_address[1]
+        self.thread = threading.Thread(target=self.httpd.serve_forever,
+                                       daemon=True)
+        self.thread.start()
+
+    def tearDown(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+        self.thread.join()
+        self.store.close()
+        self.auth.close()
+        self.ent.close()
+        self.ten.close()
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    # -- helpers --------------------------------------------------------
+    def _url(self, path):
+        return f"http://127.0.0.1:{self.port}{path}"
+
+    def _req(self, method, path, body=None, token=""):
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = "Bearer " + token
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(self._url(path), data=data,
+                                     headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode())
+        except urllib.error.HTTPError as e:
+            code, payload = e.code, json.loads(e.read().decode())
+            e.close()
+            return code, payload
+
+    def _owner_token(self):
+        _, data = self._req("POST", "/api/auth/login",
+                            {"email": "owner@platform", "password": "ownerpw"})
+        return data["token"]
+
+    def _signup(self, company, email, password="pw"):
+        return self._req("POST", "/api/auth/signup",
+                         {"company": company, "email": email,
+                          "password": password})
+
+    # -- sign-up / login (REQ-077) --------------------------------------
+    def test_signup_creates_tenant_admin_and_autologs_in(self):
+        status, data = self._signup("Acme Pharma", "admin@acme.com")
+        self.assertEqual(status, 201)
+        self.assertEqual(data["user"]["role"], "tenant-admin")
+        self.assertTrue(data["token"])
+        # The session resolves to that tenant.
+        s, me = self._req("GET", "/api/auth/me", token=data["token"])
+        self.assertEqual(s, 200)
+        self.assertEqual(me["tenant_id"], data["tenant"]["id"])
+
+    def test_signup_duplicate_email_409_routes_to_existing(self):
+        _, first = self._signup("Acme", "admin@acme.com")
+        status, data = self._signup("Acme Clone", "admin@acme.com")
+        self.assertEqual(status, 409)
+        self.assertEqual(data["tenant_id"], first["tenant"]["id"])
+
+    def test_signup_requires_fields(self):
+        status, _ = self._req("POST", "/api/auth/signup",
+                             {"company": "X"})
+        self.assertEqual(status, 400)
+
+    def test_login_bad_credentials_401(self):
+        self._signup("Acme", "admin@acme.com", "right")
+        status, _ = self._req("POST", "/api/auth/login",
+                             {"email": "admin@acme.com", "password": "wrong"})
+        self.assertEqual(status, 401)
+
+    def test_logout_invalidates_session(self):
+        _, data = self._signup("Acme", "admin@acme.com")
+        tok = data["token"]
+        self._req("POST", "/api/auth/logout", {}, token=tok)
+        status, _ = self._req("GET", "/api/auth/me", token=tok)
+        self.assertEqual(status, 401)
+
+    # -- owner control plane access control (REQ-079) -------------------
+    def test_owner_routes_forbidden_without_owner_session(self):
+        status, _ = self._req("GET", "/api/owner/tenants")
+        self.assertEqual(status, 403)
+        # A tenant-admin must also be refused the control plane.
+        _, data = self._signup("Acme", "admin@acme.com")
+        status, _ = self._req("GET", "/api/owner/tenants", token=data["token"])
+        self.assertEqual(status, 403)
+
+    def test_denied_control_plane_access_is_audited(self):
+        self._req("GET", "/api/owner/tenants")  # anonymous, denied
+        tok = self._owner_token()
+        _, data = self._req("GET", "/api/owner/audit", token=tok)
+        actions = [a["action"] for a in data["audit"]]
+        self.assertIn("control_plane.access_denied", actions)
+
+    def test_owner_login_redirects_to_console(self):
+        status, data = self._req("POST", "/api/auth/login",
+                                {"email": "owner@platform",
+                                 "password": "ownerpw"})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["role"], "owner")
+        self.assertEqual(data["redirect"], "/owner")
+
+    def test_owner_can_list_tenants_with_status_and_usage(self):
+        self._signup("Acme", "admin@acme.com")
+        tok = self._owner_token()
+        status, data = self._req("GET", "/api/owner/tenants", token=tok)
+        self.assertEqual(status, 200)
+        self.assertEqual(len(data["tenants"]), 1)
+        self.assertIn("status", data["tenants"][0])
+        self.assertIn("usage", data["tenants"][0])
+
+    # -- owner provisioning (REQ-077) -----------------------------------
+    def test_owner_provisions_tenant_with_invite_password(self):
+        tok = self._owner_token()
+        status, data = self._req("POST", "/api/owner/tenants",
+                                {"company": "Owned Co",
+                                 "email": "boss@owned.com"}, token=tok)
+        self.assertEqual(status, 201)
+        self.assertTrue(data["invite_password"])
+        self.assertEqual(data["admin"]["role"], "tenant-admin")
+        # The provisioned admin can log in with the invite password.
+        s, login = self._req("POST", "/api/auth/login",
+                            {"email": "boss@owned.com",
+                             "password": data["invite_password"]})
+        self.assertEqual(s, 200)
+
+    # -- plans + overrides (REQ-080/081) --------------------------------
+    def test_owner_creates_plan_and_assigns_to_tenant(self):
+        _, signup = self._signup("Acme", "admin@acme.com")
+        tid = signup["tenant"]["id"]
+        tok = self._owner_token()
+        s, _ = self._req("POST", "/api/owner/plans",
+                       {"name": "Basic", "features": ["dashboard", "dossiers"]},
+                       token=tok)
+        self.assertEqual(s, 201)
+        s, _ = self._req("POST", f"/api/owner/tenants/{tid}/plan",
+                       {"plan_id": "basic"}, token=tok)
+        self.assertEqual(s, 200)
+        s, ent = self._req("GET", f"/api/owner/tenants/{tid}/entitlements",
+                         token=tok)
+        self.assertFalse(ent["features"]["fees"]["enabled"])
+        self.assertTrue(ent["features"]["dashboard"]["enabled"])
+
+    def test_owner_override_beats_plan(self):
+        _, signup = self._signup("Acme", "admin@acme.com")
+        tid = signup["tenant"]["id"]
+        tok = self._owner_token()
+        s, data = self._req("POST", f"/api/owner/tenants/{tid}/overrides",
+                          {"feature": "fees", "enabled": False}, token=tok)
+        self.assertEqual(s, 200)
+        self.assertFalse(data["effective"]["fees"]["enabled"])
+        self.assertEqual(data["effective"]["fees"]["source"], "override")
+
+    # -- entitlement enforcement at the API (REQ-082) -------------------
+    def test_disabled_feature_returns_403_at_api(self):
+        _, signup = self._signup("Acme", "admin@acme.com")
+        tid = signup["tenant"]["id"]
+        tok = signup["token"]
+        # Entitled by default -> works.
+        s, _ = self._req("POST", "/api/tenant/submissions",
+                       {"drug_product": "Aspirin"}, token=tok)
+        self.assertEqual(s, 201)
+        # Owner disables 'dossiers' -> direct API call now 403 (defense in depth).
+        otok = self._owner_token()
+        self._req("POST", f"/api/owner/tenants/{tid}/overrides",
+                  {"feature": "dossiers", "enabled": False}, token=otok)
+        s, data = self._req("POST", "/api/tenant/submissions",
+                          {"drug_product": "Aspirin"}, token=tok)
+        self.assertEqual(s, 403)
+        self.assertEqual(data["feature"], "dossiers")
+
+    def test_tenant_entitlements_endpoint_lists_entitled(self):
+        _, signup = self._signup("Acme", "admin@acme.com")
+        s, data = self._req("GET", "/api/tenant/entitlements",
+                          token=signup["token"])
+        self.assertEqual(s, 200)
+        self.assertEqual(set(data["entitled"]),
+                         set(entitlements_mod.FEATURES))
+
+    # -- tenant lifecycle blocks sign-in (REQ-084) ----------------------
+    def test_suspended_tenant_user_blocked_at_login(self):
+        _, signup = self._signup("Acme", "admin@acme.com")
+        tid = signup["tenant"]["id"]
+        otok = self._owner_token()
+        self._req("POST", f"/api/owner/tenants/{tid}/suspend", {}, token=otok)
+        status, data = self._req("POST", "/api/auth/login",
+                                {"email": "admin@acme.com", "password": "pw"})
+        self.assertEqual(status, 403)
+        self.assertEqual(data["error"], "suspended")
+
+    def test_resumed_tenant_user_can_login_again(self):
+        _, signup = self._signup("Acme", "admin@acme.com")
+        tid = signup["tenant"]["id"]
+        otok = self._owner_token()
+        self._req("POST", f"/api/owner/tenants/{tid}/suspend", {}, token=otok)
+        self._req("POST", f"/api/owner/tenants/{tid}/resume", {}, token=otok)
+        status, _ = self._req("POST", "/api/auth/login",
+                            {"email": "admin@acme.com", "password": "pw"})
+        self.assertEqual(status, 200)
+
+    # -- cross-tenant data isolation over HTTP (REQ-078) ----------------
+    def test_cross_tenant_data_isolation_over_http(self):
+        _, a = self._signup("Acme", "a@acme.com")
+        _, b = self._signup("Beta", "b@beta.com")
+        self._req("POST", "/api/tenant/submissions",
+                  {"drug_product": "AcmeDrug"}, token=a["token"])
+        # Tenant B sees ONLY its own (empty) data, never Acme's.
+        _, bdata = self._req("GET", "/api/tenant/submissions", token=b["token"])
+        self.assertEqual(bdata["submissions"], [])
+        _, adata = self._req("GET", "/api/tenant/submissions", token=a["token"])
+        self.assertEqual(len(adata["submissions"]), 1)
+
+    def test_no_tenant_context_denied(self):
+        # REQ-078: an unauthenticated tenant-data request is rejected.
+        status, _ = self._req("GET", "/api/tenant/submissions")
+        self.assertEqual(status, 401)
+
+    # -- the two control-plane / auth pages render (REQ-079/085) --------
+    def test_owner_console_page_renders(self):
+        with urllib.request.urlopen(self._url("/owner")) as resp:
+            page = resp.read().decode()
+        self.assertEqual(resp.status, 200)
+        self.assertIn("Owner Control Plane", page)
+        self.assertIn('lang="en"', page)
+        self.assertIn("<label", page)  # WCAG: labelled controls
+
+    def test_auth_page_renders(self):
+        with urllib.request.urlopen(self._url("/login")) as resp:
+            page = resp.read().decode()
+        self.assertEqual(resp.status, 200)
+        self.assertIn("Register your company", page)
+        self.assertIn('lang="en"', page)
 
 
 if __name__ == "__main__":

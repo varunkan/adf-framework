@@ -16,12 +16,15 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import sqlite3
+import tempfile
 import threading
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
+import auth
 import backbone
 import bioequivalence
 import content_model
@@ -29,6 +32,7 @@ import cv
 import domain
 import dr
 import ectd
+import entitlements as entitlements_mod
 import esign
 import fees
 import hc_calendar
@@ -41,10 +45,22 @@ import report_ingest
 import response_builder
 import retention
 import stf
+import tenancy
 import transmission
 import validation
 
 DB_PATH = "submissions.db"
+
+# Multi-tenant control plane (REQ-077..084). Platform data (tenants, plans,
+# entitlements, owner accounts, control-plane audit) lives in its OWN database,
+# physically separate from any tenant's workspace DB; each tenant gets its own
+# DB file under CONTROL_PLANE_TENANTS_ROOT/<tenant-id>/ands.db.
+CONTROL_PLANE_DB = os.environ.get("ADF_CONTROL_PLANE_DB") or "control_plane.db"
+CONTROL_PLANE_TENANTS_ROOT = (
+    os.environ.get("ADF_TENANTS_ROOT") or os.path.join("data", "tenants"))
+# Bootstrap platform-owner credentials (overridable via env for a real deploy).
+OWNER_EMAIL = (os.environ.get("ADF_OWNER_EMAIL") or "owner@platform").lower()
+OWNER_PASSWORD = os.environ.get("ADF_OWNER_PASSWORD") or "owner-change-me"
 
 # Hard ceiling on an inbound JSON request body. Every API payload here is small
 # structured metadata (identifiers, a few KB of leaf "content" at most), so a
@@ -646,7 +662,10 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
                  lifecycles: "LifecycleStore" = None,
                  rejections: "RejectionStore" = None,
                  audits: "AuditStore" = None,
-                 portfolios: "PortfolioStore" = None):
+                 portfolios: "PortfolioStore" = None,
+                 auth_store: "auth.AuthStore" = None,
+                 tenancy_store: "tenancy.TenancyStore" = None,
+                 entitlement_store: "entitlements_mod.EntitlementStore" = None):
     """Build a request handler bound to a given store (keeps it testable).
 
     ``companies`` backs the REP CO endpoints, ``dossiers`` backs the eCTD
@@ -655,6 +674,10 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
     and ``rejections`` backs validation-report ingestion (REQ-029); when omitted
     a fresh in-memory store is created so existing callers keep working
     unchanged.
+
+    ``auth_store``/``tenancy_store``/``entitlement_store`` back the multi-tenant
+    control plane (REQ-077..084). When omitted, an in-memory control plane is
+    created with a bootstrap owner so existing callers keep working unchanged.
     """
     if companies is None:
         companies = CompanyStore(":memory:")
@@ -670,6 +693,14 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
         audits = AuditStore(":memory:")
     if portfolios is None:
         portfolios = PortfolioStore(":memory:")
+    if auth_store is None:
+        auth_store = auth.AuthStore(":memory:")
+        auth_store.ensure_owner(OWNER_EMAIL, OWNER_PASSWORD)
+    if entitlement_store is None:
+        entitlement_store = entitlements_mod.EntitlementStore(":memory:")
+    if tenancy_store is None:
+        tenancy_store = tenancy.TenancyStore(
+            ":memory:", tenants_root=tempfile.mkdtemp(prefix="ands-tenants-"))
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "ANDSPortal/1.0"
@@ -730,6 +761,319 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
 
         def log_message(self, *args):  # keep test output quiet
             pass
+
+        # -- control-plane auth/tenancy helpers (REQ-077..084) --------------
+        def _bearer_token(self) -> str:
+            """Token from ``Authorization: Bearer`` or a ``session`` cookie."""
+            header = self.headers.get("Authorization") or ""
+            if header.startswith("Bearer "):
+                return header[len("Bearer "):].strip()
+            cookie = self.headers.get("Cookie") or ""
+            for part in cookie.split(";"):
+                part = part.strip()
+                if part.startswith("session="):
+                    return part[len("session="):].strip()
+            return ""
+
+        def _session(self):
+            return auth_store.resolve_session(self._bearer_token())
+
+        def _require_owner(self):
+            """Return the owner session, or send 403 (audited) — REQ-079."""
+            sess = self._session()
+            if sess and sess["role"] == auth.OWNER_ROLE:
+                return sess
+            actor = sess["email"] if sess else "anonymous"
+            tenancy_store.audit(
+                actor, "control_plane.access_denied",
+                sess["tenant_id"] if sess else "",
+                None, {"path": urlparse(self.path).path})
+            self._send_json(
+                {"error": "forbidden",
+                 "detail": "the owner control plane is restricted to the "
+                           "platform owner"}, 403)
+            return None
+
+        def _tenant_session(self):
+            """Return an active-tenant user session, or send 401/403.
+
+            A suspended tenant's users are blocked at the door (REQ-084); a
+            request with no resolvable tenant context is denied (REQ-078)."""
+            sess = self._session()
+            if not sess or sess["role"] not in (
+                    auth.TENANT_ADMIN_ROLE, auth.USER_ROLE):
+                self._send_json({"error": "unauthorized"}, 401)
+                return None
+            tenant = tenancy_store.get_tenant(sess["tenant_id"])
+            if tenant is None or tenant["status"] == tenancy.STATUS_DELETED:
+                self._send_json(
+                    {"error": "forbidden", "detail": "no tenant context"}, 403)
+                return None
+            if tenant["status"] == tenancy.STATUS_SUSPENDED:
+                self._send_json(
+                    {"error": "suspended",
+                     "detail": "This workspace is suspended. Contact the "
+                               "platform owner."}, 403)
+                return None
+            return sess
+
+        def _require_feature(self, sess, feature: str) -> bool:
+            """Server-side entitlement gate (REQ-082) — 403 + audit if denied."""
+            tenant = tenancy_store.get_tenant(sess["tenant_id"])
+            if tenant is None:
+                self._send_json(
+                    {"error": "forbidden", "detail": "no tenant context"}, 403)
+                return False
+            if not entitlement_store.is_entitled(
+                    tenant["id"], tenant["plan_id"], feature):
+                tenancy_store.audit(
+                    sess["email"], "entitlement.denied", tenant["id"],
+                    None, {"feature": feature})
+                self._send_json(
+                    {"error": "forbidden", "feature": feature,
+                     "detail": f"the '{feature}' feature is not enabled for "
+                               f"this tenant"}, 403)
+                return False
+            return True
+
+        def _tenant_data(self, tenant_id: str) -> "tenancy.TenantData":
+            return tenancy.TenantData(tenancy_store.tenant_db_path(tenant_id))
+
+        # -- control-plane request handlers ---------------------------------
+        def _handle_signup(self):
+            """Self-serve company sign-up (REQ-077): atomically create a tenant
+            + its first tenant-admin + the default all-features plan; auto-login
+            the admin. A duplicate registration email routes to the existing
+            tenant rather than silently duplicating."""
+            body = self._read_json()
+            company = (body.get("company") or "").strip()
+            email = (body.get("email") or "").strip().lower()
+            password = body.get("password") or ""
+            name = (body.get("name") or "").strip()
+            if not company or not email or not password:
+                self._send_json(
+                    {"error": "company, email and password are required"}, 400)
+                return
+            try:
+                tenant = tenancy_store.create_tenant(
+                    company, email, actor="self-serve",
+                    plan_id=entitlements_mod.DEFAULT_PLAN_ID)
+            except tenancy.DuplicateTenant as dup:
+                self._send_json(
+                    {"error": "tenant_exists",
+                     "detail": "a company is already registered with this "
+                               "email; please sign in instead",
+                     "tenant_id": dup.existing["id"]}, 409)
+                return
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, 400)
+                return
+            # Create the first tenant-admin; roll back the tenant if it fails
+            # so we never leave an orphaned tenant (atomicity, REQ-077).
+            try:
+                user = auth_store.create_user(
+                    tenant["id"], email, password,
+                    role=auth.TENANT_ADMIN_ROLE, name=name)
+            except ValueError as exc:
+                tenancy_store.delete(tenant["id"], "self-serve", archive=False)
+                self._send_json({"error": str(exc)}, 400)
+                return
+            token = auth_store.start_session(user)
+            self._send_json(
+                {"tenant": tenant, "user": user, "token": token}, 201)
+
+        def _handle_login(self):
+            body = self._read_json()
+            email = (body.get("email") or "").strip().lower()
+            password = body.get("password") or ""
+            tenant_id = (body.get("tenant_id") or "").strip()
+            # Owner sign-in first (platform scope, no tenant).
+            owner = auth_store.authenticate_owner(email, password)
+            if owner is not None:
+                token = auth_store.start_session(owner)
+                self._send_json({"token": token, "role": owner["role"],
+                                 "tenant_id": "", "redirect": "/owner"})
+                return
+            # Tenant user sign-in. Resolve the tenant from an explicit id or by
+            # finding the (single) tenant whose user matches — credentials are
+            # tenant-scoped, so we look up by the tenant's registration too.
+            user = None
+            if tenant_id:
+                user = auth_store.authenticate(tenant_id, email, password)
+            else:
+                for tenant in tenancy_store.list_tenants(include_deleted=True):
+                    candidate = auth_store.authenticate(
+                        tenant["id"], email, password)
+                    if candidate is not None:
+                        user = candidate
+                        tenant_id = tenant["id"]
+                        break
+            if user is None:
+                self._send_json({"error": "invalid credentials"}, 401)
+                return
+            tenant = tenancy_store.get_tenant(tenant_id)
+            if tenant is None or tenant["status"] == tenancy.STATUS_DELETED:
+                self._send_json({"error": "invalid credentials"}, 401)
+                return
+            if tenant["status"] == tenancy.STATUS_SUSPENDED:
+                # Suspended tenants are blocked at sign-in (REQ-084).
+                self._send_json(
+                    {"error": "suspended",
+                     "detail": "This workspace is suspended. Contact the "
+                               "platform owner."}, 403)
+                return
+            token = auth_store.start_session(user)
+            self._send_json({"token": token, "role": user["role"],
+                             "tenant_id": tenant_id, "redirect": "/"})
+
+        def _handle_logout(self):
+            token = self._bearer_token()
+            if token:
+                auth_store.end_session(token)
+            self._send_json({"ok": True})
+
+        def _handle_tenant_submission(self):
+            """Write a record into the CURRENT tenant's OWN database — gated by
+            the 'dossiers' entitlement (REQ-082) and physically isolated per
+            tenant (REQ-078)."""
+            sess = self._tenant_session()
+            if sess is None:
+                return
+            if not self._require_feature(sess, "dossiers"):
+                return
+            body = self._read_json()
+            data = self._tenant_data(sess["tenant_id"])
+            try:
+                rec = data.add("submission", {
+                    "drug_product": (body.get("drug_product") or "").strip(),
+                    "dossier_id": (body.get("dossier_id") or "").strip(),
+                    "by": sess["email"]})
+            finally:
+                data.close()
+            self._send_json({"saved": rec}, 201)
+
+        def _handle_owner_provision(self):
+            """Owner-initiated tenant provisioning (REQ-077). Returns an invite
+            password for the new tenant-admin when none is supplied."""
+            sess = self._require_owner()
+            if sess is None:
+                return
+            body = self._read_json()
+            company = (body.get("company") or "").strip()
+            email = (body.get("email") or "").strip().lower()
+            password = body.get("password") or secrets.token_urlsafe(12)
+            if not company or not email:
+                self._send_json(
+                    {"error": "company and admin email are required"}, 400)
+                return
+            try:
+                tenant = tenancy_store.create_tenant(
+                    company, email, actor=sess["email"],
+                    plan_id=entitlements_mod.DEFAULT_PLAN_ID)
+            except tenancy.DuplicateTenant as dup:
+                self._send_json(
+                    {"error": "tenant_exists",
+                     "tenant_id": dup.existing["id"]}, 409)
+                return
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, 400)
+                return
+            try:
+                user = auth_store.create_user(
+                    tenant["id"], email, password,
+                    role=auth.TENANT_ADMIN_ROLE)
+            except ValueError as exc:
+                tenancy_store.delete(tenant["id"], sess["email"], archive=False)
+                self._send_json({"error": str(exc)}, 400)
+                return
+            self._send_json(
+                {"tenant": tenant, "admin": user,
+                 "invite_password": password}, 201)
+
+        def _handle_owner_create_plan(self):
+            sess = self._require_owner()
+            if sess is None:
+                return
+            body = self._read_json()
+            try:
+                plan = entitlement_store.create_plan(
+                    body.get("name") or "", body.get("features") or [])
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, 400)
+                return
+            tenancy_store.audit(sess["email"], "plan.create", "", None, plan)
+            self._send_json({"plan": plan}, 201)
+
+        def _handle_owner_update_plan(self, plan_id: str):
+            sess = self._require_owner()
+            if sess is None:
+                return
+            body = self._read_json()
+            try:
+                plan = entitlement_store.update_plan(
+                    plan_id, body.get("features") or [])
+            except KeyError:
+                self._send_json({"error": "plan not found"}, 404)
+                return
+            tenancy_store.audit(sess["email"], "plan.update", "", None, plan)
+            self._send_json({"plan": plan})
+
+        def _handle_owner_tenant_action(self, rest: str):
+            """Dispatch ``/api/owner/tenants/<id>/<action>`` (REQ-080/081/084)."""
+            sess = self._require_owner()
+            if sess is None:
+                return
+            if "/" not in rest:
+                self._send_json({"error": "not found"}, 404)
+                return
+            tenant_id, action = rest.split("/", 1)
+            if tenancy_store.get_tenant(tenant_id) is None:
+                self._send_json({"error": "tenant not found"}, 404)
+                return
+            body = self._read_json()
+            try:
+                if action == "suspend":
+                    result = tenancy_store.suspend(tenant_id, sess["email"])
+                    auth_store.end_sessions_for_tenant(tenant_id)
+                elif action == "resume":
+                    result = tenancy_store.resume(tenant_id, sess["email"])
+                elif action == "delete":
+                    auth_store.end_sessions_for_tenant(tenant_id)
+                    result = tenancy_store.delete(tenant_id, sess["email"])
+                elif action == "plan":
+                    plan_id = (body.get("plan_id") or "").strip()
+                    if entitlement_store.get_plan(plan_id) is None:
+                        self._send_json({"error": "plan not found"}, 404)
+                        return
+                    result = tenancy_store.set_plan(
+                        tenant_id, plan_id, sess["email"])
+                elif action == "overrides":
+                    feature = (body.get("feature") or "").strip()
+                    if feature not in entitlements_mod.FEATURES:
+                        self._send_json({"error": "unknown feature"}, 400)
+                        return
+                    if body.get("enabled") is None:
+                        entitlement_store.remove_override(tenant_id, feature)
+                        change = {"feature": feature, "override": "removed"}
+                    else:
+                        entitlement_store.set_override(
+                            tenant_id, feature, bool(body.get("enabled")))
+                        change = {"feature": feature,
+                                  "enabled": bool(body.get("enabled"))}
+                    tenancy_store.audit(
+                        sess["email"], "entitlement.override",
+                        tenant_id, None, change)
+                    tenant = tenancy_store.get_tenant(tenant_id)
+                    self._send_json({"effective": entitlement_store.effective(
+                        tenant_id, tenant["plan_id"])})
+                    return
+                else:
+                    self._send_json({"error": "unknown action"}, 404)
+                    return
+            except KeyError:
+                self._send_json({"error": "tenant not found"}, 404)
+                return
+            self._send_json({"tenant": result})
 
         # -- routing --------------------------------------------------------
         def do_GET(self):
@@ -1069,10 +1413,132 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
                 else:
                     self._send_json(record)
                 return
+
+            # ----- multi-tenant control plane: GET routes (REQ-077..084) ----
+            if path in ("/owner", "/owner/"):
+                # Owner control-plane console — a SEPARATE shell from the tenant
+                # workspace (REQ-079). The page renders for anyone; every data
+                # call it makes requires an owner session (enforced server-side).
+                self._send_html(OWNER_CONSOLE_HTML)
+                return
+            if path in ("/login", "/signup"):
+                self._send_html(AUTH_HTML)
+                return
+            if path == "/api/auth/me":
+                sess = self._session()
+                if not sess:
+                    self._send_json({"authenticated": False}, 401)
+                    return
+                payload = {"authenticated": True, "email": sess["email"],
+                           "role": sess["role"], "tenant_id": sess["tenant_id"]}
+                if sess["tenant_id"]:
+                    tenant = tenancy_store.get_tenant(sess["tenant_id"])
+                    if tenant:
+                        payload["tenant"] = {
+                            "id": tenant["id"], "name": tenant["name"],
+                            "status": tenant["status"],
+                            "plan_id": tenant["plan_id"]}
+                self._send_json(payload)
+                return
+            if path == "/api/tenant/entitlements":
+                sess = self._tenant_session()
+                if sess is None:
+                    return
+                tenant = tenancy_store.get_tenant(sess["tenant_id"])
+                self._send_json({
+                    "tenant_id": tenant["id"], "plan_id": tenant["plan_id"],
+                    "features": entitlement_store.effective(
+                        tenant["id"], tenant["plan_id"]),
+                    "entitled": entitlement_store.entitled_features(
+                        tenant["id"], tenant["plan_id"])})
+                return
+            if path == "/api/tenant/submissions":
+                sess = self._tenant_session()
+                if sess is None:
+                    return
+                if not self._require_feature(sess, "dossiers"):
+                    return
+                data = self._tenant_data(sess["tenant_id"])
+                try:
+                    self._send_json(
+                        {"submissions": data.list("submission")})
+                finally:
+                    data.close()
+                return
+            if path == "/api/owner/tenants":
+                if self._require_owner() is None:
+                    return
+                out = []
+                for tenant in tenancy_store.list_tenants(include_deleted=True):
+                    data = self._tenant_data(tenant["id"])
+                    try:
+                        usage = data.count()
+                    finally:
+                        data.close()
+                    out.append(dict(tenant, usage={"records": usage}))
+                self._send_json({"tenants": out})
+                return
+            if path == "/api/owner/plans":
+                if self._require_owner() is None:
+                    return
+                self._send_json({"plans": entitlement_store.list_plans(),
+                                 "features": [
+                                     {"key": k,
+                                      "label": entitlements_mod.FEATURE_LABELS[k]}
+                                     for k in entitlements_mod.FEATURES]})
+                return
+            if path == "/api/owner/audit":
+                if self._require_owner() is None:
+                    return
+                self._send_json({"audit": tenancy_store.list_audit()})
+                return
+            if path.startswith("/api/owner/tenants/") and \
+                    path.endswith("/entitlements"):
+                if self._require_owner() is None:
+                    return
+                tid = path[len("/api/owner/tenants/"):-len("/entitlements")]
+                tenant = tenancy_store.get_tenant(tid)
+                if tenant is None:
+                    self._send_json({"error": "tenant not found"}, 404)
+                    return
+                self._send_json({
+                    "tenant_id": tid, "plan_id": tenant["plan_id"],
+                    "features": entitlement_store.effective(
+                        tid, tenant["plan_id"])})
+                return
+
             self._send_json({"error": "not found"}, 404)
 
         def do_POST(self):
             path = urlparse(self.path).path
+
+            # ----- multi-tenant control plane: POST routes (REQ-077..084) ---
+            if path == "/api/auth/signup":
+                self._handle_signup()
+                return
+            if path == "/api/auth/login":
+                self._handle_login()
+                return
+            if path == "/api/auth/logout":
+                self._handle_logout()
+                return
+            if path == "/api/tenant/submissions":
+                self._handle_tenant_submission()
+                return
+            if path == "/api/owner/tenants":
+                self._handle_owner_provision()
+                return
+            if path == "/api/owner/plans":
+                self._handle_owner_create_plan()
+                return
+            if path.startswith("/api/owner/plans/"):
+                self._handle_owner_update_plan(path[len("/api/owner/plans/"):])
+                return
+            if path.startswith("/api/owner/tenants/"):
+                self._handle_owner_tenant_action(
+                    path[len("/api/owner/tenants/"):])
+                return
+
             if path == "/api/validate":
                 self._handle_validate(store_record=False)
                 return
@@ -2274,6 +2740,308 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
                 200 if event["executed"] else 409)
 
     return Handler
+
+
+# ---------------------------------------------------------------------------
+# Control-plane + auth UI (REQ-079/085/086) — self-contained, vendored CSS/JS,
+# offline, WCAG 2.1 AA (every control labelled; lang set; visible focus). The
+# "Prism" design language (depth/glass/gradient) is shared with the tenant shell.
+# ---------------------------------------------------------------------------
+
+_PRISM_CSS = """
+:root{--bg:#0b1220;--panel:rgba(255,255,255,.06);--line:rgba(255,255,255,.14);
+--ink:#eef3fb;--mut:#9fb0c9;--brand:#5b8cff;--ok:#37d39b;--warn:#ffd166;
+--bad:#ff6b6b;--radius:14px}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+color:var(--ink);background:
+radial-gradient(1200px 600px at 10% -10%,#1a2c52 0,transparent 60%),
+radial-gradient(900px 500px at 110% 10%,#3a1f57 0,transparent 55%),var(--bg)}
+a{color:var(--brand)} .mut{color:var(--mut)}
+header.topbar{display:flex;align-items:center;gap:14px;padding:14px 22px;
+border-bottom:1px solid var(--line);
+background:linear-gradient(180deg,rgba(255,255,255,.07),rgba(255,255,255,.02));
+backdrop-filter:blur(8px)}
+.brand{font-weight:700;letter-spacing:.3px}
+.badge-owner{margin-left:auto;font-size:12px;padding:4px 10px;border-radius:999px;
+background:rgba(91,140,255,.18);border:1px solid var(--line)}
+main{max-width:1080px;margin:0 auto;padding:24px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+padding:20px;margin:0 0 20px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+h1{font-size:22px;margin:.2em 0} h2{font-size:17px;margin:.2em 0 .6em}
+label{display:block;font-size:13px;color:var(--mut);margin:10px 0 4px}
+input,select{width:100%;padding:10px 12px;border-radius:10px;color:var(--ink);
+background:rgba(0,0,0,.25);border:1px solid var(--line)}
+input:focus,select:focus,button:focus{outline:3px solid var(--brand);outline-offset:1px}
+button{cursor:pointer;border:1px solid var(--line);border-radius:10px;
+padding:9px 14px;color:var(--ink);font-weight:600;
+background:linear-gradient(180deg,rgba(91,140,255,.35),rgba(91,140,255,.18))}
+button.ghost{background:rgba(255,255,255,.06)}
+button.danger{background:linear-gradient(180deg,rgba(255,107,107,.35),rgba(255,107,107,.15))}
+table{width:100%;border-collapse:collapse;margin-top:8px}
+th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);font-size:14px}
+th{color:var(--mut);font-weight:600}
+.pill{font-size:12px;padding:2px 9px;border-radius:999px;border:1px solid var(--line)}
+.pill.active{color:var(--ok)} .pill.suspended{color:var(--warn)}
+.pill.deleted{color:var(--bad)}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:end}
+.row>div{flex:1;min-width:160px}
+.notice{padding:10px 14px;border-radius:10px;border:1px solid var(--line);
+background:rgba(91,140,255,.12);margin:10px 0}
+.notice.err{background:rgba(255,107,107,.14)}
+.feat{display:inline-flex;gap:6px;align-items:center;margin:4px 10px 4px 0;font-size:13px}
+.feat input{width:auto}
+"""
+
+OWNER_CONSOLE_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ANDS Platform — Owner Control Plane</title>
+<style>""" + _PRISM_CSS + """</style>
+</head>
+<body>
+<header class="topbar">
+  <span class="brand">ANDS Platform</span>
+  <span class="mut">Owner Control Plane</span>
+  <span class="badge-owner" id="who">not signed in</span>
+</header>
+<main>
+  <div id="msg" role="status" aria-live="polite"></div>
+
+  <section class="card" id="loginCard">
+    <h1>Owner sign-in</h1>
+    <p class="mut">Restricted to the platform owner. Tenant users cannot reach
+    this console.</p>
+    <form id="loginForm">
+      <label for="oe">Owner email</label>
+      <input id="oe" name="email" type="email" autocomplete="username" required>
+      <label for="op">Password</label>
+      <input id="op" name="password" type="password"
+             autocomplete="current-password" required>
+      <p><button type="submit">Sign in</button></p>
+    </form>
+  </section>
+
+  <div id="console" hidden>
+    <section class="card">
+      <h2>Provision a tenant</h2>
+      <form id="provForm">
+        <div class="row">
+          <div><label for="pc">Company</label>
+            <input id="pc" name="company" required></div>
+          <div><label for="pe">Admin email</label>
+            <input id="pe" name="email" type="email" required></div>
+          <div style="flex:0"><label aria-hidden="true">&nbsp;</label>
+            <button type="submit">Create tenant</button></div>
+        </div>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Tenants</h2>
+      <table>
+        <caption class="mut" style="text-align:left">All tenant workspaces,
+        their plan, status and usage.</caption>
+        <thead><tr><th>Company</th><th>Status</th><th>Plan</th>
+        <th>Records</th><th>Actions</th></tr></thead>
+        <tbody id="tenantRows"></tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>Plans</h2>
+      <div id="planList"></div>
+      <h2 style="margin-top:18px">New plan</h2>
+      <form id="planForm">
+        <label for="pn">Plan name</label>
+        <input id="pn" name="name" required>
+        <label>Features</label>
+        <div id="featBoxes"></div>
+        <p><button type="submit">Create plan</button></p>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Control-plane audit</h2>
+      <table>
+        <thead><tr><th>When</th><th>Actor</th><th>Action</th>
+        <th>Tenant</th></tr></thead>
+        <tbody id="auditRows"></tbody>
+      </table>
+    </section>
+  </div>
+</main>
+<script>
+var TOKEN = localStorage.getItem('ands_owner_token') || '';
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function msg(t,err){var m=document.getElementById('msg');
+  m.className='notice'+(err?' err':'');m.textContent=t;}
+function api(method,path,body){
+  var h={'Content-Type':'application/json'};
+  if(TOKEN) h['Authorization']='Bearer '+TOKEN;
+  return fetch(path,{method:method,headers:h,
+    body:body?JSON.stringify(body):undefined}).then(function(r){
+    return r.json().then(function(j){return {ok:r.ok,status:r.status,data:j};});});}
+var FEATURES=[];
+function showConsole(){
+  document.getElementById('loginCard').hidden=true;
+  document.getElementById('console').hidden=false;
+  document.getElementById('who').textContent='owner';
+  loadPlans();loadTenants();loadAudit();}
+document.getElementById('loginForm').addEventListener('submit',function(e){
+  e.preventDefault();
+  api('POST','/api/auth/login',{email:oe.value,password:op.value})
+   .then(function(r){
+     if(!r.ok||r.data.role!=='owner'){msg('Sign-in failed: '+
+        (r.data.detail||r.data.error||'not an owner'),true);return;}
+     TOKEN=r.data.token;localStorage.setItem('ands_owner_token',TOKEN);
+     msg('Signed in.');showConsole();});});
+function loadTenants(){api('GET','/api/owner/tenants').then(function(r){
+  if(!r.ok){return;}
+  var tb=document.getElementById('tenantRows');tb.innerHTML='';
+  r.data.tenants.forEach(function(t){
+    var tr=document.createElement('tr');
+    tr.innerHTML='<td>'+esc(t.name)+'<br><span class="mut">'+esc(t.id.slice(0,8))+
+      '</span></td><td><span class="pill '+esc(t.status)+'">'+esc(t.status)+
+      '</span></td><td>'+esc(t.plan_id)+'</td><td>'+esc((t.usage||{}).records)+
+      '</td><td></td>';
+    var act=tr.lastChild;
+    if(t.status!=='deleted'){
+      act.appendChild(btn(t.status==='suspended'?'Resume':'Suspend','ghost',
+        function(){tenantAction(t.id,t.status==='suspended'?'resume':'suspend');}));
+      act.appendChild(btn('Delete','danger',function(){
+        tenantAction(t.id,'delete');}));
+      act.appendChild(btn('Entitlements','ghost',function(){
+        editEntitlements(t);}));}
+    tb.appendChild(tr);});});}
+function btn(label,cls,fn){var b=document.createElement('button');
+  b.type='button';b.className=cls;b.textContent=label;b.style.marginRight='6px';
+  b.addEventListener('click',fn);return b;}
+function tenantAction(id,action){
+  api('POST','/api/owner/tenants/'+id+'/'+action,{}).then(function(r){
+    msg(r.ok?('Tenant '+action+'d.'):(r.data.error||'failed'),!r.ok);
+    loadTenants();loadAudit();});}
+function editEntitlements(t){
+  api('GET','/api/owner/tenants/'+t.id+'/entitlements').then(function(r){
+    if(!r.ok)return;var feats=r.data.features;var lines=FEATURES.map(function(f){
+      var e=feats[f.key];return f.label+': '+(e.enabled?'on':'off')+
+        ' ('+e.source+')';}).join('\\n');
+    var pick=prompt('Toggle a feature for '+t.name+
+      '.\\nType: <feature> on|off|clear\\n\\n'+lines+
+      '\\n\\nFeatures: '+FEATURES.map(function(f){return f.key;}).join(', '));
+    if(!pick)return;var parts=pick.trim().split(/\\s+/);
+    var body={feature:parts[0]};
+    if(parts[1]==='clear'){body.enabled=null;}
+    else{body.enabled=(parts[1]==='on');}
+    api('POST','/api/owner/tenants/'+t.id+'/overrides',body).then(function(r2){
+      msg(r2.ok?'Entitlement updated.':(r2.data.error||'failed'),!r2.ok);
+      loadTenants();loadAudit();});});}
+function loadPlans(){api('GET','/api/owner/plans').then(function(r){
+  if(!r.ok)return;FEATURES=r.data.features;
+  var fb=document.getElementById('featBoxes');fb.innerHTML='';
+  FEATURES.forEach(function(f){var id='f_'+f.key;
+    var s=document.createElement('span');s.className='feat';
+    s.innerHTML='<input type="checkbox" id="'+id+'" value="'+f.key+'" checked>'+
+      '<label for="'+id+'" style="display:inline;margin:0">'+esc(f.label)+'</label>';
+    fb.appendChild(s);});
+  var pl=document.getElementById('planList');pl.innerHTML='';
+  r.data.plans.forEach(function(p){var d=document.createElement('div');
+    d.className='notice';d.textContent=p.name+' — '+p.features.length+
+      ' features';pl.appendChild(d);});});}
+document.getElementById('provForm').addEventListener('submit',function(e){
+  e.preventDefault();
+  api('POST','/api/owner/tenants',{company:pc.value,email:pe.value})
+   .then(function(r){
+     if(!r.ok){msg(r.data.detail||r.data.error||'failed',true);return;}
+     msg('Tenant created. Invite password: '+r.data.invite_password);
+     pc.value='';pe.value='';loadTenants();loadAudit();});});
+document.getElementById('planForm').addEventListener('submit',function(e){
+  e.preventDefault();var feats=[];
+  document.querySelectorAll('#featBoxes input:checked').forEach(function(c){
+    feats.push(c.value);});
+  api('POST','/api/owner/plans',{name:pn.value,features:feats}).then(function(r){
+    msg(r.ok?'Plan created.':(r.data.error||'failed'),!r.ok);
+    if(r.ok){pn.value='';loadPlans();}});});
+function loadAudit(){api('GET','/api/owner/audit').then(function(r){
+  if(!r.ok)return;var tb=document.getElementById('auditRows');tb.innerHTML='';
+  r.data.audit.forEach(function(a){var tr=document.createElement('tr');
+    tr.innerHTML='<td class="mut">'+esc((a.ts||'').slice(0,19))+'</td><td>'+
+      esc(a.actor)+'</td><td>'+esc(a.action)+'</td><td>'+
+      esc((a.tenant_id||'').slice(0,8))+'</td>';tb.appendChild(tr);});});}
+if(TOKEN){api('GET','/api/auth/me').then(function(r){
+  if(r.ok&&r.data.role==='owner'){showConsole();}
+  else{localStorage.removeItem('ands_owner_token');TOKEN='';}});}
+</script>
+</body>
+</html>"""
+
+AUTH_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ANDS Portal — Sign in or register your company</title>
+<style>""" + _PRISM_CSS + """</style>
+</head>
+<body>
+<header class="topbar"><span class="brand">ANDS Portal</span>
+<span class="mut">Health Canada drug submissions</span></header>
+<main>
+  <div id="msg" role="status" aria-live="polite"></div>
+  <section class="card">
+    <h1>Register your company</h1>
+    <p class="mut">Self-serve sign-up creates your isolated workspace with every
+    feature enabled.</p>
+    <form id="signupForm">
+      <label for="sc">Company name</label>
+      <input id="sc" name="company" required>
+      <label for="se">Your email (becomes the tenant admin)</label>
+      <input id="se" name="email" type="email" autocomplete="username" required>
+      <label for="sp">Choose a password</label>
+      <input id="sp" name="password" type="password"
+             autocomplete="new-password" required>
+      <p><button type="submit">Create workspace</button></p>
+    </form>
+  </section>
+  <section class="card">
+    <h1>Sign in</h1>
+    <form id="loginForm">
+      <label for="le">Email</label>
+      <input id="le" name="email" type="email" autocomplete="username" required>
+      <label for="lp">Password</label>
+      <input id="lp" name="password" type="password"
+             autocomplete="current-password" required>
+      <p><button type="submit">Sign in</button></p>
+    </form>
+  </section>
+</main>
+<script>
+function esc(s){return String(s==null?'':s);}
+function msg(t,err){var m=document.getElementById('msg');
+  m.className='notice'+(err?' err':'');m.textContent=t;}
+function post(path,body){return fetch(path,{method:'POST',
+  headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+  .then(function(r){return r.json().then(function(j){
+    return {ok:r.ok,data:j};});});}
+document.getElementById('signupForm').addEventListener('submit',function(e){
+  e.preventDefault();
+  post('/api/auth/signup',{company:sc.value,email:se.value,password:sp.value})
+   .then(function(r){
+     if(!r.ok){msg(r.data.detail||r.data.error||'sign-up failed',true);return;}
+     localStorage.setItem('ands_token',r.data.token);
+     msg('Workspace created. Redirecting…');location.href='/';});});
+document.getElementById('loginForm').addEventListener('submit',function(e){
+  e.preventDefault();
+  post('/api/auth/login',{email:le.value,password:lp.value}).then(function(r){
+    if(!r.ok){msg(r.data.detail||r.data.error||'sign-in failed',true);return;}
+    localStorage.setItem('ands_token',r.data.token);
+    location.href=r.data.redirect||'/';});});
+</script>
+</body>
+</html>"""
 
 
 # ---------------------------------------------------------------------------
@@ -3820,11 +4588,21 @@ def run(host: str = "127.0.0.1", port: int = 8000, db_path: str = DB_PATH):
     # the org portfolio would silently evaporate on restart.
     audits = AuditStore(db_path)
     portfolios = PortfolioStore(db_path)
+    # Multi-tenant control plane: its OWN database, separate from tenant data
+    # (REQ-078). A bootstrap owner is ensured so the /owner console is reachable.
+    auth_store = auth.AuthStore(CONTROL_PLANE_DB)
+    auth_store.ensure_owner(OWNER_EMAIL, OWNER_PASSWORD)
+    entitlement_store = entitlements_mod.EntitlementStore(CONTROL_PLANE_DB)
+    tenancy_store = tenancy.TenancyStore(
+        CONTROL_PLANE_DB, tenants_root=CONTROL_PLANE_TENANTS_ROOT)
     httpd = ThreadingHTTPServer(
         (host, port),
         make_handler(store, companies, dossiers, transmissions,
-                     lifecycles, rejections, audits, portfolios))
+                     lifecycles, rejections, audits, portfolios,
+                     auth_store=auth_store, tenancy_store=tenancy_store,
+                     entitlement_store=entitlement_store))
     print(f"ANDS Submission Portal serving on http://{host}:{port}  (db: {db_path})")
+    print(f"  control plane: {CONTROL_PLANE_DB}  | owner console: /owner")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
@@ -3839,6 +4617,9 @@ def run(host: str = "127.0.0.1", port: int = 8000, db_path: str = DB_PATH):
         rejections.close()
         audits.close()
         portfolios.close()
+        auth_store.close()
+        entitlement_store.close()
+        tenancy_store.close()
 
 
 if __name__ == "__main__":
