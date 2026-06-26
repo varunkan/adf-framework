@@ -39,6 +39,7 @@ from server import (
     tip_by_diner,
     tip_matrix,
     affordable_bill,
+    card_cash_split,
     TipError,
     Handler,
 )
@@ -1802,6 +1803,129 @@ class TestTipByDiner(unittest.TestCase):
             tip_by_diner([{"amount": 10, "tip_percent": 10}], tax=-1)
 
 
+class TestCardCashSplit(unittest.TestCase):
+    def test_only_card_payers_pay_surcharge(self):
+        r = card_cash_split([
+            {"name": "Sam", "amount": 30, "method": "card"},
+            {"name": "Alex", "amount": 45, "method": "cash"},
+            {"name": "Jo", "amount": 25, "method": "card"},
+        ], tip_percent=0, card_surcharge=3)
+        by = {d["name"]: d for d in r["diners"]}
+        self.assertEqual(by["Sam"]["surcharge"], 0.9)   # 3% of 30
+        self.assertEqual(by["Alex"]["surcharge"], 0.0)  # cash pays nothing
+        self.assertEqual(by["Jo"]["surcharge"], 0.75)   # 3% of 25
+        self.assertEqual(r["surcharge"], 1.65)
+
+    def test_surcharge_levied_on_amount_plus_tax_plus_tip(self):
+        # one card diner: amount 50, tip 20% (=10), tax 5 -> base 65; 4% -> 2.60.
+        r = card_cash_split([{"amount": 50, "method": "card"}],
+                            tip_percent=20, tax=5, card_surcharge=4)
+        d = r["diners"][0]
+        self.assertEqual(d["tip"], 10.0)
+        self.assertEqual(d["tax"], 5.0)
+        self.assertEqual(d["surcharge"], 2.6)
+        self.assertEqual(d["total"], 67.6)
+
+    def test_grand_total_reconciles_to_per_diner_totals(self):
+        r = card_cash_split([
+            {"amount": 33.33, "method": "card"},
+            {"amount": 41.11, "method": "cash"},
+            {"amount": 25.55, "method": "card"},
+        ], tip_percent=18, tax=8.77, card_surcharge=2.5)
+        self.assertEqual(round(sum(d["total"] for d in r["diners"]), 2), r["total"])
+
+    def test_totals_breakdown(self):
+        r = card_cash_split([
+            {"amount": 30, "method": "card"},
+            {"amount": 70, "method": "cash"},
+        ], tip_percent=10, card_surcharge=2)
+        self.assertEqual(r["subtotal"], 100.0)
+        self.assertEqual(r["tip"], 10.0)          # 10% of 100
+        # card diner base = 30 + tip 3 = 33; 2% -> 0.66.
+        self.assertEqual(r["surcharge"], 0.66)
+        self.assertEqual(r["total"], 110.66)
+        self.assertEqual(r["people"], 2)
+
+    def test_card_and_cash_counts(self):
+        r = card_cash_split([
+            {"amount": 10, "method": "card"},
+            {"amount": 10, "method": "cash"},
+            {"amount": 10, "method": "card"},
+        ])
+        self.assertEqual(r["card_count"], 2)
+        self.assertEqual(r["cash_count"], 1)
+
+    def test_method_defaults_to_cash(self):
+        r = card_cash_split([{"amount": 40}], card_surcharge=5)
+        self.assertEqual(r["diners"][0]["method"], "cash")
+        self.assertEqual(r["diners"][0]["surcharge"], 0.0)
+        self.assertEqual(r["cash_count"], 1)
+
+    def test_method_case_insensitive(self):
+        r = card_cash_split([{"amount": 10, "method": "CARD"}], card_surcharge=10)
+        self.assertEqual(r["diners"][0]["method"], "card")
+        self.assertEqual(r["diners"][0]["surcharge"], 1.0)
+
+    def test_tax_allocated_proportionally(self):
+        # amounts 75 / 25 -> tax 10 splits 7.50 / 2.50.
+        r = card_cash_split([
+            {"amount": 75, "method": "cash"},
+            {"amount": 25, "method": "cash"},
+        ], tax=10)
+        self.assertEqual([d["tax"] for d in r["diners"]], [7.5, 2.5])
+        self.assertEqual(sum(d["tax"] for d in r["diners"]), r["tax"])
+
+    def test_zero_surcharge_means_no_extra(self):
+        r = card_cash_split([{"amount": 50, "method": "card"}], tip_percent=20)
+        self.assertEqual(r["surcharge"], 0.0)
+        self.assertEqual(r["diners"][0]["total"], 60.0)
+
+    def test_string_inputs_coerced(self):
+        r = card_cash_split([{"amount": "30", "method": "card"}],
+                            tip_percent="0", tax="0", card_surcharge="3")
+        self.assertEqual(r["diners"][0]["surcharge"], 0.9)
+
+    def test_default_names(self):
+        r = card_cash_split([{"amount": 10}, {"amount": 20}])
+        self.assertEqual([d["name"] for d in r["diners"]], ["Diner 1", "Diner 2"])
+
+    def test_empty_list_rejected(self):
+        with self.assertRaises(TipError):
+            card_cash_split([])
+
+    def test_none_rejected(self):
+        with self.assertRaises(TipError):
+            card_cash_split(None)
+
+    def test_non_list_rejected(self):
+        with self.assertRaises(TipError):
+            card_cash_split({"amount": 10})
+
+    def test_diner_not_object_rejected(self):
+        with self.assertRaises(TipError):
+            card_cash_split([42])
+
+    def test_bad_method_rejected(self):
+        with self.assertRaises(TipError):
+            card_cash_split([{"amount": 10, "method": "bitcoin"}])
+
+    def test_negative_amount_rejected(self):
+        with self.assertRaises(TipError):
+            card_cash_split([{"amount": -1, "method": "card"}])
+
+    def test_negative_surcharge_rejected(self):
+        with self.assertRaises(TipError):
+            card_cash_split([{"amount": 10, "method": "card"}], card_surcharge=-1)
+
+    def test_negative_tip_percent_rejected(self):
+        with self.assertRaises(TipError):
+            card_cash_split([{"amount": 10}], tip_percent=-5)
+
+    def test_negative_tax_rejected(self):
+        with self.assertRaises(TipError):
+            card_cash_split([{"amount": 10}], tax=-1)
+
+
 # ---------------------------------------------------------------------------
 # HTTP API tests
 # ---------------------------------------------------------------------------
@@ -1998,6 +2122,29 @@ class TestApi(unittest.TestCase):
             {"diners": [{"name": "<b>Sam</b>", "amount": 30, "tip_percent": 20}]})
         self.assertEqual(status, 200)
         self.assertEqual(data["diners"][0]["name"], "<b>Sam</b>")
+
+    def test_api_card_split_happy_path(self):
+        status, data = self._post_to("/api/card-split", {
+            "diners": [
+                {"name": "Sam", "amount": 30, "method": "card"},
+                {"name": "Alex", "amount": 70, "method": "cash"},
+            ],
+            "tip_percent": 10,
+            "card_surcharge": 2,
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(data["subtotal"], 100.0)
+        self.assertEqual(data["tip"], 10.0)
+        self.assertEqual(data["surcharge"], 0.66)   # 2% of (30 + 3 tip)
+        self.assertEqual(data["total"], 110.66)
+        self.assertEqual(data["card_count"], 1)
+        self.assertEqual(data["cash_count"], 1)
+
+    def test_api_card_split_validation_error(self):
+        status, data = self._post_to(
+            "/api/card-split", {"diners": [{"amount": 10, "method": "crypto"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
 
     def test_api_happy_path(self):
         status, data = self._post({"bill": 100, "tip_percent": 20, "people": 4})

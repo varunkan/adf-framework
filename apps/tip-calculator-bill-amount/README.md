@@ -76,4 +76,19 @@ JSON endpoints (all `POST` unless noted):
   via largest-remainder, and each diner pays amount + tax share + their own tip.
   Distinct from `/api/items-split` and `/api/split` (single table-wide rate) and
   `/api/split-percentage` (fixed shares of one total) (REQ-001/002 extension).
+- `/api/affordable-bill` — inverse **planner**: given a per-person `budget`, a
+  `tip_percent` and a sales-`tax_percent` rate, solve for the largest pre-tax food
+  bill the table can afford ("we've each got $50 and tip 20% — what can we
+  order?"). Honours pre/post-tax tipping, floors to the cent so the grand total
+  never exceeds budget, splits it exactly across people and reports the leftover
+  `headroom`. Distinct from `/api/reverse` and `/api/target-per-person`, which
+  take the bill as given and solve for the TIP (REQ-001/002 extension).
+- `/api/card-split` — **card surcharge split**: each diner brings their own pre-tax
+  portion and a `method` (`card`/`cash`, default cash); a single table-wide
+  `tip_percent` and apportioned `tax` apply to everyone, then `card_surcharge`
+  percent is added ON TOP of each CARD payer's own (amount + tax + tip) subtotal
+  while cash payers add nothing. Reports per-diner `surcharge`/`total`, the
+  `card_count`/`cash_count`, and totals that reconcile to the cent. Distinct from
+  `/api/diner-tips` (per-diner tip *rates*) and `/api/service-charge` (one flat fee
+  on the whole bill) (REQ-001/002 extension).
 - `GET /health` — liveness probe.

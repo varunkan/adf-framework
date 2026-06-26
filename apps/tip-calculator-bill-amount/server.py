@@ -1961,6 +1961,130 @@ def tip_by_diner(diners, tax=0):
     }
 
 
+def _normalise_pay_method(method, index):
+    """Validate a per-diner payment method, defaulting blank to ``"cash"``."""
+    if method in (None, ""):
+        return "cash"
+    text = str(method).strip().lower()
+    if text not in ("card", "cash"):
+        raise TipError("diner %d method must be 'card' or 'cash'" % (index + 1))
+    return text
+
+
+def card_cash_split(diners, tip_percent=0, tax=0, card_surcharge=0):
+    """Split a shared cheque where CARD payers absorb a card surcharge (REQ-001/002).
+
+    Many venues pass the card-processing fee on to whoever pays by card. This splits
+    one table's bill so each diner pays their own pre-tax portion (``amount``) plus a
+    proportional share of the table ``tax`` and a single table-wide ``tip_percent``
+    taken on that portion; then any diner whose ``method`` is ``"card"`` adds
+    ``card_surcharge`` percent ON TOP of their own (amount + tax + tip) subtotal,
+    while ``"cash"`` payers add nothing. This is deliberately DISTINCT from
+    :func:`tip_by_diner` (each diner picks their own tip *rate*) and
+    :func:`service_charge` (one flat fee on the whole bill): here the extra fee is
+    levied per person and ONLY on the card payers.
+
+    ``diners`` is a list of objects, one per person, each with an ``amount`` (their
+    pre-tax portion) and an optional ``method`` (``"card"``/``"cash"``, default
+    ``"cash"``) and ``name`` (default ``"Diner N"``). ``tax`` is the whole cheque's
+    tax, apportioned across diners in proportion to ``amount`` by the
+    largest-remainder method so the shares sum EXACTLY to it. ``tip_percent`` and
+    ``card_surcharge`` are non-negative rates.
+
+    Returns the per-diner breakdown (``name``/``method``/``amount``/``tax``/``tip``/
+    ``surcharge``/``total``) plus table-wide ``subtotal``, ``tax``, ``tip``,
+    ``surcharge``, grand ``total``, ``people``, and ``card_count``/``cash_count``.
+    Per-diner totals reconcile to the grand total to the cent. Raises ``TipError``
+    on invalid input so callers fail safe.
+    """
+    if diners in (None, ""):
+        raise TipError("diners is required")
+    if isinstance(diners, (str, bytes, dict)) or not hasattr(diners, "__iter__"):
+        raise TipError("diners must be a list of diners")
+    diners = list(diners)
+    if not diners:
+        raise TipError("at least one diner is required")
+
+    tip_rate = _to_number(tip_percent, "tip_percent") if tip_percent not in (None, "") else 0.0
+    if tip_rate < 0:
+        raise TipError("tip_percent must not be negative")
+    surcharge_rate = (
+        _to_number(card_surcharge, "card_surcharge")
+        if card_surcharge not in (None, "") else 0.0
+    )
+    if surcharge_rate < 0:
+        raise TipError("card_surcharge must not be negative")
+
+    names = []
+    methods = []
+    amount_cents = []
+    for index, entry in enumerate(diners):
+        if not isinstance(entry, dict):
+            raise TipError("diner %d must be an object" % (index + 1))
+        name = entry.get("name")
+        if name in (None, ""):
+            name = "Diner %d" % (index + 1)
+        else:
+            name = str(name)
+        amount = _to_number(entry.get("amount"), "diner %d amount" % (index + 1))
+        if amount < 0:
+            raise TipError("diner %d amount must not be negative" % (index + 1))
+        names.append(name)
+        methods.append(_normalise_pay_method(entry.get("method"), index))
+        amount_cents.append(int(round(amount * 100)))
+
+    tax_amount = _to_number(tax, "tax") if tax not in (None, "") else 0.0
+    if tax_amount < 0:
+        raise TipError("tax must not be negative")
+    tax_cents_total = int(round(tax_amount * 100))
+    tax_shares = _largest_remainder(tax_cents_total, list(amount_cents))
+
+    rows = []
+    subtotal_cents = 0
+    tip_cents_total = 0
+    surcharge_cents_total = 0
+    total_cents = 0
+    card_count = 0
+    cash_count = 0
+    for i, name in enumerate(names):
+        a_cents = amount_cents[i]
+        tip_c = int(round(a_cents / 100.0 * tip_rate))
+        tax_share = tax_shares[i]
+        base_cents = a_cents + tax_share + tip_c
+        if methods[i] == "card":
+            surcharge_c = int(round(base_cents / 100.0 * surcharge_rate))
+            card_count += 1
+        else:
+            surcharge_c = 0
+            cash_count += 1
+        row_total = base_cents + surcharge_c
+        subtotal_cents += a_cents
+        tip_cents_total += tip_c
+        surcharge_cents_total += surcharge_c
+        total_cents += row_total
+        rows.append({
+            "name": name,
+            "method": methods[i],
+            "amount": _round2(a_cents / 100.0),
+            "tax": _round2(tax_share / 100.0),
+            "tip": _round2(tip_c / 100.0),
+            "surcharge": _round2(surcharge_c / 100.0),
+            "total": _round2(row_total / 100.0),
+        })
+
+    return {
+        "diners": rows,
+        "people": len(rows),
+        "card_count": card_count,
+        "cash_count": cash_count,
+        "subtotal": _round2(subtotal_cents / 100.0),
+        "tax": _round2(tax_cents_total / 100.0),
+        "tip": _round2(tip_cents_total / 100.0),
+        "surcharge": _round2(surcharge_cents_total / 100.0),
+        "total": _round2(total_cents / 100.0),
+    }
+
+
 def tip_matrix(bill, percents=(15, 18, 20, 25), people_options=(1, 2, 4),
                tax=0, tip_on="total"):
     """Build a 2-D comparison grid of per-person cost across tip rates × party sizes.
@@ -2494,6 +2618,25 @@ Jo 25 @ 25</textarea>
       <button class="chip" id="afford-go" style="margin-top:.6rem;flex:initial;width:100%;">How much food can we order?</button>
       <div id="afford-rows"></div>
       <div class="err" id="afford-err"></div>
+    </div>
+
+    <div class="out">
+      <div class="row"><span class="k">Card payers cover the fee</span><span class="v">card surcharge split</span></div>
+      <label for="card-diners">One diner per line: name amount card|cash, e.g. "Sam 30 card"</label>
+      <textarea id="card-diners" rows="3" style="width:100%;padding:.6rem .7rem;font-size:1rem;
+        border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;
+        font-family:inherit;">Sam 30 card
+Alex 45 cash
+Jo 25 card</textarea>
+      <label for="card-tip">Tip %</label>
+      <input id="card-tip" type="text" value="18" placeholder="e.g. 18">
+      <label for="card-tax">Tax ($)</label>
+      <input id="card-tax" type="text" value="0" placeholder="e.g. 8">
+      <label for="card-surcharge">Card surcharge %</label>
+      <input id="card-surcharge" type="text" value="3" placeholder="e.g. 3">
+      <button class="chip" id="card-go" style="margin-top:.6rem;flex:initial;width:100%;">Split with card surcharge</button>
+      <div id="card-rows"></div>
+      <div class="err" id="card-err"></div>
     </div>
   </div>
 
@@ -3329,6 +3472,53 @@ async function affordableBill() {
   }
 }
 $("afford-go").addEventListener("click", affordableBill);
+
+// Parse "Name 30 card" / "30 cash" lines into {name, amount, method} diners.
+function parseCardDiners(text) {
+  return text.split("\\n").map((s) => s.trim()).filter((s) => s.length).map((line) => {
+    const tokens = line.split(/\\s+/);
+    let method;
+    if (tokens.length && /^(card|cash)$/i.test(tokens[tokens.length - 1])) {
+      method = tokens.pop().toLowerCase();
+    }
+    const amount = Number(tokens.pop());
+    const name = tokens.join(" ");
+    const diner = { amount };
+    if (method) diner.method = method;
+    if (name) diner.name = name;
+    return diner;
+  });
+}
+
+async function cardSplit() {
+  const body = {
+    diners: parseCardDiners($("card-diners").value),
+    tip_percent: $("card-tip").value,
+    tax: $("card-tax").value,
+    card_surcharge: $("card-surcharge").value,
+  };
+  $("card-rows").innerHTML = "";
+  try {
+    const res = await fetch("/api/card-split", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) { $("card-err").textContent = data.error || "Invalid input"; return; }
+    $("card-err").textContent = "";
+    const rows = data.diners.map((d) => [
+      esc(d.name) + " (" + d.method + (d.surcharge ? ", +" + money(d.surcharge) : "") + ")",
+      money(d.total),
+    ]);
+    rows.push(["Card surcharge total", money(data.surcharge)]);
+    rows.push(["Grand total", money(data.total)]);
+    renderRows("card-rows", rows);
+  } catch (e) {
+    $("card-err").textContent = "Network error";
+  }
+}
+$("card-go").addEventListener("click", cardSplit);
 </script>
 </body>
 </html>
@@ -3375,7 +3565,7 @@ class Handler(BaseHTTPRequestHandler):
                              "/api/shared-items", "/api/regional-tip",
                              "/api/charity", "/api/tip-excluding",
                              "/api/diner-tips", "/api/tip-matrix",
-                             "/api/affordable-bill"):
+                             "/api/affordable-bill", "/api/card-split"):
             self._send_json(404, {"error": "not found"})
             return
         try:
@@ -3580,6 +3770,13 @@ class Handler(BaseHTTPRequestHandler):
                     data.get("people_options", (1, 2, 4)),
                     data.get("tax", 0),
                     data.get("tip_on", "total"),
+                )
+            elif self.path == "/api/card-split":
+                result = card_cash_split(
+                    data.get("diners"),
+                    data.get("tip_percent", 0),
+                    data.get("tax", 0),
+                    data.get("card_surcharge", 0),
                 )
             elif self.path == "/api/affordable-bill":
                 result = affordable_bill(
