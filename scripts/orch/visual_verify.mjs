@@ -21,6 +21,18 @@ const port = Number(process.env.ADF_CDP_PORT || 9334);
 const BUDGET_MS = Number(process.env.ADF_VISUAL_BUDGET_MS || 360000); // 6 min cap
 const MAX_NAV = Number(process.env.ADF_VISUAL_MAX_NAV || 60);
 const MAX_FORMS = Number(process.env.ADF_VISUAL_MAX_FORMS || 30);
+// Adaptive settle caps (ms). Replace the old flat 1800ms-per-navigation dead waits:
+// a server-rendered localhost app reaches readyState 'complete' in tens of ms, so
+// we poll for that and only wait the cap on a genuinely slow view. Tunable for apps
+// with heavier async hydration. NAV = after navigation, ACT = after a click/submit.
+const NAV_SETTLE = Number(process.env.ADF_VISUAL_SETTLE_MS || 700);
+const ACT_SETTLE = Number(process.env.ADF_VISUAL_ACT_SETTLE_MS || 900);
+// Minimum waits (ms) before trusting readyState — covers in-page async renders
+// (JS fetch → DOM update with NO navigation, where readyState is already
+// 'complete'). NAV is short (let navigation start + old page unload); ACT covers
+// a localhost fetch+render after a click/submit.
+const NAV_FLOOR = Number(process.env.ADF_VISUAL_NAV_FLOOR_MS || 150);
+const ACT_FLOOR = Number(process.env.ADF_VISUAL_ACT_FLOOR_MS || 400);
 const t0 = Date.now();
 const overBudget = () => Date.now() - t0 > BUDGET_MS;
 
@@ -78,7 +90,18 @@ try {
     return r && r.result ? r.result.value : undefined;
   };
   const setViewport = (w, h, mobile) => send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile });
-  const goto = async (u) => { await send('Page.navigate', { url: u }); await sleep(1800); };
+  // Poll for the page to actually be ready instead of a fixed dead wait: returns
+  // as soon as document.readyState === 'complete' (tens of ms on a localhost app),
+  // capped so a genuinely slow/hanging view still bounds the wait.
+  const settle = async (cap, floor = 0) => {
+    let w = 0;
+    for (; w < floor; w += 40) await sleep(40);   // min wait — async in-page renders
+    for (; w < cap; w += 40) {
+      await sleep(40);
+      if ((await evalJs('document.readyState').catch(() => null)) === 'complete') return;
+    }
+  };
+  const goto = async (u) => { await send('Page.navigate', { url: u }); await settle(NAV_SETTLE, NAV_FLOOR); };
   const screenshot = async (name) => {
     try { const { data } = await send('Page.captureScreenshot', { format: 'png' }); if (data) writeFileSync(`${shotDir}/${name}.png`, Buffer.from(data, 'base64')); return `${name}.png`; } catch { return null; }
   };
@@ -169,7 +192,7 @@ try {
     await goto(url);               // clean state so nav indices/handlers are stable
     const ok = await clickNavByText(t);
     if (!ok) continue;
-    await sleep(1400);
+    await settle(ACT_SETTLE, ACT_FLOOR);
     await record(`view:${t}`, 'desktop');
   }
   const formCount = (await evalJs(`document.querySelectorAll('form').length`)) || 0;
@@ -178,7 +201,7 @@ try {
     if (overBudget()) { defects.push('NOTE: visual budget hit — remaining forms not exercised'); break; }
     await goto(url);
     await fillAndSubmit(i);
-    await sleep(1800);
+    await settle(ACT_SETTLE, ACT_FLOOR);
     await record(`form#${i}-submitted`, 'desktop');
   }
 
@@ -189,7 +212,7 @@ try {
   for (const t of nav.slice(0, MAX_NAV)) {
     if (overBudget()) break;
     await goto(url);
-    if (await clickNavByText(t)) { await sleep(1200); await record(`view:${t}`, 'mobile'); }
+    if (await clickNavByText(t)) { await settle(ACT_SETTLE, ACT_FLOOR); await record(`view:${t}`, 'mobile'); }
   }
 
   writeFileSync(`${shotDir}/manifest.json`, JSON.stringify({ url, views, defects }, null, 2));
