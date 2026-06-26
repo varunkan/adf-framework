@@ -15,6 +15,7 @@ The real value (the four Health-Canada validation rules) lives in
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import threading
 from datetime import datetime, timezone
@@ -750,6 +751,22 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
+                return
+            if path in ("/api/health", "/healthz"):
+                # Readiness probe (client req 2026-06-26): the UI polls this and
+                # presents only once both servers are up. A 200 means the web
+                # listener answered AND the API/DB tier is genuinely live — we
+                # touch the store so a not-yet-ready (or stale orphaned) process
+                # reports 503 rather than a socket-accept-only false ready.
+                try:
+                    store.list()
+                    api_ready = True
+                except Exception:
+                    api_ready = False
+                self._send_json(
+                    {"status": "ok" if api_ready else "starting",
+                     "web": True, "api": api_ready},
+                    status=200 if api_ready else 503)
                 return
             if path == "/api/submissions":
                 self._send_json({"submissions": store.list()})
@@ -2306,9 +2323,20 @@ INDEX_HTML = """<!DOCTYPE html>
   th, td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); }
   th { font-size:12px; color:#6b7886; text-transform:uppercase; }
   .empty { color:#6b7886; font-size:13px; }
+  #boot-overlay { position:fixed; inset:0; z-index:9999; background:var(--bg);
+    display:flex; flex-direction:column; align-items:center;
+    justify-content:center; gap:14px; color:#4a5b6d; font-size:14px; }
+  #boot-overlay .spinner { width:30px; height:30px; border:3px solid var(--line);
+    border-top-color:#13344f; border-radius:50%; animation:spin .8s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  body.ready #boot-overlay { display:none; }
 </style>
 </head>
 <body>
+<div id="boot-overlay" role="status" aria-live="polite">
+  <div class="spinner"></div>
+  <div id="boot-msg">Starting ANDS Portal — bringing up web &amp; API servers…</div>
+</div>
 <header>
   <h1>ANDS Submission Portal</h1>
   <p>Abbreviated New Drug Submission intake &amp; eCTD sequence validation</p>
@@ -3731,10 +3759,36 @@ async function feeRightToSell() {
 }
 
 document.getElementById('valCtx').value = JSON.stringify(SAMPLE_CTX, null, 2);
-loadActivityTypes();
-loadList();
-loadDossierList();
-loadRulesets();
+
+async function boot() {
+  // Client requirement (2026-06-26): present the UI only after BOTH the web
+  // server and the API server are confirmed up. The web server already answered
+  // (this page is running), so we poll /api/health to gate on the API tier; once
+  // both report up we reveal the portal and fire its loaders.
+  const msg = document.getElementById('boot-msg');
+  for (let attempt = 1; attempt <= 50; attempt++) {
+    try {
+      const r = await fetch('/api/health', { cache: 'no-store' });
+      if (r.ok) {
+        const h = await r.json();
+        if (h.web && h.api) {
+          document.body.classList.add('ready');
+          loadActivityTypes();
+          loadList();
+          loadDossierList();
+          loadRulesets();
+          return;
+        }
+      }
+    } catch (e) { /* server still coming up — keep polling */ }
+    if (msg) msg.textContent =
+      'Waiting for web + API servers to come up… (attempt ' + attempt + ')';
+    await new Promise(res => setTimeout(res, 200));
+  }
+  if (msg) msg.textContent =
+    'Servers did not come up. Check the portal process and reload.';
+}
+boot();
 </script>
 </body>
 </html>
@@ -3779,4 +3833,6 @@ def run(host: str = "127.0.0.1", port: int = 8000, db_path: str = DB_PATH):
 
 
 if __name__ == "__main__":
-    run()
+    # Port is taken from the environment so a verifier can run an isolated
+    # instance; behaviour is unchanged (default 8000) when the env is unset.
+    run(port=int(os.environ.get("ADF_SMOKE_PORT") or os.environ.get("PORT") or 8000))

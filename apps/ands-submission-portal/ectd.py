@@ -36,8 +36,9 @@ HTTP/API/UI layer in server.py is a thin shell over these functions.
 from __future__ import annotations
 
 import hashlib
-from xml.dom.minidom import parseString
 from xml.sax.saxutils import escape as _xml_escape, quoteattr as _xml_attr
+
+import xmlsafe
 
 
 # ---------------------------------------------------------------------------
@@ -375,7 +376,12 @@ def validate_backbone(xml_text: str, descriptor: dict) -> None:
     ``SchemaValidationError`` on any violation (mirrors A06a/H08).
     """
     try:
-        dom = parseString(xml_text)
+        # Hardened against billion-laughs / XXE: a backbone can be posted from an
+        # untrusted client (``/api/validation/package-attempt``), so it must go
+        # through the same entity-safety guard as every other caller-supplied XML.
+        dom = xmlsafe.safe_parse_xml(xml_text)
+    except xmlsafe.UnsafeXmlError as exc:
+        raise SchemaValidationError(f"backbone XML rejected for safety: {exc}")
     except Exception as exc:  # malformed XML
         raise SchemaValidationError(f"backbone is not well-formed XML: {exc}")
 

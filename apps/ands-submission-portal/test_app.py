@@ -313,6 +313,35 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(resp.headers.get("Content-Type"), "image/svg+xml")
             self.assertTrue(resp.read())  # non-empty body
 
+    def test_health_probe_reports_both_servers_ready(self):
+        # Client requirement (2026-06-26): the web server and the API server must
+        # both be up before the UI is presented. /api/health is the readiness
+        # probe the UI polls. It touches the API/DB tier (store.list()), so a 200
+        # means BOTH the web listener answered AND the API is genuinely live —
+        # not a socket-accept-only false ready that the orphaned-:8000 stale
+        # server problem warned about.
+        status, data = self._get("/api/health")
+        self.assertEqual(status, 200)
+        self.assertEqual(data["status"], "ok")
+        self.assertTrue(data["web"])
+        self.assertTrue(data["api"])
+
+    def test_ui_gated_on_readiness_until_servers_up(self):
+        # The portal must not present (or fire its API loaders) until the
+        # readiness probe confirms both servers are up: the page ships a boot
+        # gate that polls /api/health and only then reveals the portal and runs
+        # the loaders.
+        with urllib.request.urlopen(self._url("/")) as resp:
+            page = resp.read().decode()
+        self.assertIn("/api/health", page)      # the UI polls readiness
+        self.assertIn("boot-overlay", page)     # a "starting servers" splash
+        self.assertIn("function boot(", page)   # gate runs before the loaders
+        # The readiness fetch must precede the loader invocations inside boot().
+        idx_health = page.index("/api/health")
+        idx_loaders = page.index("loadActivityTypes();")
+        self.assertLess(idx_health, idx_loaders,
+                        "readiness check must gate the UI loaders")
+
     def test_add_leaf_guarded_before_dossier_selected(self):
         # Regression: clicking "Add leaf" before a dossier was created/opened
         # fired POST /api/ectd/dossiers/null/leaves (CURRENT_DOSSIER === null),
@@ -1963,6 +1992,65 @@ class StfTests(unittest.TestCase):
             [{"id": "be-01", "stf": {"xml": "<wrong/>"}}])
         self.assertFalse(result["valid"])
         self.assertTrue(all(f["category"] == "STF" for f in result["findings"]))
+
+
+# ---------------------------------------------------------------------------
+# Security: every caller-supplied-XML path is hardened against billion-laughs /
+# XXE through the shared ``xmlsafe`` guard, not just the validation endpoints.
+# ---------------------------------------------------------------------------
+class XmlEntityHardeningTests(unittest.TestCase):
+    # A classic "billion laughs" internal-entity bomb.
+    _LOL = (
+        '<?xml version="1.0"?>'
+        '<!DOCTYPE ectd-stf ['
+        '  <!ENTITY lol "lol">'
+        '  <!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;">'
+        ']>'
+        '<ectd-stf>&lol2;</ectd-stf>'
+    )
+    # An external-entity (XXE) file-exfiltration payload.
+    _XXE = (
+        '<?xml version="1.0"?>'
+        '<!DOCTYPE backbone [ <!ENTITY xxe SYSTEM "file:///etc/passwd"> ]>'
+        '<ectd>&xxe;</ectd>'
+    )
+
+    def test_xmlsafe_rejects_internal_entity_bomb(self):
+        import xmlsafe
+        with self.assertRaises(xmlsafe.UnsafeXmlError):
+            xmlsafe.safe_parse_xml(self._LOL)
+
+    def test_xmlsafe_rejects_external_entity(self):
+        import xmlsafe
+        with self.assertRaises(xmlsafe.UnsafeXmlError):
+            xmlsafe.safe_parse_xml(self._XXE)
+
+    def test_validation_safe_parse_xml_reexports_guard(self):
+        # The historical public name keeps working and shares the SAME class.
+        import xmlsafe
+        self.assertIs(validation.UnsafeXmlError, xmlsafe.UnsafeXmlError)
+        with self.assertRaises(validation.UnsafeXmlError):
+            validation.safe_parse_xml(self._XXE)
+
+    def test_backbone_validation_rejects_entity_attack(self):
+        # ectd.validate_backbone now routes through the guard and converts an
+        # entity attack into a clean SchemaValidationError (not a crash / DoS).
+        with self.assertRaises(ectd.SchemaValidationError) as ctx:
+            ectd.validate_backbone(self._XXE, ectd.ICH_ECTD_DTD)
+        self.assertIn("safety", str(ctx.exception).lower())
+
+    def test_stf_validation_flags_entity_attack(self):
+        # An STF body posted from an untrusted client is reported as a finding,
+        # never parsed by the raw (unhardened) parser.
+        findings = stf.validate_stf({"xml": self._LOL})
+        self.assertIn("stf_unsafe_xml", {f["rule"] for f in findings})
+        self.assertTrue(all(f["category"] == "STF" for f in findings))
+
+    def test_well_formed_xml_still_parses(self):
+        # Regression guard: the hardening must NOT break ordinary, entity-free XML.
+        import xmlsafe
+        dom = xmlsafe.safe_parse_xml('<?xml version="1.0"?><ectd-stf/>')
+        self.assertEqual(dom.documentElement.tagName, "ectd-stf")
 
 
 # ---------------------------------------------------------------------------

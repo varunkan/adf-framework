@@ -19,8 +19,9 @@ deterministic.
 
 from __future__ import annotations
 
-from xml.dom.minidom import parseString
 from xml.sax.saxutils import escape as _xml_escape
+
+import xmlsafe
 
 
 STF_CATEGORY = "STF"
@@ -112,7 +113,13 @@ def validate_stf(stf: dict) -> list:
         add("stf_missing_xml", "STF has no XML body")
         return out
     try:
-        dom = parseString(xml)
+        # An STF body can be posted from an untrusted client
+        # (``/api/stf/validate``), so it goes through the shared entity-safety
+        # guard (billion-laughs / XXE) before parsing, like every other backbone.
+        dom = xmlsafe.safe_parse_xml(xml)
+    except xmlsafe.UnsafeXmlError as exc:
+        add("stf_unsafe_xml", f"STF XML rejected for safety: {exc}")
+        return out
     except Exception as exc:
         add("stf_malformed", f"STF is not well-formed XML: {exc}")
         return out
