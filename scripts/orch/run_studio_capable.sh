@@ -125,7 +125,10 @@ export ORCH_CHAT_LLM=claude
 # --- Studio server -----------------------------------------------------------
 export ORCH_REPO_ROOT="$FW"
 export ORCH_PORT="${ORCH_PORT:-3847}"
-export ORCH_AUTO_APPROVE=false               # track M holds at every gate (you watch + approve)
+# Track M normally holds at every gate for manual approval. Honor an override so an
+# UNATTENDED autonomous run can self-advance (ORCH_AUTO_APPROVE=true in .adf/secrets.env)
+# — required for "keep building until all features are done without stopping."
+export ORCH_AUTO_APPROVE="${ORCH_AUTO_APPROVE:-false}"
 
 echo "ADF Studio: workhorse=$NEMOTRON | deep=$([ "$USE_OPUS" = 1 ] && echo 'Opus-4.8(ultra)' || echo "$NEMOTRON") | port $ORCH_PORT"
 

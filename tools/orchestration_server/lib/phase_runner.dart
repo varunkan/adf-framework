@@ -1510,8 +1510,14 @@ Instructions:
           final gates = (st['gates'] as Map<String, dynamic>?) ?? const {};
           final phase = (st['current_phase'] as num?)?.toInt() ??
               (run?['phase'] as num?)?.toInt() ?? 0;
+          // "Complete" must mean the FULL quality bar is met — NOT merely
+          // tests-green at phase 7. The old (tests_green && phase>=7) shortcut made
+          // a build stop the moment baseline unit tests passed, even with the UI/
+          // review/security gates still open and scoped features unbuilt — so it
+          // sat idle for hours instead of finishing. Require the real terminal
+          // gates so the relentless net keeps re-engaging until genuinely done.
           final complete = gates['review_approved'] == true ||
-              (gates['tests_green'] == true && phase >= 7);
+              gates['all_quality_gates_pass'] == true;
           if (!complete && phase >= 5) {
             store.writeRunStatus(id, {
               'status': 'error',
