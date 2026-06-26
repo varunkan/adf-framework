@@ -75,6 +75,16 @@ class PhaseRunner {
     return raw != null && raw > 0 ? raw : 100;
   }
 
+  /// Max features that may build CONCURRENTLY across the whole runner. `_pollQueue`
+  /// fires `unawaited` every tick, so WITHOUT a cap every queued feature starts at
+  /// once (the rate-limit-storm signature). Default 1 = effectively serial =
+  /// today's behavior. Raise to run independent features in parallel — bounded by
+  /// the subscription rate limit, not CPU. Tune via ADF_BUILD_PARALLELISM.
+  int get maxBuildParallelism {
+    final raw = int.tryParse(_env['ADF_BUILD_PARALLELISM']?.trim() ?? '');
+    return raw != null && raw > 0 ? raw : 1;
+  }
+
   /// Age in seconds of an ISO-8601 timestamp relative to [now], or null if absent
   /// / unparseable. Static → unit-testable without the wall clock.
   static int? ageSeconds(String? iso, DateTime now) {
@@ -647,6 +657,7 @@ class PhaseRunner {
 
   Future<void> _pollQueue() async {
     for (final id in store.listFeatures()) {
+      if (_active.length >= maxBuildParallelism) break; // global concurrency cap
       if (_active.contains(id)) continue;
       final req = store.readPhaseRequest(id);
       final run = store.readRunStatus(id);
@@ -660,6 +671,10 @@ class PhaseRunner {
 
   Future<void> _runFeature(String featureId) async {
     if (_active.contains(featureId)) return;
+    // Global concurrency cap. Atomic on Dart's single event loop — there is NO
+    // await between this check and `_active.add` below, so two overlapping poll
+    // ticks can't both slip past it. Default cap 1 → unchanged serial behavior.
+    if (_active.length >= maxBuildParallelism) return;
     final req = store.readPhaseRequest(featureId);
     if (req == null || req['consumed'] == true) return;
 
