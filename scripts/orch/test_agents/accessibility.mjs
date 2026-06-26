@@ -161,7 +161,19 @@ try {
     const r = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
     return r && r.result ? r.result.value : undefined;
   };
-  const goto = async (u) => { await send('Page.navigate', { url: u }); await sleep(1500); };
+  // Adaptive settle (shares visual_verify's env knobs): poll document.readyState
+  // instead of a flat 1500ms dead wait; floors cover in-page async (fetch->DOM)
+  // renders so the audit never runs before content is present.
+  const NAV_SETTLE = Number(process.env.ADF_VISUAL_SETTLE_MS || 700);
+  const ACT_SETTLE = Number(process.env.ADF_VISUAL_ACT_SETTLE_MS || 900);
+  const NAV_FLOOR = Number(process.env.ADF_VISUAL_NAV_FLOOR_MS || 150);
+  const ACT_FLOOR = Number(process.env.ADF_VISUAL_ACT_FLOOR_MS || 400);
+  const settle = async (cap, floor = 0) => {
+    let w = 0;
+    for (; w < floor; w += 40) await sleep(40);
+    for (; w < cap; w += 40) { await sleep(40); if ((await evalJs('document.readyState').catch(() => null)) === 'complete') return; }
+  };
+  const goto = async (u) => { await send('Page.navigate', { url: u }); await settle(NAV_SETTLE, NAV_FLOOR); };
   const clickNavByText = (t) => evalJs(`(() => { const els = [...document.querySelectorAll(${JSON.stringify(navSel)})]; const el = els.find((e) => ((e.innerText || e.getAttribute('aria-label') || '').trim()) === ${JSON.stringify(t)}); if (el) { el.click(); return true; } return false; })()`);
 
   // de-dup across views by rule+location+detail so we don't report the same
@@ -184,7 +196,7 @@ try {
   for (const t of nav.slice(0, MAX_NAV)) {
     if (overBudget() || findings.length >= MAX_FINDINGS) break;
     await goto(base);
-    if (await clickNavByText(t)) { await sleep(1100); await audit('view:' + t); }
+    if (await clickNavByText(t)) { await settle(ACT_SETTLE, ACT_FLOOR); await audit('view:' + t); }
   }
 
   const high = findings.filter(f => f.severity === 'high').length;
