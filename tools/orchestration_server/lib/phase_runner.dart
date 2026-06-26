@@ -93,6 +93,15 @@ class PhaseRunner {
     return raw != null && raw > 0 ? raw : 8000;
   }
 
+  /// Lowest port in [base, base+cap) not already in [used]; falls back to base
+  /// (unreachable while the number of active features ≤ cap). Pure → unit-testable.
+  static int lowestFreePort(Set<int> used, int base, int cap) {
+    for (var p = base; p < base + cap; p++) {
+      if (!used.contains(p)) return p;
+    }
+    return base;
+  }
+
   /// Age in seconds of an ISO-8601 timestamp relative to [now], or null if absent
   /// / unparseable. Static → unit-testable without the wall clock.
   static int? ageSeconds(String? iso, DateTime now) {
@@ -205,13 +214,8 @@ class PhaseRunner {
     // to honor ADF_SMOKE_PORT/PORT (generation template + existing-app patch).
     if (maxBuildParallelism > 1) {
       _featurePort.removeWhere((id, _) => !_active.contains(id));
-      final port = _featurePort.putIfAbsent(featureId, () {
-        final used = _featurePort.values.toSet();
-        for (var p = appPortBase; p < appPortBase + maxBuildParallelism; p++) {
-          if (!used.contains(p)) return p;
-        }
-        return appPortBase;
-      });
+      final port = _featurePort.putIfAbsent(featureId, () => lowestFreePort(
+          _featurePort.values.toSet(), appPortBase, maxBuildParallelism));
       env['ADF_SMOKE_PORT'] = '$port';
       env['ADF_APP_URL'] = 'http://127.0.0.1:$port';
     }
