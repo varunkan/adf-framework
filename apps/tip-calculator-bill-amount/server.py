@@ -10,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import html
 import math
+import os
 
 # ---------------------------------------------------------------------------
 # Core domain logic
@@ -1960,6 +1961,192 @@ def tip_by_diner(diners, tax=0):
     }
 
 
+def tip_matrix(bill, percents=(15, 18, 20, 25), people_options=(1, 2, 4),
+               tax=0, tip_on="total"):
+    """Build a 2-D comparison grid of per-person cost across tip rates × party sizes.
+
+    :func:`suggest_tips` answers "what does each tip tier cost for ONE fixed
+    party size". This answers the orthogonal question a group actually argues
+    about at the table — "there are four of us: how does 18% vs 20% change MY
+    share, and what happens to it if a fifth person joins?" — by laying every
+    ``(tip_percent, people)`` combination out as a grid so the trade-off is
+    visible at a glance.
+
+    ``percents`` is a non-empty list of non-negative tip rates (default
+    ``(15, 18, 20, 25)``); ``people_options`` is a non-empty list of whole party
+    sizes >= 1 (default ``(1, 2, 4)``). ``tax`` and ``tip_on`` are forwarded to
+    :func:`calculate_tip` so the tip-base mode (pre-tax vs post-tax) and rounding
+    rules stay identical to every other view. Each cell reuses
+    :func:`calculate_tip`, so a matrix cell never disagrees with the single
+    calculator for the same inputs.
+
+    Returns ``bill``/``tax``/``tip_on``, the resolved ``people_options``, a list
+    of ``rows`` (one per tip percent, each carrying the whole-table ``tip``/
+    ``total`` plus per-party ``cells`` of ``tip_per_person``/``total_per_person``),
+    and the ``cheapest``/``priciest`` cells by per-person cost so the best- and
+    worst-case shares are called out. Raises ``TipError`` on invalid input so
+    callers fail safe.
+    """
+    bill = _to_number(bill, "bill")
+    if bill < 0:
+        raise TipError("bill must not be negative")
+
+    if percents is None or percents == "":
+        percents = (15, 18, 20, 25)
+    if isinstance(percents, (str, bytes)) or not hasattr(percents, "__iter__"):
+        raise TipError("percents must be a list of numbers")
+    percents = list(percents)
+    if not percents:
+        raise TipError("percents must be a non-empty list")
+
+    if people_options is None or people_options == "":
+        people_options = (1, 2, 4)
+    if isinstance(people_options, (str, bytes)) or not hasattr(people_options, "__iter__"):
+        raise TipError("people_options must be a list of whole numbers")
+    people_options = [_validate_people(p) for p in people_options]
+    if not people_options:
+        raise TipError("people_options must be a non-empty list")
+
+    rows = []
+    cheapest = None
+    priciest = None
+    for p in percents:
+        base = calculate_tip(bill, p, 1, tax=tax, tip_on=tip_on)
+        cells = []
+        for people_int in people_options:
+            cell_calc = calculate_tip(bill, p, people_int, tax=tax, tip_on=tip_on)
+            cell = {
+                "people": people_int,
+                "tip_per_person": cell_calc["tip_per_person"],
+                "total_per_person": cell_calc["total_per_person"],
+            }
+            cells.append(cell)
+            marker = {
+                "tip_percent": cell_calc["tip_percent"],
+                "people": people_int,
+                "tip_per_person": cell_calc["tip_per_person"],
+                "total_per_person": cell_calc["total_per_person"],
+            }
+            if cheapest is None or marker["total_per_person"] < cheapest["total_per_person"]:
+                cheapest = marker
+            if priciest is None or marker["total_per_person"] > priciest["total_per_person"]:
+                priciest = marker
+        rows.append({
+            "tip_percent": base["tip_percent"],
+            "tip": base["tip"],
+            "total": base["total"],
+            "cells": cells,
+        })
+
+    return {
+        "bill": base["bill"],
+        "tax": base["tax"],
+        "tip_on": base["tip_on"],
+        "people_options": people_options,
+        "rows": rows,
+        "cheapest": cheapest,
+        "priciest": priciest,
+    }
+
+
+def affordable_bill(budget, people=1, tip_percent=0, tax_percent=0, tip_on="total"):
+    """Inverse PLANNER: the largest food bill a per-person budget can afford.
+
+    Every other inverse view solves for the TIP and takes the bill as GIVEN:
+    :func:`reverse_tip` backs out the tip needed to hit a target grand total,
+    and :func:`tip_for_target_per_person` backs out the tip so each diner pays a
+    chosen amount. This answers the orthogonal question diners ask *before*
+    ordering — "we've each got ``budget`` to spend, we'll tip ``tip_percent`` and
+    the county adds ``tax_percent`` sales tax: how much food can the table
+    actually afford?" — by solving for the pre-tax subtotal, not the tip.
+
+    Because ``tax_percent`` is a RATE applied to an unknown subtotal (we are
+    solving for the bill), it is a percentage here, distinct from the absolute
+    ``tax`` dollar amount used by :func:`calculate_tip` and friends. ``budget`` is
+    each diner's grand-total-inclusive cap; the table's spending power is
+    ``budget * people``. With ``tip_on="total"`` the gratuity is taken on the
+    tax-inclusive amount, so the grand total is ``subtotal * (1 + tax_rate) *
+    (1 + tip_rate)``; with ``tip_on="subtotal"`` (pre-tax) it is ``subtotal *
+    (1 + tax_rate + tip_rate)``. The affordable subtotal is the budget divided by
+    that factor, FLOORED to the cent and then nudged down if rounding tax/tip
+    would push the grand total even a cent over budget — so the result is always
+    within budget, never over.
+
+    Returns the affordable ``bill``/``subtotal`` plus the resulting ``tax``,
+    ``tip`` and grand ``total``, the per-person ``amounts`` (largest-remainder
+    split so they sum EXACTLY to the total), the nominal ``per_person`` figure,
+    the ``effective_tip_percent`` paid against the subtotal, and the ``headroom``
+    (budget left unspent). Raises ``TipError`` on invalid input so callers fail
+    safe.
+    """
+    budget = _to_number(budget, "budget")
+    if budget < 0:
+        raise TipError("budget must not be negative")
+    people_int = _validate_people(people)
+    tip_percent = _to_number(tip_percent, "tip_percent")
+    if tip_percent < 0:
+        raise TipError("tip_percent must not be negative")
+    tax_percent = (_to_number(tax_percent, "tax_percent")
+                   if tax_percent not in (None, "") else 0.0)
+    if tax_percent < 0:
+        raise TipError("tax_percent must not be negative")
+    mode = _normalise_tip_on(tip_on)
+
+    tax_rate = tax_percent / 100.0
+    tip_rate = tip_percent / 100.0
+    if mode == "total":
+        divisor = (1.0 + tax_rate) * (1.0 + tip_rate)
+    else:
+        divisor = 1.0 + tax_rate + tip_rate
+
+    total_budget_cents = int(round(budget * 100)) * people_int
+
+    def _grand(subtotal_cents):
+        tax_cents = int(round(subtotal_cents * tax_rate))
+        if mode == "total":
+            tip_cents = int(round((subtotal_cents + tax_cents) * tip_rate))
+        else:
+            tip_cents = int(round(subtotal_cents * tip_rate))
+        return tax_cents, tip_cents, subtotal_cents + tax_cents + tip_cents
+
+    # Divisor is >= 1 (rates are non-negative), so this is always finite.
+    subtotal_cents = int(math.floor(total_budget_cents / divisor))
+    if subtotal_cents < 0:
+        subtotal_cents = 0
+    # Rounding tax/tip up can nudge the grand total a cent over budget; step the
+    # subtotal down until it fits, guaranteeing we never exceed the budget.
+    tax_cents, tip_cents, grand_cents = _grand(subtotal_cents)
+    while grand_cents > total_budget_cents and subtotal_cents > 0:
+        subtotal_cents -= 1
+        tax_cents, tip_cents, grand_cents = _grand(subtotal_cents)
+
+    share_cents = _largest_remainder(grand_cents, [1] * people_int)
+    amounts = [_round2(c / 100.0) for c in share_cents]
+
+    if subtotal_cents > 0:
+        effective = tip_cents / subtotal_cents * 100.0
+    else:
+        effective = 0.0
+
+    return {
+        "budget_per_person": _round2(budget),
+        "people": people_int,
+        "total_budget": _round2(total_budget_cents / 100.0),
+        "tip_percent": _round2(tip_percent),
+        "tax_percent": _round2(tax_percent),
+        "tip_on": mode,
+        "bill": _round2(subtotal_cents / 100.0),
+        "subtotal": _round2(subtotal_cents / 100.0),
+        "tax": _round2(tax_cents / 100.0),
+        "tip": _round2(tip_cents / 100.0),
+        "total": _round2(grand_cents / 100.0),
+        "per_person": _round2(grand_cents / 100.0 / people_int),
+        "amounts": amounts,
+        "effective_tip_percent": _round2(effective),
+        "headroom": _round2((total_budget_cents - grand_cents) / 100.0),
+    }
+
+
 # ---------------------------------------------------------------------------
 # HTTP layer
 # ---------------------------------------------------------------------------
@@ -2293,11 +2480,29 @@ Jo 25 @ 25</textarea>
       <div id="diner-tips-rows"></div>
       <div class="err" id="diner-tips-err"></div>
     </div>
+
+    <div class="out">
+      <div class="row"><span class="k">What can we afford?</span><span class="v">budget &rarr; bill</span></div>
+      <label for="afford-budget">Budget per person ($)</label>
+      <input id="afford-budget" type="text" value="50" placeholder="e.g. 50">
+      <label for="afford-people">People</label>
+      <input id="afford-people" type="text" value="4" placeholder="e.g. 4">
+      <label for="afford-tip">Tip %</label>
+      <input id="afford-tip" type="text" value="20" placeholder="e.g. 20">
+      <label for="afford-tax">Sales tax %</label>
+      <input id="afford-tax" type="text" value="8" placeholder="e.g. 8">
+      <button class="chip" id="afford-go" style="margin-top:.6rem;flex:initial;width:100%;">How much food can we order?</button>
+      <div id="afford-rows"></div>
+      <div class="err" id="afford-err"></div>
+    </div>
   </div>
 
 <script>
 const $ = (id) => document.getElementById(id);
 const money = (n) => "$" + Number(n).toFixed(2);
+// Escape user-controlled strings before they touch innerHTML (DOM-XSS guard).
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 // Shared key/value row renderer — appends one ".row" div per [key, value] pair.
 const renderRows = (id, rows) => {
   rows.forEach(([k, v]) => {
@@ -2632,7 +2837,7 @@ async function buildBill() {
     data.line_items.forEach((it) => {
       const row = document.createElement("div");
       row.className = "row";
-      row.innerHTML = '<span class="k">' + it.name + ' &times;' + it.qty +
+      row.innerHTML = '<span class="k">' + esc(it.name) + ' &times;' + it.qty +
         '</span><span class="v">' + money(it.amount) + '</span>';
       $("menu-rows").appendChild(row);
     });
@@ -3082,7 +3287,7 @@ async function dinerTips() {
     if (!res.ok) { $("diner-tips-err").textContent = data.error || "Invalid input"; return; }
     $("diner-tips-err").textContent = "";
     const rows = data.diners.map((d) => [
-      d.name + " (" + d.tip_percent + "%)", money(d.total),
+      esc(d.name) + " (" + d.tip_percent + "%)", money(d.total),
     ]);
     rows.push(["Tip total", money(data.tip)]);
     rows.push(["Grand total", money(data.total)]);
@@ -3092,6 +3297,38 @@ async function dinerTips() {
   }
 }
 $("diner-tips-go").addEventListener("click", dinerTips);
+
+async function affordableBill() {
+  const body = {
+    budget: $("afford-budget").value,
+    people: $("afford-people").value,
+    tip_percent: $("afford-tip").value,
+    tax_percent: $("afford-tax").value,
+  };
+  $("afford-rows").innerHTML = "";
+  try {
+    const res = await fetch("/api/affordable-bill", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) { $("afford-err").textContent = data.error || "Invalid input"; return; }
+    $("afford-err").textContent = "";
+    const rows = [
+      ["Food budget (bill)", money(data.bill)],
+      ["Tax", money(data.tax)],
+      ["Tip", money(data.tip)],
+      ["Grand total", money(data.total)],
+      ["Total / person", money(data.per_person)],
+      ["Headroom left", money(data.headroom)],
+    ];
+    renderRows("afford-rows", rows);
+  } catch (e) {
+    $("afford-err").textContent = "Network error";
+  }
+}
+$("afford-go").addEventListener("click", affordableBill);
 </script>
 </body>
 </html>
@@ -3137,7 +3374,8 @@ class Handler(BaseHTTPRequestHandler):
                              "/api/split-comped", "/api/gross-up-tip",
                              "/api/shared-items", "/api/regional-tip",
                              "/api/charity", "/api/tip-excluding",
-                             "/api/diner-tips"):
+                             "/api/diner-tips", "/api/tip-matrix",
+                             "/api/affordable-bill"):
             self._send_json(404, {"error": "not found"})
             return
         try:
@@ -3335,6 +3573,22 @@ class Handler(BaseHTTPRequestHandler):
                     data.get("diners"),
                     data.get("tax", 0),
                 )
+            elif self.path == "/api/tip-matrix":
+                result = tip_matrix(
+                    data.get("bill"),
+                    data.get("percents", (15, 18, 20, 25)),
+                    data.get("people_options", (1, 2, 4)),
+                    data.get("tax", 0),
+                    data.get("tip_on", "total"),
+                )
+            elif self.path == "/api/affordable-bill":
+                result = affordable_bill(
+                    data.get("budget"),
+                    data.get("people", 1),
+                    data.get("tip_percent", 0),
+                    data.get("tax_percent", 0),
+                    data.get("tip_on", "total"),
+                )
             else:  # /api/split
                 result = split_by_shares(
                     data.get("bill"),
@@ -3362,4 +3616,4 @@ def run(host="0.0.0.0", port=8000):
 
 
 if __name__ == "__main__":
-    run()
+    run(port=int(os.environ.get("ADF_SMOKE_PORT") or os.environ.get("PORT") or 8000))

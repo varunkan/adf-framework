@@ -37,6 +37,8 @@ from server import (
     charity_round_up,
     tip_excluding,
     tip_by_diner,
+    tip_matrix,
+    affordable_bill,
     TipError,
     Handler,
 )
@@ -1805,6 +1807,109 @@ class TestTipByDiner(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
+class TestAffordableBill(unittest.TestCase):
+    # Inverse planner: solve for the affordable bill given a per-person budget.
+
+    def test_happy_post_tax_tip(self):
+        # $50pp x 4 = $200, tip on tax-inclusive total: 200 / (1.08*1.20) = 154.32.
+        r = affordable_bill(50, 4, 20, 8)
+        self.assertEqual(r["bill"], 154.32)
+        self.assertEqual(r["tax"], 12.35)
+        self.assertEqual(r["tip"], 33.33)
+        self.assertEqual(r["total"], 200.0)
+        self.assertEqual(r["per_person"], 50.0)
+
+    def test_subtotal_mode(self):
+        # tip on pre-tax subtotal: 60 / (1 + 0.10 + 0.15) = 48.00 exactly.
+        r = affordable_bill(60, 1, 15, 10, "subtotal")
+        self.assertEqual(r["bill"], 48.0)
+        self.assertEqual(r["tax"], 4.8)
+        self.assertEqual(r["tip"], 7.2)
+        self.assertEqual(r["total"], 60.0)
+        self.assertEqual(r["tip_on"], "subtotal")
+
+    def test_never_exceeds_budget(self):
+        # Across many awkward inputs the grand total must stay within budget.
+        for budget in (10, 23.45, 50, 99.99, 137):
+            for people in (1, 2, 3, 5):
+                for tip in (0, 15, 18.5, 22):
+                    for tax in (0, 7, 8.875):
+                        for mode in ("total", "subtotal"):
+                            r = affordable_bill(budget, people, tip, tax, mode)
+                            self.assertLessEqual(
+                                r["total"], round(budget * people, 2) + 1e-9,
+                                (budget, people, tip, tax, mode))
+                            self.assertGreaterEqual(r["headroom"], 0.0)
+
+    def test_amounts_sum_to_total(self):
+        r = affordable_bill(33.33, 3, 18, 6)
+        self.assertEqual(round(sum(r["amounts"]), 2), r["total"])
+        self.assertEqual(len(r["amounts"]), 3)
+
+    def test_headroom_reported(self):
+        r = affordable_bill(50, 4, 20, 8)
+        self.assertEqual(r["headroom"], round(r["total_budget"] - r["total"], 2))
+
+    def test_zero_tip_and_tax(self):
+        r = affordable_bill(25, 2, 0, 0)
+        self.assertEqual(r["bill"], 50.0)
+        self.assertEqual(r["total"], 50.0)
+        self.assertEqual(r["tip"], 0.0)
+        self.assertEqual(r["tax"], 0.0)
+        self.assertEqual(r["effective_tip_percent"], 0.0)
+
+    def test_zero_budget(self):
+        r = affordable_bill(0, 4, 20, 8)
+        self.assertEqual(r["bill"], 0.0)
+        self.assertEqual(r["total"], 0.0)
+        self.assertEqual(r["amounts"], [0.0, 0.0, 0.0, 0.0])
+
+    def test_string_inputs_coerced(self):
+        r = affordable_bill("50", "4", "20", "8")
+        self.assertEqual(r["bill"], 154.32)
+        self.assertEqual(r["people"], 4)
+
+    def test_defaults_no_tip_no_tax(self):
+        # people defaults to 1; tip/tax default to 0 -> bill equals budget.
+        r = affordable_bill(40)
+        self.assertEqual(r["people"], 1)
+        self.assertEqual(r["bill"], 40.0)
+        self.assertEqual(r["total"], 40.0)
+
+    def test_effective_tip_percent(self):
+        # Post-tax tipping makes the effective pre-tax rate exceed the nominal one.
+        r = affordable_bill(50, 4, 20, 8)
+        self.assertGreater(r["effective_tip_percent"], 20.0)
+
+    def test_negative_budget_rejected(self):
+        with self.assertRaises(TipError):
+            affordable_bill(-5, 4, 20, 8)
+
+    def test_negative_tip_rejected(self):
+        with self.assertRaises(TipError):
+            affordable_bill(50, 4, -20, 8)
+
+    def test_negative_tax_rejected(self):
+        with self.assertRaises(TipError):
+            affordable_bill(50, 4, 20, -8)
+
+    def test_zero_people_rejected(self):
+        with self.assertRaises(TipError):
+            affordable_bill(50, 0, 20, 8)
+
+    def test_fractional_people_rejected(self):
+        with self.assertRaises(TipError):
+            affordable_bill(50, 2.5, 20, 8)
+
+    def test_missing_budget_rejected(self):
+        with self.assertRaises(TipError):
+            affordable_bill(None, 4, 20, 8)
+
+    def test_bad_tip_on_rejected(self):
+        with self.assertRaises(TipError):
+            affordable_bill(50, 4, 20, 8, "sideways")
+
+
 class TestApi(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -1864,6 +1969,35 @@ class TestApi(unittest.TestCase):
         self.assertNotIn('split("\n', script)
         # The intended two-character escape must survive into the served JS.
         self.assertIn('split("\\n")', script)
+
+    def test_index_escapes_user_names_in_dom(self):
+        # DOM-XSS guard: user-controlled name strings (a diner's name, a built
+        # bill's line-item name) are echoed back from the API and injected via
+        # innerHTML. They MUST pass through esc() so a name like
+        # "<img src=x onerror=alert(1)>" cannot execute script in the browser.
+        import re
+        html = server.INDEX_HTML
+        script = re.search(r"<script>(.*?)</script>", html, re.S).group(1)
+        # The escape helper itself must be defined and cover every HTML metachar.
+        self.assertIn("const esc =", script)
+        for ch in ("&", "<", ">", '"', "'"):
+            self.assertIn(ch, script.split("const esc =", 1)[1][:200])
+        # Both user-controlled name sinks must be wrapped in esc(...).
+        self.assertIn("esc(d.name)", script)
+        self.assertIn("esc(it.name)", script)
+        # Regression: the raw, unescaped sinks must NOT reappear.
+        self.assertNotIn("+ d.name +", script)
+        self.assertNotIn("' + it.name + '", script)
+
+    def test_diner_name_is_preserved_verbatim_by_api(self):
+        # The server stores the diner name as-is (escaping is the browser's job
+        # via esc()); confirm a script-y name round-trips unchanged through the
+        # API so the client-side guard is the single, tested point of defense.
+        status, data = self._post_to(
+            "/api/diner-tips",
+            {"diners": [{"name": "<b>Sam</b>", "amount": 30, "tip_percent": 20}]})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["diners"][0]["name"], "<b>Sam</b>")
 
     def test_api_happy_path(self):
         status, data = self._post({"bill": 100, "tip_percent": 20, "people": 4})
@@ -2288,6 +2422,34 @@ class TestApi(unittest.TestCase):
 
     def test_api_diner_tips_validation(self):
         status, data = self._post_to("/api/diner-tips", {"diners": []})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_api_affordable_bill_happy(self):
+        status, data = self._post_to("/api/affordable-bill", {
+            "budget": 50, "people": 4, "tip_percent": 20, "tax_percent": 8})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["bill"], 154.32)
+        self.assertEqual(data["total"], 200.0)
+        self.assertEqual(data["per_person"], 50.0)
+        self.assertEqual(data["headroom"], 0.0)
+
+    def test_api_affordable_bill_subtotal_mode(self):
+        status, data = self._post_to("/api/affordable-bill", {
+            "budget": 60, "tip_percent": 15, "tax_percent": 10,
+            "tip_on": "subtotal"})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["bill"], 48.0)
+        self.assertEqual(data["tip_on"], "subtotal")
+
+    def test_api_affordable_bill_defaults(self):
+        status, data = self._post_to("/api/affordable-bill", {"budget": 40})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["people"], 1)
+        self.assertEqual(data["bill"], 40.0)
+
+    def test_api_affordable_bill_validation(self):
+        status, data = self._post_to("/api/affordable-bill", {"budget": -5})
         self.assertEqual(status, 400)
         self.assertIn("error", data)
 
