@@ -1926,6 +1926,47 @@ class TestCardCashSplit(unittest.TestCase):
             card_cash_split([{"amount": 10}], tax=-1)
 
 
+class TestDinerSplitSharedHelpers(unittest.TestCase):
+    # Locks in the shared diner-parsing helpers extracted from tip_by_diner /
+    # card_cash_split so the two stay behaviourally identical (no dup drift).
+    def test_validate_diners_list_rejects_empties_and_scalars(self):
+        for bad in (None, "", [], "abc", {"amount": 1}, 5):
+            with self.assertRaises(TipError):
+                server._validate_diners_list(bad)
+        self.assertEqual(server._validate_diners_list([{"amount": 1}]),
+                         [{"amount": 1}])
+
+    def test_parse_diner_name_amount_defaults_and_validation(self):
+        name, cents = server._parse_diner_name_amount({"amount": 12.34}, 2)
+        self.assertEqual((name, cents), ("Diner 3", 1234))
+        name, cents = server._parse_diner_name_amount(
+            {"name": "Pat", "amount": "5"}, 0)
+        self.assertEqual((name, cents), ("Pat", 500))
+        with self.assertRaises(TipError):
+            server._parse_diner_name_amount("nope", 0)
+        with self.assertRaises(TipError):
+            server._parse_diner_name_amount({"amount": -1}, 0)
+
+    def test_parse_tax_shares_sums_exactly(self):
+        total, shares = server._parse_tax_shares(10, [3333, 3333, 3334])
+        self.assertEqual(total, 1000)
+        self.assertEqual(sum(shares), 1000)
+        self.assertEqual(server._parse_tax_shares(None, [100])[0], 0)
+        with self.assertRaises(TipError):
+            server._parse_tax_shares(-1, [100])
+
+    def test_both_callers_share_identical_diner_parsing(self):
+        # Same diners through both functions must agree on name/amount/tax split.
+        diners = [{"name": "X", "amount": 40, "tip_percent": 0},
+                  {"amount": 60, "tip_percent": 0}]
+        a = tip_by_diner(diners, tax=10)
+        b = card_cash_split(diners, tax=10)
+        for da, db in zip(a["diners"], b["diners"]):
+            self.assertEqual(da["name"], db["name"])
+            self.assertEqual(da["amount"], db["amount"])
+            self.assertEqual(da["tax"], db["tax"])
+
+
 # ---------------------------------------------------------------------------
 # HTTP API tests
 # ---------------------------------------------------------------------------

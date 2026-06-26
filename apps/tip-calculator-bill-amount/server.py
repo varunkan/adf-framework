@@ -1864,6 +1864,43 @@ def tip_excluding(bill, tip_percent, excluded=0, people=1):
     }
 
 
+def _validate_diners_list(diners):
+    """Validate the ``diners`` argument and return it as a concrete list."""
+    if diners in (None, ""):
+        raise TipError("diners is required")
+    if isinstance(diners, (str, bytes, dict)) or not hasattr(diners, "__iter__"):
+        raise TipError("diners must be a list of diners")
+    diners = list(diners)
+    if not diners:
+        raise TipError("at least one diner is required")
+    return diners
+
+
+def _parse_diner_name_amount(entry, index):
+    """Validate one diner entry dict and return ``(name, amount_cents)``."""
+    if not isinstance(entry, dict):
+        raise TipError("diner %d must be an object" % (index + 1))
+    name = entry.get("name")
+    if name in (None, ""):
+        name = "Diner %d" % (index + 1)
+    else:
+        name = str(name)
+    amount = _to_number(entry.get("amount"), "diner %d amount" % (index + 1))
+    if amount < 0:
+        raise TipError("diner %d amount must not be negative" % (index + 1))
+    return name, int(round(amount * 100))
+
+
+def _parse_tax_shares(tax, amount_cents):
+    """Parse ``tax`` and apportion it across ``amount_cents`` by largest remainder."""
+    tax_amount = _to_number(tax, "tax") if tax not in (None, "") else 0.0
+    if tax_amount < 0:
+        raise TipError("tax must not be negative")
+    tax_cents_total = int(round(tax_amount * 100))
+    tax_shares = _largest_remainder(tax_cents_total, list(amount_cents))
+    return tax_cents_total, tax_shares
+
+
 def tip_by_diner(diners, tax=0):
     """Per-diner INDIVIDUAL tip rates on each diner's own portion (REQ-001/002).
 
@@ -1889,40 +1926,21 @@ def tip_by_diner(diners, tax=0):
     paid against the subtotal. Per-diner totals always reconcile to the grand
     total to the cent. Raises ``TipError`` on invalid input so callers fail safe.
     """
-    if diners in (None, ""):
-        raise TipError("diners is required")
-    if isinstance(diners, (str, bytes, dict)) or not hasattr(diners, "__iter__"):
-        raise TipError("diners must be a list of diners")
-    diners = list(diners)
-    if not diners:
-        raise TipError("at least one diner is required")
+    diners = _validate_diners_list(diners)
 
     names = []
     amount_cents = []
     percents = []
     for index, entry in enumerate(diners):
-        if not isinstance(entry, dict):
-            raise TipError("diner %d must be an object" % (index + 1))
-        name = entry.get("name")
-        if name in (None, ""):
-            name = "Diner %d" % (index + 1)
-        else:
-            name = str(name)
-        amount = _to_number(entry.get("amount"), "diner %d amount" % (index + 1))
-        if amount < 0:
-            raise TipError("diner %d amount must not be negative" % (index + 1))
+        name, a_cents = _parse_diner_name_amount(entry, index)
         pct = _to_number(entry.get("tip_percent"), "diner %d tip_percent" % (index + 1))
         if pct < 0:
             raise TipError("diner %d tip_percent must not be negative" % (index + 1))
         names.append(name)
-        amount_cents.append(int(round(amount * 100)))
+        amount_cents.append(a_cents)
         percents.append(pct)
 
-    tax_amount = _to_number(tax, "tax") if tax not in (None, "") else 0.0
-    if tax_amount < 0:
-        raise TipError("tax must not be negative")
-    tax_cents_total = int(round(tax_amount * 100))
-    tax_shares = _largest_remainder(tax_cents_total, list(amount_cents))
+    tax_cents_total, tax_shares = _parse_tax_shares(tax, amount_cents)
 
     rows = []
     subtotal_cents = 0
@@ -1997,13 +2015,7 @@ def card_cash_split(diners, tip_percent=0, tax=0, card_surcharge=0):
     Per-diner totals reconcile to the grand total to the cent. Raises ``TipError``
     on invalid input so callers fail safe.
     """
-    if diners in (None, ""):
-        raise TipError("diners is required")
-    if isinstance(diners, (str, bytes, dict)) or not hasattr(diners, "__iter__"):
-        raise TipError("diners must be a list of diners")
-    diners = list(diners)
-    if not diners:
-        raise TipError("at least one diner is required")
+    diners = _validate_diners_list(diners)
 
     tip_rate = _to_number(tip_percent, "tip_percent") if tip_percent not in (None, "") else 0.0
     if tip_rate < 0:
@@ -2019,25 +2031,12 @@ def card_cash_split(diners, tip_percent=0, tax=0, card_surcharge=0):
     methods = []
     amount_cents = []
     for index, entry in enumerate(diners):
-        if not isinstance(entry, dict):
-            raise TipError("diner %d must be an object" % (index + 1))
-        name = entry.get("name")
-        if name in (None, ""):
-            name = "Diner %d" % (index + 1)
-        else:
-            name = str(name)
-        amount = _to_number(entry.get("amount"), "diner %d amount" % (index + 1))
-        if amount < 0:
-            raise TipError("diner %d amount must not be negative" % (index + 1))
+        name, a_cents = _parse_diner_name_amount(entry, index)
         names.append(name)
         methods.append(_normalise_pay_method(entry.get("method"), index))
-        amount_cents.append(int(round(amount * 100)))
+        amount_cents.append(a_cents)
 
-    tax_amount = _to_number(tax, "tax") if tax not in (None, "") else 0.0
-    if tax_amount < 0:
-        raise TipError("tax must not be negative")
-    tax_cents_total = int(round(tax_amount * 100))
-    tax_shares = _largest_remainder(tax_cents_total, list(amount_cents))
+    tax_cents_total, tax_shares = _parse_tax_shares(tax, amount_cents)
 
     rows = []
     subtotal_cents = 0
