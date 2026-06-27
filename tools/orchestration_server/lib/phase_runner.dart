@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'claude_child_env.dart';
 import 'code_heuristics.dart';
 import 'cost_meter.dart';
 import 'feature_store.dart';
@@ -190,21 +191,15 @@ class PhaseRunner {
       'ADF_STACK': store.stackFor(featureId),
       'ADF_FEATURE_ID': featureId,
     };
-    // A coding-agent backend (Claude Code) must run as a FRESH top-level session.
-    // When ADF was itself launched from inside a Claude Code session, the server's
-    // env carries nested-session markers (CLAUDE_CODE_*, CLAUDE_AGENT_SDK_*,
-    // CLAUDECODE) and a session-scoped ANTHROPIC_BASE_URL. Inherited by the spawned
-    // `claude -p`, they make it behave as a nested SDK call — it returns a
-    // <synthetic> error and exits 1 instead of building. Scrub them so the child
-    // uses its own login/config. (Harmless to strip for argv runners too.)
-    if (_health.backend.buildsAppDirectly) {
-      env.removeWhere((k, _) =>
-          // keep the long-lived headless auth token (`claude setup-token`)
-          (k.startsWith('CLAUDE_CODE_') && k != 'CLAUDE_CODE_OAUTH_TOKEN') ||
-          k.startsWith('CLAUDE_AGENT_SDK') ||
-          k == 'CLAUDECODE' ||
-          k == 'ANTHROPIC_BASE_URL');
-    }
+    // A coding-agent backend (Claude Code) must run as a FRESH top-level session
+    // on the $0 subscription. claudeChildEnv strips the nested-session markers
+    // (CLAUDE_CODE_*/CLAUDE_AGENT_SDK*/CLAUDECODE/ANTHROPIC_BASE_URL) that would
+    // make the spawned `claude -p` behave as a nested SDK call (synthetic error,
+    // exit 1), AND removes the paid ANTHROPIC_API_KEY when the subscription OAuth
+    // token is present so the build bills $0, not the API. NB: this scrub is only
+    // effective because the build spawn passes includeParentEnvironment: false
+    // (see Process.start below) — otherwise the parent env merges back over it.
+    claudeChildEnv(env, claudeBackend: _health.backend.buildsAppDirectly);
     // Per-feature app-under-test PORT isolation — ONLY when parallelism is enabled.
     // At the default cap of 1 we inject nothing, so the gate keeps using its :8000
     // defaults (byte-identical to today). At cap>1, each concurrently-active feature
@@ -858,7 +853,14 @@ class PhaseRunner {
     try {
       final r = await Process.run(
               'python3', [script, '$repoRoot/apps/$featureId'],
-              workingDirectory: repoRoot)
+              workingDirectory: repoRoot,
+              // The gate fans out to the deep LLM agents (llm_agent.py runs
+              // `claude -p --model opus` on the subscription). Scrub the paid key
+              // here too so those calls bill $0 — the gate spawns python with no
+              // env arg by default, inheriting the raw server env including
+              // ANTHROPIC_API_KEY. includeParentEnvironment:false makes it stick.
+              environment: claudeChildEnvFromParent(claudeBackend: true),
+              includeParentEnvironment: false)
           .timeout(const Duration(seconds: 1200)); // ecosystem of agents takes minutes
       final out = (r.stdout as String).trim();
       if (out.isEmpty) return ['test-agent gate produced no output'];
@@ -1189,7 +1191,13 @@ class PhaseRunner {
     }
 
     final proc = await Process.start(agent, args,
-        workingDirectory: cwd, environment: childEnvFor(featureId));
+        workingDirectory: cwd,
+        environment: childEnvFor(featureId),
+        // childEnvFor returns the COMPLETE child env (a copy of the parent plus
+        // ADF_* extras, minus the claudeChildEnv scrubs). Pass it as the whole
+        // env — without this, Dart merges the raw parent env back on top and the
+        // ANTHROPIC_API_KEY / nested-session scrubs are silently undone.
+        includeParentEnvironment: false);
     _processes[featureId] = proc;
     // Headless agents (`claude -p`) take the prompt from argv and otherwise block
     // ~3s waiting on piped stdin ("no stdin data received in 3s"). Close it so they

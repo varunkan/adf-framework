@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'claude_child_env.dart';
 import 'cost_meter.dart';
 import 'feature_store.dart';
 import 'runner_health.dart';
@@ -63,7 +64,14 @@ class AgentChatRunner {
     String? fullResult;
     final streamed = StringBuffer();
     try {
-      proc = await Process.start(agent, args, workingDirectory: repoRoot);
+      proc = await Process.start(agent, args,
+          workingDirectory: repoRoot,
+          // Bill the dashboard-chat claude -p on the $0 subscription, not the
+          // paid API. This spawn previously inherited the raw server env (so it
+          // leaked ANTHROPIC_API_KEY and skipped the nested-session scrub).
+          environment: claudeChildEnvFromParent(
+              claudeBackend: health.backend.buildsAppDirectly),
+          includeParentEnvironment: false);
       final stdoutDone = proc.stdout
           .transform(utf8.decoder)
           .transform(const LineSplitter())

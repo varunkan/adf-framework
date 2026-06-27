@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'claude_child_env.dart';
 import 'runner_backend.dart';
 
 /// Probes the active agent runner (Claude or a custom CLI) for availability and
@@ -201,7 +202,15 @@ class RunnerHealth {
 
     Process? proc;
     try {
-      proc = await Process.start(agentPath, args, workingDirectory: cwd);
+      proc = await Process.start(agentPath, args,
+          workingDirectory: cwd,
+          // Bill the readiness probe on the $0 subscription too. Guarded on the
+          // backend: a custom/NVIDIA runner keeps its paid ANTHROPIC_API_KEY.
+          // When OAuth is absent the key is left in place so the probe still
+          // reports needs-login rather than failing to auth silently.
+          environment:
+              claudeChildEnvFromParent(claudeBackend: backend.buildsAppDirectly),
+          includeParentEnvironment: false);
 
       var sawOutput = false;
       void chunk(String chunk) {
