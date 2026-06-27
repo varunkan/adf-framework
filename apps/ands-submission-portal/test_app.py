@@ -11,6 +11,7 @@ Run:  python3 -m unittest -v
 
 import json
 import os
+import re
 import shutil
 import tempfile
 import threading
@@ -265,6 +266,37 @@ class ApiTests(unittest.TestCase):
         self.assertIn("data-file=", page)
         # The old, injectable inline form must be gone.
         self.assertNotIn("valFix(\\'", page)
+
+    def test_every_onclick_handler_is_defined(self):
+        # Regression: every JS function referenced from an inline onclick="" in
+        # INDEX_HTML must actually be defined in the page <script>, or the button
+        # throws an uncaught ReferenceError and the whole journey is dead in the
+        # UI (e.g. the DSTS lifecycle, rejection-ingest and calendar cards once
+        # shipped with their onclick handlers wired to undefined functions).
+        with urllib.request.urlopen(self._url("/")) as resp:
+            page = resp.read().decode()
+        # Pull the bare function name out of each onclick="fnName(...)".
+        called = set(re.findall(r'onclick="([A-Za-z_$][\w$]*)\s*\(', page))
+        self.assertTrue(called, "expected onclick handlers in the page")
+        missing = []
+        for fn in sorted(called):
+            # A function is "defined" if the script declares it as a function
+            # declaration or assigns it to a name (function/const/let/var).
+            if re.search(r'(?:async\s+)?function\s+' + re.escape(fn) + r'\s*\(',
+                         page):
+                continue
+            if re.search(r'(?:const|let|var)\s+' + re.escape(fn) + r'\s*=', page):
+                continue
+            missing.append(fn)
+        self.assertEqual(missing, [],
+                         f"onclick handlers with no definition: {missing}")
+        # Explicitly assert the previously-dead handlers are now present.
+        for fn in ("lcStart", "lcTransition", "lcScreening", "lcClarifax",
+                   "lcDecision", "lcServiceStandard", "lcLoad", "rejIngest",
+                   "calCompute", "calHolidays"):
+            self.assertIn(fn, called, f"{fn} button missing from page")
+            self.assertRegex(page, r'function\s+' + fn + r'\s*\(',
+                             f"{fn} referenced but not defined")
 
     def test_malformed_content_length_does_not_crash(self):
         # Regression: a non-numeric Content-Length must be handled gracefully

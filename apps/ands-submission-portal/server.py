@@ -4632,6 +4632,157 @@ async function feeRightToSell() {
 
 document.getElementById('valCtx').value = JSON.stringify(SAMPLE_CTX, null, 2);
 
+// -- DSTS lifecycle (REQ-030/031/062) ----------------------------------------
+function lcField(id) {
+  const el = document.getElementById(id);
+  return el ? el.value.trim() : '';
+}
+
+function lcShow(data) {
+  const el = document.getElementById('lcResult');
+  if (!el) return;
+  if (!data.valid && data.error) {
+    el.innerHTML = '<span class="badge bad">Error</span> ' + esc(data.error);
+    return;
+  }
+  const s = data.status || data.assessment || data;
+  el.innerHTML = '<pre style="background:#f4f7fb;border:1px solid var(--line);' +
+    'border-radius:6px;padding:10px;overflow:auto;font-size:12px">' +
+    esc(JSON.stringify(s, null, 2)) + '</pre>';
+}
+
+function lcNow() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+async function lcStart() {
+  const body = {
+    dossier_id: lcField('lcDossier'),
+    submission_type: lcField('lcType'),
+    core_id: lcField('lcCore'),
+    fee_paid: parseFloat(lcField('lcFee')) || null,
+    now: lcNow(),
+  };
+  const {status, data} = await postJson('/api/lifecycle/start', body);
+  lcShow(data);
+}
+
+async function lcTransition(action) {
+  const body = {dossier_id: lcField('lcDossier'), action, now: lcNow()};
+  const {status, data} = await postJson('/api/lifecycle/transition', body);
+  lcShow(data);
+}
+
+async function lcScreening(outcome) {
+  const body = {dossier_id: lcField('lcDossier'), action: 'screening_outcome', outcome, now: lcNow()};
+  const {status, data} = await postJson('/api/lifecycle/transition', body);
+  lcShow(data);
+}
+
+async function lcClarifax() {
+  const override = lcField('lcOverride');
+  const body = {
+    dossier_id: lcField('lcDossier'),
+    action: 'clarifax',
+    tier: lcField('lcTier'),
+    response_days: override ? parseInt(override, 10) : undefined,
+    now: lcNow(),
+  };
+  const {status, data} = await postJson('/api/lifecycle/transition', body);
+  lcShow(data);
+}
+
+async function lcDecision(decision) {
+  const body = {dossier_id: lcField('lcDossier'), action: 'decision', decision, now: lcNow()};
+  const {status, data} = await postJson('/api/lifecycle/transition', body);
+  lcShow(data);
+}
+
+async function lcServiceStandard() {
+  const body = {dossier_id: lcField('lcDossier'), now: lcNow()};
+  const {status, data} = await postJson('/api/lifecycle/service-standard', body);
+  lcShow(data);
+}
+
+async function lcLoad() {
+  const id = lcField('lcDossier');
+  const el = document.getElementById('lcResult');
+  try {
+    const res = await fetch('/api/lifecycle/dossiers/' + encodeURIComponent(id));
+    const data = await res.json();
+    if (!el) return;
+    if (res.status >= 400) {
+      el.innerHTML = '<span class="badge bad">Error</span> ' + esc(data.error || res.status);
+      return;
+    }
+    el.innerHTML = '<pre style="background:#f4f7fb;border:1px solid var(--line);' +
+      'border-radius:6px;padding:10px;overflow:auto;font-size:12px">' +
+      esc(JSON.stringify(data, null, 2)) + '</pre>';
+  } catch (e) {
+    if (el) el.innerHTML = '<span class="badge bad">Error</span> ' + esc(e.message);
+  }
+}
+
+// -- HC deadline calendar (REQ-052) ------------------------------------------
+async function calCompute() {
+  const el = document.getElementById('calResult');
+  const basis = document.getElementById('calBasis').value;
+  const body = {
+    start: document.getElementById('calStart').value.trim(),
+    days: parseInt(document.getElementById('calDays').value, 10),
+    notice_type: document.getElementById('calNotice').value,
+    basis: basis || undefined,
+  };
+  const {status, data} = await postJson('/api/calendar/deadline', body);
+  if (!el) return;
+  if (!data.valid) {
+    el.innerHTML = '<span class="badge bad">Error</span> ' + esc(data.error);
+    return;
+  }
+  el.innerHTML = '<pre style="background:#f4f7fb;border:1px solid var(--line);' +
+    'border-radius:6px;padding:10px;overflow:auto;font-size:12px">' +
+    esc(JSON.stringify(data.deadline, null, 2)) + '</pre>';
+}
+
+async function calHolidays() {
+  const el = document.getElementById('calResult');
+  const year = new Date().getFullYear();
+  try {
+    const res = await fetch('/api/calendar/holidays?start=' + year + '&end=' + (year + 1));
+    const data = await res.json();
+    if (!el) return;
+    if (res.status >= 400) {
+      el.innerHTML = '<span class="badge bad">Error</span> ' + esc(data.error || res.status);
+      return;
+    }
+    let html = '<strong>Canadian federal statutory holidays (' + data.start_year +
+      '–' + data.end_year + ')</strong><table><tr><th>Date</th><th>Name</th></tr>';
+    for (const h of data.holidays)
+      html += '<tr><td>' + esc(h.date) + '</td><td>' + esc(h.name) + '</td></tr>';
+    el.innerHTML = html + '</table>';
+  } catch (e) {
+    if (el) el.innerHTML = '<span class="badge bad">Error</span> ' + esc(e.message);
+  }
+}
+
+// -- Rejection / eCTD Validation Report ingest (REQ-029) ---------------------
+async function rejIngest() {
+  const el = document.getElementById('rejResult');
+  const body = {
+    dossier_id: (document.getElementById('rejDossier').value || '').trim(),
+    report_text: (document.getElementById('rejReport').value || '').trim(),
+  };
+  const {status, data} = await postJson('/api/rejections/ingest', body);
+  if (!el) return;
+  if (!data.valid) {
+    el.innerHTML = '<span class="badge bad">Error</span> ' + esc(data.error);
+    return;
+  }
+  el.innerHTML = '<pre style="background:#f4f7fb;border:1px solid var(--line);' +
+    'border-radius:6px;padding:10px;overflow:auto;font-size:12px">' +
+    esc(JSON.stringify(data, null, 2)) + '</pre>';
+}
+
 async function boot() {
   // Client requirement (2026-06-26): present the UI only after BOTH the web
   // server and the API server are confirmed up. The web server already answered
