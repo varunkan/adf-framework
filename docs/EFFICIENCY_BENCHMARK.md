@@ -32,13 +32,28 @@ From 25 recorded ANDS build turns (`measure_efficiency.py --feature ands-submiss
   non-model harness is a small slice of a turn, which is exactly why "100× single-build latency"
   is not achievable without changing the model).
 
-## Incremental-verify (lever #3): currently DORMANT — measured by registry inspection
-The gate's deep LLM agents — `e2e`, `integration`, `black-box`, `white-box` — are all
-**`enabled: false`** in `scripts/orch/test_agents/registry.json`. So the live gate is **all
-deterministic** (ui-visual, accessibility, dup, security, functional ≈ ~6s post-settle), and the
-incremental lever has **nothing to defer → ~0 effect in the current config**. The lever is correct
-and ready; its saving only materializes once the deep LLM agents are enabled (then deferring them on
-a deterministically-failing cycle saves their multi-minute run). Honest current value: **0×** (no-op).
+## Incremental-verify (lever #3): now ACTIVATABLE via one knob (was dormant)
+The gate's deep LLM agents — `e2e`, `integration`, `black-box`, `white-box` — ship
+**`enabled: false`** in `scripts/orch/test_agents/registry.json`, so by default the live gate is
+**all deterministic** (ui-visual, accessibility, dup, security, functional ≈ ~6s post-settle) and
+the incremental lever has nothing to defer (**0× when off** — the prior, quota-safe default).
+`_apply_deep_agent_gate` (run_test_agents.py, commit 76cefaa) wires those agents' `enabled` to the
+single **`ADF_DEEP_AGENTS`** knob: set it to `1` and the deep agents run — deferred by
+`ADF_VERIFY_INCREMENTAL` while the cheap deterministic tier is dirty, then run once it is clean (the
+natural completion milestone). That is when the lever does real work (deferring a multi-minute
+4-agent Opus sweep on every deterministically-failing cycle). $0 holds: `llm_agent.py` drives
+`claude -p --model opus` via `CLAUDE_CODE_OAUTH_TOKEN`, never the API. Covered by 5 unit tests
+(`test_deep_agent_gate.py`). To quantify the saving, run a C-incremental A/B with `ADF_DEEP_AGENTS=1`.
+
+## Parallelism (lever #4): cap-2 now UNBLOCKED + isolation proven (deterministic)
+`ADF_BUILD_PARALLELISM>1` gives each concurrent feature its own app port. The remaining blocker —
+apps hardcoding `:8000` — is closed (commit 76cefaa): `childEnvFor` sets both `ADF_SMOKE_PORT` and
+`PORT`, and every app's `__main__` honors `ADF_SMOKE_PORT or PORT or 8000` (new apps inherit it from
+the build prompt). **Proven without LLM quota:** two apps booted on `:8011`+`:8012` simultaneously
+(one via `ADF_SMOKE_PORT`, one via `PORT`) — both HTTP 200, nothing on shared `:8000`. Allocator +
+cap logic covered by `phase_runner_parallelism_test.dart`. The live two-feature throughput A/B
+(builds/hr at cap 1 vs cap 2) is the only piece still needing a real quota'd run; do it on two SMALL
+throwaway features (not the live ANDS build) and watch for `rate_limit_event`.
 
 ## Controlled A/B — assessed NOT worth the quota (and why)
 A 5-config × N=3 LLM build campaign was planned for clean per-lever attribution, but inspection shows
