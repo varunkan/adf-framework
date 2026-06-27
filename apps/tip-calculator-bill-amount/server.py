@@ -2542,6 +2542,112 @@ def clean_share_split(bill, tip_percent, people, organizer=0, nearest=1.0,
     }
 
 
+def redeem_loyalty(bill, tip_percent, points=0, point_value=0.01, people=1,
+                   increment=1, max_redeem=None, tax=0, tip_on="subtotal"):
+    """Redeem loyalty / rewards points against the bill, tipping on full value.
+
+    Restaurant and cafe rewards programmes let a diner burn accrued points for a
+    statement credit at the till. The defining real-world rule — and what makes
+    this DISTINCT from both :func:`apply_discount` and :func:`tip_excluding` — is
+    *what the points touch*. A discount lowers the tip base (you tip on the
+    cheaper price); ``tip_excluding`` holds part of the cheque out of the tip but
+    you still pay it in full. Here the redemption is a pure **payment** credit:
+    the gratuity is charged on the FULL pre-redemption service value, because the
+    server delivered that value regardless of how the diner settles it, and the
+    points only reduce the cash actually handed over.
+
+    ``points`` is the balance offered for redemption and ``point_value`` the
+    dollars each point is worth (default ``0.01`` → 100 points = $1). Points
+    redeem only in whole multiples of ``increment`` (e.g. 100-point blocks), and
+    the dollar credit is capped at what is actually owed for goods —
+    ``bill + tax`` — and, if supplied, at ``max_redeem`` as well, so a diner can
+    never redeem the tip away or drive the bill negative. Any points not redeemed
+    (because of the increment or a cap) are returned as ``remaining_points`` so
+    they stay on the card.
+
+    The tip is computed via the shared ``tip_on`` mode against the full bill
+    (``"subtotal"``, the default and etiquette norm) or against ``bill + tax``
+    (``"total"``). The ``amount_due`` you pay is ``bill + tax - redemption + tip``
+    and is split evenly across ``people`` with the largest-remainder method so the
+    per-person ``amounts`` sum EXACTLY to it. Raises ``TipError`` on invalid input
+    so callers fail safe.
+    """
+    bill = _to_number(bill, "bill")
+    tip_percent, tax, mode = _validate_tip_inputs(tip_percent, tax, tip_on)
+    people_int = _validate_people(people)
+    points = _to_number(points, "points") if points not in (None, "") else 0.0
+    point_value = (_to_number(point_value, "point_value")
+                   if point_value not in (None, "") else 0.0)
+    increment = (_to_number(increment, "increment")
+                 if increment not in (None, "") else 1.0)
+
+    if bill < 0:
+        raise TipError("bill must not be negative")
+    if points < 0:
+        raise TipError("points must not be negative")
+    if point_value < 0:
+        raise TipError("point_value must not be negative")
+    if increment <= 0:
+        raise TipError("increment must be greater than zero")
+
+    cap = bill + tax
+    if max_redeem not in (None, ""):
+        max_redeem = _to_number(max_redeem, "max_redeem")
+        if max_redeem < 0:
+            raise TipError("max_redeem must not be negative")
+        cap = min(cap, max_redeem)
+
+    # Points redeem only in whole ``increment`` blocks (floor, never round up).
+    eligible_points = math.floor(points / increment + 1e-9) * increment
+
+    # Trim the redeemed points so their dollar value never exceeds the cap.
+    if point_value > 0 and cap >= 0:
+        max_points_by_cap = math.floor(cap / point_value / increment + 1e-9) * increment
+        redeemed_points = min(eligible_points, max_points_by_cap)
+    else:
+        redeemed_points = 0.0
+
+    redemption = _round2(redeemed_points * point_value)
+    if redemption > cap:  # guard against float drift past the cap
+        redemption = _round2(cap)
+    remaining_points = _round2(points - redeemed_points)
+
+    subtotal = bill + tax
+    tip_base = subtotal if mode == "total" else bill
+    tip = tip_base * tip_percent / 100.0
+    amount_due = subtotal - redemption + tip
+    amount_due_cents = int(round(amount_due * 100))
+
+    if subtotal > 0:
+        effective_discount = redemption / subtotal * 100.0
+    else:
+        effective_discount = 0.0
+
+    share_cents = _largest_remainder(amount_due_cents, [1] * people_int)
+    per_person_amounts = [c / 100.0 for c in share_cents]
+
+    return {
+        "bill": _round2(bill),
+        "tax": _round2(tax),
+        "tip_percent": _round2(tip_percent),
+        "tip_on": mode,
+        "people": people_int,
+        "point_value": _round2(point_value),
+        "increment": _round2(increment),
+        "points": _round2(points),
+        "redeemed_points": _round2(redeemed_points),
+        "remaining_points": remaining_points,
+        "redemption": redemption,
+        "subtotal": _round2(subtotal),
+        "tip": _round2(tip),
+        "amount_due": _round2(amount_due_cents / 100.0),
+        "effective_discount_percent": _round2(effective_discount),
+        "tip_per_person": _round2(tip / people_int),
+        "amount_due_per_person": _round2(amount_due_cents / 100.0 / people_int),
+        "per_person_amounts": per_person_amounts,
+    }
+
+
 # ---------------------------------------------------------------------------
 # HTTP layer
 # ---------------------------------------------------------------------------
@@ -2959,6 +3065,25 @@ Jo 25 card</textarea>
       <button class="chip" id="clean-go" style="margin-top:.6rem;flex:initial;width:100%;">Make everyone&#39;s share clean</button>
       <div id="clean-rows"></div>
       <div class="err" id="clean-err"></div>
+    </div>
+
+    <div class="out">
+      <div class="row"><span class="k">Redeem rewards points</span><span class="v">tip on full value</span></div>
+      <label for="loy-bill">Bill ($)</label>
+      <input id="loy-bill" type="text" value="100" placeholder="e.g. 100">
+      <label for="loy-tip">Tip %</label>
+      <input id="loy-tip" type="text" value="20" placeholder="e.g. 20">
+      <label for="loy-points">Points to redeem</label>
+      <input id="loy-points" type="text" value="500" placeholder="e.g. 500">
+      <label for="loy-value">Dollar value per point ($)</label>
+      <input id="loy-value" type="text" value="0.01" placeholder="e.g. 0.01">
+      <label for="loy-increment">Redeem in blocks of (points)</label>
+      <input id="loy-increment" type="text" value="100" placeholder="e.g. 100">
+      <label for="loy-people">People</label>
+      <input id="loy-people" type="text" value="2" placeholder="e.g. 2">
+      <button class="chip" id="loy-go" style="margin-top:.6rem;flex:initial;width:100%;">Redeem &amp; settle</button>
+      <div id="loy-rows"></div>
+      <div class="err" id="loy-err"></div>
     </div>
   </div>
 
@@ -3725,6 +3850,39 @@ async function tipExcluding() {
 }
 $("excl-go").addEventListener("click", tipExcluding);
 
+async function loyaltyRedeem() {
+  const body = {
+    bill: $("loy-bill").value,
+    tip_percent: $("loy-tip").value,
+    points: $("loy-points").value,
+    point_value: $("loy-value").value,
+    increment: $("loy-increment").value,
+    people: $("loy-people").value,
+  };
+  $("loy-rows").innerHTML = "";
+  try {
+    const res = await fetch("/api/loyalty-redeem", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) { $("loy-err").textContent = data.error || "Invalid input"; return; }
+    $("loy-err").textContent = "";
+    const rows = [
+      ["Points redeemed", data.redeemed_points + " (" + money(data.redemption) + ")"],
+      ["Points left", String(data.remaining_points)],
+      ["Tip", money(data.tip)],
+      ["Amount due", money(data.amount_due)],
+      ["Amount / person", money(data.amount_due_per_person)],
+    ];
+    renderRows("loy-rows", rows);
+  } catch (e) {
+    $("loy-err").textContent = "Network error";
+  }
+}
+$("loy-go").addEventListener("click", loyaltyRedeem);
+
 // Parse "Name 30 @ 20" / "30 @ 20" lines into {name, amount, tip_percent} diners.
 function parseDinerTips(text) {
   return text.split("\\n").map((s) => s.trim()).filter((s) => s.length).map((line) => {
@@ -3990,7 +4148,7 @@ class Handler(BaseHTTPRequestHandler):
                              "/api/diner-tips", "/api/tip-matrix",
                              "/api/affordable-bill", "/api/card-split",
                              "/api/tiered-tax", "/api/guest-of-honor",
-                             "/api/clean-split"):
+                             "/api/clean-split", "/api/loyalty-redeem"):
             self._send_json(404, {"error": "not found"})
             return
         try:
@@ -4237,6 +4395,18 @@ class Handler(BaseHTTPRequestHandler):
                     data.get("nearest", 1.0),
                     data.get("tax", 0),
                     data.get("tip_on", "total"),
+                )
+            elif self.path == "/api/loyalty-redeem":
+                result = redeem_loyalty(
+                    data.get("bill"),
+                    data.get("tip_percent"),
+                    data.get("points", 0),
+                    data.get("point_value", 0.01),
+                    data.get("people", 1),
+                    data.get("increment", 1),
+                    data.get("max_redeem"),
+                    data.get("tax", 0),
+                    data.get("tip_on", "subtotal"),
                 )
             else:  # /api/split
                 result = split_by_shares(

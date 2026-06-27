@@ -122,4 +122,17 @@ JSON endpoints (all `POST` unless noted):
   growing the total) and `/api/guest-of-honor` (some diners pay nothing) — here the
   true total is preserved and only the rounding remainder shifts onto the organizer
   (REQ-002 extension).
+- `/api/loyalty-redeem` — **redeem rewards points**: burn a loyalty/rewards balance
+  for a statement credit at the till. `points` redeem only in whole `increment`
+  blocks (e.g. 100-point chunks) at `point_value` dollars each (default `0.01` →
+  100 pts = $1); the credit is capped at what's actually owed for goods
+  (`bill + tax`) and, optionally, at `max_redeem`, so a diner can never redeem the
+  tip away or drive the bill negative — leftover points come back as
+  `remaining_points`. Crucially the gratuity is charged on the FULL pre-redemption
+  service value (`tip_on` `subtotal`/`total`), because the redemption is a *payment*
+  credit, not a price cut. Reports `redeemed_points`, `redemption`, `tip`,
+  `amount_due` and the exact even per-person split. Distinct from `/api/discount`
+  (lowers the tip base — you tip on the cheaper price) and `/api/tip-excluding`
+  (holds part of the cheque out of the tip but you still pay it) — here you pay LESS
+  but tip on the whole (REQ-001/002 extension).
 - `GET /health` — liveness probe.

@@ -46,6 +46,7 @@ from server import (
     tiered_tax_split,
     guest_of_honor_split,
     clean_share_split,
+    redeem_loyalty,
     TipError,
     Handler,
 )
@@ -2821,6 +2822,85 @@ class TestCleanShareSplit(unittest.TestCase):
         self.assertEqual(r["amounts"], [0.0, 0.0, 0.0])
 
 
+class TestRedeemLoyalty(unittest.TestCase):
+    # REQ-001/002 extension: burn loyalty points as a payment credit while the
+    # gratuity is still charged on the FULL pre-redemption service value.
+    def test_happy_path_tip_on_full_bill(self):
+        # 500 pts @ $0.01 = $5 credit; tip is 20% of the full $100, NOT $95.
+        r = redeem_loyalty(100, 20, points=500, point_value=0.01, people=1)
+        self.assertEqual(r["redemption"], 5.0)
+        self.assertEqual(r["tip"], 20.0)          # tipped on full value
+        self.assertEqual(r["amount_due"], 115.0)  # 100 - 5 + 20
+        self.assertEqual(r["remaining_points"], 0.0)
+        self.assertEqual(r["effective_discount_percent"], 5.0)
+
+    def test_points_redeem_only_in_whole_increments(self):
+        # 550 points in 100-point blocks -> only 500 burn, 50 stay on the card.
+        r = redeem_loyalty(100, 20, points=550, point_value=0.01, increment=100)
+        self.assertEqual(r["redeemed_points"], 500.0)
+        self.assertEqual(r["remaining_points"], 50.0)
+        self.assertEqual(r["redemption"], 5.0)
+
+    def test_redemption_capped_at_amount_owed(self):
+        # $10 of points offered against a $4 cheque: credit caps at $4, the rest
+        # of the points are handed back and the bill can never go negative.
+        r = redeem_loyalty(4, 0, points=1000, point_value=0.01)
+        self.assertEqual(r["redemption"], 4.0)
+        self.assertEqual(r["redeemed_points"], 400.0)
+        self.assertEqual(r["remaining_points"], 600.0)
+        self.assertEqual(r["amount_due"], 0.0)
+
+    def test_explicit_max_redeem_cap(self):
+        # max_redeem holds the credit below what the points alone would buy.
+        r = redeem_loyalty(100, 20, points=2000, point_value=0.01, max_redeem=7)
+        self.assertEqual(r["redemption"], 7.0)
+        self.assertEqual(r["amount_due"], 113.0)  # 100 - 7 + 20
+
+    def test_cap_respects_increment_blocks(self):
+        # cap is $4 but points only burn in 300-point ($3) blocks, so the credit
+        # rounds DOWN to $3, never up past the cap.
+        r = redeem_loyalty(4, 0, points=1000, point_value=0.01, increment=300)
+        self.assertEqual(r["redeemed_points"], 300.0)
+        self.assertEqual(r["redemption"], 3.0)
+        self.assertEqual(r["amount_due"], 1.0)
+
+    def test_tip_on_total_includes_tax(self):
+        # tip_on="total" tips on bill+tax; redemption still only credits payment.
+        r = redeem_loyalty(100, 10, points=0, tax=8, tip_on="total")
+        self.assertEqual(r["tip"], 10.8)          # 10% of 108
+        self.assertEqual(r["amount_due"], 118.8)  # 108 - 0 + 10.8
+
+    def test_split_is_exact_across_people(self):
+        r = redeem_loyalty(100, 20, points=500, point_value=0.01, people=3)
+        self.assertEqual(round(sum(r["per_person_amounts"]), 2), r["amount_due"])
+        self.assertEqual(len(r["per_person_amounts"]), 3)
+
+    def test_no_points_is_a_plain_bill(self):
+        r = redeem_loyalty(50, 20, points=0)
+        self.assertEqual(r["redemption"], 0.0)
+        self.assertEqual(r["amount_due"], 60.0)
+
+    def test_negative_bill_rejected(self):
+        with self.assertRaises(TipError):
+            redeem_loyalty(-1, 20, points=100)
+
+    def test_negative_points_rejected(self):
+        with self.assertRaises(TipError):
+            redeem_loyalty(100, 20, points=-5)
+
+    def test_negative_point_value_rejected(self):
+        with self.assertRaises(TipError):
+            redeem_loyalty(100, 20, points=100, point_value=-0.01)
+
+    def test_non_positive_increment_rejected(self):
+        with self.assertRaises(TipError):
+            redeem_loyalty(100, 20, points=100, increment=0)
+
+    def test_negative_max_redeem_rejected(self):
+        with self.assertRaises(TipError):
+            redeem_loyalty(100, 20, points=100, max_redeem=-1)
+
+
 class TestApi(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -3587,6 +3667,24 @@ class TestApi(unittest.TestCase):
         status, data = self._post_to("/api/tip-excluding",
                                      {"bill": 100, "tip_percent": 20,
                                       "excluded": 200})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_api_loyalty_redeem_happy_path(self):
+        status, data = self._post_to("/api/loyalty-redeem", {
+            "bill": 100, "tip_percent": 20, "points": 500,
+            "point_value": 0.01, "people": 2})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["redemption"], 5.0)
+        self.assertEqual(data["tip"], 20.0)
+        self.assertEqual(data["amount_due"], 115.0)
+        self.assertEqual(round(sum(data["per_person_amounts"]), 2),
+                         data["amount_due"])
+
+    def test_api_loyalty_redeem_validation_error(self):
+        status, data = self._post_to("/api/loyalty-redeem",
+                                     {"bill": 100, "tip_percent": 20,
+                                      "points": -5})
         self.assertEqual(status, 400)
         self.assertIn("error", data)
 
