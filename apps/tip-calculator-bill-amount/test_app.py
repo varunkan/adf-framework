@@ -54,6 +54,7 @@ from server import (
     guest_of_honor_split,
     clean_share_split,
     redeem_loyalty,
+    breakdown_receipt,
     save_calculation,
     recent_calculations,
     TipError,
@@ -2944,6 +2945,74 @@ class TestRedeemLoyalty(unittest.TestCase):
         self.assertEqual(r["effective_discount_percent"], 0.0)
 
 
+class TestBreakdownReceipt(unittest.TestCase):
+    # REQ-001/002 extension: work backwards from a charged total to the original
+    # subtotal/tax/tip given the rates the venue applied.
+    def test_round_trip_tip_on_subtotal(self):
+        # $100 food + 8% tax + 20% tip on subtotal = $128.00 charged.
+        r = breakdown_receipt(128.0, tax_percent=8, tip_percent=20,
+                              tip_on="subtotal")
+        self.assertEqual(r["subtotal"], 100.0)
+        self.assertEqual(r["tax"], 8.0)
+        self.assertEqual(r["tip"], 20.0)
+        self.assertEqual(r["total"], 128.0)
+        self.assertEqual(r["effective_tip_percent"], 20.0)
+
+    def test_round_trip_tip_on_total(self):
+        # $100 food, 8% tax -> $108; 20% tip on the post-tax total -> $129.60.
+        r = breakdown_receipt(129.6, tax_percent=8, tip_percent=20,
+                              tip_on="total")
+        self.assertEqual(r["subtotal"], 100.0)
+        self.assertEqual(r["tax"], 8.0)
+        self.assertEqual(r["tip"], 21.6)
+        self.assertEqual(r["total"], 129.6)
+
+    def test_parts_reconcile_exactly_to_total(self):
+        # An awkward total must still split into parts that sum back exactly.
+        r = breakdown_receipt(130.68, tax_percent=8, tip_percent=20)
+        self.assertEqual(
+            round(r["subtotal"] + r["tax"] + r["tip"], 2), r["total"])
+
+    def test_no_tax_no_tip_is_pure_subtotal(self):
+        r = breakdown_receipt(50, tax_percent=0, tip_percent=0)
+        self.assertEqual(r["subtotal"], 50.0)
+        self.assertEqual(r["tax"], 0.0)
+        self.assertEqual(r["tip"], 0.0)
+
+    def test_split_is_exact_across_people(self):
+        r = breakdown_receipt(128.0, tax_percent=8, tip_percent=20, people=3)
+        self.assertEqual(len(r["per_person_amounts"]), 3)
+        self.assertEqual(round(sum(r["per_person_amounts"]), 2), r["total"])
+
+    def test_zero_total_is_all_zero(self):
+        r = breakdown_receipt(0, tax_percent=8, tip_percent=20)
+        self.assertEqual(r["subtotal"], 0.0)
+        self.assertEqual(r["tax"], 0.0)
+        self.assertEqual(r["tip"], 0.0)
+        self.assertEqual(r["effective_tip_percent"], 20.0)
+
+    def test_tip_on_alias_normalised(self):
+        r = breakdown_receipt(129.6, tax_percent=8, tip_percent=20,
+                              tip_on="posttax")
+        self.assertEqual(r["tip_on"], "total")
+
+    def test_negative_total_rejected(self):
+        with self.assertRaises(TipError):
+            breakdown_receipt(-1, tax_percent=8, tip_percent=20)
+
+    def test_negative_tax_percent_rejected(self):
+        with self.assertRaises(TipError):
+            breakdown_receipt(100, tax_percent=-1, tip_percent=20)
+
+    def test_negative_tip_percent_rejected(self):
+        with self.assertRaises(TipError):
+            breakdown_receipt(100, tax_percent=8, tip_percent=-1)
+
+    def test_non_numeric_total_rejected(self):
+        with self.assertRaises(TipError):
+            breakdown_receipt("abc", tax_percent=8, tip_percent=20)
+
+
 class TestApi(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -3631,6 +3700,30 @@ class TestApi(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertIn("error", data)
 
+    def test_api_breakdown_happy(self):
+        status, data = self._post_to("/api/breakdown", {
+            "total": 128.0, "tax_percent": 8, "tip_percent": 20,
+            "tip_on": "subtotal"})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["subtotal"], 100.0)
+        self.assertEqual(data["tax"], 8.0)
+        self.assertEqual(data["tip"], 20.0)
+        self.assertEqual(
+            round(data["subtotal"] + data["tax"] + data["tip"], 2),
+            data["total"])
+
+    def test_api_breakdown_defaults_tip_on_subtotal(self):
+        status, data = self._post_to("/api/breakdown", {
+            "total": 128.0, "tax_percent": 8, "tip_percent": 20})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["tip_on"], "subtotal")
+
+    def test_api_breakdown_negative_total_error(self):
+        status, data = self._post_to("/api/breakdown", {
+            "total": -5, "tax_percent": 8, "tip_percent": 20})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
     # --- Defect 1: unbounded people count (DoS) ---
 
     def test_people_max_boundary_accepted(self):
@@ -4073,6 +4166,13 @@ class TestUiWiring(unittest.TestCase):
         # calc() must trigger both panels so they're populated on use.
         self.assertIn("loadSuggestions();", self.HTML)
         self.assertIn("loadHistory();", self.HTML)
+
+    def test_breakdown_panel_is_wired(self):
+        # The reverse-a-receipt panel must have markup AND a live handler.
+        self.assertIn("/api/breakdown", self.HTML)
+        self.assertIn("breakdownReceipt", self.HTML)
+        self.assertIn('id="brk-total"', self.HTML)
+        self.assertIn('"brk-rows"', self.HTML)
 
 
 if __name__ == "__main__":

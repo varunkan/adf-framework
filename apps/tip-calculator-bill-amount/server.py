@@ -2756,6 +2756,101 @@ def redeem_loyalty(bill, tip_percent, points=0, point_value=0.01, people=1,
     }
 
 
+def breakdown_receipt(total, tax_percent=0, tip_percent=0, people=1,
+                      tip_on="subtotal"):
+    """Reverse-engineer a receipt: recover subtotal/tax/tip from the final total.
+
+    REQ-001/002 extension. Every other endpoint works *forwards* — you know the
+    food price and add tax and tip. This one works *backwards*: you have only the
+    single number the card was charged (``total``) and you know the rates the
+    venue applied — ``tax_percent`` on the food subtotal and a ``tip_percent``
+    gratuity. It then splits the charged amount back into its ``subtotal``,
+    ``tax`` and ``tip`` parts. This is the everyday expense-report problem: "I was
+    charged $130.68, the receipt says 8% tax and I tipped 20% — what was the food
+    cost I can claim?".
+
+    The algebra depends on what the tip was charged on:
+
+    - ``tip_on="subtotal"`` (default, the etiquette norm): the gratuity is a
+      percentage of the pre-tax food, so
+      ``total = subtotal * (1 + tax_r + tip_r)``.
+    - ``tip_on="total"`` (aliases: ``posttax``/``gross``): the gratuity is a
+      percentage of the tax-inclusive amount, so
+      ``total = subtotal * (1 + tax_r) * (1 + tip_r)``.
+
+    where ``tax_r = tax_percent/100`` and ``tip_r = tip_percent/100``. The
+    subtotal is solved exactly, then tax and the recovered parts are reconciled
+    in integer cents — ``tip`` absorbs any half-cent rounding residue so
+    ``subtotal + tax + tip`` always sums EXACTLY back to the ``total`` you typed
+    in. The total is finally split evenly across ``people`` with the
+    largest-remainder method so the per-person ``amounts`` also reconcile.
+
+    Returns the recovered breakdown plus the ``effective_tip_percent`` actually
+    paid (tip over the tip base) so you can sanity-check the receipt. Raises
+    ``TipError`` on invalid input so callers can fail safe.
+    """
+    total = _to_number(total, "total")
+    tax_percent = (_to_number(tax_percent, "tax_percent")
+                   if tax_percent not in (None, "") else 0.0)
+    tip_percent = (_to_number(tip_percent, "tip_percent")
+                   if tip_percent not in (None, "") else 0.0)
+    people_int = _validate_people(people)
+    mode = _normalise_tip_on(tip_on)
+
+    if total < 0:
+        raise TipError("total must not be negative")
+    if tax_percent < 0:
+        raise TipError("tax_percent must not be negative")
+    if tip_percent < 0:
+        raise TipError("tip_percent must not be negative")
+
+    tax_r = tax_percent / 100.0
+    tip_r = tip_percent / 100.0
+
+    # Solve for the pre-tax food subtotal from the charged total.
+    if mode == "subtotal":
+        denom = 1.0 + tax_r + tip_r
+    else:  # tip charged on the tax-inclusive amount
+        denom = (1.0 + tax_r) * (1.0 + tip_r)
+    # denom >= 1 always (rates are non-negative), so this can never divide by 0.
+    subtotal = total / denom
+
+    total_cents = _cents(total)
+    subtotal_cents = int(round(subtotal * 100))
+    tax_cents = int(round(subtotal * tax_r * 100))
+    # Tip absorbs the residue so the three parts reconcile to the exact total.
+    tip_cents = total_cents - subtotal_cents - tax_cents
+
+    subtotal_r = subtotal_cents / 100.0
+    tax_amt = tax_cents / 100.0
+    tip_amt = tip_cents / 100.0
+
+    # Effective gratuity over whatever base the tip was actually charged on.
+    tip_base = subtotal_r if mode == "subtotal" else subtotal_r + tax_amt
+    if tip_base > 0:
+        effective = tip_amt / tip_base * 100.0
+    else:
+        effective = tip_percent
+
+    share_cents = _largest_remainder(total_cents, [1] * people_int)
+    per_person_amounts = [c / 100.0 for c in share_cents]
+
+    return {
+        "total": _round2(total_cents / 100.0),
+        "tax_percent": _round2(tax_percent),
+        "tip_percent": _round2(tip_percent),
+        "tip_on": mode,
+        "people": people_int,
+        "subtotal": _round2(subtotal_r),
+        "tax": _round2(tax_amt),
+        "tip": _round2(tip_amt),
+        "effective_tip_percent": _round2(effective),
+        "tip_per_person": _round2(tip_amt / people_int),
+        "total_per_person": _round2(total_cents / 100.0 / people_int),
+        "per_person_amounts": per_person_amounts,
+    }
+
+
 # ---------------------------------------------------------------------------
 # HTTP layer
 # ---------------------------------------------------------------------------
@@ -3197,6 +3292,23 @@ Jo 25 card</textarea>
       <button class="chip" id="loy-go" style="margin-top:.6rem;flex:initial;width:100%;">Redeem &amp; settle</button>
       <div id="loy-rows"></div>
       <div class="err" id="loy-err"></div>
+    </div>
+
+    <div class="out">
+      <div class="row"><span class="k">Reverse a receipt</span><span class="v">recover subtotal/tax/tip</span></div>
+      <label for="brk-total">Charged total ($)</label>
+      <input id="brk-total" type="text" value="130.68" placeholder="e.g. 130.68">
+      <label for="brk-tax">Tax %</label>
+      <input id="brk-tax" type="text" value="8" placeholder="e.g. 8">
+      <label for="brk-tip">Tip %</label>
+      <input id="brk-tip" type="text" value="20" placeholder="e.g. 20">
+      <label for="brk-on">Tip charged on (subtotal / total)</label>
+      <input id="brk-on" type="text" value="subtotal" placeholder="subtotal">
+      <label for="brk-people">People</label>
+      <input id="brk-people" type="text" value="1" placeholder="e.g. 1">
+      <button class="chip" id="brk-go" style="margin-top:.6rem;flex:initial;width:100%;">Break it down</button>
+      <div id="brk-rows"></div>
+      <div class="err" id="brk-err"></div>
     </div>
   </div>
 
@@ -4261,6 +4373,38 @@ async function cleanSplit() {
   }
 }
 $("clean-go").addEventListener("click", cleanSplit);
+
+async function breakdownReceipt() {
+  const body = {
+    total: $("brk-total").value,
+    tax_percent: $("brk-tax").value,
+    tip_percent: $("brk-tip").value,
+    tip_on: $("brk-on").value,
+    people: $("brk-people").value,
+  };
+  $("brk-rows").innerHTML = "";
+  try {
+    const res = await fetch("/api/breakdown", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) { $("brk-err").textContent = data.error || "Invalid input"; return; }
+    $("brk-err").textContent = "";
+    const rows = [
+      ["Subtotal (food)", money(data.subtotal)],
+      ["Tax", money(data.tax)],
+      ["Tip", money(data.tip) + " (" + money(data.effective_tip_percent).slice(1) + "%)"],
+      ["Charged total", money(data.total)],
+    ];
+    if (data.people > 1) rows.push(["Per person", money(data.total_per_person)]);
+    renderRows("brk-rows", rows);
+  } catch (e) {
+    $("brk-err").textContent = "Network error";
+  }
+}
+$("brk-go").addEventListener("click", breakdownReceipt);
 </script>
 </body>
 </html>
@@ -4311,7 +4455,8 @@ class Handler(BaseHTTPRequestHandler):
                              "/api/diner-tips", "/api/tip-matrix",
                              "/api/affordable-bill", "/api/card-split",
                              "/api/tiered-tax", "/api/guest-of-honor",
-                             "/api/clean-split", "/api/loyalty-redeem"):
+                             "/api/clean-split", "/api/loyalty-redeem",
+                             "/api/breakdown"):
             self._send_json(404, {"error": "not found"})
             return
         try:
@@ -4572,6 +4717,14 @@ class Handler(BaseHTTPRequestHandler):
                     data.get("increment", 1),
                     data.get("max_redeem"),
                     data.get("tax", 0),
+                    data.get("tip_on", "subtotal"),
+                )
+            elif self.path == "/api/breakdown":
+                result = breakdown_receipt(
+                    data.get("total"),
+                    data.get("tax_percent", 0),
+                    data.get("tip_percent", 0),
+                    data.get("people", 1),
                     data.get("tip_on", "subtotal"),
                 )
             else:  # /api/split
