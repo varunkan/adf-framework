@@ -2116,6 +2116,12 @@ class TestApi(unittest.TestCase):
             self.assertEqual(resp.status, 200)
             self.assertEqual(json.loads(resp.read())["status"], "ok")
 
+    def test_api_health_alias(self):
+        # The ADF verify harness probes /api/health; it must alias /health.
+        with urllib.request.urlopen(self._url("/api/health")) as resp:
+            self.assertEqual(resp.status, 200)
+            self.assertEqual(json.loads(resp.read())["status"], "ok")
+
     def test_favicon_no_404(self):
         # The browser implicitly requests /favicon.ico; it must not 404
         # (which would surface as a console error on the home page).
@@ -2638,6 +2644,82 @@ class TestApi(unittest.TestCase):
 
     def test_api_affordable_bill_validation(self):
         status, data = self._post_to("/api/affordable-bill", {"budget": -5})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    # --- Defect 1: unbounded people count (DoS) ---
+
+    def test_people_max_boundary_accepted(self):
+        """people=10000 (max) must succeed."""
+        status, data = self._post_to("/api/calculate", {"bill": 10, "tip_percent": 15, "people": 10000})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["people"], 10000)
+
+    def test_people_over_max_rejected(self):
+        """people=10001 must be rejected with 400."""
+        status, data = self._post_to("/api/calculate", {"bill": 10, "tip_percent": 15, "people": 10001})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_people_huge_integer_rejected(self):
+        """people=100_000_000 (memory DoS) must be rejected."""
+        status, data = self._post_to("/api/charity", {"bill": 10, "tip_percent": 15, "people": 100000000})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_people_large_float_rejected(self):
+        """people=1e20 (huge float coerced to int) must be rejected."""
+        status, data = self._post_to("/api/round-total", {"bill": 10, "base_percent": 15, "people": 1e20})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_people_huge_on_comp_endpoint(self):
+        """split_comped with huge people must be rejected cleanly."""
+        status, data = self._post_to("/api/split-comped",
+                                     {"bill": 10, "tip_percent": 15, "people": 9999999})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_people_huge_on_combine_endpoint(self):
+        """combine_checks with huge people must be rejected cleanly."""
+        status, data = self._post_to("/api/combine",
+                                     {"checks": [{"bill": 10, "tip_percent": 15}], "people": 50000})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    # --- Defect 2: numeric overflow → non-finite JSON ---
+
+    def test_overflow_calculate_returns_400_not_infinity_json(self):
+        """Huge bill*tip_percent must return 400, not 200 with Infinity body."""
+        status, data = self._post_to("/api/calculate", {"bill": 1e308, "tip_percent": 1e308})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_overflow_convert_large_rate_rejected(self):
+        """convert_currency with rate that overflows converted total must return 400."""
+        status, data = self._post_to("/api/convert",
+                                     {"bill": 1e308, "tip_percent": 15, "rate": 1e308})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_overflow_round_total_large_inputs_rejected(self):
+        """round_total_to with inputs that overflow intermediate base_cents must return 400."""
+        status, data = self._post_to("/api/round-total",
+                                     {"bill": 1e308, "base_percent": 1e308})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_overflow_gross_up_tip_near_100_fee(self):
+        """gross_up_tip with fee_percent causing huge gross_tip must return 400, not 500."""
+        status, data = self._post_to("/api/gross-up-tip",
+                                     {"bill": 1e308, "tip_percent": 20, "fee_percent": 50})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_overflow_build_bill_large_price_qty(self):
+        """build_bill with price*qty overflow must return 400."""
+        status, data = self._post_to("/api/build-bill",
+                                     {"items": [{"price": 1e308, "qty": 2}]})
         self.assertEqual(status, 400)
         self.assertIn("error", data)
 

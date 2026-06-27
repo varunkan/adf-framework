@@ -37,24 +37,31 @@ def _to_number(value, field):
 
 
 def _round2(num):
-    """Round to cents using banker's-free half-up-ish round() then 2dp."""
+    """Round to cents; raise TipError if the value is non-finite."""
+    if not math.isfinite(num):
+        raise TipError("computed value is out of range — inputs are too large")
     return round(num + 0.0, 2)
 
 
+_MAX_PEOPLE = 10_000
+
+
 def _validate_people(people):
-    """Validate/normalise a people count: a whole number >= 1 (default 1)."""
+    """Validate/normalise a people count: a whole number in [1, _MAX_PEOPLE]."""
     if isinstance(people, bool):
         raise TipError("people must be a whole number")
     if people is None or people == "":
         people = 1
     try:
         people_int = int(people)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         raise TipError("people must be a whole number")
     if float(people) != people_int:
         raise TipError("people must be a whole number")
     if people_int < 1:
         raise TipError("people must be at least 1")
+    if people_int > _MAX_PEOPLE:
+        raise TipError("people must not exceed %d" % _MAX_PEOPLE)
     return people_int
 
 
@@ -3541,7 +3548,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path in ("/", "/index.html"):
             self._send(200, INDEX_HTML, "text/html; charset=utf-8")
-        elif self.path == "/health":
+        elif self.path in ("/health", "/api/health"):
             self._send_json(200, {"status": "ok"})
         elif self.path == "/favicon.ico":
             # No icon asset to serve; answer with an empty 204 so browsers
@@ -3793,6 +3800,9 @@ class Handler(BaseHTTPRequestHandler):
                 )
         except TipError as exc:
             self._send_json(400, {"error": str(exc)})
+            return
+        except OverflowError:
+            self._send_json(400, {"error": "inputs are too large"})
             return
         self._send_json(200, result)
 
