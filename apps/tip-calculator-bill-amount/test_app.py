@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Tests for the tip calculator — core domain logic and HTTP API."""
 import json
+import os
 import socket
+import tempfile
 import threading
 import time
 import http.client
@@ -10,6 +12,11 @@ import urllib.request
 import urllib.error
 
 from http.server import ThreadingHTTPServer
+
+# Isolate persistence to a throwaway DB so the test run never touches the
+# repo's data.db. server._db_path() reads this env var on every connect.
+os.environ["TIP_DB_PATH"] = os.path.join(
+    tempfile.mkdtemp(prefix="tipcalc-test-"), "test.db")
 
 import server
 from server import (
@@ -47,6 +54,8 @@ from server import (
     guest_of_honor_split,
     clean_share_split,
     redeem_loyalty,
+    save_calculation,
+    recent_calculations,
     TipError,
     Handler,
 )
@@ -3001,6 +3010,27 @@ class TestApi(unittest.TestCase):
         # The intended two-character escape must survive into the served JS.
         self.assertIn('split("\\n")', script)
 
+    def test_chip_selector_targets_only_tip_percent_buttons(self):
+        # Regression: querySelectorAll('.chip') matched ALL chip-classed buttons
+        # (including every feature action button), attaching tip-setting behaviour
+        # to them. The fix narrows the selector to '.chip[data-tip]' so only the
+        # 5 tip-percent shortcuts (10/15/18/20/25%) are wired to set the tip input.
+        import re
+        html = server.INDEX_HTML
+        script = re.search(r"<script>(.*?)</script>", html, re.S).group(1)
+        # The selector must be attribute-qualified — bare '.chip' would match all.
+        self.assertIn('querySelectorAll(".chip[data-tip]")', script)
+        self.assertNotIn('querySelectorAll(".chip")', script)
+
+    def test_calc_js_assigns_o_eff_from_effective_tip_percent(self):
+        # Regression: calc() was setting o-tip/o-total/o-tpp/o-pp but never
+        # writing to #o-eff, leaving the "Effective tip" row permanently blank.
+        import re
+        html = server.INDEX_HTML
+        script = re.search(r"<script>(.*?)</script>", html, re.S).group(1)
+        self.assertIn('$("o-eff")', script)
+        self.assertIn("effective_tip_percent", script)
+
     def test_index_escapes_user_names_in_dom(self):
         # DOM-XSS guard: user-controlled name strings (a diner's name, a built
         # bill's line-item name) are echoed back from the API and injected via
@@ -3805,6 +3835,244 @@ class TestRunServer(unittest.TestCase):
             server.run(host="127.0.0.1", port=port)  # returns cleanly
         finally:
             ThreadingHTTPServer.serve_forever = original
+
+
+class TestOversizedIntegerFailsSafe(unittest.TestCase):
+    """A JSON integer literal too large for a C double must fail safe as a
+    TipError (-> 400), not crash with an uncaught OverflowError (-> 500)."""
+
+    HUGE = 10 ** 350  # 351-digit int: int() is fine, float() overflows.
+
+    def test_to_number_rejects_huge_int(self):
+        with self.assertRaises(TipError):
+            calculate_tip(self.HUGE, 15)
+
+    def test_huge_tip_percent_rejected(self):
+        with self.assertRaises(TipError):
+            calculate_tip(100, self.HUGE)
+
+    def test_validate_people_rejects_huge_int(self):
+        # int(people) succeeds but float(people) overflows; must still be a
+        # clean TipError (range rejection), never an OverflowError.
+        with self.assertRaises(TipError):
+            calculate_tip(100, 15, self.HUGE)
+
+    def test_huge_people_in_auto_gratuity(self):
+        with self.assertRaises(TipError):
+            auto_gratuity(100, self.HUGE)
+
+    def test_huge_threshold_in_auto_gratuity(self):
+        with self.assertRaises(TipError):
+            auto_gratuity(100, 4, self.HUGE)
+
+
+class TestPersistence(unittest.TestCase):
+    """The Python app actually saves calculations and reads them back, using a
+    schema whose columns match the domain's output keys (round-trip)."""
+
+    def setUp(self):
+        # Each test gets its own isolated DB file.
+        self._dir = tempfile.mkdtemp(prefix="tipcalc-persist-")
+        self._prev = os.environ.get("TIP_DB_PATH")
+        os.environ["TIP_DB_PATH"] = os.path.join(self._dir, "p.db")
+
+    def tearDown(self):
+        if self._prev is None:
+            os.environ.pop("TIP_DB_PATH", None)
+        else:
+            os.environ["TIP_DB_PATH"] = self._prev
+
+    def test_calculate_result_round_trips(self):
+        result = calculate_tip(100, 20, 4)
+        row_id = save_calculation(result)
+        self.assertIsInstance(row_id, int)
+        rows = recent_calculations()
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        # Every persisted domain key survives the round-trip unchanged.
+        for key in ("bill", "tip_percent", "people", "tip", "total",
+                    "total_per_person"):
+            self.assertEqual(row[key], result[key])
+        self.assertIn("created_at", row)
+
+    def test_newest_first_and_limit(self):
+        for pct in (10, 15, 20):
+            save_calculation(calculate_tip(50, pct, 2))
+        rows = recent_calculations(limit=2)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["tip_percent"], 20.0)
+
+    def test_incomplete_result_not_saved(self):
+        self.assertIsNone(save_calculation({"bill": 1}))
+        self.assertEqual(recent_calculations(), [])
+
+
+class TestPersistenceApi(unittest.TestCase):
+    """HTTP surface for persistence + oversized-integer fail-safe."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._dir = tempfile.mkdtemp(prefix="tipcalc-api-")
+        cls._prev = os.environ.get("TIP_DB_PATH")
+        os.environ["TIP_DB_PATH"] = os.path.join(cls._dir, "api.db")
+        cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        cls.port = cls.httpd.server_address[1]
+        cls.thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+        if cls._prev is None:
+            os.environ.pop("TIP_DB_PATH", None)
+        else:
+            os.environ["TIP_DB_PATH"] = cls._prev
+
+    def _url(self, path):
+        return "http://127.0.0.1:%d%s" % (self.port, path)
+
+    def _post(self, path, body):
+        data = json.dumps(body).encode("utf-8")
+        req = urllib.request.Request(
+            self._url(path), data=data,
+            headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read())
+
+    def _get(self, path):
+        with urllib.request.urlopen(self._url(path)) as resp:
+            return resp.status, json.loads(resp.read())
+
+    def test_calculate_persists_and_history_reads_back(self):
+        status, _ = self._post("/api/calculate",
+                               {"bill": 80, "tip_percent": 18, "people": 2})
+        self.assertEqual(status, 200)
+        status, data = self._get("/api/history")
+        self.assertEqual(status, 200)
+        calcs = data["calculations"]
+        self.assertTrue(any(c["bill"] == 80.0 and c["tip_percent"] == 18.0
+                            for c in calcs))
+
+    def test_oversized_bill_returns_400_not_500(self):
+        status, data = self._post("/api/calculate",
+                                  {"bill": 10 ** 350, "tip_percent": 15})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_oversized_people_returns_400_not_500(self):
+        status, data = self._post(
+            "/api/calculate",
+            {"bill": 100, "tip_percent": 15, "people": 10 ** 350})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
+class TestFiniteCentsGuard(unittest.TestCase):
+    """Finite-but-huge money values must fail safe as TipError (-> 400), never
+    crash with an uncaught OverflowError from `int(round(x * 100))` (-> 500).
+    Locks in the `_cents()` guard across every affected domain function."""
+
+    BIG = 1e308  # finite float, but *100 overflows to inf
+
+    def test_split_by_shares_huge_overflow_raises(self):
+        with self.assertRaises(TipError):
+            split_by_shares(self.BIG, self.BIG, [1, 1])
+
+    def test_tip_pool_huge_pool_raises(self):
+        with self.assertRaises(TipError):
+            tip_pool(self.BIG, [1, 1])
+
+    def test_settle_up_huge_bill_raises(self):
+        with self.assertRaises(TipError):
+            settle_up(self.BIG, self.BIG, [0, 0])
+
+    def test_split_by_percentage_huge_bill_raises(self):
+        with self.assertRaises(TipError):
+            split_by_percentage(self.BIG, self.BIG, [50, 50])
+
+    def test_change_due_huge_raises(self):
+        # paid - total stays ~1e308, so *100 overflows to inf.
+        with self.assertRaises(TipError):
+            change_due(1e307, self.BIG)
+
+    def test_combine_checks_huge_raises(self):
+        with self.assertRaises(TipError):
+            combine_checks([{"bill": self.BIG, "tip_percent": self.BIG}], 1)
+
+    def test_affordable_bill_huge_budget_raises(self):
+        with self.assertRaises(TipError):
+            affordable_bill(self.BIG, 2, 20, 8)
+
+    def test_redeem_loyalty_huge_bill_raises(self):
+        with self.assertRaises(TipError):
+            redeem_loyalty(self.BIG, self.BIG)
+
+    def test_clean_share_split_huge_bill_raises(self):
+        with self.assertRaises(TipError):
+            clean_share_split(self.BIG, self.BIG, 3)
+
+    def test_calculate_tip_round_total_huge_raises(self):
+        # round_total branch used math.ceil(inf) before the _round2 guard.
+        with self.assertRaises(TipError):
+            calculate_tip(1e308, 1000000000, round_total=True)
+
+    def test_calculate_tip_round_total_normal_still_rounds_up(self):
+        # The guard must not change ordinary round_total behaviour.
+        r = calculate_tip(100, 18, round_total=True)
+        self.assertEqual(r["total"], float(__import__("math").ceil(118.0)))
+
+
+class TestSavePruning(unittest.TestCase):
+    """save_calculation must cap the table so it never grows unbounded."""
+
+    def setUp(self):
+        self._dir = tempfile.mkdtemp(prefix="tipcalc-prune-")
+        self._prev = os.environ.get("TIP_DB_PATH")
+        os.environ["TIP_DB_PATH"] = os.path.join(self._dir, "p.db")
+
+    def tearDown(self):
+        if self._prev is None:
+            os.environ.pop("TIP_DB_PATH", None)
+        else:
+            os.environ["TIP_DB_PATH"] = self._prev
+
+    def test_table_capped_at_100_rows(self):
+        for i in range(120):
+            save_calculation(calculate_tip(10 + i, 15, 1))
+        with server._db_conn() as conn:
+            count = conn.execute(
+                "SELECT COUNT(*) AS n FROM tip_calculations").fetchone()["n"]
+        self.assertEqual(count, 100)
+        # The 100 retained rows must be the newest ones.
+        rows = recent_calculations(limit=100)
+        self.assertEqual(rows[0]["bill"], 129.0)
+
+
+class TestUiWiring(unittest.TestCase):
+    """The served page must actually wire the suggestions + history panels —
+    backend + markup existed but no JS referenced them (dead UI)."""
+
+    HTML = server.INDEX_HTML
+
+    def test_suggestions_panel_is_wired(self):
+        self.assertIn("loadSuggestions", self.HTML)
+        self.assertIn("/api/suggestions", self.HTML)
+        self.assertIn('"sug-rows"', self.HTML)
+
+    def test_history_panel_is_wired(self):
+        self.assertIn("loadHistory", self.HTML)
+        self.assertIn("/api/history", self.HTML)
+        self.assertIn("hist-rows", self.HTML)
+        self.assertIn('id="hist-panel"', self.HTML)
+
+    def test_calc_invokes_panel_loaders(self):
+        # calc() must trigger both panels so they're populated on use.
+        self.assertIn("loadSuggestions();", self.HTML)
+        self.assertIn("loadHistory();", self.HTML)
 
 
 if __name__ == "__main__":

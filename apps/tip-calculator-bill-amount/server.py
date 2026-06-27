@@ -11,6 +11,90 @@ import json
 import html
 import math
 import os
+import sqlite3
+
+# ---------------------------------------------------------------------------
+# Persistence (SQLite, stdlib only)
+# ---------------------------------------------------------------------------
+#
+# The running Python app owns its own local SQLite file so calculations made
+# through the served UI are actually saved and can be read back via
+# /api/history. Schema columns mirror the Python domain's output keys
+# (bill, tip_percent, people, tip, total, total_per_person) so a calculate
+# result round-trips into the table without renaming.
+
+_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS tip_calculations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  bill REAL NOT NULL,
+  tip_percent REAL NOT NULL,
+  people INTEGER NOT NULL,
+  tip REAL NOT NULL,
+  total REAL NOT NULL,
+  total_per_person REAL NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+"""
+
+_PERSISTED_KEYS = ("bill", "tip_percent", "people", "tip", "total",
+                   "total_per_person")
+
+
+def _db_path():
+    """Resolve the SQLite file path, honouring TIP_DB_PATH (tests isolate it)."""
+    return os.environ.get("TIP_DB_PATH") or os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "data.db")
+
+
+def _db_conn():
+    """Open a connection with the schema ensured (idempotent)."""
+    conn = sqlite3.connect(_db_path())
+    conn.row_factory = sqlite3.Row
+    conn.executescript(_SCHEMA_SQL)
+    return conn
+
+
+def save_calculation(result):
+    """Persist a calculate_tip() result. Best-effort: a DB failure must never
+    break the API response, so storage errors are swallowed. Returns the new
+    row id, or None if the result lacked the persisted keys / the write failed."""
+    if not isinstance(result, dict) or not all(
+            k in result for k in _PERSISTED_KEYS):
+        return None
+    try:
+        with _db_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO tip_calculations "
+                "(bill, tip_percent, people, tip, total, total_per_person) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                tuple(result[k] for k in _PERSISTED_KEYS),
+            )
+            row_id = cur.lastrowid
+            conn.execute(
+                "DELETE FROM tip_calculations WHERE id NOT IN "
+                "(SELECT id FROM tip_calculations ORDER BY id DESC LIMIT 100)"
+            )
+            return row_id
+    except sqlite3.Error:
+        return None
+
+
+def recent_calculations(limit=20):
+    """Return the most recent saved calculations (newest first)."""
+    try:
+        limit = max(1, min(int(limit), 100))
+    except (TypeError, ValueError):
+        limit = 20
+    try:
+        with _db_conn() as conn:
+            rows = conn.execute(
+                "SELECT id, bill, tip_percent, people, tip, total, "
+                "total_per_person, created_at FROM tip_calculations "
+                "ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        return [dict(r) for r in rows]
+    except sqlite3.Error:
+        return []
+
 
 # ---------------------------------------------------------------------------
 # Core domain logic
@@ -31,6 +115,11 @@ def _to_number(value, field):
         num = float(value)
     except (TypeError, ValueError):
         raise TipError("%s must be a number" % field)
+    except OverflowError:
+        # A JSON integer literal too large to fit a C double (e.g. 10**350)
+        # parses to an arbitrary-precision int; float() raises OverflowError.
+        # Treat it as the documented out-of-range fail-safe (400), not a 500.
+        raise TipError("%s is too large" % field)
     if num != num or num in (float("inf"), float("-inf")):
         raise TipError("%s must be a finite number" % field)
     return num
@@ -41,6 +130,14 @@ def _round2(num):
     if not math.isfinite(num):
         raise TipError("computed value is out of range — inputs are too large")
     return round(num + 0.0, 2)
+
+
+def _cents(x):
+    """Convert dollars to integer cents; raise TipError if the product overflows."""
+    v = x * 100
+    if not math.isfinite(v):
+        raise TipError("computed value is out of range — inputs are too large")
+    return int(round(v))
 
 
 _MAX_PEOPLE = 10_000
@@ -56,7 +153,13 @@ def _validate_people(people):
         people_int = int(people)
     except (TypeError, ValueError, OverflowError):
         raise TipError("people must be a whole number")
-    if float(people) != people_int:
+    try:
+        is_whole = float(people) == people_int
+    except OverflowError:
+        # Huge integer literal: int() succeeded but float() overflows. It is a
+        # whole number; the range check below rejects it as a 400, not a 500.
+        is_whole = True
+    if not is_whole:
         raise TipError("people must be a whole number")
     if people_int < 1:
         raise TipError("people must be at least 1")
@@ -157,6 +260,8 @@ def calculate_tip(bill, tip_percent, people=1, round_total=False, tax=0, tip_on=
 
     round_total = bool(round_total)
     if round_total:
+        if not math.isfinite(total):
+            raise TipError("computed value is out of range — inputs are too large")
         total = float(math.ceil(round(total, 2)))
         tip = total - bill
 
@@ -326,7 +431,7 @@ def split_by_shares(bill, tip_percent, shares):
 
     tip = bill * tip_percent / 100.0
     total = bill + tip
-    total_cents = int(round(total * 100))
+    total_cents = _cents(total)
     sw = sum(weights)
 
     raw = [total_cents * w / sw for w in weights]
@@ -497,9 +602,9 @@ def settle_up(bill, tip_percent, paid, shares=None):
 
     tip = bill * tip_percent / 100.0
     total = bill + tip
-    total_cents = int(round(total * 100))
+    total_cents = _cents(total)
 
-    paid_cents = [int(round(a * 100)) for a in paid_amounts]
+    paid_cents = [_cents(a) for a in paid_amounts]
     if sum(paid_cents) != total_cents:
         raise TipError(
             "payments must add up to the total of %.2f" % (total_cents / 100.0))
@@ -612,7 +717,7 @@ def change_due(total, paid):
     if paid < total:
         raise TipError("paid must be at least the total")
 
-    change_cents = int(round((paid - total) * 100))
+    change_cents = _cents(paid - total)
     breakdown = []
     remaining = change_cents
     for value, label in _DENOMINATIONS:
@@ -667,7 +772,7 @@ def combine_checks(checks, people=1):
         )
         bill_sum += r["bill"]
         tip_sum += r["tip"]
-        total_cents += int(round(r["total"] * 100))
+        total_cents += _cents(r["total"])
         breakdown.append({
             "bill": r["bill"],
             "tip_percent": r["tip_percent"],
@@ -799,7 +904,7 @@ def tip_pool(pool, weights):
         if w <= 0:
             raise TipError("each weight must be a positive number")
 
-    pool_cents = int(round(pool * 100))
+    pool_cents = _cents(pool)
     share_cents = _largest_remainder(pool_cents, norm)
     shares = [_round2(c / 100.0) for c in share_cents]
 
@@ -1180,7 +1285,7 @@ def split_by_percentage(bill, tip_percent, percentages):
 
     tip = bill * tip_percent / 100.0
     total = bill + tip
-    total_cents = int(round(total * 100))
+    total_cents = _cents(total)
     cents = _largest_remainder(total_cents, pcts)
     amounts = [_round2(c / 100.0) for c in cents]
 
@@ -2229,7 +2334,7 @@ def affordable_bill(budget, people=1, tip_percent=0, tax_percent=0, tip_on="tota
     else:
         divisor = 1.0 + tax_rate + tip_rate
 
-    total_budget_cents = int(round(budget * 100)) * people_int
+    total_budget_cents = _cents(budget) * people_int
 
     def _grand(subtotal_cents):
         tax_cents = int(round(subtotal_cents * tax_rate))
@@ -2490,7 +2595,7 @@ def clean_share_split(bill, tip_percent, people, organizer=0, nearest=1.0,
     nearest = _to_number(nearest, "nearest")
     if nearest <= 0:
         raise TipError("nearest must be greater than zero")
-    inc_cents = int(round(nearest * 100))
+    inc_cents = _cents(nearest)
     if inc_cents < 1:
         raise TipError("nearest must be at least one cent")
 
@@ -2498,7 +2603,7 @@ def clean_share_split(bill, tip_percent, people, organizer=0, nearest=1.0,
     tip_base = subtotal if mode == "subtotal" else bill
     tip = tip_base * tip_percent / 100.0
     total = bill + tip
-    total_cents = int(round(total * 100))
+    total_cents = _cents(total)
 
     fair_exact = total_cents / people_int  # exact even share, in cents
     clean_cents = int(math.floor(fair_exact / inc_cents + 0.5)) * inc_cents
@@ -2602,7 +2707,10 @@ def redeem_loyalty(bill, tip_percent, points=0, point_value=0.01, people=1,
 
     # Trim the redeemed points so their dollar value never exceeds the cap.
     if point_value > 0 and cap >= 0:
-        max_points_by_cap = math.floor(cap / point_value / increment + 1e-9) * increment
+        ratio = cap / point_value / increment
+        if not math.isfinite(ratio):
+            raise TipError("computed value is out of range — inputs are too large")
+        max_points_by_cap = math.floor(ratio + 1e-9) * increment
         redeemed_points = min(eligible_points, max_points_by_cap)
     else:
         redeemed_points = 0.0
@@ -2616,7 +2724,7 @@ def redeem_loyalty(bill, tip_percent, points=0, point_value=0.01, people=1,
     tip_base = subtotal if mode == "total" else bill
     tip = tip_base * tip_percent / 100.0
     amount_due = subtotal - redemption + tip
-    amount_due_cents = int(round(amount_due * 100))
+    amount_due_cents = _cents(amount_due)
 
     if subtotal > 0:
         effective_discount = redemption / subtotal * 100.0
@@ -2722,6 +2830,11 @@ INDEX_HTML = """<!DOCTYPE html>
     <div class="out" id="sug" hidden>
       <div class="row"><span class="k">Quick tip tiers</span><span class="v">total / person</span></div>
       <div id="sug-rows"></div>
+    </div>
+
+    <div class="out" id="hist-panel" hidden>
+      <div class="row"><span class="k">Recent calculations</span><span class="v">last 10</span></div>
+      <div id="hist-rows"></div>
     </div>
 
     <div class="out">
@@ -3127,15 +3240,63 @@ async function calc() {
     $("err").textContent = "";
     $("o-tip").textContent = money(data.tip);
     $("o-total").textContent = money(data.total);
+    $("o-eff").textContent = data.effective_tip_percent.toFixed(2) + "%";
     $("o-tpp").textContent = money(data.tip_per_person);
     $("o-pp").textContent = money(data.total_per_person);
     $("out").hidden = false;
+    loadSuggestions();
+    loadHistory();
   } catch (e) {
     $("err").textContent = "Network error";
   }
 }
 
-document.querySelectorAll(".chip").forEach((c) =>
+async function loadSuggestions() {
+  const body = { bill: $("bill").value, people: $("people").value };
+  try {
+    const res = await fetch("/api/suggestions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) { $("sug").hidden = true; return; }
+    $("sug-rows").innerHTML = "";
+    data.tiers.forEach((t) => {
+      const row = document.createElement("div");
+      row.className = "row";
+      row.innerHTML = '<span class="k">' + t.tip_percent + '%</span>'
+        + '<span class="v">' + money(t.total_per_person) + '/person</span>';
+      $("sug-rows").appendChild(row);
+    });
+    $("sug").hidden = false;
+  } catch (e) {
+    $("sug").hidden = true;
+  }
+}
+
+async function loadHistory() {
+  try {
+    const res = await fetch("/api/history");
+    const data = await res.json();
+    if (!res.ok) return;
+    const rows = (data.calculations || []).slice(0, 10);
+    $("hist-rows").innerHTML = "";
+    if (!rows.length) { $("hist-panel").hidden = true; return; }
+    rows.forEach((c) => {
+      const row = document.createElement("div");
+      row.className = "row";
+      row.innerHTML = '<span class="k">$' + c.bill.toFixed(2)
+        + ' @ ' + c.tip_percent.toFixed(0) + '%'
+        + (c.people > 1 ? ' &times; ' + c.people : '') + '</span>'
+        + '<span class="v">$' + c.total.toFixed(2) + '</span>';
+      $("hist-rows").appendChild(row);
+    });
+    $("hist-panel").hidden = false;
+  } catch (e) {}
+}
+
+document.querySelectorAll(".chip[data-tip]").forEach((c) =>
   c.addEventListener("click", () => { $("tip").value = c.dataset.tip; calc(); }));
 ["bill", "tip", "people", "tax"].forEach((id) => $(id).addEventListener("input", calc));
 ["pretax", "roundup"].forEach((id) => $(id).addEventListener("change", calc));
@@ -4125,6 +4286,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, INDEX_HTML, "text/html; charset=utf-8")
         elif self.path in ("/health", "/api/health"):
             self._send_json(200, {"status": "ok"})
+        elif self.path == "/api/history":
+            self._send_json(200, {"calculations": recent_calculations()})
         elif self.path == "/favicon.ico":
             # No icon asset to serve; answer with an empty 204 so browsers
             # don't log a 404/console error for the implicit favicon request.
@@ -4174,6 +4337,9 @@ class Handler(BaseHTTPRequestHandler):
                     data.get("tax", 0),
                     data.get("tip_on", "total"),
                 )
+                # Persist the headline calculation so the served app's history
+                # survives the request (best-effort; never blocks the response).
+                save_calculation(result)
             elif self.path == "/api/suggestions":
                 result = suggest_tips(
                     data.get("bill"),
