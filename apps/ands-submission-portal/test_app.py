@@ -439,6 +439,13 @@ class ApiTests(unittest.TestCase):
         status, _ = self._get("/api/submissions/9999")
         self.assertEqual(status, 404)
 
+    def test_calendar_holidays_out_of_range_year_422(self):
+        # year=0 and year>9999 must return 422, not crash with 500.
+        status, _ = self._get("/api/calendar/holidays?start=0")
+        self.assertEqual(status, 422)
+        status2, _ = self._get("/api/calendar/holidays?start=99999&end=100000")
+        self.assertEqual(status2, 422)
+
 
 # ---------------------------------------------------------------------------
 # REP domain logic — identifier formats (REQ-042)
@@ -2778,6 +2785,19 @@ class TransmissionApiTests(unittest.TestCase):
         self.assertEqual(len(data["alerts"]), 1)
         states = {t["sequence"]: t["state"] for t in data["status"]["transactions"]}
         self.assertEqual(states["0000"], "TRANSPORT_UNCONFIRMED")
+
+    def test_monitor_non_numeric_timeout_422(self):
+        # mdn_timeout_s / fda_timeout_s must reject non-numeric values with 422,
+        # not crash with an unhandled ValueError/TypeError (500).
+        self._configure()
+        status, _ = self._post(
+            "/api/transmission/monitor",
+            {"dossier_id": "e012345", "mdn_timeout_s": "abc"})
+        self.assertEqual(status, 422)
+        status2, _ = self._post(
+            "/api/transmission/monitor",
+            {"dossier_id": "e012345", "fda_timeout_s": {}})
+        self.assertEqual(status2, 422)
 
     def test_resend_blocked_then_allowed(self):
         self._post("/api/transmission/submit",
@@ -5340,6 +5360,28 @@ class TenancyStoreTests(unittest.TestCase):
         self.assertIn(t["id"], ids_all)
 
 
+class SqliteStoreBaseTests(unittest.TestCase):
+    """Lock in the _SqliteStore refactor — both stores must share the base."""
+
+    def test_auth_store_inherits_sqlite_store(self):
+        self.assertTrue(issubclass(auth_mod.AuthStore, auth_mod._SqliteStore))
+
+    def test_entitlement_store_inherits_sqlite_store(self):
+        self.assertTrue(issubclass(
+            entitlements_mod.EntitlementStore, auth_mod._SqliteStore))
+
+    def test_close_is_inherited_not_overridden(self):
+        # close() must live on _SqliteStore, not re-defined on the subclasses
+        self.assertIs(auth_mod.AuthStore.close, auth_mod._SqliteStore.close)
+        self.assertIs(entitlements_mod.EntitlementStore.close,
+                      auth_mod._SqliteStore.close)
+
+    def test_init_is_inherited_not_overridden(self):
+        self.assertIs(auth_mod.AuthStore.__init__, auth_mod._SqliteStore.__init__)
+        self.assertIs(entitlements_mod.EntitlementStore.__init__,
+                      auth_mod._SqliteStore.__init__)
+
+
 class ControlPlaneApiTests(unittest.TestCase):
     """End-to-end HTTP tests for the multi-tenant control plane."""
 
@@ -5420,6 +5462,25 @@ class ControlPlaneApiTests(unittest.TestCase):
         status, _ = self._req("POST", "/api/auth/signup",
                              {"company": "X"})
         self.assertEqual(status, 400)
+
+    def test_signup_non_string_fields_returns_4xx_not_500(self):
+        # Non-string fields must not crash the handler (500).
+        # str() coercion may let numeric company/email through or produce a 400,
+        # but must never produce a 500.
+        status, _ = self._req("POST", "/api/auth/signup",
+                             {"company": 123, "email": "a@b.com", "password": "pw"})
+        self.assertNotEqual(status, 500)
+        status2, _ = self._req("POST", "/api/auth/signup",
+                              {"company": True, "email": True, "password": "pw"})
+        self.assertNotEqual(status2, 500)
+
+    def test_login_non_string_email_returns_4xx_not_500(self):
+        status, _ = self._req("POST", "/api/auth/login",
+                             {"email": 123, "password": "x"})
+        self.assertNotEqual(status, 500)
+        status2, _ = self._req("POST", "/api/auth/login",
+                              {"email": [1, 2], "password": "x", "tenant_id": 99})
+        self.assertNotEqual(status2, 500)
 
     def test_login_bad_credentials_401(self):
         self._signup("Acme", "admin@acme.com", "right")
@@ -5588,6 +5649,28 @@ class ControlPlaneApiTests(unittest.TestCase):
         self.assertEqual(resp.status, 200)
         self.assertIn("Register your company", page)
         self.assertIn('lang="en"', page)
+
+
+class StoreGcNoLeakTests(unittest.TestCase):
+    """A dropped store must close its sqlite connection — no ResourceWarning."""
+
+    def test_dropped_store_emits_no_resource_warning(self):
+        import gc, warnings
+        for ctor in (
+            lambda: auth_mod.AuthStore(":memory:"),
+            lambda: entitlements_mod.EntitlementStore(":memory:"),
+            lambda: tenancy_mod.TenancyStore(":memory:"),
+        ):
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", ResourceWarning)
+                store = ctor()
+                del store
+                gc.collect()  # __del__ must close cleanly; no warning raised
+
+    def test_all_store_classes_define_del(self):
+        for cls in (auth_mod._SqliteStore, tenancy_mod.TenantData,
+                    tenancy_mod.TenancyStore):
+            self.assertIn("__del__", cls.__dict__)
 
 
 if __name__ == "__main__":

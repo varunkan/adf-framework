@@ -123,6 +123,12 @@ class _SqliteStore:
         with self._lock:
             self._conn.close()
 
+    def __del__(self):  # best-effort safety net so a dropped store never leaks
+        try:
+            self._conn.close()
+        except Exception:
+            pass
+
 
 class SubmissionStore(_SqliteStore):
     """Stores accepted submissions and answers the lifecycle's prior-sequence
@@ -846,10 +852,10 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
             the admin. A duplicate registration email routes to the existing
             tenant rather than silently duplicating."""
             body = self._read_json()
-            company = (body.get("company") or "").strip()
-            email = (body.get("email") or "").strip().lower()
-            password = body.get("password") or ""
-            name = (body.get("name") or "").strip()
+            company = str(body.get("company") or "").strip()
+            email = str(body.get("email") or "").strip().lower()
+            password = str(body.get("password") or "")
+            name = str(body.get("name") or "").strip()
             if not company or not email or not password:
                 self._send_json(
                     {"error": "company, email and password are required"}, 400)
@@ -884,9 +890,9 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
 
         def _handle_login(self):
             body = self._read_json()
-            email = (body.get("email") or "").strip().lower()
-            password = body.get("password") or ""
-            tenant_id = (body.get("tenant_id") or "").strip()
+            email = str(body.get("email") or "").strip().lower()
+            password = str(body.get("password") or "")
+            tenant_id = str(body.get("tenant_id") or "").strip()
             # Owner sign-in first (platform scope, no tenant).
             owner = auth_store.authenticate_owner(email, password)
             if owner is not None:
@@ -1272,6 +1278,9 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
                     return
                 if end < start or end - start > 50:
                     self._send_json({"error": "invalid year range"}, 422)
+                    return
+                if start < 1 or end > 9999:
+                    self._send_json({"error": "year out of range (1-9999)"}, 422)
                     return
                 table = hc_calendar.holiday_table(start, end)
                 self._send_json({
@@ -2362,10 +2371,15 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
             if led is None:
                 return
             kwargs = {}
-            if data.get("mdn_timeout_s") is not None:
-                kwargs["mdn_timeout_s"] = int(data["mdn_timeout_s"])
-            if data.get("fda_timeout_s") is not None:
-                kwargs["fda_timeout_s"] = int(data["fda_timeout_s"])
+            try:
+                if data.get("mdn_timeout_s") is not None:
+                    kwargs["mdn_timeout_s"] = int(data["mdn_timeout_s"])
+                if data.get("fda_timeout_s") is not None:
+                    kwargs["fda_timeout_s"] = int(data["fda_timeout_s"])
+            except (TypeError, ValueError):
+                self._send_json(
+                    {"error": "mdn_timeout_s and fda_timeout_s must be integers"}, 422)
+                return
             alerts = led.check_monitors(now=data.get("now"), **kwargs)
             transmissions.save(led)
             self._send_json({"valid": True, "alerts": alerts,
