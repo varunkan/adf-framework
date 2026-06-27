@@ -5673,5 +5673,278 @@ class StoreGcNoLeakTests(unittest.TestCase):
             self.assertIn("__del__", cls.__dict__)
 
 
+# ---------------------------------------------------------------------------
+# REQ-065: REP XML stylesheet package — bundled, version-tracked, render-for-review
+# ---------------------------------------------------------------------------
+
+class RepStylesheetPackageTests(unittest.TestCase):
+    """Unit tests for rep_stylesheet.py (REQ-065)."""
+
+    def setUp(self):
+        import rep_stylesheet as rs
+        self.rs = rs
+
+    def test_package_manifest_has_active_version(self):
+        m = self.rs.package_manifest()
+        self.assertEqual(m["package"], "pharmabio_stylesheets")
+        self.assertEqual(m["active_version"], "2025-09-10")
+        self.assertEqual(m["review_stage"], "pre-file")
+        self.assertTrue(len(m["versions"]) >= 1)
+
+    def test_bundled_covers_all_four_kinds(self):
+        pkg = self.rs.load_stylesheet("2025-09-10")
+        self.assertIn("co", pkg["views"])
+        self.assertIn("rt", pkg["views"])
+        self.assertIn("pi", pkg["views"])
+        self.assertIn("ca_regional", pkg["views"])
+
+    def test_load_unknown_version_raises(self):
+        with self.assertRaises(self.rs.StylesheetVersionError):
+            self.rs.load_stylesheet("9999-99-99")
+
+    def test_available_versions_contains_bundled(self):
+        self.assertIn("2025-09-10", self.rs.available_versions())
+
+    def test_stylesheet_for_template_matches_rt(self):
+        m = self.rs.stylesheet_for_template("rt", rep.RT_TEMPLATE_VERSION)
+        self.assertEqual(m["version"], "2025-09-10")
+        self.assertEqual(m["view"]["root_tag"], "rep-transaction")
+
+    def test_stylesheet_for_template_unmatched_raises(self):
+        with self.assertRaises(self.rs.StylesheetVersionError):
+            self.rs.stylesheet_for_template("rt", "9.9.9")
+
+    def _rt_xml(self):
+        return (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            f'<rep-transaction template-version="{rep.RT_TEMPLATE_VERSION}" '
+            f'template-date="2025-09-10">'
+            '<dossier-id>e123456</dossier-id>'
+            '<company-id>K18276</company-id>'
+            '<regulatory-activity-type code="ANDS">'
+            'Abbreviated New Drug Submission (ANDS)</regulatory-activity-type>'
+            '<regulatory-activity-lead>Pharmaceuticals</regulatory-activity-lead>'
+            '<sequence>0000</sequence>'
+            '</rep-transaction>'
+        )
+
+    def _co_xml(self):
+        return (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            f'<rep-company template-version="{rep.CO_TEMPLATE_VERSION}">'
+            '<company-id>K18276</company-id>'
+            '<company-name>Acme Generics Inc.</company-name>'
+            '</rep-company>'
+        )
+
+    def _pi_xml(self):
+        return (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            f'<rep-product-information template-version="{rep.PI_TEMPLATE_VERSION}">'
+            '<dossier-id>e123456</dossier-id>'
+            '<product-name>Metformin HCl 500 mg</product-name>'
+            '<din>02123456</din>'
+            '</rep-product-information>'
+        )
+
+    def test_render_rt_xml_returns_kind_and_html(self):
+        result = self.rs.render_rep_xml(self._rt_xml())
+        self.assertEqual(result["kind"], "rt")
+        self.assertTrue(result["matched"])
+        self.assertEqual(result["review_stage"], "pre-file")
+        self.assertIn("e123456", result["html"])
+        self.assertIn("ANDS", result["html"])
+        self.assertIn("<table", result["html"])
+
+    def test_render_co_xml_fields(self):
+        result = self.rs.render_rep_xml(self._co_xml())
+        self.assertEqual(result["kind"], "co")
+        self.assertIn("K18276", result["html"])
+        self.assertIn("Acme Generics Inc.", result["html"])
+
+    def test_render_pi_xml_fields(self):
+        result = self.rs.render_rep_xml(self._pi_xml())
+        self.assertEqual(result["kind"], "pi")
+        self.assertIn("Metformin", result["html"])
+        self.assertIn("02123456", result["html"])
+
+    def test_render_version_auto_detected_from_attribute(self):
+        # template version on the element drives stylesheet matching
+        result = self.rs.render_rep_xml(self._rt_xml())
+        self.assertEqual(result["stylesheet"]["version"], "2025-09-10")
+
+    def test_render_explicit_template_version_overrides(self):
+        result = self.rs.render_rep_xml(
+            self._rt_xml(), template_version=rep.RT_TEMPLATE_VERSION)
+        self.assertTrue(result["matched"])
+
+    def test_render_unknown_root_raises(self):
+        with self.assertRaises(self.rs.StylesheetRenderError):
+            self.rs.render_rep_xml('<unknown-element/>')
+
+    def test_render_malformed_xml_raises(self):
+        with self.assertRaises(self.rs.StylesheetRenderError):
+            self.rs.render_rep_xml('not xml at all <<<')
+
+    def test_render_entity_attack_raises(self):
+        bomb = ('<?xml version="1.0"?><!DOCTYPE lol [<!ENTITY lol "lol">]>'
+                '<rep-transaction>&lol;</rep-transaction>')
+        with self.assertRaises((self.rs.StylesheetRenderError,
+                                __import__('xmlsafe').UnsafeXmlError)):
+            self.rs.render_rep_xml(bomb)
+
+    def test_render_transaction_renders_all_artifacts(self):
+        import rep as rep_mod
+        txn = rep_mod.assemble_transaction({
+            "applicant": "Acme", "company_id": "K18276",
+            "dossier_id": "e123456", "activity_type": "ANDS",
+            "sequence": "0000", "drug_product": "Metformin 500mg",
+        })["transaction"]
+        result = self.rs.render_transaction(txn)
+        self.assertEqual(result["review_stage"], "pre-file")
+        kinds = [a["kind"] for a in result["artifacts"]]
+        self.assertIn("co", kinds)
+        self.assertIn("rt", kinds)
+        self.assertIn("ca_regional", kinds)
+
+    def test_render_transaction_with_pi(self):
+        import rep as rep_mod
+        txn = rep_mod.assemble_transaction({
+            "applicant": "Acme", "company_id": "K18276",
+            "dossier_id": "e123456", "activity_type": "ANDS",
+            "sequence": "0000", "drug_product": "Metformin 500mg",
+            "pi_required": True, "din": "02123456",
+        })["transaction"]
+        result = self.rs.render_transaction(txn)
+        kinds = [a["kind"] for a in result["artifacts"]]
+        self.assertIn("pi", kinds)
+
+    def test_register_new_package_and_render(self):
+        # Simulate a stylesheet update from HC — register as data, render works.
+        new_pkg = {
+            "package": "pharmabio_stylesheets",
+            "published": "2026-01-01",
+            "title": "HC REP stylesheet (future)",
+            "covers_templates": {
+                "rt": ["5.2.0"],
+            },
+            "views": {
+                "rt": {
+                    "root_tag": "rep-transaction",
+                    "title": "REP RT (future)",
+                    "version_attr": "template-version",
+                    "fields": [{"path": "dossier-id", "label": "Dossier ID"}],
+                },
+            },
+        }
+        self.rs.register_stylesheet_package("2026-01-01", new_pkg)
+        self.assertIn("2026-01-01", self.rs.available_versions())
+        # Clean up so other tests are unaffected
+        del self.rs._STYLESHEET_PACKAGES["2026-01-01"]
+
+    def test_register_empty_version_raises(self):
+        with self.assertRaises(ValueError):
+            self.rs.register_stylesheet_package("", {})
+
+    def test_register_package_without_views_raises(self):
+        with self.assertRaises(ValueError):
+            self.rs.register_stylesheet_package("2026-02-01", {"foo": "bar"})
+
+
+class RepStylesheetApiTests(unittest.TestCase):
+    """HTTP API tests for /api/rep/stylesheet (GET) and /api/rep/stylesheet/render (POST)."""
+
+    def setUp(self):
+        self.store = server.SubmissionStore(":memory:")
+        self.httpd = ThreadingHTTPServer(
+            ("127.0.0.1", 0), server.make_handler(self.store))
+        self.port = self.httpd.server_address[1]
+        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self.thread.start()
+
+    def tearDown(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+    def _get(self, path):
+        import http.client
+        conn = http.client.HTTPConnection("127.0.0.1", self.port)
+        conn.request("GET", path)
+        r = conn.getresponse()
+        return r.status, json.loads(r.read())
+
+    def _post(self, path, body):
+        import http.client
+        conn = http.client.HTTPConnection("127.0.0.1", self.port)
+        data = json.dumps(body).encode()
+        conn.request("POST", path, body=data,
+                     headers={"Content-Type": "application/json"})
+        r = conn.getresponse()
+        return r.status, json.loads(r.read())
+
+    def _rt_xml(self):
+        return (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            f'<rep-transaction template-version="{rep.RT_TEMPLATE_VERSION}" '
+            'template-date="2025-09-10">'
+            '<dossier-id>e123456</dossier-id>'
+            '<company-id>K18276</company-id>'
+            '<regulatory-activity-type code="ANDS">'
+            'Abbreviated New Drug Submission (ANDS)</regulatory-activity-type>'
+            '<regulatory-activity-lead>Pharmaceuticals</regulatory-activity-lead>'
+            '<sequence>0000</sequence>'
+            '</rep-transaction>'
+        )
+
+    def test_get_manifest_200(self):
+        status, data = self._get("/api/rep/stylesheet")
+        self.assertEqual(status, 200)
+        self.assertEqual(data["package"], "pharmabio_stylesheets")
+        self.assertIn("active_version", data)
+        self.assertIn("versions", data)
+
+    def test_get_manifest_bundled_version(self):
+        _, data = self._get("/api/rep/stylesheet")
+        self.assertEqual(data["active_version"], "2025-09-10")
+        kinds = data["versions"][0]["kinds"]
+        for k in ("co", "rt", "pi", "ca_regional"):
+            self.assertIn(k, kinds)
+
+    def test_post_render_single_xml(self):
+        status, data = self._post("/api/rep/stylesheet/render",
+                                  {"xml": self._rt_xml()})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["kind"], "rt")
+        self.assertTrue(data["matched"])
+        self.assertIn("e123456", data["html"])
+
+    def test_post_render_transaction(self):
+        import rep as rep_mod
+        txn = rep_mod.assemble_transaction({
+            "applicant": "Acme", "company_id": "K18276",
+            "dossier_id": "e123456", "activity_type": "ANDS",
+            "sequence": "0000", "drug_product": "Metformin 500mg",
+        })["transaction"]
+        status, data = self._post("/api/rep/stylesheet/render",
+                                  {"transaction": txn})
+        self.assertEqual(status, 200)
+        self.assertIn("artifacts", data)
+        kinds = [a["kind"] for a in data["artifacts"]]
+        self.assertIn("co", kinds)
+        self.assertIn("rt", kinds)
+
+    def test_post_render_malformed_xml_422(self):
+        status, data = self._post("/api/rep/stylesheet/render",
+                                  {"xml": "<<<not xml"})
+        self.assertEqual(status, 422)
+        self.assertIn("error", data)
+
+    def test_post_render_unknown_root_422(self):
+        status, data = self._post("/api/rep/stylesheet/render",
+                                  {"xml": "<unknown-element/>"})
+        self.assertEqual(status, 422)
+        self.assertIn("error", data)
+
+
 if __name__ == "__main__":
     unittest.main()

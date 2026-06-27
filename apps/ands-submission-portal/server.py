@@ -41,7 +41,9 @@ import privacy
 import qos
 import rbac
 import rep
+import rep_stylesheet
 import report_ingest
+import xmlsafe
 import response_builder
 import retention
 import stf
@@ -1207,6 +1209,11 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
                     "dsts_ia_lookup": rep.DSTS_IA_LOOKUP_CONTACT,
                 })
                 return
+            if path == "/api/rep/stylesheet":
+                # REQ-065: the bundled, version-tracked HC REP XML stylesheet
+                # package (pharmabio_stylesheets) + per-version template coverage.
+                self._send_json(rep_stylesheet.package_manifest())
+                return
             if path == "/api/cv":
                 # REQ-066: the ingested HC Module-1 controlled vocabularies,
                 # keyed to the CA Module 1 schema version.
@@ -1572,6 +1579,9 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
             if path == "/api/rep/dossier-id/assign":
                 self._handle_dossier_id_assign()
                 return
+            if path == "/api/rep/stylesheet/render":
+                self._handle_rep_stylesheet_render()
+                return
             if path == "/api/privacy/consent":
                 self._handle_privacy_consent()
                 return
@@ -1801,6 +1811,33 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
             result = rep.record_dossier_id_assignment(
                 data.get("request") or {}, data.get("assigned_dossier_id", ""))
             self._send_json(result, 200 if result["valid"] else 422)
+
+        def _handle_rep_stylesheet_render(self):
+            """REQ-065: render generated REP XML through the version-matched HC
+            stylesheet for human review BEFORE filing.
+
+            Accepts either ``{"transaction": <assemble output>}`` to render every
+            artifact, or ``{"xml": ..., "kind"?, "template_version"?}`` to render a
+            single REP XML blob. Returns the human-review HTML (what HC displays).
+            """
+            data = self._read_json()
+            txn = data.get("transaction")
+            try:
+                if txn:
+                    result = rep_stylesheet.render_transaction(txn)
+                else:
+                    result = rep_stylesheet.render_rep_xml(
+                        data.get("xml", ""),
+                        kind=data.get("kind") or None,
+                        template_version=data.get("template_version") or None)
+            except rep_stylesheet.StylesheetVersionError as exc:
+                self._send_json({"error": str(exc), "matched": False}, 422)
+                return
+            except (rep_stylesheet.StylesheetRenderError,
+                    xmlsafe.UnsafeXmlError) as exc:
+                self._send_json({"error": str(exc)}, 422)
+                return
+            self._send_json(result)
 
         # -- validation engine handlers (REQ-022/023/024/045/059/070) -------
         def _validation_version(self, data: dict) -> str:
@@ -3112,6 +3149,17 @@ INDEX_HTML = """<!DOCTYPE html>
     border-top-color:#13344f; border-radius:50%; animation:spin .8s linear infinite; }
   @keyframes spin { to { transform:rotate(360deg); } }
   body.ready #boot-overlay { display:none; }
+  /* REQ-065: REP stylesheet preview table */
+  table.rep-render { width:100%; border-collapse:collapse; font-size:13px; }
+  table.rep-render th { text-align:left; padding:4px 8px; background:var(--surface,#f4f7fb);
+    font-weight:600; width:36%; border:1px solid var(--line,#dce3ec); }
+  table.rep-render td { padding:4px 8px; border:1px solid var(--line,#dce3ec); }
+  table.rep-render .rep-blank { color:#aaa; font-style:italic; }
+  table.rep-render .rep-code { background:#e8f0fe; color:#1a56a0; border-radius:3px;
+    padding:1px 4px; font-family:monospace; font-size:11px; }
+  table.rep-render .rep-group { background:var(--accent-soft,#eef3ff); font-weight:700; }
+  table.rep-render .rep-occ { font-size:12px; }
+  table.rep-render .rep-empty { color:#aaa; font-style:italic; }
 </style>
 </head>
 <body>
@@ -3836,7 +3884,40 @@ async function assemble() {
     ' — portal template</div><pre style="background:#f4f7fb;border:1px solid ' +
     'var(--line);border-radius:6px;padding:10px;overflow:auto;font-size:12px">' +
     esc(t.cover_letter.text) + '</pre></div>';
+  // REQ-065: render-for-review button
+  html += '<div style="margin-top:16px"><button type="button" class="primary" ' +
+    'id="repReviewBtn" onclick="renderRepForReview()">' +
+    'Render for review (HC stylesheet)</button></div>';
+  html += '<div id="repReviewPanel" style="margin-top:12px"></div>';
   el.innerHTML = html;
+  window._lastTransaction = data.transaction;
+}
+
+// REQ-065: render every REP artifact through the version-matched HC stylesheet
+async function renderRepForReview() {
+  const panel = document.getElementById('repReviewPanel');
+  if (!window._lastTransaction) { panel.innerHTML = '<p class="error">No assembled transaction.</p>'; return; }
+  panel.innerHTML = '<p class="hint">Rendering via HC stylesheet…</p>';
+  try {
+    const res = await fetch('/api/rep/stylesheet/render', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({transaction: window._lastTransaction})
+    });
+    const data = await res.json();
+    if (!res.ok) { panel.innerHTML = '<p class="error">' + esc(data.error || 'Render failed') + '</p>'; return; }
+    let html = '<div class="card" style="padding:12px;margin-top:0">' +
+      '<span class="badge ok">STYLESHEET PREVIEW</span> ' +
+      '<span class="hint">HC ' + esc(data.stylesheet.package) + ' v' +
+      esc(data.stylesheet.versions.join(', ')) + ' — pre-file human review</span>';
+    for (const art of data.artifacts) {
+      html += '<div style="margin-top:14px"><strong>' + esc(art.title) + '</strong>';
+      if (art.filename) html += ' <span class="hint">(' + esc(art.filename) + ')</span>';
+      html += '<div style="margin-top:6px">' + art.html + '</div></div>';
+    }
+    html += '</div>';
+    panel.innerHTML = html;
+  } catch(e) { panel.innerHTML = '<p class="error">Render error: ' + esc(String(e)) + '</p>'; }
 }
 
 // -- eCTD dossier UI (REQ-009/014/015/017/018/019) --------------------
