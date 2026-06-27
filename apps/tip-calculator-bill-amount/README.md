@@ -91,4 +91,35 @@ JSON endpoints (all `POST` unless noted):
   `card_count`/`cash_count`, and totals that reconcile to the cent. Distinct from
   `/api/diner-tips` (per-diner tip *rates*) and `/api/service-charge` (one flat fee
   on the whole bill) (REQ-001/002 extension).
+- `/api/tiered-tax` — **split-rate tax**: many jurisdictions tax prepared food and
+  alcohol at DIFFERENT rates (e.g. food 6%, liquor 10%). Given a pre-tax `food`
+  subtotal and a pre-tax `alcohol` subtotal — each taxed at its own
+  `food_tax_percent`/`alcohol_tax_percent` — it returns the per-category tax, the
+  combined `tax` and `blended_tax_percent`, the gratuity (on the pre-tax subtotal
+  by default, or the tax-inclusive total when `tip_on="total"`), the grand total
+  and a per-person split reconciled exactly to the cent via largest-remainder.
+  Distinct from `/api/build-bill` and `/api/calculate`, which apply ONE tax figure
+  to the whole cheque (REQ-001/002 extension).
+- `/api/guest-of-honor` — **treat the guest of honor**: the classic birthday /
+  anniversary "your money's no good here". Given `bill`, `tip_percent`, `people`
+  and a `guests` list of 0-based diner indices to treat, the honorees pay nothing
+  and the remaining payers split the ENTIRE grand total evenly, reconciled exactly
+  to the cent via largest-remainder. Treating everyone fails safe (someone must
+  cover the cheque); an empty `guests` list reduces to a plain even split. Distinct
+  from `/api/split-comped` (removes comped items from the total) and
+  `/api/split-caps` (caps a contribution) — here the full total is still paid, just
+  by fewer people (REQ-002 extension).
+- `/api/clean-split` — **clean even split**: the everyday "I'll put it on my card,
+  just send me a round number". The grand total is split evenly across `people`,
+  but every diner EXCEPT the designated `organizer` (0-based index of whoever paid
+  the cheque) rounds their fair share to the nearest `nearest` increment (default
+  `$1`) so they can hand over tidy cash; the organizer pays whatever is left so the
+  payments still sum EXACTLY to the total. Honours `tax` and pre/post-tax tipping,
+  and reports each diner's `amount`, the `organizer_amount` and the
+  `organizer_delta` (how much more/less the organizer pays than an exact share). An
+  increment so large the others would cover more than the whole cheque fails safe.
+  Distinct from `/api/round-split` (rounds EVERY share UP into a surplus kitty,
+  growing the total) and `/api/guest-of-honor` (some diners pay nothing) — here the
+  true total is preserved and only the rounding remainder shifts onto the organizer
+  (REQ-002 extension).
 - `GET /health` — liveness probe.

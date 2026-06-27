@@ -44,6 +44,8 @@ from server import (
     affordable_bill,
     card_cash_split,
     tiered_tax_split,
+    guest_of_honor_split,
+    clean_share_split,
     TipError,
     Handler,
 )
@@ -2620,6 +2622,205 @@ class TestCoverageGaps(unittest.TestCase):
         self.assertGreaterEqual(r["headroom"], 0.0)
 
 
+class TestGuestOfHonorSplit(unittest.TestCase):
+    # REQ-002 extension: treat one or more diners; the rest split the whole total.
+    def test_treat_one_diner_others_cover(self):
+        r = guest_of_honor_split(120, 20, 4, [1])
+        # Total = 144; diner index 1 is treated, the other three split 144.
+        self.assertEqual(r["total"], 144.0)
+        self.assertEqual(r["tip"], 24.0)
+        self.assertEqual(r["payers"], 3)
+        self.assertEqual(r["guests"], [1])
+        self.assertEqual(r["people_detail"][1]["amount"], 0.0)
+        self.assertTrue(r["people_detail"][1]["guest"])
+        self.assertEqual(round(sum(r["amounts"]), 2), 144.0)
+        # The three payers each cover 48.00.
+        self.assertEqual([r["amounts"][i] for i in (0, 2, 3)], [48.0, 48.0, 48.0])
+
+    def test_amounts_reconcile_exactly_with_odd_total(self):
+        # 100 + 10% = 110 split by 3 payers -> 36.67/36.67/36.66 (largest remainder)
+        r = guest_of_honor_split(100, 10, 4, [3])
+        payer_amounts = [r["amounts"][i] for i in (0, 1, 2)]
+        self.assertEqual(sorted(payer_amounts), [36.66, 36.67, 36.67])
+        self.assertEqual(r["amounts"][3], 0.0)
+        self.assertEqual(round(sum(r["amounts"]), 2), 110.0)
+
+    def test_no_guests_is_plain_even_split(self):
+        r = guest_of_honor_split(100, 20, 4)
+        self.assertEqual(r["guests"], [])
+        self.assertEqual(r["payers"], 4)
+        self.assertEqual(r["amounts"], [30.0, 30.0, 30.0, 30.0])
+
+    def test_empty_guest_list_allowed(self):
+        r = guest_of_honor_split(80, 0, 2, [])
+        self.assertEqual(r["payers"], 2)
+        self.assertEqual(r["amounts"], [40.0, 40.0])
+
+    def test_multiple_guests(self):
+        r = guest_of_honor_split(200, 0, 5, [0, 4])
+        self.assertEqual(r["guests"], [0, 4])
+        self.assertEqual(r["payers"], 3)
+        self.assertEqual(r["amounts"][0], 0.0)
+        self.assertEqual(r["amounts"][4], 0.0)
+        self.assertEqual(round(sum(r["amounts"]), 2), 200.0)
+
+    def test_fair_share_reported(self):
+        r = guest_of_honor_split(90, 0, 3, [2])
+        self.assertEqual(r["fair_share"], 45.0)
+
+    def test_treating_everyone_fails_safe(self):
+        with self.assertRaises(TipError):
+            guest_of_honor_split(100, 20, 3, [0, 1, 2])
+
+    def test_guest_index_out_of_range_rejected(self):
+        with self.assertRaises(TipError):
+            guest_of_honor_split(100, 20, 3, [3])
+
+    def test_negative_guest_index_rejected(self):
+        with self.assertRaises(TipError):
+            guest_of_honor_split(100, 20, 3, [-1])
+
+    def test_duplicate_guest_rejected(self):
+        with self.assertRaises(TipError):
+            guest_of_honor_split(100, 20, 3, [1, 1])
+
+    def test_non_integer_guest_rejected(self):
+        with self.assertRaises(TipError):
+            guest_of_honor_split(100, 20, 3, [1.5])
+
+    def test_boolean_guest_rejected(self):
+        with self.assertRaises(TipError):
+            guest_of_honor_split(100, 20, 3, [True])
+
+    def test_guests_not_a_list_rejected(self):
+        with self.assertRaises(TipError):
+            guest_of_honor_split(100, 20, 3, "1")
+
+    def test_negative_bill_rejected(self):
+        with self.assertRaises(TipError):
+            guest_of_honor_split(-10, 20, 3, [0])
+
+    def test_negative_tip_rejected(self):
+        with self.assertRaises(TipError):
+            guest_of_honor_split(100, -5, 3, [0])
+
+    def test_zero_bill_zero_amounts(self):
+        r = guest_of_honor_split(0, 20, 3, [0])
+        self.assertEqual(r["total"], 0.0)
+        self.assertEqual(r["amounts"], [0.0, 0.0, 0.0])
+
+
+class TestCleanShareSplit(unittest.TestCase):
+    # REQ-002 extension: even split where everyone pays a clean amount and the
+    # organizer absorbs the rounding remainder.
+    def test_even_total_no_rounding_needed(self):
+        # 100 + 20% = 120 split by 3 -> 40 each, already clean.
+        r = clean_share_split(100, 20, 3, organizer=0)
+        self.assertEqual(r["total"], 120.0)
+        self.assertEqual(r["amounts"], [40.0, 40.0, 40.0])
+        self.assertEqual(r["organizer"], 0)
+        self.assertEqual(r["organizer_delta"], 0.0)
+
+    def test_others_round_organizer_absorbs(self):
+        # 100 + 0% = 100 split by 3 -> fair 33.33; others pay clean $33,
+        # organizer covers 100 - 66 = 34.
+        r = clean_share_split(100, 0, 3, organizer=0, nearest=1.0)
+        self.assertEqual(r["clean_amount"], 33.0)
+        self.assertEqual(r["amounts"][1], 33.0)
+        self.assertEqual(r["amounts"][2], 33.0)
+        self.assertEqual(r["amounts"][0], 34.0)
+        self.assertEqual(round(sum(r["amounts"]), 2), 100.0)
+        self.assertEqual(r["organizer_delta"], 0.67)
+
+    def test_sum_is_exactly_total(self):
+        r = clean_share_split(87.41, 18, 5, organizer=2, nearest=1.0)
+        self.assertEqual(round(sum(r["amounts"]), 2), r["total"])
+        self.assertEqual(r["amounts"][2], r["organizer_amount"])
+
+    def test_organizer_index_honoured(self):
+        r = clean_share_split(100, 0, 3, organizer=2)
+        self.assertTrue(r["people_detail"][2]["organizer"])
+        self.assertFalse(r["people_detail"][0]["organizer"])
+        self.assertEqual(r["amounts"][2], 34.0)
+
+    def test_nearest_increment_five(self):
+        # 100 split by 3, round others to nearest $5 -> 35 each (33.33 -> 35),
+        # organizer covers 100 - 70 = 30.
+        r = clean_share_split(100, 0, 3, organizer=0, nearest=5.0)
+        self.assertEqual(r["amounts"][1], 35.0)
+        self.assertEqual(r["amounts"][2], 35.0)
+        self.assertEqual(r["amounts"][0], 30.0)
+        self.assertEqual(round(sum(r["amounts"]), 2), 100.0)
+
+    def test_single_person_pays_full_total(self):
+        r = clean_share_split(50, 10, 1)
+        self.assertEqual(r["amounts"], [55.0])
+        self.assertEqual(r["organizer_amount"], 55.0)
+
+    def test_default_organizer_is_zero(self):
+        r = clean_share_split(100, 0, 3)
+        self.assertEqual(r["organizer"], 0)
+
+    def test_tip_on_subtotal(self):
+        # bill 110 includes 10 tax; tip 20% on the 100 subtotal = 20 -> total 130.
+        r = clean_share_split(110, 20, 2, organizer=0, tax=10, tip_on="subtotal")
+        self.assertEqual(r["tip"], 20.0)
+        self.assertEqual(r["total"], 130.0)
+        self.assertEqual(r["subtotal"], 100.0)
+
+    def test_nearest_too_large_fails_safe(self):
+        # nearest $50 on a $90 cheque: each $30 share rounds UP to $50, so the
+        # two others would owe $100 together — more than the whole total, which
+        # would force the organizer's share negative -> fail safe.
+        with self.assertRaises(TipError):
+            clean_share_split(90, 0, 3, organizer=0, nearest=50.0)
+
+    def test_organizer_out_of_range_rejected(self):
+        with self.assertRaises(TipError):
+            clean_share_split(100, 20, 3, organizer=3)
+
+    def test_negative_organizer_rejected(self):
+        with self.assertRaises(TipError):
+            clean_share_split(100, 20, 3, organizer=-1)
+
+    def test_non_integer_organizer_rejected(self):
+        with self.assertRaises(TipError):
+            clean_share_split(100, 20, 3, organizer=1.5)
+
+    def test_boolean_organizer_rejected(self):
+        with self.assertRaises(TipError):
+            clean_share_split(100, 20, 3, organizer=True)
+
+    def test_zero_nearest_rejected(self):
+        with self.assertRaises(TipError):
+            clean_share_split(100, 20, 3, nearest=0)
+
+    def test_negative_nearest_rejected(self):
+        with self.assertRaises(TipError):
+            clean_share_split(100, 20, 3, nearest=-1)
+
+    def test_negative_bill_rejected(self):
+        with self.assertRaises(TipError):
+            clean_share_split(-10, 20, 3)
+
+    def test_negative_tip_rejected(self):
+        with self.assertRaises(TipError):
+            clean_share_split(100, -5, 3)
+
+    def test_tax_exceeds_bill_rejected(self):
+        with self.assertRaises(TipError):
+            clean_share_split(50, 10, 2, tax=60)
+
+    def test_negative_tax_rejected(self):
+        with self.assertRaises(TipError):
+            clean_share_split(100, 10, 2, tax=-5)
+
+    def test_zero_bill_zero_amounts(self):
+        r = clean_share_split(0, 20, 3, organizer=1)
+        self.assertEqual(r["total"], 0.0)
+        self.assertEqual(r["amounts"], [0.0, 0.0, 0.0])
+
+
 class TestApi(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -3227,6 +3428,62 @@ class TestApi(unittest.TestCase):
 
     def test_api_tiered_tax_missing_food(self):
         status, data = self._post_to("/api/tiered-tax", {"alcohol": 20})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_api_guest_of_honor_happy(self):
+        status, data = self._post_to("/api/guest-of-honor", {
+            "bill": 120, "tip_percent": 20, "people": 4, "guests": [1]})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["total"], 144.0)
+        self.assertEqual(data["payers"], 3)
+        self.assertEqual(data["guests"], [1])
+        self.assertEqual(data["amounts"][1], 0.0)
+        self.assertEqual(round(sum(data["amounts"]), 2), data["total"])
+
+    def test_api_guest_of_honor_no_guests_even_split(self):
+        status, data = self._post_to("/api/guest-of-honor", {
+            "bill": 100, "tip_percent": 20, "people": 4})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["guests"], [])
+        self.assertEqual(data["amounts"], [30.0, 30.0, 30.0, 30.0])
+
+    def test_api_guest_of_honor_treat_everyone_error(self):
+        status, data = self._post_to("/api/guest-of-honor", {
+            "bill": 100, "tip_percent": 20, "people": 3, "guests": [0, 1, 2]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_api_guest_of_honor_out_of_range_error(self):
+        status, data = self._post_to("/api/guest-of-honor", {
+            "bill": 100, "tip_percent": 20, "people": 3, "guests": [5]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_api_clean_split_happy(self):
+        status, data = self._post_to("/api/clean-split", {
+            "bill": 100, "tip_percent": 0, "people": 3, "organizer": 0, "nearest": 1})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["amounts"], [34.0, 33.0, 33.0])
+        self.assertEqual(round(sum(data["amounts"]), 2), data["total"])
+        self.assertEqual(data["organizer"], 0)
+
+    def test_api_clean_split_defaults_organizer(self):
+        status, data = self._post_to("/api/clean-split", {
+            "bill": 100, "tip_percent": 20, "people": 3})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["organizer"], 0)
+        self.assertEqual(data["amounts"], [40.0, 40.0, 40.0])
+
+    def test_api_clean_split_organizer_out_of_range_error(self):
+        status, data = self._post_to("/api/clean-split", {
+            "bill": 100, "tip_percent": 20, "people": 3, "organizer": 9})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_api_clean_split_nearest_too_large_error(self):
+        status, data = self._post_to("/api/clean-split", {
+            "bill": 90, "tip_percent": 0, "people": 3, "nearest": 50})
         self.assertEqual(status, 400)
         self.assertIn("error", data)
 

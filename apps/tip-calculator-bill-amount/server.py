@@ -2358,6 +2358,190 @@ def tiered_tax_split(food, alcohol=0, food_tax_percent=0, alcohol_tax_percent=0,
     }
 
 
+def guest_of_honor_split(bill, tip_percent, people, guests=None):
+    """Treat one or more diners — the rest cover the whole cheque (REQ-002 extn).
+
+    The classic birthday/anniversary scenario: "your money's no good here
+    tonight". The guest(s) of honor pay NOTHING, and the remaining diners split
+    the ENTIRE grand total (``bill`` plus a ``tip_percent`` gratuity) evenly
+    between themselves — so the honorees' share is absorbed by their hosts.
+
+    ``guests`` is a list of 0-based diner indices to treat (each a whole number
+    in ``[0, people)``, no duplicates); ``None``/``""``/an empty list means
+    nobody is treated, which reduces to a plain even split. At least one diner
+    must remain to pay — treating EVERYONE fails safe, since then no one would
+    cover the cheque.
+
+    Distinct from :func:`split_comped` (which removes comped items from the
+    total) and :func:`split_with_caps` (which caps a contribution): here the
+    full total is still paid, just by fewer people. All money is reconciled in
+    integer cents with the largest-remainder method so the per-diner ``amounts``
+    sum EXACTLY to the grand ``total``. Returns each diner's ``amount`` and
+    whether they were a ``guest``, plus the ``fair_share`` each payer covers.
+    Raises ``TipError`` on invalid input so callers can fail safe.
+    """
+    bill, tip_percent, people_int = _validate_bill_tip_people(bill, tip_percent, people)
+
+    if guests is None or guests == "":
+        guests = []
+    if isinstance(guests, (str, bytes)) or not hasattr(guests, "__iter__"):
+        raise TipError("guests must be a list of diner numbers")
+    guests = list(guests)
+
+    guest_set = set()
+    for g in guests:
+        if isinstance(g, bool):
+            raise TipError("each guest must be a whole diner number")
+        try:
+            idx = int(g)
+        except (TypeError, ValueError, OverflowError):
+            raise TipError("each guest must be a whole diner number")
+        if float(g) != idx:
+            raise TipError("each guest must be a whole diner number")
+        if idx < 0 or idx >= people_int:
+            raise TipError("guest %d is out of range for %d diners" % (idx, people_int))
+        if idx in guest_set:
+            raise TipError("guest %d is listed more than once" % idx)
+        guest_set.add(idx)
+
+    payers = [i for i in range(people_int) if i not in guest_set]
+    if not payers:
+        raise TipError("at least one diner must pay — cannot treat everyone")
+
+    tip = bill * tip_percent / 100.0
+    total = bill + tip
+    total_cents = int(round(total * 100))
+
+    payer_cents = _largest_remainder(total_cents, [1] * len(payers))
+    amount_cents = [0] * people_int
+    for pos, i in enumerate(payers):
+        amount_cents[i] = payer_cents[pos]
+
+    people_out = [{
+        "amount": _round2(amount_cents[i] / 100.0),
+        "guest": i in guest_set,
+    } for i in range(people_int)]
+
+    return {
+        "bill": _round2(bill),
+        "tip_percent": _round2(tip_percent),
+        "people": people_int,
+        "guests": sorted(guest_set),
+        "payers": len(payers),
+        "tip": _round2(tip),
+        "total": _round2(total_cents / 100.0),
+        "fair_share": _round2(total_cents / 100.0 / len(payers)),
+        "people_detail": people_out,
+        "amounts": [p["amount"] for p in people_out],
+    }
+
+
+def clean_share_split(bill, tip_percent, people, organizer=0, nearest=1.0,
+                      tax=0, tip_on="total"):
+    """Even split where everyone pays a CLEAN amount and one diner absorbs the
+    remainder (REQ-002 extension).
+
+    The everyday "I'll put it on my card, just Venmo me a round number"
+    scenario. The grand total (``bill`` — already tax-inclusive — plus a
+    ``tip_percent`` gratuity, optionally tipped on the pre-tax subtotal via
+    ``tip_on``) is split evenly across ``people``, but every diner EXCEPT the
+    designated ``organizer`` rounds their fair share to the nearest ``nearest``
+    increment (default ``1.0`` = a whole dollar) so they can hand over tidy
+    cash / send a round transfer. The ``organizer`` — the 0-based index of the
+    person who actually paid the cheque — pays whatever is left so the diners'
+    payments still sum EXACTLY to the grand total, to the cent.
+
+    Distinct from :func:`round_up_split` (which rounds EVERY share UP, inflating
+    the total into a surplus kitty), from :func:`guest_of_honor_split` (where the
+    treated diners pay nothing) and from :func:`settle_up` (which reconciles
+    arbitrary amounts already paid): here the true total is preserved and only
+    the small rounding remainder shifts onto the organizer.
+
+    ``nearest`` must be a positive amount; the rounding may not push the
+    organizer's own share below zero (an increment so large that the others
+    already cover more than the whole cheque fails safe). Returns each diner's
+    ``amount``, who the ``organizer`` is and the ``organizer_delta`` (how much
+    more, +, or less, -, the organizer pays than an exact even share). Raises
+    ``TipError`` on invalid input so callers can fail safe.
+    """
+    bill, tip_percent, people_int = _validate_bill_tip_people(bill, tip_percent, people)
+    tax = _to_number(tax, "tax") if tax not in (None, "") else 0.0
+    mode = _normalise_tip_on(tip_on)
+    if tax < 0:
+        raise TipError("tax must not be negative")
+    if tax > bill:
+        raise TipError("tax must not exceed the bill")
+
+    # Resolve the organizer index — a whole number in [0, people).
+    if isinstance(organizer, bool):
+        raise TipError("organizer must be a whole diner number")
+    if organizer is None or organizer == "":
+        organizer = 0
+    try:
+        organizer_idx = int(organizer)
+    except (TypeError, ValueError, OverflowError):
+        raise TipError("organizer must be a whole diner number")
+    if float(organizer) != organizer_idx:
+        raise TipError("organizer must be a whole diner number")
+    if organizer_idx < 0 or organizer_idx >= people_int:
+        raise TipError("organizer %d is out of range for %d diners"
+                       % (organizer_idx, people_int))
+
+    nearest = _to_number(nearest, "nearest")
+    if nearest <= 0:
+        raise TipError("nearest must be greater than zero")
+    inc_cents = int(round(nearest * 100))
+    if inc_cents < 1:
+        raise TipError("nearest must be at least one cent")
+
+    subtotal = bill - tax
+    tip_base = subtotal if mode == "subtotal" else bill
+    tip = tip_base * tip_percent / 100.0
+    total = bill + tip
+    total_cents = int(round(total * 100))
+
+    fair_exact = total_cents / people_int  # exact even share, in cents
+    clean_cents = int(math.floor(fair_exact / inc_cents + 0.5)) * inc_cents
+
+    amount_cents = [0] * people_int
+    others_sum = 0
+    for i in range(people_int):
+        if i == organizer_idx:
+            continue
+        amount_cents[i] = clean_cents
+        others_sum += clean_cents
+
+    organizer_cents = total_cents - others_sum
+    if organizer_cents < 0:
+        raise TipError("nearest is too large to reconcile fairly")
+    amount_cents[organizer_idx] = organizer_cents
+
+    fair_cents = total_cents / people_int
+    people_out = [{
+        "amount": _round2(amount_cents[i] / 100.0),
+        "organizer": i == organizer_idx,
+    } for i in range(people_int)]
+
+    return {
+        "bill": _round2(bill),
+        "tip_percent": _round2(tip_percent),
+        "people": people_int,
+        "tax": _round2(tax),
+        "subtotal": _round2(subtotal),
+        "tip_on": mode,
+        "nearest": _round2(nearest),
+        "tip": _round2(tip),
+        "total": _round2(total_cents / 100.0),
+        "organizer": organizer_idx,
+        "fair_share": _round2(fair_cents / 100.0),
+        "clean_amount": _round2(clean_cents / 100.0),
+        "organizer_amount": _round2(organizer_cents / 100.0),
+        "organizer_delta": _round2((organizer_cents - fair_cents) / 100.0),
+        "people_detail": people_out,
+        "amounts": [p["amount"] for p in people_out],
+    }
+
+
 # ---------------------------------------------------------------------------
 # HTTP layer
 # ---------------------------------------------------------------------------
@@ -2743,6 +2927,38 @@ Jo 25 card</textarea>
       <button class="chip" id="tt-go" style="margin-top:.6rem;flex:initial;width:100%;">Tax food &amp; drinks apart</button>
       <div id="tt-rows"></div>
       <div class="err" id="tt-err"></div>
+    </div>
+
+    <div class="out">
+      <div class="row"><span class="k">Treat the guest of honor</span><span class="v">birthday split</span></div>
+      <label for="goh-bill">Bill ($)</label>
+      <input id="goh-bill" type="text" value="120" placeholder="e.g. 120">
+      <label for="goh-tip">Tip %</label>
+      <input id="goh-tip" type="text" value="20" placeholder="e.g. 20">
+      <label for="goh-people">People</label>
+      <input id="goh-people" type="text" value="4" placeholder="e.g. 4">
+      <label for="goh-guests">Treated diner #s (1-based, comma-separated)</label>
+      <input id="goh-guests" type="text" value="1" placeholder="e.g. 1, 2">
+      <button class="chip" id="goh-go" style="margin-top:.6rem;flex:initial;width:100%;">Cover the guest of honor</button>
+      <div id="goh-rows"></div>
+      <div class="err" id="goh-err"></div>
+    </div>
+
+    <div class="out">
+      <div class="row"><span class="k">Clean even split</span><span class="v">organizer absorbs the cents</span></div>
+      <label for="clean-bill">Bill ($)</label>
+      <input id="clean-bill" type="text" value="100" placeholder="e.g. 100">
+      <label for="clean-tip">Tip %</label>
+      <input id="clean-tip" type="text" value="20" placeholder="e.g. 20">
+      <label for="clean-people">People</label>
+      <input id="clean-people" type="text" value="3" placeholder="e.g. 3">
+      <label for="clean-organizer">Organizer diner # (1-based, paid the card)</label>
+      <input id="clean-organizer" type="text" value="1" placeholder="e.g. 1">
+      <label for="clean-nearest">Round others to nearest ($)</label>
+      <input id="clean-nearest" type="text" value="1" placeholder="e.g. 1">
+      <button class="chip" id="clean-go" style="margin-top:.6rem;flex:initial;width:100%;">Make everyone&#39;s share clean</button>
+      <div id="clean-rows"></div>
+      <div class="err" id="clean-err"></div>
     </div>
   </div>
 
@@ -3658,6 +3874,74 @@ async function tieredTax() {
   }
 }
 $("tt-go").addEventListener("click", tieredTax);
+
+async function guestOfHonor() {
+  // The UI shows 1-based diner numbers; the API uses 0-based indices.
+  const guests = $("goh-guests").value.split(",")
+    .map((s) => s.trim()).filter((s) => s !== "")
+    .map((s) => Number(s) - 1);
+  const body = {
+    bill: $("goh-bill").value,
+    tip_percent: $("goh-tip").value,
+    people: $("goh-people").value,
+    guests: guests,
+  };
+  $("goh-rows").innerHTML = "";
+  try {
+    const res = await fetch("/api/guest-of-honor", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) { $("goh-err").textContent = data.error || "Invalid input"; return; }
+    $("goh-err").textContent = "";
+    const rows = data.people_detail.map((p, i) => [
+      "Diner " + (i + 1) + (p.guest ? " (guest of honor)" : ""),
+      p.guest ? "covered" : money(p.amount),
+    ]);
+    rows.push(["Grand total", money(data.total)]);
+    rows.push([data.payers + " payer(s) each", money(data.fair_share)]);
+    renderRows("goh-rows", rows);
+  } catch (e) {
+    $("goh-err").textContent = "Network error";
+  }
+}
+$("goh-go").addEventListener("click", guestOfHonor);
+
+async function cleanSplit() {
+  // The UI shows a 1-based organizer number; the API uses a 0-based index.
+  const body = {
+    bill: $("clean-bill").value,
+    tip_percent: $("clean-tip").value,
+    people: $("clean-people").value,
+    organizer: Number($("clean-organizer").value) - 1,
+    nearest: $("clean-nearest").value,
+  };
+  $("clean-rows").innerHTML = "";
+  try {
+    const res = await fetch("/api/clean-split", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) { $("clean-err").textContent = data.error || "Invalid input"; return; }
+    $("clean-err").textContent = "";
+    const rows = data.people_detail.map((p, i) => [
+      "Diner " + (i + 1) + (p.organizer ? " (organizer)" : ""),
+      money(p.amount),
+    ]);
+    rows.push(["Grand total", money(data.total)]);
+    rows.push(["Fair share each", money(data.fair_share)]);
+    rows.push(["Organizer pays", money(data.organizer_amount) +
+      " (" + (data.organizer_delta >= 0 ? "+" : "") + money(data.organizer_delta).slice(1) + ")"]);
+    renderRows("clean-rows", rows);
+  } catch (e) {
+    $("clean-err").textContent = "Network error";
+  }
+}
+$("clean-go").addEventListener("click", cleanSplit);
 </script>
 </body>
 </html>
@@ -3705,7 +3989,8 @@ class Handler(BaseHTTPRequestHandler):
                              "/api/charity", "/api/tip-excluding",
                              "/api/diner-tips", "/api/tip-matrix",
                              "/api/affordable-bill", "/api/card-split",
-                             "/api/tiered-tax"):
+                             "/api/tiered-tax", "/api/guest-of-honor",
+                             "/api/clean-split"):
             self._send_json(404, {"error": "not found"})
             return
         try:
@@ -3935,6 +4220,23 @@ class Handler(BaseHTTPRequestHandler):
                     data.get("tip_percent", 0),
                     data.get("people", 1),
                     data.get("tip_on", "subtotal"),
+                )
+            elif self.path == "/api/guest-of-honor":
+                result = guest_of_honor_split(
+                    data.get("bill"),
+                    data.get("tip_percent"),
+                    data.get("people", 1),
+                    data.get("guests"),
+                )
+            elif self.path == "/api/clean-split":
+                result = clean_share_split(
+                    data.get("bill"),
+                    data.get("tip_percent"),
+                    data.get("people", 1),
+                    data.get("organizer", 0),
+                    data.get("nearest", 1.0),
+                    data.get("tax", 0),
+                    data.get("tip_on", "total"),
                 )
             else:  # /api/split
                 result = split_by_shares(
