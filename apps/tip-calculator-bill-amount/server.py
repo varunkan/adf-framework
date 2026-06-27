@@ -2608,7 +2608,7 @@ def redeem_loyalty(bill, tip_percent, points=0, point_value=0.01, people=1,
         redeemed_points = 0.0
 
     redemption = _round2(redeemed_points * point_value)
-    if redemption > cap:  # guard against float drift past the cap
+    if redemption > cap:  # pragma: no cover - defensive; floor() keeps redemption <= cap
         redemption = _round2(cap)
     remaining_points = _round2(points - redeemed_points)
 

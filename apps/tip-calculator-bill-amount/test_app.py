@@ -2689,6 +2689,11 @@ class TestGuestOfHonorSplit(unittest.TestCase):
         with self.assertRaises(TipError):
             guest_of_honor_split(100, 20, 3, [1.5])
 
+    def test_non_numeric_guest_rejected(self):
+        # A guest that cannot even be coerced to an int (e.g. text) fails safe.
+        with self.assertRaises(TipError):
+            guest_of_honor_split(100, 20, 3, ["abc"])
+
     def test_boolean_guest_rejected(self):
         with self.assertRaises(TipError):
             guest_of_honor_split(100, 20, 3, [True])
@@ -2761,6 +2766,21 @@ class TestCleanShareSplit(unittest.TestCase):
     def test_default_organizer_is_zero(self):
         r = clean_share_split(100, 0, 3)
         self.assertEqual(r["organizer"], 0)
+
+    def test_blank_organizer_defaults_to_zero(self):
+        # None or an empty string (e.g. an untouched form field) means diner 0.
+        self.assertEqual(clean_share_split(100, 0, 3, organizer=None)["organizer"], 0)
+        self.assertEqual(clean_share_split(100, 0, 3, organizer="")["organizer"], 0)
+
+    def test_non_numeric_organizer_rejected(self):
+        # An organizer that cannot be coerced to an int fails safe.
+        with self.assertRaises(TipError):
+            clean_share_split(100, 0, 3, organizer="abc")
+
+    def test_sub_cent_nearest_rejected(self):
+        # A positive but sub-cent rounding increment is meaningless -> fail safe.
+        with self.assertRaises(TipError):
+            clean_share_split(100, 0, 3, nearest=0.001)
 
     def test_tip_on_subtotal(self):
         # bill 110 includes 10 tax; tip 20% on the 100 subtotal = 20 -> total 130.
@@ -2899,6 +2919,20 @@ class TestRedeemLoyalty(unittest.TestCase):
     def test_negative_max_redeem_rejected(self):
         with self.assertRaises(TipError):
             redeem_loyalty(100, 20, points=100, max_redeem=-1)
+
+    def test_zero_point_value_redeems_nothing(self):
+        # Points worth $0 each can buy no credit; the bill is paid in full.
+        r = redeem_loyalty(100, 18, points=500, point_value=0)
+        self.assertEqual(r["redeemed_points"], 0.0)
+        self.assertEqual(r["redemption"], 0.0)
+        self.assertEqual(r["remaining_points"], 500.0)
+        self.assertEqual(r["amount_due"], 118.0)
+
+    def test_zero_bill_zero_effective_discount(self):
+        # No goods to pay for -> no redemption and a 0% effective discount.
+        r = redeem_loyalty(0, 18, points=0)
+        self.assertEqual(r["amount_due"], 0.0)
+        self.assertEqual(r["effective_discount_percent"], 0.0)
 
 
 class TestApi(unittest.TestCase):
