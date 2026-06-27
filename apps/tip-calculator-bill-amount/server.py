@@ -2241,7 +2241,7 @@ def affordable_bill(budget, people=1, tip_percent=0, tax_percent=0, tip_on="tota
 
     # Divisor is >= 1 (rates are non-negative), so this is always finite.
     subtotal_cents = int(math.floor(total_budget_cents / divisor))
-    if subtotal_cents < 0:
+    if subtotal_cents < 0:  # pragma: no cover - defensive; budget>=0 & divisor>=1
         subtotal_cents = 0
     # Rounding tax/tip up can nudge the grand total a cent over budget; step the
     # subtotal down until it fits, guaranteeing we never exceed the budget.
@@ -2274,6 +2274,87 @@ def affordable_bill(budget, people=1, tip_percent=0, tax_percent=0, tip_on="tota
         "amounts": amounts,
         "effective_tip_percent": _round2(effective),
         "headroom": _round2((total_budget_cents - grand_cents) / 100.0),
+    }
+
+
+def tiered_tax_split(food, alcohol=0, food_tax_percent=0, alcohol_tax_percent=0,
+                     tip_percent=0, people=1, tip_on="subtotal"):
+    """Tip on a cheque whose categories are taxed at DIFFERENT rates (REQ-001/002 extn).
+
+    Many jurisdictions levy separate sales-tax rates on prepared food and on
+    alcohol — e.g. food at 6 % but liquor at 10 %, or groceries untaxed while a
+    cooked meal is taxed. Given a pre-tax ``food`` subtotal and a pre-tax
+    ``alcohol`` subtotal, each taxed at its OWN rate, this computes the
+    per-category tax, the combined tax, the gratuity, the grand total and the
+    per-person split.
+
+    By default the gratuity is taken on the pre-tax combined subtotal
+    (``tip_on="subtotal"``, the customary base when tax rates differ by line);
+    pass ``tip_on="total"`` to tip on the tax-inclusive amount instead. The
+    per-person ``amounts`` are reconciled with the largest-remainder method so
+    they sum EXACTLY to the grand total, to the cent.
+
+    Distinct from :func:`build_bill` and :func:`calculate_tip`, which apply a
+    SINGLE tax figure (a flat percent / one dollar amount) to the whole cheque.
+    Raises ``TipError`` on invalid input so callers fail safe.
+    """
+    food = _to_number(food, "food")
+    alcohol = _to_number(alcohol, "alcohol") if alcohol not in (None, "") else 0.0
+    food_tax_percent = (_to_number(food_tax_percent, "food_tax_percent")
+                        if food_tax_percent not in (None, "") else 0.0)
+    alcohol_tax_percent = (_to_number(alcohol_tax_percent, "alcohol_tax_percent")
+                           if alcohol_tax_percent not in (None, "") else 0.0)
+    tip_percent = (_to_number(tip_percent, "tip_percent")
+                   if tip_percent not in (None, "") else 0.0)
+    people_int = _validate_people(people)
+    mode = _normalise_tip_on(tip_on)
+
+    if food < 0:
+        raise TipError("food must not be negative")
+    if alcohol < 0:
+        raise TipError("alcohol must not be negative")
+    if food_tax_percent < 0:
+        raise TipError("food_tax_percent must not be negative")
+    if alcohol_tax_percent < 0:
+        raise TipError("alcohol_tax_percent must not be negative")
+    if tip_percent < 0:
+        raise TipError("tip_percent must not be negative")
+
+    food_tax = food * food_tax_percent / 100.0
+    alcohol_tax = alcohol * alcohol_tax_percent / 100.0
+    subtotal = food + alcohol
+    tax = food_tax + alcohol_tax
+
+    tip_base = subtotal if mode == "subtotal" else subtotal + tax
+    tip = tip_base * tip_percent / 100.0
+    total = subtotal + tax + tip
+
+    total_cents = int(round(_round2(total) * 100))
+    share_cents = _largest_remainder(total_cents, [1] * people_int)
+    amounts = [_round2(c / 100.0) for c in share_cents]
+
+    blended = (tax / subtotal * 100.0) if subtotal > 0 else 0.0
+    effective = (tip / subtotal * 100.0) if subtotal > 0 else 0.0
+
+    return {
+        "food": _round2(food),
+        "alcohol": _round2(alcohol),
+        "food_tax_percent": _round2(food_tax_percent),
+        "alcohol_tax_percent": _round2(alcohol_tax_percent),
+        "tip_percent": _round2(tip_percent),
+        "people": people_int,
+        "tip_on": mode,
+        "food_tax": _round2(food_tax),
+        "alcohol_tax": _round2(alcohol_tax),
+        "subtotal": _round2(subtotal),
+        "tax": _round2(tax),
+        "blended_tax_percent": _round2(blended),
+        "tip": _round2(tip),
+        "total": _round2(total),
+        "amounts": amounts,
+        "total_per_person": _round2(total / people_int),
+        "tip_per_person": _round2(tip / people_int),
+        "effective_tip_percent": _round2(effective),
     }
 
 
@@ -2643,6 +2724,25 @@ Jo 25 card</textarea>
       <button class="chip" id="card-go" style="margin-top:.6rem;flex:initial;width:100%;">Split with card surcharge</button>
       <div id="card-rows"></div>
       <div class="err" id="card-err"></div>
+    </div>
+
+    <div class="out">
+      <div class="row"><span class="k">Food &amp; drinks taxed apart</span><span class="v">tiered tax</span></div>
+      <label for="tt-food">Food subtotal ($, pre-tax)</label>
+      <input id="tt-food" type="text" value="80" placeholder="e.g. 80">
+      <label for="tt-alcohol">Alcohol subtotal ($, pre-tax)</label>
+      <input id="tt-alcohol" type="text" value="40" placeholder="e.g. 40">
+      <label for="tt-food-tax">Food tax %</label>
+      <input id="tt-food-tax" type="text" value="6" placeholder="e.g. 6">
+      <label for="tt-alcohol-tax">Alcohol tax %</label>
+      <input id="tt-alcohol-tax" type="text" value="10" placeholder="e.g. 10">
+      <label for="tt-tip">Tip %</label>
+      <input id="tt-tip" type="text" value="20" placeholder="e.g. 20">
+      <label for="tt-people">People</label>
+      <input id="tt-people" type="text" value="2" placeholder="e.g. 2">
+      <button class="chip" id="tt-go" style="margin-top:.6rem;flex:initial;width:100%;">Tax food &amp; drinks apart</button>
+      <div id="tt-rows"></div>
+      <div class="err" id="tt-err"></div>
     </div>
   </div>
 
@@ -3525,6 +3625,39 @@ async function cardSplit() {
   }
 }
 $("card-go").addEventListener("click", cardSplit);
+
+async function tieredTax() {
+  const body = {
+    food: $("tt-food").value,
+    alcohol: $("tt-alcohol").value,
+    food_tax_percent: $("tt-food-tax").value,
+    alcohol_tax_percent: $("tt-alcohol-tax").value,
+    tip_percent: $("tt-tip").value,
+    people: $("tt-people").value,
+  };
+  $("tt-rows").innerHTML = "";
+  try {
+    const res = await fetch("/api/tiered-tax", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) { $("tt-err").textContent = data.error || "Invalid input"; return; }
+    $("tt-err").textContent = "";
+    renderRows("tt-rows", [
+      ["Food tax", money(data.food_tax)],
+      ["Alcohol tax", money(data.alcohol_tax)],
+      ["Total tax (" + data.blended_tax_percent + "% blended)", money(data.tax)],
+      ["Tip", money(data.tip)],
+      ["Grand total", money(data.total)],
+      ["Each pays", money(data.total_per_person)],
+    ]);
+  } catch (e) {
+    $("tt-err").textContent = "Network error";
+  }
+}
+$("tt-go").addEventListener("click", tieredTax);
 </script>
 </body>
 </html>
@@ -3571,7 +3704,8 @@ class Handler(BaseHTTPRequestHandler):
                              "/api/shared-items", "/api/regional-tip",
                              "/api/charity", "/api/tip-excluding",
                              "/api/diner-tips", "/api/tip-matrix",
-                             "/api/affordable-bill", "/api/card-split"):
+                             "/api/affordable-bill", "/api/card-split",
+                             "/api/tiered-tax"):
             self._send_json(404, {"error": "not found"})
             return
         try:
@@ -3792,6 +3926,16 @@ class Handler(BaseHTTPRequestHandler):
                     data.get("tax_percent", 0),
                     data.get("tip_on", "total"),
                 )
+            elif self.path == "/api/tiered-tax":
+                result = tiered_tax_split(
+                    data.get("food"),
+                    data.get("alcohol", 0),
+                    data.get("food_tax_percent", 0),
+                    data.get("alcohol_tax_percent", 0),
+                    data.get("tip_percent", 0),
+                    data.get("people", 1),
+                    data.get("tip_on", "subtotal"),
+                )
             else:  # /api/split
                 result = split_by_shares(
                     data.get("bill"),
@@ -3821,5 +3965,5 @@ def run(host="0.0.0.0", port=8000):
         httpd.server_close()
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover - script entry point
     run(port=int(os.environ.get("ADF_SMOKE_PORT") or os.environ.get("PORT") or 8000))

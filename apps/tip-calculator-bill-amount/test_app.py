@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Tests for the tip calculator — core domain logic and HTTP API."""
 import json
+import socket
 import threading
+import time
+import http.client
 import unittest
 import urllib.request
 import urllib.error
@@ -40,6 +43,7 @@ from server import (
     tip_matrix,
     affordable_bill,
     card_cash_split,
+    tiered_tax_split,
     TipError,
     Handler,
 )
@@ -2075,6 +2079,547 @@ class TestAffordableBill(unittest.TestCase):
             affordable_bill(50, 4, 20, 8, "sideways")
 
 
+class TestTieredTaxSplit(unittest.TestCase):
+    # Split-rate tax: food and alcohol taxed at their own rates, then tip + split.
+
+    def test_happy_separate_rates(self):
+        # Food 80 @ 6% = 4.80; alcohol 40 @ 10% = 4.00; subtotal 120, tax 8.80.
+        # Tip on pre-tax subtotal (default): 120 * 20% = 24.00; total = 152.80.
+        r = tiered_tax_split(80, 40, 6, 10, 20, 2)
+        self.assertEqual(r["food_tax"], 4.8)
+        self.assertEqual(r["alcohol_tax"], 4.0)
+        self.assertEqual(r["subtotal"], 120.0)
+        self.assertEqual(r["tax"], 8.8)
+        self.assertEqual(r["tip"], 24.0)
+        self.assertEqual(r["total"], 152.8)
+        self.assertEqual(r["tip_on"], "subtotal")
+
+    def test_per_category_rates_differ(self):
+        # The whole point: alcohol is taxed harder than food.
+        r = tiered_tax_split(100, 100, 5, 15, 0, 1)
+        self.assertEqual(r["food_tax"], 5.0)
+        self.assertEqual(r["alcohol_tax"], 15.0)
+        self.assertEqual(r["tax"], 20.0)
+
+    def test_blended_tax_percent(self):
+        # 8.80 tax on 120 subtotal -> 7.33% blended.
+        r = tiered_tax_split(80, 40, 6, 10, 20, 2)
+        self.assertEqual(r["blended_tax_percent"], 7.33)
+
+    def test_tip_on_total_mode(self):
+        # tip_on=total tips on the tax-inclusive amount, so tip is larger.
+        sub = tiered_tax_split(80, 40, 6, 10, 20, 2, "subtotal")
+        tot = tiered_tax_split(80, 40, 6, 10, 20, 2, "total")
+        self.assertEqual(sub["tip"], 24.0)
+        self.assertEqual(tot["tip"], 25.76)  # 20% of (120 + 8.80)
+        self.assertGreater(tot["tip"], sub["tip"])
+
+    def test_amounts_sum_to_total_exactly(self):
+        # Largest-remainder split must reconcile to the cent across people.
+        for people in (1, 2, 3, 5, 7):
+            r = tiered_tax_split(33.33, 17.77, 6.25, 9.5, 18, people)
+            self.assertEqual(len(r["amounts"]), people)
+            self.assertEqual(round(sum(r["amounts"]), 2), r["total"])
+
+    def test_alcohol_defaults_to_zero(self):
+        # No drinks: behaves like a single-rate food bill.
+        r = tiered_tax_split(50, food_tax_percent=8, tip_percent=20)
+        self.assertEqual(r["alcohol"], 0.0)
+        self.assertEqual(r["alcohol_tax"], 0.0)
+        self.assertEqual(r["tax"], 4.0)
+        self.assertEqual(r["tip"], 10.0)
+        self.assertEqual(r["total"], 64.0)
+
+    def test_string_inputs_coerced(self):
+        r = tiered_tax_split("80", "40", "6", "10", "20", "2")
+        self.assertEqual(r["total"], 152.8)
+        self.assertEqual(r["people"], 2)
+
+    def test_zero_tax_and_tip(self):
+        r = tiered_tax_split(60, 40, 0, 0, 0, 1)
+        self.assertEqual(r["tax"], 0.0)
+        self.assertEqual(r["tip"], 0.0)
+        self.assertEqual(r["total"], 100.0)
+        self.assertEqual(r["blended_tax_percent"], 0.0)
+        self.assertEqual(r["effective_tip_percent"], 0.0)
+
+    def test_effective_tip_percent_subtotal(self):
+        # Tipping 20% on subtotal yields exactly 20% effective vs subtotal.
+        r = tiered_tax_split(80, 40, 6, 10, 20, 2)
+        self.assertEqual(r["effective_tip_percent"], 20.0)
+
+    def test_zero_subtotal_no_div_by_zero(self):
+        r = tiered_tax_split(0, 0, 6, 10, 20, 3)
+        self.assertEqual(r["total"], 0.0)
+        self.assertEqual(r["amounts"], [0.0, 0.0, 0.0])
+        self.assertEqual(r["blended_tax_percent"], 0.0)
+
+    def test_negative_food_rejected(self):
+        with self.assertRaises(TipError):
+            tiered_tax_split(-5, 10, 6, 10, 20, 2)
+
+    def test_negative_alcohol_rejected(self):
+        with self.assertRaises(TipError):
+            tiered_tax_split(50, -10, 6, 10, 20, 2)
+
+    def test_negative_food_tax_rejected(self):
+        with self.assertRaises(TipError):
+            tiered_tax_split(50, 10, -6, 10, 20, 2)
+
+    def test_negative_alcohol_tax_rejected(self):
+        with self.assertRaises(TipError):
+            tiered_tax_split(50, 10, 6, -10, 20, 2)
+
+    def test_negative_tip_rejected(self):
+        with self.assertRaises(TipError):
+            tiered_tax_split(50, 10, 6, 10, -20, 2)
+
+    def test_missing_food_rejected(self):
+        with self.assertRaises(TipError):
+            tiered_tax_split(None, 10, 6, 10, 20, 2)
+
+    def test_zero_people_rejected(self):
+        with self.assertRaises(TipError):
+            tiered_tax_split(50, 10, 6, 10, 20, 0)
+
+    def test_fractional_people_rejected(self):
+        with self.assertRaises(TipError):
+            tiered_tax_split(50, 10, 6, 10, 20, 2.5)
+
+    def test_bad_tip_on_rejected(self):
+        with self.assertRaises(TipError):
+            tiered_tax_split(50, 10, 6, 10, 20, 2, "sideways")
+
+    def test_overflow_rejected(self):
+        with self.assertRaises(TipError):
+            tiered_tax_split(1e308, 1e308, 1e308, 1e308, 1e308, 1)
+
+
+class TestSplitWithCaps(unittest.TestCase):
+    """split_with_caps — water-filling when some diners have a spending cap."""
+
+    def test_no_caps_even_split(self):
+        # All caps None → plain even split.
+        r = split_with_caps(100, 20, 3, [None, None, None])
+        self.assertEqual(r["total"], 120.0)
+        self.assertEqual(r["fair_share"], 40.0)
+        self.assertFalse(any(p["capped"] for p in r["people_detail"]))
+
+    def test_one_capped_overflow_redistributed(self):
+        # Bill 100 + 20% tip = 120 / 3 = 40 each.
+        # Diner 0 capped at 20 → shortfall 20 split between diners 1 & 2.
+        r = split_with_caps(100, 20, 3, [20, None, None])
+        self.assertEqual(r["amounts"][0], 20.0)
+        self.assertTrue(r["people_detail"][0]["capped"])
+        self.assertEqual(round(sum(r["amounts"]), 2), 120.0)
+
+    def test_amounts_sum_exactly_to_total(self):
+        # Exact cent reconciliation under odd split.
+        for people in (3, 5, 7):
+            caps = [None] * people
+            caps[0] = 5.0
+            r = split_with_caps(33.33, 15, people, caps)
+            self.assertEqual(round(sum(r["amounts"]), 2), r["total"])
+
+    def test_all_caps_insufficient_raises(self):
+        # Total = 120; all three capped at 10 (30 total) — cannot cover.
+        with self.assertRaises(TipError):
+            split_with_caps(100, 20, 3, [10, 10, 10])
+
+    def test_caps_wrong_length_raises(self):
+        with self.assertRaises(TipError):
+            split_with_caps(100, 20, 3, [None, None])  # 2 caps, 3 people
+
+    def test_caps_not_list_raises(self):
+        with self.assertRaises(TipError):
+            split_with_caps(100, 20, 2, "bad")
+
+    def test_negative_cap_raises(self):
+        with self.assertRaises(TipError):
+            split_with_caps(100, 20, 2, [-5, None])
+
+    def test_capped_flag_false_when_below_cap(self):
+        # Diner 0 capped at 100, fair share is 40 → not capped.
+        r = split_with_caps(100, 20, 3, [100, None, None])
+        self.assertFalse(r["people_detail"][0]["capped"])
+
+    def test_null_string_cap_treated_as_uncapped(self):
+        r = split_with_caps(100, 20, 2, ["", None])
+        self.assertFalse(r["people_detail"][0]["capped"])
+        self.assertEqual(round(sum(r["amounts"]), 2), 120.0)
+
+    def test_returns_bill_tip_people_fields(self):
+        r = split_with_caps(80, 25, 2, [None, None])
+        self.assertEqual(r["bill"], 80.0)
+        self.assertEqual(r["tip_percent"], 25.0)
+        self.assertEqual(r["people"], 2)
+        self.assertEqual(r["tip"], 20.0)
+
+
+class TestTipExcluding(unittest.TestCase):
+    """tip_excluding — gratuity on a subset of the bill."""
+
+    def test_basic_exclusion(self):
+        # Bill 100, exclude 40 → tip on 60 @ 20% = 12; total = 112.
+        r = tip_excluding(100, 20, 40)
+        self.assertEqual(r["excluded"], 40.0)
+        self.assertEqual(r["eligible"], 60.0)
+        self.assertEqual(r["tip"], 12.0)
+        self.assertEqual(r["total"], 112.0)
+
+    def test_excluded_list_summed(self):
+        # Exclude [25, 15] = 40.
+        r = tip_excluding(100, 20, [25, 15])
+        self.assertEqual(r["excluded"], 40.0)
+        self.assertEqual(r["tip"], 12.0)
+
+    def test_excluded_string_number(self):
+        r = tip_excluding(100, 20, "30")
+        self.assertEqual(r["excluded"], 30.0)
+        self.assertEqual(r["eligible"], 70.0)
+
+    def test_excluded_none_defaults_zero(self):
+        r = tip_excluding(100, 20, None)
+        self.assertEqual(r["excluded"], 0.0)
+        self.assertEqual(r["tip"], 20.0)
+
+    def test_excluded_empty_string_defaults_zero(self):
+        r = tip_excluding(100, 20, "")
+        self.assertEqual(r["excluded"], 0.0)
+
+    def test_excluded_equals_bill_zero_tip(self):
+        r = tip_excluding(100, 20, 100)
+        self.assertEqual(r["eligible"], 0.0)
+        self.assertEqual(r["tip"], 0.0)
+        self.assertEqual(r["total"], 100.0)
+
+    def test_per_person_split_exact(self):
+        for people in (1, 2, 3, 5):
+            r = tip_excluding(100, 18, 30, people)
+            self.assertEqual(len(r["per_person_amounts"]), people)
+            self.assertEqual(round(sum(r["per_person_amounts"]), 2), r["total"])
+
+    def test_zero_bill_effective_equals_tip_percent(self):
+        r = tip_excluding(0, 20, 0)
+        self.assertEqual(r["total"], 0.0)
+        self.assertEqual(r["effective_tip_percent"], 20.0)
+
+    def test_excluded_exceeds_bill_raises(self):
+        with self.assertRaises(TipError):
+            tip_excluding(80, 20, 100)
+
+    def test_negative_excluded_in_list_raises(self):
+        with self.assertRaises(TipError):
+            tip_excluding(100, 20, [30, -5])
+
+    def test_negative_bill_raises(self):
+        with self.assertRaises(TipError):
+            tip_excluding(-10, 20, 0)
+
+    def test_effective_tip_less_than_nominal(self):
+        # Tip of 20% on 60/100 eligible → 12/100 = 12% effective.
+        r = tip_excluding(100, 20, 40)
+        self.assertAlmostEqual(r["effective_tip_percent"], 12.0)
+
+
+class TestTipMatrix(unittest.TestCase):
+    """tip_matrix — 2-D grid of tip percents × party sizes."""
+
+    def test_basic_matrix_shape(self):
+        r = tip_matrix(100, [15, 20], [1, 2, 4])
+        self.assertEqual(len(r["rows"]), 2)
+        self.assertEqual(len(r["rows"][0]["cells"]), 3)
+
+    def test_cheapest_priciest_populated(self):
+        r = tip_matrix(100, [15, 20], [1, 2])
+        self.assertIsNotNone(r["cheapest"])
+        self.assertIsNotNone(r["priciest"])
+        # Cheapest is smallest percent × most people; priciest is opposite.
+        self.assertLessEqual(
+            r["cheapest"]["total_per_person"], r["priciest"]["total_per_person"])
+
+    def test_row_totals_consistent(self):
+        r = tip_matrix(80, [15, 20, 25], [1, 2, 4])
+        for row in r["rows"]:
+            for cell in row["cells"]:
+                self.assertIn("total_per_person", cell)
+
+    def test_default_percents_and_people(self):
+        r = tip_matrix(100)
+        self.assertEqual(r["people_options"], [1, 2, 4])
+        self.assertEqual(len(r["rows"]), 4)  # default (15, 18, 20, 25)
+
+    def test_tax_passed_through(self):
+        r_no_tax = tip_matrix(110, [20], [1], tax=0)
+        r_tax = tip_matrix(110, [20], [1], tax=10)
+        # With tax=10, tip base is the same ($110) but result keys include tax.
+        self.assertIn("tax", r_no_tax)
+        self.assertAlmostEqual(r_tax["tax"], 10.0)
+
+    def test_negative_bill_raises(self):
+        with self.assertRaises(TipError):
+            tip_matrix(-1, [15], [1])
+
+    def test_empty_percents_raises(self):
+        with self.assertRaises(TipError):
+            tip_matrix(100, [], [1])
+
+    def test_empty_people_options_raises(self):
+        with self.assertRaises(TipError):
+            tip_matrix(100, [15], [])
+
+    def test_percents_not_list_raises(self):
+        with self.assertRaises(TipError):
+            tip_matrix(100, "bad", [1])
+
+    def test_people_options_not_list_raises(self):
+        with self.assertRaises(TipError):
+            tip_matrix(100, [15], "bad")
+
+
+class TestCoverageGaps(unittest.TestCase):
+    """Targeted tests for previously uncovered branches."""
+
+    # _validate_people edge cases (lines 52, 54, 57-58)
+    def test_people_bool_rejected(self):
+        with self.assertRaises(TipError):
+            calculate_tip(100, 20, True)
+
+    def test_people_none_defaults_to_one(self):
+        r = calculate_tip(100, 20, None)
+        self.assertEqual(r["people"], 1)
+
+    def test_people_empty_string_defaults_to_one(self):
+        r = calculate_tip(100, 20, "")
+        self.assertEqual(r["people"], 1)
+
+    # _normalise_tip_on edge cases (lines 89, 91)
+    def test_tip_on_none_defaults_total(self):
+        r = calculate_tip(110, 20, tip_on=None, tax=10)
+        self.assertEqual(r["tip_on"], "total")
+
+    def test_tip_on_non_string_raises(self):
+        with self.assertRaises(TipError):
+            calculate_tip(100, 20, tip_on=42)
+
+    # calculate_tip round_total=True (lines 160-161)
+    def test_round_total_true_rounds_up(self):
+        # 100 + 18% = 118 — already whole, so stays 118.
+        r = calculate_tip(100, 18, round_total=True)
+        self.assertEqual(r["total"], 118.0)
+        r2 = calculate_tip(100, 15.5, round_total=True)
+        self.assertEqual(r2["total"], float(int(r2["total"])))
+
+    # reverse_tip zero bill (line 211)
+    def test_reverse_tip_zero_bill_effective_zero(self):
+        from server import reverse_tip
+        r = reverse_tip(0, 0)
+        self.assertEqual(r["effective_tip_percent"], 0.0)
+
+    # round_up_split zero bill / zero effective (line 257)
+    def test_round_up_split_zero_bill_uses_tip_percent(self):
+        r = round_up_split(0, 20, 1)
+        self.assertEqual(r["effective_tip_percent"], 20.0)
+
+    # suggest_tips default percents (line 285)
+    def test_suggest_tips_default_percents(self):
+        r = suggest_tips(100)
+        percents = [t["tip_percent"] for t in r["tiers"]]
+        self.assertIn(10.0, percents)
+        self.assertIn(15.0, percents)
+
+    # _largest_remainder zero-weight edge (lines 361-366)
+    def test_largest_remainder_zero_weights_spreads_evenly(self):
+        from server import _largest_remainder
+        result = _largest_remainder(10, [0, 0, 0])
+        self.assertEqual(sum(result), 10)
+        self.assertEqual(len(result), 3)
+
+    # settle_up shares-not-list (line 490)
+    def test_settle_up_shares_not_list_raises(self):
+        with self.assertRaises(TipError):
+            settle_up(100, 20, [120, 0, 0], shares="bad")
+
+    # _normalise_discount_type (lines 700, 702)
+    def test_discount_type_none_defaults_amount(self):
+        from server import _normalise_discount_type
+        self.assertEqual(_normalise_discount_type(None), "amount")
+
+    def test_discount_type_non_string_raises(self):
+        from server import _normalise_discount_type
+        with self.assertRaises(TipError):
+            _normalise_discount_type(42)
+
+    # build_bill negative tip_percent (line 968)
+    def test_build_bill_negative_tip_percent_raises(self):
+        with self.assertRaises(TipError):
+            build_bill([10], 0, -5)
+
+    # _normalise_currency (lines 1056, 1058)
+    def test_currency_none_defaults_usd(self):
+        from server import _normalise_currency
+        self.assertEqual(_normalise_currency(None), "USD")
+
+    def test_currency_non_string_raises(self):
+        from server import _normalise_currency
+        with self.assertRaises(TipError):
+            _normalise_currency(42)
+
+    # split_by_percentage zero-sum percents (line 1177)
+    def test_split_percentage_zero_sum_raises(self):
+        with self.assertRaises(TipError):
+            split_by_percentage(100, 20, [0, 0, 0])
+
+    # tip_for_target_per_person zero bill (line 1226)
+    def test_target_per_person_zero_bill_effective_zero(self):
+        r = tip_for_target_per_person(0, 0)
+        self.assertEqual(r["effective_tip_percent"], 0.0)
+
+    # _normalise_direction (lines 1243, 1245)
+    def test_direction_none_defaults_up(self):
+        from server import _normalise_direction
+        self.assertEqual(_normalise_direction(None), "up")
+
+    def test_direction_non_string_raises(self):
+        from server import _normalise_direction
+        with self.assertRaises(TipError):
+            _normalise_direction(42)
+
+    # round_total_to (lines 1296, 1312, 1335)
+    def test_round_total_negative_tax_raises(self):
+        with self.assertRaises(TipError):
+            round_total_to(100, 18, tax=-5)
+
+    def test_round_total_zero_bill_effective_equals_base(self):
+        r = round_total_to(0, 20, nearest=1)
+        self.assertEqual(r["effective_tip_percent"], 20.0)
+
+    # split_comped edge cases (lines 1379, 1387, 1390-1391)
+    def test_split_comped_none_comped_defaults_empty(self):
+        r = split_comped(100, 20, 3, comped=None)
+        self.assertEqual(r["payers"], 3)
+
+    def test_split_comped_bool_index_raises(self):
+        with self.assertRaises(TipError):
+            split_comped(100, 20, 2, comped=[True])
+
+    def test_split_comped_non_numeric_index_raises(self):
+        with self.assertRaises(TipError):
+            split_comped(100, 20, 2, comped=["a"])
+
+    # _parse_shared_item edge cases (lines 1506, 1516, 1522, 1528, 1532-1533, 1536)
+    def test_shared_item_empty_list_raises(self):
+        with self.assertRaises(TipError):
+            split_shared_items([[10], [10]], shared_items=[[]])
+
+    def test_shared_item_negative_price_raises(self):
+        with self.assertRaises(TipError):
+            split_shared_items([[10], [10]], shared_items=[[-5]])
+
+    def test_shared_item_sharers_not_list_raises(self):
+        with self.assertRaises(TipError):
+            split_shared_items([[10], [10]], shared_items=[{"price": 5, "sharers": "bad"}])
+
+    def test_shared_item_bool_sharer_raises(self):
+        with self.assertRaises(TipError):
+            split_shared_items([[10], [10]], shared_items=[{"price": 5, "sharers": [True]}])
+
+    def test_shared_item_non_numeric_sharer_raises(self):
+        with self.assertRaises(TipError):
+            split_shared_items([[10], [10]], shared_items=[{"price": 5, "sharers": ["x"]}])
+
+    def test_shared_item_fractional_sharer_raises(self):
+        with self.assertRaises(TipError):
+            split_shared_items([[10], [10]], shared_items=[{"price": 5, "sharers": [0.5]}])
+
+    # split_shared_items shared_items not list (line 1604)
+    def test_split_shared_items_not_list_raises(self):
+        with self.assertRaises(TipError):
+            split_shared_items([[10], [10]], shared_items="bad")
+
+    # charity_round_up very small round_to (line 1770)
+    def test_charity_round_up_tiny_round_to_raises(self):
+        with self.assertRaises(TipError):
+            charity_round_up(100, 18, round_to=0.001)
+
+    # tip_by_diner zero subtotal (line 1976)
+    def test_tip_by_diner_zero_subtotal_effective_zero(self):
+        r = tip_by_diner([{"name": "Sam", "amount": 0, "tip_percent": 0}])
+        self.assertEqual(r["effective_tip_percent"], 0.0)
+
+    # affordable_bill edge cases (lines 2245, 2250-2251)
+    def test_affordable_bill_zero_budget_per_person(self):
+        r = affordable_bill(0, 1)
+        self.assertEqual(r["bill"], 0.0)
+        self.assertEqual(r["total"], 0.0)
+
+    # _validate_people: int() raises on a non-numeric string (lines 57-58)
+    def test_people_unparseable_string_raises(self):
+        with self.assertRaises(TipError):
+            calculate_tip(100, 20, "abc")
+
+    # reverse_tip negative target_total (line 203)
+    def test_reverse_tip_negative_target_raises(self):
+        with self.assertRaises(TipError):
+            reverse_tip(100, -5)
+
+    # round_up_split: nearest > 0 but rounds to zero cents (line 247)
+    def test_round_up_split_sub_cent_nearest_raises(self):
+        with self.assertRaises(TipError):
+            round_up_split(100, 20, 1, 0.001)
+
+    # suggest_tips None / empty percents fall back to defaults (line 285)
+    def test_suggest_tips_none_percents_uses_defaults(self):
+        r = suggest_tips(100, percents=None)
+        self.assertEqual(len(r["tiers"]), 5)
+        r2 = suggest_tips(100, percents="")
+        self.assertEqual(len(r2["tiers"]), 5)
+
+    # split_by_shares negative bill / tip (lines 313, 315)
+    def test_split_by_shares_negative_bill_raises(self):
+        with self.assertRaises(TipError):
+            split_by_shares(-1, 20, [1, 1])
+
+    def test_split_by_shares_negative_tip_raises(self):
+        with self.assertRaises(TipError):
+            split_by_shares(100, -1, [1, 1])
+
+    # round_total_to: nearest > 0 but rounds to zero cents (line 1312)
+    def test_round_total_to_sub_cent_nearest_raises(self):
+        with self.assertRaises(TipError):
+            round_total_to(100, 18, nearest=0.001)
+
+    # tip_excluding negative tip / excluded (lines 1840, 1842)
+    def test_tip_excluding_negative_tip_raises(self):
+        with self.assertRaises(TipError):
+            tip_excluding(100, -1, 0)
+
+    def test_tip_excluding_negative_excluded_raises(self):
+        with self.assertRaises(TipError):
+            tip_excluding(100, 20, -5)
+
+    # tip_matrix None / empty percents and people_options use defaults
+    # (lines 2125, 2133)
+    def test_tip_matrix_none_percents_uses_defaults(self):
+        r = tip_matrix(100, percents=None)
+        self.assertEqual(len(r["rows"]), 4)  # default (15, 18, 20, 25)
+        r2 = tip_matrix(100, percents="")
+        self.assertEqual(len(r2["rows"]), 4)
+
+    def test_tip_matrix_none_people_options_uses_defaults(self):
+        r = tip_matrix(100, people_options=None)
+        self.assertTrue(len(r["people_options"]) >= 1)
+        r2 = tip_matrix(100, people_options="")
+        self.assertTrue(len(r2["people_options"]) >= 1)
+
+    # affordable_bill: tiny budget where rounding tax/tip up would overshoot the
+    # budget, exercising the step-down reconciliation loop (lines 2250-2251).
+    def test_affordable_bill_stepdown_loop_stays_within_budget(self):
+        r = affordable_bill(0.04, 1, 12.6, 16.7, "total")
+        self.assertLessEqual(r["total"], 0.04 + 1e-9)
+        self.assertGreaterEqual(r["headroom"], 0.0)
+
+
 class TestApi(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -2647,6 +3192,44 @@ class TestApi(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertIn("error", data)
 
+    def test_api_tiered_tax_happy(self):
+        status, data = self._post_to("/api/tiered-tax", {
+            "food": 80, "alcohol": 40, "food_tax_percent": 6,
+            "alcohol_tax_percent": 10, "tip_percent": 20, "people": 2})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["food_tax"], 4.8)
+        self.assertEqual(data["alcohol_tax"], 4.0)
+        self.assertEqual(data["tax"], 8.8)
+        self.assertEqual(data["tip"], 24.0)
+        self.assertEqual(data["total"], 152.8)
+        self.assertEqual(round(sum(data["amounts"]), 2), data["total"])
+
+    def test_api_tiered_tax_total_mode(self):
+        status, data = self._post_to("/api/tiered-tax", {
+            "food": 80, "alcohol": 40, "food_tax_percent": 6,
+            "alcohol_tax_percent": 10, "tip_percent": 20, "people": 2,
+            "tip_on": "total"})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["tip"], 25.76)
+        self.assertEqual(data["tip_on"], "total")
+
+    def test_api_tiered_tax_alcohol_defaults_zero(self):
+        status, data = self._post_to("/api/tiered-tax", {
+            "food": 50, "food_tax_percent": 8, "tip_percent": 20})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["alcohol"], 0.0)
+        self.assertEqual(data["total"], 64.0)
+
+    def test_api_tiered_tax_validation_error(self):
+        status, data = self._post_to("/api/tiered-tax", {"food": -5})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_api_tiered_tax_missing_food(self):
+        status, data = self._post_to("/api/tiered-tax", {"alcohol": 20})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
     # --- Defect 1: unbounded people count (DoS) ---
 
     def test_people_max_boundary_accepted(self):
@@ -2722,6 +3305,117 @@ class TestApi(unittest.TestCase):
                                      {"items": [{"price": 1e308, "qty": 2}]})
         self.assertEqual(status, 400)
         self.assertIn("error", data)
+
+    # Previously-untested dispatch routes (server.py lines 3798, 3895, 3907).
+    def test_api_split_caps_happy_path(self):
+        status, data = self._post_to("/api/split-caps", {
+            "bill": 100, "tip_percent": 20, "people": 3,
+            "caps": [50, 50, 50]})
+        self.assertEqual(status, 200)
+        self.assertEqual(round(sum(data["amounts"]), 2), data["total"])
+
+    def test_api_split_caps_validation_error(self):
+        status, data = self._post_to("/api/split-caps",
+                                     {"bill": -1, "tip_percent": 20, "people": 2})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_api_tip_excluding_happy_path(self):
+        status, data = self._post_to("/api/tip-excluding", {
+            "bill": 100, "tip_percent": 20, "excluded": 20, "people": 1})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["tip"], 16.0)  # 20% of (100 - 20)
+
+    def test_api_tip_excluding_validation_error(self):
+        status, data = self._post_to("/api/tip-excluding",
+                                     {"bill": 100, "tip_percent": 20,
+                                      "excluded": 200})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_api_tip_matrix_happy_path(self):
+        status, data = self._post_to("/api/tip-matrix", {
+            "bill": 100, "percents": [15, 20], "people_options": [1, 2]})
+        self.assertEqual(status, 200)
+        self.assertEqual(len(data["rows"]), 2)
+
+    def test_api_tip_matrix_validation_error(self):
+        status, data = self._post_to("/api/tip-matrix", {"bill": -1})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    # POST error paths (server.py lines 3709-3710, 3713-3714, 3722-3723).
+    def test_api_unknown_post_route_404(self):
+        status, data = self._post_to("/api/does-not-exist", {})
+        self.assertEqual(status, 404)
+        self.assertIn("error", data)
+
+    def test_api_post_body_not_object_400(self):
+        conn = http.client.HTTPConnection("127.0.0.1", self.port)
+        conn.request("POST", "/api/calculate", body=b"[1,2,3]",
+                     headers={"Content-Type": "application/json"})
+        resp = conn.getresponse()
+        body = json.loads(resp.read())
+        conn.close()
+        self.assertEqual(resp.status, 400)
+        self.assertIn("error", body)
+
+    def test_api_post_bad_content_length_header(self):
+        # A non-integer Content-Length must not crash the handler: it falls back
+        # to a zero-length body, which then yields a clean validation error.
+        conn = http.client.HTTPConnection("127.0.0.1", self.port)
+        conn.putrequest("POST", "/api/calculate", skip_accept_encoding=True)
+        conn.putheader("Content-Length", "abc")
+        conn.putheader("Content-Type", "application/json")
+        conn.endheaders(message_body=b"")
+        resp = conn.getresponse()
+        body = json.loads(resp.read())
+        conn.close()
+        self.assertEqual(resp.status, 400)
+        self.assertIn("error", body)
+
+
+class TestRunServer(unittest.TestCase):
+    """Exercise the run() entry point (server.py lines 3958-3965)."""
+
+    def test_run_boots_and_serves_health(self):
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+        sock.close()
+        t = threading.Thread(
+            target=server.run, kwargs={"host": "127.0.0.1", "port": port},
+            daemon=True)
+        t.start()
+        last_err = None
+        for _ in range(100):
+            try:
+                with urllib.request.urlopen(
+                        "http://127.0.0.1:%d/health" % port, timeout=1) as resp:
+                    self.assertEqual(json.loads(resp.read())["status"], "ok")
+                    return
+            except Exception as e:  # not up yet
+                last_err = e
+                time.sleep(0.05)
+        self.fail("run() server did not come up: %r" % last_err)
+
+    def test_run_handles_keyboard_interrupt_cleanly(self):
+        # Simulate Ctrl-C: serve_forever raises KeyboardInterrupt, which run()
+        # must swallow and still close the server in its finally block.
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+        sock.close()
+        original = ThreadingHTTPServer.serve_forever
+
+        def _interrupt(self, *a, **k):
+            raise KeyboardInterrupt
+
+        ThreadingHTTPServer.serve_forever = _interrupt
+        try:
+            server.run(host="127.0.0.1", port=port)  # returns cleanly
+        finally:
+            ThreadingHTTPServer.serve_forever = original
 
 
 if __name__ == "__main__":
