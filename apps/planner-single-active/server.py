@@ -161,8 +161,9 @@ def make_server(port=0):
 
 
 if __name__ == "__main__":
-    srv = make_server(8000)
-    print("Server ready on http://127.0.0.1:8000")
+    port = int(os.environ.get("ADF_SMOKE_PORT") or os.environ.get("PORT") or 8000)
+    srv = make_server(port)
+    print("Server ready on http://127.0.0.1:%d" % port)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

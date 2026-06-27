@@ -217,6 +217,10 @@ class PhaseRunner {
       final port = _featurePort.putIfAbsent(featureId, () => lowestFreePort(
           _featurePort.values.toSet(), appPortBase, maxBuildParallelism));
       env['ADF_SMOKE_PORT'] = '$port';
+      // Also set PORT: apps generated before the canonical
+      // `ADF_SMOKE_PORT or PORT or 8000` pattern honor only PORT. Setting both
+      // means every PORT-aware app binds the isolated port with no per-app edit.
+      env['PORT'] = '$port';
       env['ADF_APP_URL'] = 'http://127.0.0.1:$port';
     }
     return env;
@@ -1822,6 +1826,8 @@ Work the DEFECT WORKLIST above ONE BY ONE, from the top (highest severity) down:
 3. Re-verify just that fix, then move to the NEXT defect. Repeat until you have addressed every item on the worklist.
 4. Keep every existing test passing and ADD a test that locks in each fix where it makes sense.
 5. Then run the FULL gate exactly as ADF will: `python3 -m unittest -v` in `apps/$featureId/` must print OK with 0 failures/0 errors, AND boot `python3 server.py` and exercise every view + every `/api/...` route the page calls — no 5xx, no traceback, no JS console error, no blank render, no accessibility barrier, no duplicated component.
+
+OUTPUT DISCIPLINE (this directly controls cost/latency — each output token is billed and slows the turn): edit SURGICALLY with the Edit tool — change only the lines the fix touches. NEVER rewrite or re-emit a whole file when a few lines change, and NEVER paste unchanged file contents back into your reply. Keep your prose terse; let the edits be the work.
 Finish with one line: the final test count, how many defects you fixed, and "running app verified clean" once the worklist is empty.
 
 If a specific defect proves a false positive, say so explicitly with the evidence — do not silently ignore it.

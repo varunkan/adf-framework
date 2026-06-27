@@ -141,6 +141,7 @@ def _run(agent, app_dir):
 def main(app_dir):
     global BASE_URL
     reg = json.load(open(REGISTRY))
+    _apply_deep_agent_gate(reg)
     # Boot the app ONCE up front so every dynamic agent shares one live instance
     # (accessibility/e2e/etc. don't boot their own); app_verify.py reuses it.
     needs_app = any(a.get("enabled", True) and a.get("kind") in ("dynamic", "llm")
@@ -197,6 +198,20 @@ def _run_set(agents, app_dir):
         for fut in concurrent.futures.as_completed(futs):
             res_by_id[futs[fut]["id"]] = fut.result()
     return res_by_id
+
+
+def _apply_deep_agent_gate(reg):
+    """The deep LLM agents (kind=='llm') are the slow, multi-minute, Opus-judged
+    behavioral checks (e2e/integration/black-box/white-box). They ship `enabled`:
+    false in the registry so the default gate is fast + all-deterministic. The
+    single knob ADF_DEEP_AGENTS turns them on — and only THEN does the incremental
+    lever (ADF_VERIFY_INCREMENTAL) have anything to defer. Off/unset = prior
+    behavior, byte-for-byte (no llm agent runs). $0: llm_agent.py drives `claude -p
+    --model opus` via CLAUDE_CODE_OAUTH_TOKEN (the subscription), never the API."""
+    on = os.environ.get("ADF_DEEP_AGENTS", "0") == "1"
+    for a in reg["agents"]:
+        if a.get("kind") == "llm":
+            a["enabled"] = on
 
 
 def _run_all(reg, app_dir):
