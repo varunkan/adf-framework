@@ -20,7 +20,7 @@ import secrets
 import sqlite3
 import tempfile
 import threading
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -37,9 +37,11 @@ import esign
 import fees
 import hc_calendar
 import lifecycle
+import navigation
 import privacy
 import qos
 import rbac
+import readiness
 import rep
 import rep_stylesheet
 import report_ingest
@@ -950,12 +952,22 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
             if not self._require_feature(sess, "dossiers"):
                 return
             body = self._read_json()
+            record = {
+                "drug_product": (body.get("drug_product") or "").strip(),
+                "dossier_id": (body.get("dossier_id") or "").strip(),
+                "by": sess["email"]}
+            # REQ-071: carry through any readiness signals the caller supplies
+            # (validation, Module-1 content, fees, e-sign, transmission,
+            # lifecycle, deadline) so the dashboard reflects real progress —
+            # each is optional and only stored when it's a JSON object.
+            for signal in ("validation", "content", "fees", "esign",
+                           "transmission", "lifecycle", "deadline"):
+                value = body.get(signal)
+                if isinstance(value, dict):
+                    record[signal] = value
             data = self._tenant_data(sess["tenant_id"])
             try:
-                rec = data.add("submission", {
-                    "drug_product": (body.get("drug_product") or "").strip(),
-                    "dossier_id": (body.get("dossier_id") or "").strip(),
-                    "by": sess["email"]})
+                rec = data.add("submission", record)
             finally:
                 data.close()
             self._send_json({"saved": rec}, 201)
@@ -1440,6 +1452,18 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
             if path in ("/login", "/signup"):
                 self._send_html(AUTH_HTML)
                 return
+            # ----- tenant workspace app shell (REQ-085 / UI-1) --------------
+            # Serve the SAME shell for every deep-linkable workspace route so a
+            # refresh/bookmark of any area works; the client-side router renders
+            # the active page. The legacy single page stays at "/".
+            if navigation.resolve_tenant_route(path) is not None:
+                self._send_html(WORKSPACE_HTML)
+                return
+            # Owner control-plane is a SEPARATE shell; its detail/plan pages are
+            # deep-linkable too (UI-3). Access is enforced on each data call.
+            if navigation.is_owner_route(path):
+                self._send_html(OWNER_CONSOLE_HTML)
+                return
             if path == "/api/auth/me":
                 sess = self._session()
                 if not sess:
@@ -1468,6 +1492,20 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
                     "entitled": entitlement_store.entitled_features(
                         tenant["id"], tenant["plan_id"])})
                 return
+            if path == "/api/tenant/nav":
+                # REQ-085/UI-1: the workspace primary-nav route map, filtered to
+                # the tenant's ENTITLED features (REQ-082) — non-entitled areas
+                # never render a tab. Drives the left-rail + breadcrumbs.
+                sess = self._tenant_session()
+                if sess is None:
+                    return
+                tenant = tenancy_store.get_tenant(sess["tenant_id"])
+                entitled = entitlement_store.entitled_features(
+                    tenant["id"], tenant["plan_id"])
+                self._send_json({
+                    "home": navigation.WORKSPACE_HOME,
+                    "nav": navigation.tenant_nav(entitled)})
+                return
             if path == "/api/tenant/submissions":
                 sess = self._tenant_session()
                 if sess is None:
@@ -1480,6 +1518,30 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
                         {"submissions": data.list("submission")})
                 finally:
                     data.close()
+                return
+            if path == "/api/tenant/dashboard":
+                # REQ-071 / UI-2: the submission-readiness DASHBOARD — surfaces
+                # each submission's already-computed signals (lifecycle,
+                # validation Errors/Warnings, Module-1 X-of-Y, fees, e-sign,
+                # transmission, next deadline) as at-a-glance tiles + a single
+                # READY/BLOCKED indicator with drill-in to the blocking items.
+                # Gated by the 'dashboard' entitlement (REQ-082); the landing
+                # page of the tenant workspace.
+                sess = self._tenant_session()
+                if sess is None:
+                    return
+                if not self._require_feature(sess, "dashboard"):
+                    return
+                qs = parse_qs(urlparse(self.path).query)
+                today = (qs.get("today") or [""])[0].strip()
+                if not today:
+                    today = date.today().isoformat()
+                data = self._tenant_data(sess["tenant_id"])
+                try:
+                    subs = data.list("submission")
+                finally:
+                    data.close()
+                self._send_json(readiness.dashboard(subs, today=today))
                 return
             if path == "/api/owner/tenants":
                 if self._require_owner() is None:
@@ -1502,6 +1564,13 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
                                      {"key": k,
                                       "label": entitlements_mod.FEATURE_LABELS[k]}
                                      for k in entitlements_mod.FEATURES]})
+                return
+            if path == "/api/owner/nav":
+                # REQ-085/UI-1 + REQ-079: the owner control-plane nav (separate
+                # shell). Owner-only; tenant users are refused + audited.
+                if self._require_owner() is None:
+                    return
+                self._send_json({"nav": navigation.owner_nav()})
                 return
             if path == "/api/owner/audit":
                 if self._require_owner() is None:
@@ -1698,6 +1767,9 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
                 return
             if path == "/api/lifecycle/service-standard":
                 self._handle_lifecycle_service_standard()
+                return
+            if path == "/api/lifecycle/check-deadlines":
+                self._handle_lifecycle_check_deadlines()
                 return
             if path == "/api/rejections/ingest":
                 self._handle_rejection_ingest()
@@ -2591,12 +2663,23 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
                     lc.resume_clock(now=now)
                 elif action == "decision":
                     lc.record_decision(data.get("decision", ""), now=now)
+                elif action == "withdraw":
+                    result = lc.withdraw(
+                        now=now,
+                        reason=str(data.get("reason") or ""),
+                        w_status=data.get("w_status") or None,
+                    )
+                elif action == "refile":
+                    result = lc.refile(now=now)
+                elif action == "reconsider":
+                    result = lc.request_reconsideration(now=now)
                 else:
                     self._send_json(
                         {"valid": False,
                          "error": "action must be 'to_screening', "
                                   "'screening_outcome', 'clarifax', "
-                                  "'resume_clock' or 'decision'"}, 422)
+                                  "'resume_clock', 'decision', "
+                                  "'withdraw', 'refile' or 'reconsider'"}, 422)
                     return
             except lifecycle.LifecycleError as exc:
                 self._send_json({"valid": False, "error": str(exc)}, 422)
@@ -2618,6 +2701,19 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
             assessment = lc.check_service_standard(now=data.get("now"))
             lifecycles.save(lc)
             self._send_json({"valid": True, "assessment": assessment})
+
+        def _handle_lifecycle_check_deadlines(self):
+            """REQ-033/050: advance the clock against open response timers and
+            auto-interpret any lapsed window as a withdrawal (NON-W / NOD-W /
+            Withdrawn). Returns the list of lapsed timers."""
+            data = self._read_json()
+            lc = self._lifecycle_or_404(data)
+            if lc is None:
+                return
+            lapsed = lc.check_deadlines(now=data.get("now"))
+            lifecycles.save(lc)
+            self._send_json({"valid": True, "lapsed": lapsed,
+                             "status": lc.status_view(now=data.get("now"))})
 
         # -- REQ-029: rejection / validation-report ingestion ---------------
         def _handle_rejection_ingest(self):
@@ -2799,7 +2895,47 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
 # "Prism" design language (depth/glass/gradient) is shared with the tenant shell.
 # ---------------------------------------------------------------------------
 
-_PRISM_CSS = """
+# REQ-086 / UI-4 — the shared "Prism" / 3D design system. Theme-agnostic
+# tokens, depth/elevation tiers, prismatic accent, micro-interactions, and the
+# accessibility GUARD media queries (prefers-reduced-motion / -transparency).
+# Vendored inline (no CDN / web-font / framework) so the app renders fully
+# offline via `python3 server.py`. Imported by BOTH the dark owner/auth surfaces
+# AND the light tenant workspace, so every screen is one cohesive system.
+_PRISM_TOKENS = """
+/* ── Prism / 3D design system — shared tokens & guards (REQ-086, UI-4) ── */
+:root{
+  --prism-radius:14px; --prism-blur:8px;
+  --prism-shadow-1:0 1px 2px rgba(11,18,32,.10);
+  --prism-shadow-2:0 8px 22px rgba(11,18,32,.16);
+  --prism-shadow-3:0 20px 50px rgba(11,18,32,.30);
+  --prism-z-surface:0; --prism-z-card:1; --prism-z-panel:10; --prism-z-modal:100;
+  --prism-accent:linear-gradient(120deg,#5b8cff 0,#9b6bff 55%,#37d39b 100%);
+  --prism-ease:200ms cubic-bezier(.2,.6,.2,1);
+}
+/* a prismatic accent strip usable on any section header / top bar */
+.prism-accent{background-image:var(--prism-accent)}
+/* micro-interactions: GPU-friendly transform/shadow transitions only */
+a,button,input,select,.card{transition:transform var(--prism-ease),
+  box-shadow var(--prism-ease),background var(--prism-ease),
+  border-color var(--prism-ease),outline-color var(--prism-ease)}
+.card{box-shadow:var(--prism-shadow-2);z-index:var(--prism-z-card)}
+.card:hover{transform:translateY(-2px);box-shadow:var(--prism-shadow-3)}
+button:hover{transform:translateY(-1px);box-shadow:var(--prism-shadow-2)}
+button:active{transform:translateY(0)}
+/* GUARD — honour reduced motion: kill transitions/animations/lift */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{transition:none!important;animation:none!important;
+    scroll-behavior:auto!important}
+  .card:hover,button:hover,button:active{transform:none!important}
+}
+/* GUARD — honour reduced transparency: drop blur, make glass opaque */
+@media (prefers-reduced-transparency:reduce){
+  :root{--prism-blur:0px}
+  header.topbar,.topbar,nav.rail,.card,.glass{backdrop-filter:none!important}
+}
+"""
+
+_PRISM_CSS = _PRISM_TOKENS + """
 :root{--bg:#0b1220;--panel:rgba(255,255,255,.06);--line:rgba(255,255,255,.14);
 --ink:#eef3fb;--mut:#9fb0c9;--brand:#5b8cff;--ok:#37d39b;--warn:#ffd166;
 --bad:#ff6b6b;--radius:14px}
@@ -2812,7 +2948,7 @@ a{color:var(--brand)} .mut{color:var(--mut)}
 header.topbar{display:flex;align-items:center;gap:14px;padding:14px 22px;
 border-bottom:1px solid var(--line);
 background:linear-gradient(180deg,rgba(255,255,255,.07),rgba(255,255,255,.02));
-backdrop-filter:blur(8px)}
+backdrop-filter:blur(var(--prism-blur));box-shadow:var(--prism-shadow-1)}
 .brand{font-weight:700;letter-spacing:.3px}
 .badge-owner{margin-left:auto;font-size:12px;padding:4px 10px;border-radius:999px;
 background:rgba(91,140,255,.18);border:1px solid var(--line)}
@@ -3090,6 +3226,327 @@ document.getElementById('loginForm').addEventListener('submit',function(e){
     if(!r.ok){msg(r.data.detail||r.data.error||'sign-in failed',true);return;}
     localStorage.setItem('ands_token',r.data.token);
     location.href=r.data.redirect||'/';});});
+</script>
+</body>
+</html>"""
+
+
+# ---------------------------------------------------------------------------
+# Tenant workspace app shell + client-side router (REQ-085 / UI-1)
+#
+# A Veeva-Vault-style multi-page workspace: a persistent top bar + left-rail
+# primary nav where EVERY workflow area is its own deep-linkable route. The
+# router uses the History API (real URL changes, working Back button), shows
+# breadcrumbs + active-nav state, and renders only the tenant's entitled tabs
+# (REQ-082). The server serves THIS shell for every workspace route so a
+# refresh/bookmark of a deep link works; the legacy single page stays at "/".
+# ---------------------------------------------------------------------------
+
+WORKSPACE_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ANDS Workspace</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%231a4a7a'/%3E%3Ctext x='8' y='12' font-size='11' text-anchor='middle' fill='white' font-family='sans-serif'%3EA%3C/text%3E%3C/svg%3E">
+<style>""" + _PRISM_TOKENS + """
+  /* Tenant workspace — light theme of the shared Prism/3D system (REQ-086) */
+  :root { --ink:#1d2b3a; --line:#d7dee6; --bg:#f4f7fb; --brand:#13344f;
+          --accent:#1a6fd6; --muted:#6b7886; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.5 system-ui,Segoe UI,Roboto,sans-serif;
+         color:var(--ink); background:
+           radial-gradient(900px 480px at 8% -8%,rgba(91,140,255,.10) 0,transparent 60%),
+           radial-gradient(760px 420px at 108% 4%,rgba(155,107,255,.10) 0,transparent 55%),
+           var(--bg); }
+  /* persistent top bar — glass + prismatic accent strip */
+  .topbar { display:flex; align-items:center; gap:16px; background:var(--brand);
+            color:#fff; padding:12px 20px;
+            border-bottom:3px solid transparent; border-image:var(--prism-accent) 1;
+            box-shadow:var(--prism-shadow-1); }
+  .topbar .product { font-weight:700; font-size:16px; }
+  .topbar .tenant { font-size:13px; opacity:.85; }
+  .topbar .env { font-size:11px; font-weight:700; text-transform:uppercase;
+                 letter-spacing:.06em; background:#1a6fd6; padding:2px 8px;
+                 border-radius:999px; }
+  .topbar .spacer { flex:1; }
+  .topbar .account { font-size:13px; }
+  .topbar .account button { font:inherit; color:#fff; background:transparent;
+                            border:1px solid rgba(255,255,255,.4);
+                            border-radius:6px; padding:5px 10px; cursor:pointer; }
+  /* layout: side rail + content */
+  .shell { display:flex; min-height:calc(100vh - 49px); }
+  nav.rail { width:230px; background:rgba(255,255,255,.66);
+             backdrop-filter:blur(var(--prism-blur));
+             border-right:1px solid var(--line); padding:12px 8px; }
+  nav.rail a { display:flex; align-items:center; gap:10px; padding:9px 12px;
+               margin:2px 0; border-radius:8px; color:var(--ink);
+               text-decoration:none; font-size:14px; }
+  nav.rail a:hover { background:#eef3fb; }
+  nav.rail a[aria-current="page"] { background:#e7f0fb; color:var(--accent);
+               font-weight:700; }
+  nav.rail .ico { width:18px; text-align:center; opacity:.8; }
+  main.content { flex:1; padding:20px 28px; }
+  .crumbs { font-size:13px; color:var(--muted); margin-bottom:14px; }
+  .crumbs a { color:var(--accent); text-decoration:none; }
+  .crumbs .sep { margin:0 8px; opacity:.6; }
+  .page h1 { font-size:22px; margin:0 0 6px; }
+  .page .lead { color:var(--muted); margin:0 0 18px; }
+  .card { background:rgba(255,255,255,.72);
+          backdrop-filter:blur(var(--prism-blur));
+          border:1px solid var(--line); border-radius:var(--prism-radius);
+          padding:18px 20px; margin:0 0 14px; box-shadow:var(--prism-shadow-2); }
+  .card a { color:var(--accent); }
+  /* readiness dashboard (REQ-071 / UI-2) */
+  .rdy-summary { display:flex; gap:12px; flex-wrap:wrap; margin:0 0 18px; }
+  .rdy-summary .pill { background:rgba(255,255,255,.72); border:1px solid var(--line);
+    border-radius:999px; padding:6px 14px; font-size:13px; font-weight:600;
+    box-shadow:var(--prism-shadow-1); }
+  .rdy-card { background:rgba(255,255,255,.72);
+    backdrop-filter:blur(var(--prism-blur)); border:1px solid var(--line);
+    border-left:5px solid var(--line); border-radius:var(--prism-radius);
+    padding:16px 18px; margin:0 0 14px; box-shadow:var(--prism-shadow-2); }
+  .rdy-card.is-ready { border-left-color:#1a7f37; }
+  .rdy-card.is-blocked { border-left-color:#b3261e; }
+  .rdy-head { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .rdy-head h2 { font-size:17px; margin:0; }
+  .rdy-head .dossier { font-size:12px; color:var(--muted);
+    font-family:ui-monospace,Menlo,Consolas,monospace; }
+  .badge { font-size:11px; font-weight:700; text-transform:uppercase;
+    letter-spacing:.04em; padding:3px 10px; border-radius:999px; }
+  .badge.ready { background:#e6f4ea; color:#0f5132; }
+  .badge.blocked { background:#fbe6e4; color:#842029; }
+  .rdy-tiles { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
+    gap:10px; margin:14px 0 0; }
+  .tile { border:1px solid var(--line); border-radius:10px; padding:10px 12px;
+    background:#fff; }
+  .tile .t-label { font-size:11px; color:var(--muted); text-transform:uppercase;
+    letter-spacing:.04em; }
+  .tile .t-value { font-size:14px; font-weight:600; margin-top:3px; }
+  .tile.s-pass { border-color:#a3cfb0; background:#f2faf4; }
+  .tile.s-fail { border-color:#e3a8a2; background:#fdf3f2; }
+  .tile.s-todo { border-color:#e6cda0; background:#fdf8ee; }
+  .tile.s-warn { border-color:#e6cda0; background:#fdf8ee; }
+  .tile.s-info { border-color:var(--line); }
+  .rdy-blockers { margin:14px 0 0; padding:12px 14px; background:#fdf3f2;
+    border:1px solid #e3a8a2; border-radius:10px; }
+  .rdy-blockers h3 { font-size:12px; margin:0 0 8px; text-transform:uppercase;
+    letter-spacing:.04em; color:#842029; }
+  .rdy-blockers ul { margin:0; padding-left:18px; }
+  .rdy-blockers li { margin:3px 0; font-size:14px; }
+  .rdy-empty { text-align:center; padding:40px 20px; }
+  .rdy-empty .cta { display:inline-block; margin-top:14px; padding:10px 20px;
+    background:var(--accent); color:#fff; border-radius:8px; text-decoration:none;
+    font-weight:600; }
+  #boot-overlay { position:fixed; inset:0; z-index:9999; background:var(--bg);
+    display:flex; align-items:center; justify-content:center; color:var(--muted); }
+  body.ready #boot-overlay { display:none; }
+  a:focus-visible, button:focus-visible { outline:3px solid #1a6fd6;
+    outline-offset:2px; }
+  @media (max-width:720px){ .shell{flex-direction:column;} nav.rail{width:auto;
+    display:flex; flex-wrap:wrap; border-right:0; border-bottom:1px solid var(--line);} }
+</style>
+</head>
+<body>
+<div id="boot-overlay" role="status" aria-live="polite">Loading workspace…</div>
+<header class="topbar">
+  <span class="product">ANDS Submission Portal</span>
+  <span class="env">Workspace</span>
+  <span class="tenant" id="tenant-name"></span>
+  <span class="spacer"></span>
+  <span class="account"><span id="account-email"></span>
+    <button type="button" id="signout" onclick="signOut()">Sign out</button></span>
+</header>
+<div class="shell">
+  <nav class="rail" id="nav-rail" aria-label="Primary"></nav>
+  <main class="content">
+    <div class="crumbs" id="crumbs" aria-label="Breadcrumb"></div>
+    <div class="page" id="page"></div>
+  </main>
+</div>
+<script>
+// ---- tiny History-API router (REQ-085/UI-1) ---------------------------
+// Vanilla JS, no framework: every workflow area is its OWN route; clicking a
+// nav entry pushState()s a real URL (deep-linkable, Back-button works) and
+// re-renders. The nav is fetched entitlement-filtered from the server so only
+// the tenant's allowed tabs appear.
+var NAV = [];          // entitlement-filtered nav items from /api/tenant/nav
+var ME = null;         // /api/auth/me payload
+function esc(s){ return String(s==null?'':s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+  .replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+function matchRoute(path){
+  path = (path || location.pathname).replace(/\\/+$/,'') || '/dashboard';
+  for (var i=0;i<NAV.length;i++){ if (NAV[i].route === path)
+    return { item: NAV[i], detail: null }; }
+  // deep-linkable detail page: /dossiers/<id> -> parent 'dossiers'
+  var m = path.match(/^\\/dossiers\\/(.+)$/);
+  if (m){ for (var j=0;j<NAV.length;j++){ if (NAV[j].route === '/dossiers')
+    return { item: NAV[j], detail: m[1] }; } }
+  return null;
+}
+
+function renderNav(active){
+  var rail = document.getElementById('nav-rail');
+  rail.innerHTML = NAV.map(function(n){
+    var cur = (n.route === active) ? ' aria-current="page"' : '';
+    return '<a href="'+esc(n.route)+'" data-route="'+esc(n.route)+'"'+cur+'>'
+      + '<span class="ico" aria-hidden="true">'+esc(n.icon)+'</span>'
+      + '<span>'+esc(n.label)+'</span></a>';
+  }).join('');
+}
+
+function renderCrumbs(trail){
+  var c = document.getElementById('crumbs');
+  c.innerHTML = trail.map(function(t, i){
+    var last = (i === trail.length - 1);
+    var part = (t.route && !last)
+      ? '<a href="'+esc(t.route)+'" data-route="'+esc(t.route)+'">'+esc(t.label)+'</a>'
+      : '<span aria-current="'+(last?'page':'false')+'">'+esc(t.label)+'</span>';
+    return (i ? '<span class="sep">/</span>' : '') + part;
+  }).join('');
+}
+
+function renderPage(match, detail){
+  var page = document.getElementById('page');
+  var item = match.item;
+  // REQ-071 / UI-2: the Dashboard is the readiness landing view, not a stub.
+  if (item.route === '/dashboard'){ renderDashboard(page); return; }
+  page.innerHTML = '<h1>'+esc(item.label)+'</h1>'
+    + '<p class="lead">'+esc(item.label)+' workspace.</p>'
+    + '<div class="card">This is the <strong>'+esc(item.label)+'</strong>'
+    + ' page (route <code>'+esc(item.route)+'</code>). Each workflow area is its'
+    + ' own deep-linkable page — use the left rail or your browser Back button'
+    + ' to navigate.'
+    + (detail ? ' <br>Viewing item <strong>'+esc(detail)+'</strong>.' : '')
+    + '</div>';
+}
+
+// ---- REQ-071 readiness dashboard ------------------------------------------
+function tileHtml(t){
+  return '<div class="tile s-'+esc(t.state)+'">'
+    + '<div class="t-label">'+esc(t.label)+'</div>'
+    + '<div class="t-value">'+esc(t.value)+'</div></div>';
+}
+function blockersHtml(items){
+  if (!items || !items.length) return '';
+  var lis = items.map(function(b){
+    var txt = esc(b.label);
+    return b.route
+      ? '<li><a href="'+esc(b.route)+'" data-route="'+esc(b.route)+'">'+txt+'</a></li>'
+      : '<li>'+txt+'</li>';
+  }).join('');
+  return '<div class="rdy-blockers"><h3>Blocking items — resolve to file</h3>'
+    + '<ul>'+lis+'</ul></div>';
+}
+function cardHtml(c){
+  var cls = c.ready ? 'is-ready' : 'is-blocked';
+  var badge = c.ready ? '<span class="badge ready">READY</span>'
+                      : '<span class="badge blocked">BLOCKED</span>';
+  var dossier = c.dossier_id
+    ? '<span class="dossier">'+esc(c.dossier_id)+'</span>' : '';
+  return '<div class="rdy-card '+cls+'">'
+    + '<div class="rdy-head">'+badge+'<h2>'+esc(c.title)+'</h2>'+dossier+'</div>'
+    + '<div class="rdy-tiles">'+(c.tiles||[]).map(tileHtml).join('')+'</div>'
+    + blockersHtml(c.blocking_items)
+    + '</div>';
+}
+function renderDashboard(page){
+  page.innerHTML = '<h1>Dashboard</h1>'
+    + '<p class="lead">Submission readiness at a glance.</p>'
+    + '<div class="card">Loading readiness…</div>';
+  fetch('/api/tenant/dashboard').then(function(r){
+    if (!r.ok) return null; return r.json();
+  }).then(function(data){
+    if (!data){
+      page.innerHTML = '<h1>Dashboard</h1>'
+        + '<div class="card">Unable to load the readiness dashboard.</div>';
+      return;
+    }
+    if (data.empty){
+      page.innerHTML = '<h1>Dashboard</h1>'
+        + '<div class="card rdy-empty"><h2>No submissions yet</h2>'
+        + '<p class="lead">Start your first ANDS submission to see its'
+        + ' readiness here.</p>'
+        + '<a class="cta" href="/submit" data-route="/submit">'
+        + 'Start a submission</a></div>';
+      return;
+    }
+    var summary = '<div class="rdy-summary">'
+      + '<span class="pill">'+esc(data.total)+' submissions</span>'
+      + '<span class="pill">'+esc(data.ready)+' ready</span>'
+      + '<span class="pill">'+esc(data.blocked)+' blocked</span></div>';
+    page.innerHTML = '<h1>Dashboard</h1>'
+      + '<p class="lead">Submission readiness at a glance.</p>'
+      + summary
+      + (data.submissions||[]).map(cardHtml).join('');
+  }).catch(function(){
+    page.innerHTML = '<h1>Dashboard</h1>'
+      + '<div class="card">Unable to load the readiness dashboard.</div>';
+  });
+}
+
+function render(){
+  var match = matchRoute();
+  if (!match){
+    document.getElementById('crumbs').innerHTML = '';
+    document.getElementById('page').innerHTML =
+      '<h1>Not found</h1><p class="lead">No such page.</p>'
+      + '<div class="card"><a href="/dashboard" data-route="/dashboard">'
+      + 'Go to Dashboard</a></div>';
+    renderNav(null);
+    return;
+  }
+  var trail = (match.item.breadcrumb || []).map(function(label, i, arr){
+    return { label: label, route: (i < arr.length - 1) ? '/dashboard'
+                                  : match.item.route };
+  });
+  if (match.detail) trail.push({ label: match.detail, route: null });
+  renderNav(match.item.route);
+  renderCrumbs(trail);
+  renderPage(match, match.detail);
+  document.title = match.item.label + ' — ANDS Workspace';
+}
+
+function navigate(path){
+  if (path !== location.pathname){ history.pushState({}, '', path); }
+  render();
+}
+document.addEventListener('click', function(e){
+  var a = e.target.closest && e.target.closest('a[data-route]');
+  if (!a) return;
+  e.preventDefault();
+  navigate(a.getAttribute('data-route'));
+});
+window.addEventListener('popstate', render);   // Back/Forward buttons
+
+function signOut(){
+  fetch('/api/auth/logout', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+    .then(function(){ location.href = '/login'; });
+}
+
+function boot(){
+  fetch('/api/auth/me').then(function(r){
+    if (!r.ok){ location.href = '/login'; return null; }
+    return r.json();
+  }).then(function(me){
+    if (!me) return;
+    ME = me;
+    document.getElementById('account-email').textContent = me.email + '  ';
+    if (me.tenant) document.getElementById('tenant-name').textContent =
+      '· ' + me.tenant.name;
+    return fetch('/api/tenant/nav');
+  }).then(function(r){
+    if (!r || !r.ok) return;
+    return r.json();
+  }).then(function(data){
+    if (data) NAV = data.nav || [];
+    render();
+    document.body.classList.add('ready');
+  }).catch(function(){ document.body.classList.add('ready'); render(); });
+}
+boot();
 </script>
 </body>
 </html>"""
@@ -3591,6 +4048,12 @@ INDEX_HTML = """<!DOCTYPE html>
       <button type="button" class="ghost" onclick="lcDecision('NOD')">NOD</button>
       <button type="button" class="ghost" onclick="lcServiceStandard()">Check service standard</button>
       <button type="button" class="ghost" onclick="lcLoad()">Refresh</button>
+    </div>
+    <div class="actions" style="flex-wrap:wrap">
+      <button type="button" class="ghost" onclick="lcWithdraw()">Withdraw (REQ-033)</button>
+      <button type="button" class="ghost" onclick="lcRefile()">Refile without prejudice</button>
+      <button type="button" class="ghost" onclick="lcReconsider()">Request reconsideration</button>
+      <button type="button" class="ghost" onclick="lcCheckDeadlines()">Check deadlines (auto-withdraw)</button>
     </div>
     <div id="lcResult" style="margin-top:12px"></div>
     <div id="lcStatus" style="margin-top:12px"></div>
@@ -4701,6 +5164,31 @@ async function lcDecision(decision) {
 async function lcServiceStandard() {
   const body = {dossier_id: lcField('lcDossier'), now: lcNow()};
   const {status, data} = await postJson('/api/lifecycle/service-standard', body);
+  lcShow(data);
+}
+
+async function lcWithdraw() {
+  const reason = prompt('Withdrawal reason (optional):', 'sponsor decision') || '';
+  const body = {dossier_id: lcField('lcDossier'), action: 'withdraw', reason, now: lcNow()};
+  const {status, data} = await postJson('/api/lifecycle/transition', body);
+  lcShow(data);
+}
+
+async function lcRefile() {
+  const body = {dossier_id: lcField('lcDossier'), action: 'refile', now: lcNow()};
+  const {status, data} = await postJson('/api/lifecycle/transition', body);
+  lcShow(data);
+}
+
+async function lcReconsider() {
+  const body = {dossier_id: lcField('lcDossier'), action: 'reconsider', now: lcNow()};
+  const {status, data} = await postJson('/api/lifecycle/transition', body);
+  lcShow(data);
+}
+
+async function lcCheckDeadlines() {
+  const body = {dossier_id: lcField('lcDossier'), now: lcNow()};
+  const {status, data} = await postJson('/api/lifecycle/check-deadlines', body);
   lcShow(data);
 }
 

@@ -35,10 +35,12 @@ import lifecycle
 import privacy
 import qos
 import rbac
+import readiness
 import rep
 import report_ingest
 import retention
 import server
+import navigation
 import stf
 import transmission
 
@@ -4909,6 +4911,116 @@ class WithdrawalStatusTests(unittest.TestCase):
             lc.withdraw(now="2026-03-02")
 
 
+class WithdrawRefileApiTests(unittest.TestCase):
+    """REQ-033: withdraw / refile / reconsider and check-deadlines wired into
+    server.py — API-level coverage for the previously-dead routes."""
+
+    def setUp(self):
+        self.store = server.SubmissionStore(":memory:")
+        self.httpd = ThreadingHTTPServer(
+            ("127.0.0.1", 0), server.make_handler(self.store))
+        self.port = self.httpd.server_address[1]
+        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self.thread.start()
+
+    def tearDown(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+        self.thread.join()
+        self.store.close()
+
+    def _url(self, path):
+        return f"http://127.0.0.1:{self.port}{path}"
+
+    def _post(self, path, body):
+        req = urllib.request.Request(
+            self._url(path), data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read().decode())
+
+    def _start_to_review(self, dossier="e999001"):
+        self._post("/api/lifecycle/start",
+                   {"dossier_id": dossier, "submission_type": "ANDS",
+                    "now": "2026-01-01"})
+        self._post("/api/lifecycle/transition",
+                   {"dossier_id": dossier, "action": "to_screening",
+                    "now": "2026-01-11"})
+        self._post("/api/lifecycle/transition",
+                   {"dossier_id": dossier, "action": "screening_outcome",
+                    "outcome": "SAL", "now": "2026-02-01"})
+
+    def test_withdraw_action_sets_status_withdrawn(self):
+        self._start_to_review()
+        status, data = self._post(
+            "/api/lifecycle/transition",
+            {"dossier_id": "e999001", "action": "withdraw",
+             "reason": "sponsor decision", "now": "2026-03-01"})
+        self.assertEqual(status, 200)
+        self.assertTrue(data["valid"])
+        self.assertEqual(data["status"]["status"], lifecycle.STATUS_WITHDRAWN)
+
+    def test_refile_action_after_withdrawal(self):
+        self._start_to_review("e999002")
+        self._post("/api/lifecycle/transition",
+                   {"dossier_id": "e999002", "action": "withdraw",
+                    "now": "2026-03-01"})
+        status, data = self._post(
+            "/api/lifecycle/transition",
+            {"dossier_id": "e999002", "action": "refile", "now": "2026-04-01"})
+        self.assertEqual(status, 200)
+        self.assertTrue(data["valid"])
+        self.assertIn("refiled", data["timer"])
+
+    def test_reconsider_action_after_non(self):
+        self._start_to_review("e999003")
+        self._post("/api/lifecycle/transition",
+                   {"dossier_id": "e999003", "action": "decision",
+                    "decision": "NON", "now": "2026-03-01"})
+        status, data = self._post(
+            "/api/lifecycle/transition",
+            {"dossier_id": "e999003", "action": "reconsider",
+             "now": "2026-04-01"})
+        self.assertEqual(status, 200)
+        self.assertTrue(data["valid"])
+        self.assertTrue(data["timer"]["requested"])
+
+    def test_check_deadlines_auto_withdraws_lapsed_nod(self):
+        self._start_to_review("e999004")
+        self._post("/api/lifecycle/transition",
+                   {"dossier_id": "e999004", "action": "decision",
+                    "decision": "NOD", "now": "2026-03-01"})
+        # Advance past the 90-day NOD response window
+        status, data = self._post(
+            "/api/lifecycle/check-deadlines",
+            {"dossier_id": "e999004", "now": "2026-07-01"})
+        self.assertEqual(status, 200)
+        self.assertTrue(data["valid"])
+        self.assertTrue(len(data["lapsed"]) > 0)
+        self.assertEqual(data["status"]["status"], lifecycle.STATUS_WITHDRAWN_NOD)
+
+    def test_check_deadlines_no_lapse_returns_empty(self):
+        self._start_to_review("e999005")
+        status, data = self._post(
+            "/api/lifecycle/check-deadlines",
+            {"dossier_id": "e999005", "now": "2026-02-05"})
+        self.assertEqual(status, 200)
+        self.assertTrue(data["valid"])
+        self.assertEqual(data["lapsed"], [])
+
+    def test_unknown_action_returns_422(self):
+        self._start_to_review("e999006")
+        status, data = self._post(
+            "/api/lifecycle/transition",
+            {"dossier_id": "e999006", "action": "bogus"})
+        self.assertEqual(status, 422)
+        self.assertFalse(data["valid"])
+        self.assertIn("reconsider", data["error"])
+
+
 class PortfolioServiceStandardTests(unittest.TestCase):
     """REQ-034: ANDS measured against 100% on-time; NC/CTA against 90%."""
 
@@ -5682,6 +5794,207 @@ class ControlPlaneApiTests(unittest.TestCase):
         self.assertIn("Register your company", page)
         self.assertIn('lang="en"', page)
 
+    # -- REQ-071 / UI-2: submission-readiness dashboard -----------------
+    def test_dashboard_empty_state_for_new_tenant(self):
+        # GIVEN no dossiers yet THEN the dashboard reports an empty state
+        # (the UI shows a "Start a submission" CTA, not a blank form-wall).
+        _, signup = self._signup("Acme", "admin@acme.com")
+        s, data = self._req("GET", "/api/tenant/dashboard",
+                            token=signup["token"])
+        self.assertEqual(s, 200)
+        self.assertTrue(data["empty"])
+        self.assertEqual(data["total"], 0)
+        self.assertEqual(data["submissions"], [])
+
+    def test_dashboard_blocked_submission_lists_blocking_items(self):
+        # A freshly-created submission is BLOCKED on validation, Module-1,
+        # fees and e-signature, each drilling in to where it is resolved.
+        _, signup = self._signup("Acme", "admin@acme.com")
+        tok = signup["token"]
+        self._req("POST", "/api/tenant/submissions",
+                  {"drug_product": "Aspirin", "dossier_id": "e123456"},
+                  token=tok)
+        s, data = self._req("GET", "/api/tenant/dashboard", token=tok)
+        self.assertEqual(s, 200)
+        self.assertFalse(data["empty"])
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(data["blocked"], 1)
+        card = data["submissions"][0]
+        self.assertEqual(card["status"], "BLOCKED")
+        self.assertFalse(card["ready"])
+        self.assertEqual(card["title"], "Aspirin")
+        self.assertEqual(card["dossier_id"], "e123456")
+        signals = {b["signal"] for b in card["blocking_items"]}
+        self.assertEqual(signals,
+                         {"validation", "module1", "fees", "esign"})
+        routes = {b["route"] for b in card["blocking_items"]}
+        self.assertIn("/validation", routes)
+        self.assertIn("/fees", routes)
+        # every required tile is present
+        keys = {t["key"] for t in card["tiles"]}
+        self.assertEqual(keys, {"lifecycle", "validation", "module1", "fees",
+                                "esign", "transmission", "deadline"})
+
+    def test_dashboard_ready_when_all_signals_satisfied(self):
+        # A submission carrying clean signals shows READY with no blockers.
+        _, signup = self._signup("Acme", "admin@acme.com")
+        tok = signup["token"]
+        present = [{"key": d["key"], "formats": d["formats"]}
+                   for d in content_model.required_documents(False)]
+        self._req("POST", "/api/tenant/submissions", {
+            "drug_product": "Betadrug", "dossier_id": "e999999",
+            "validation": {"ran": True, "errors": 0, "warnings": 2},
+            "content": {"present_documents": present},
+            "fees": {"paid": True}, "esign": {"signed": True},
+            "transmission": {"state": "RECEIVED_BY_HC"},
+            "lifecycle": {"status": "Active"},
+            "deadline": {"start": "2026-06-01", "days": 45,
+                         "notice_type": "SDN"}}, token=tok)
+        s, data = self._req("GET", "/api/tenant/dashboard?today=2026-06-27",
+                            token=tok)
+        self.assertEqual(s, 200)
+        self.assertEqual(data["ready"], 1)
+        self.assertEqual(data["blocked"], 0)
+        card = data["submissions"][0]
+        self.assertEqual(card["status"], "READY")
+        self.assertEqual(card["blocking_items"], [])
+        m1 = next(t for t in card["tiles"] if t["key"] == "module1")
+        self.assertTrue(m1["complete"])
+        dl = next(t for t in card["tiles"] if t["key"] == "deadline")
+        self.assertEqual(dl["days_remaining"], 19)  # 2026-07-16 due
+
+    def test_dashboard_requires_tenant_session(self):
+        # REQ-078: an unauthenticated dashboard request is rejected.
+        s, _ = self._req("GET", "/api/tenant/dashboard")
+        self.assertEqual(s, 401)
+
+    def test_dashboard_gated_by_entitlement(self):
+        # REQ-082: owner disables the 'dashboard' feature -> 403 at the API.
+        _, signup = self._signup("Acme", "admin@acme.com")
+        tid = signup["tenant"]["id"]
+        tok = signup["token"]
+        s, _ = self._req("GET", "/api/tenant/dashboard", token=tok)
+        self.assertEqual(s, 200)
+        otok = self._owner_token()
+        self._req("POST", f"/api/owner/tenants/{tid}/overrides",
+                  {"feature": "dashboard", "enabled": False}, token=otok)
+        s, data = self._req("GET", "/api/tenant/dashboard", token=tok)
+        self.assertEqual(s, 403)
+        self.assertEqual(data["feature"], "dashboard")
+
+    def test_dashboard_isolated_per_tenant(self):
+        # REQ-078: one tenant's dashboard never surfaces another's submissions.
+        _, a = self._signup("Acme", "a@acme.com")
+        _, b = self._signup("Beta", "b@beta.com")
+        self._req("POST", "/api/tenant/submissions",
+                  {"drug_product": "AcmeDrug"}, token=a["token"])
+        _, bdash = self._req("GET", "/api/tenant/dashboard", token=b["token"])
+        self.assertTrue(bdash["empty"])
+        _, adash = self._req("GET", "/api/tenant/dashboard", token=a["token"])
+        self.assertEqual(adash["total"], 1)
+
+    def test_workspace_shell_renders_dashboard_client(self):
+        # The workspace shell ships the readiness-dashboard renderer + REQ tag.
+        with urllib.request.urlopen(self._url("/dashboard")) as resp:
+            page = resp.read().decode()
+        self.assertEqual(resp.status, 200)
+        self.assertIn("renderDashboard", page)
+        self.assertIn("/api/tenant/dashboard", page)
+        self.assertIn("REQ-071", page)
+        self.assertIn('lang="en"', page)
+
+
+class ReadinessDashboardDomainTests(unittest.TestCase):
+    """REQ-071 readiness aggregation — pure domain (no HTTP)."""
+
+    def _present_all(self, cs_be_only=False):
+        return [{"key": d["key"], "formats": d["formats"]}
+                for d in content_model.required_documents(cs_be_only)]
+
+    def test_draft_is_blocked_on_every_prerequisite(self):
+        r = readiness.submission_readiness(
+            {"payload": {"drug_product": "Aspirin", "dossier_id": "e123456"}},
+            today="2026-06-27")
+        self.assertEqual(r["status"], "BLOCKED")
+        self.assertFalse(r["ready"])
+        self.assertEqual({b["signal"] for b in r["blocking_items"]},
+                         {"validation", "module1", "fees", "esign"})
+
+    def test_module1_completeness_is_x_of_y(self):
+        r = readiness.submission_readiness(
+            {"payload": {"content": {"present_documents": self._present_all()}}})
+        tile = next(t for t in r["tiles"] if t["key"] == "module1")
+        self.assertTrue(tile["complete"])
+        self.assertEqual(tile["present"], tile["required"])
+        self.assertEqual(tile["value"],
+                         f"{tile['present']} of {tile['required']}")
+
+    def test_validation_errors_block_and_count(self):
+        r = readiness.submission_readiness(
+            {"payload": {"validation": {"ran": True, "errors": 3,
+                                        "warnings": 1}}})
+        v = next(t for t in r["tiles"] if t["key"] == "validation")
+        self.assertEqual(v["state"], "fail")
+        self.assertEqual(v["errors"], 3)
+        block = next(b for b in r["blocking_items"]
+                     if b["signal"] == "validation")
+        self.assertEqual(block["count"], 3)
+
+    def test_warnings_only_validation_passes_but_warns(self):
+        r = readiness.submission_readiness(
+            {"payload": {"validation": {"ran": True, "errors": 0,
+                                        "warnings": 5}}})
+        v = next(t for t in r["tiles"] if t["key"] == "validation")
+        self.assertEqual(v["state"], "warn")
+        self.assertTrue(v["passed"])
+        self.assertNotIn("validation",
+                         {b["signal"] for b in r["blocking_items"]})
+
+    def test_deadline_overdue_is_negative_and_flagged(self):
+        r = readiness.submission_readiness(
+            {"payload": {"deadline": {"due": "2026-06-01"}}},
+            today="2026-06-27")
+        dl = next(t for t in r["tiles"] if t["key"] == "deadline")
+        self.assertEqual(dl["days_remaining"], -26)
+        self.assertEqual(dl["state"], "fail")
+
+    def test_deadline_soon_is_warned(self):
+        r = readiness.submission_readiness(
+            {"payload": {"deadline": {"due": "2026-07-05"}}},
+            today="2026-06-27")
+        dl = next(t for t in r["tiles"] if t["key"] == "deadline")
+        self.assertEqual(dl["state"], "warn")
+
+    def test_deadline_without_anchor_shows_date_no_countdown(self):
+        r = readiness.submission_readiness(
+            {"payload": {"deadline": {"start": "2026-06-01", "days": 45}}})
+        dl = next(t for t in r["tiles"] if t["key"] == "deadline")
+        self.assertEqual(dl["due"], "2026-07-16")
+        self.assertIsNone(dl["days_remaining"])
+
+    def test_transmission_delivered_is_positive(self):
+        r = readiness.submission_readiness(
+            {"payload": {"transmission": {"state": "RECEIVED_BY_HC"}}})
+        tx = next(t for t in r["tiles"] if t["key"] == "transmission")
+        self.assertTrue(tx["delivered"])
+        self.assertEqual(tx["state"], "pass")
+
+    def test_bare_payload_without_id_titles_untitled(self):
+        r = readiness.submission_readiness({})
+        self.assertEqual(r["title"], "Untitled submission")
+
+    def test_dashboard_rollup_counts(self):
+        ready_sub = {"payload": {
+            "validation": {"ran": True, "errors": 0, "warnings": 0},
+            "content": {"present_documents": self._present_all()},
+            "fees": {"paid": True}, "esign": {"signed": True}}}
+        blocked = {"payload": {"drug_product": "X"}}
+        d = readiness.dashboard([ready_sub, blocked], today="2026-06-27")
+        self.assertEqual(d["total"], 2)
+        self.assertEqual(d["ready"], 1)
+        self.assertEqual(d["blocked"], 1)
+        self.assertFalse(d["empty"])
+
 
 class StoreGcNoLeakTests(unittest.TestCase):
     """A dropped store must close its sqlite connection — no ResourceWarning."""
@@ -5977,6 +6290,472 @@ class RepStylesheetApiTests(unittest.TestCase):
         self.assertEqual(status, 422)
         self.assertIn("error", data)
 
+
+# ---------------------------------------------------------------------------
+# App shell + client-side router (REQ-085 / UI-1)
+# ---------------------------------------------------------------------------
+
+class NavigationDomainTests(unittest.TestCase):
+    """The route map is the single source of truth for both shells."""
+
+    def test_tenant_nav_keys_are_all_entitlement_features(self):
+        # Every nav entry MUST tie to a real entitlement feature so filtering
+        # by entitlement (REQ-082) is exact, with no second list to drift.
+        feats = {item["feature"] for item in navigation.TENANT_NAV}
+        self.assertEqual(feats, set(entitlements_mod.FEATURES))
+
+    def test_tenant_nav_filters_to_entitled_features_only(self):
+        nav = navigation.tenant_nav(["dashboard", "validation"])
+        routes = [n["route"] for n in nav]
+        self.assertEqual(routes, ["/dashboard", "/validation"])
+        # hidden areas never appear
+        self.assertNotIn("/fees", routes)
+
+    def test_tenant_nav_entries_carry_label_route_and_breadcrumb(self):
+        nav = navigation.tenant_nav(["fees"])
+        self.assertEqual(len(nav), 1)
+        entry = nav[0]
+        self.assertEqual(entry["route"], "/fees")
+        self.assertEqual(entry["label"], entitlements_mod.FEATURE_LABELS["fees"])
+        # breadcrumb starts at the workspace home and ends at this page
+        self.assertEqual(entry["breadcrumb"][0], navigation.WORKSPACE_HOME["label"])
+        self.assertEqual(entry["breadcrumb"][-1], entry["label"])
+
+    def test_tenant_nav_preserves_catalogue_order(self):
+        nav = navigation.tenant_nav(list(entitlements_mod.FEATURES))
+        self.assertEqual([n["feature"] for n in nav],
+                         list(entitlements_mod.FEATURES))
+
+    def test_resolve_top_level_route(self):
+        self.assertEqual(navigation.resolve_tenant_route("/validation"),
+                         ("validation", None))
+
+    def test_resolve_trailing_slash_and_root(self):
+        self.assertEqual(navigation.resolve_tenant_route("/fees/"),
+                         ("fees", None))
+        # bare "/" is NOT a workspace route (legacy single page lives there)
+        self.assertIsNone(navigation.resolve_tenant_route("/"))
+
+    def test_resolve_deep_linkable_detail_route(self):
+        self.assertEqual(navigation.resolve_tenant_route("/dossiers/e123456"),
+                         ("dossiers", "e123456"))
+
+    def test_resolve_unknown_route_is_none(self):
+        self.assertIsNone(navigation.resolve_tenant_route("/api/health"))
+        self.assertIsNone(navigation.resolve_tenant_route("/nope"))
+
+    def test_owner_route_detection(self):
+        self.assertTrue(navigation.is_owner_route("/owner/plans"))
+        self.assertTrue(navigation.is_owner_route("/owner/tenants/abc"))
+        self.assertFalse(navigation.is_owner_route("/dashboard"))
+
+    def test_owner_nav_has_breadcrumbs(self):
+        nav = navigation.owner_nav()
+        self.assertEqual([n["route"] for n in nav], ["/owner", "/owner/plans"])
+        self.assertTrue(all(n["breadcrumb"][0] == "Control plane" for n in nav))
+
+
+class AppShellRoutingApiTests(unittest.TestCase):
+    """HTTP behaviour of the workspace shell + entitlement-filtered nav API."""
+
+    def setUp(self):
+        self.store = server.SubmissionStore(":memory:")
+        self.auth = auth_mod.AuthStore(":memory:")
+        self.auth.ensure_owner("owner@platform", "ownerpw")
+        self.ent = entitlements_mod.EntitlementStore(":memory:")
+        self.root = tempfile.mkdtemp(prefix="ands-shell-")
+        self.ten = tenancy_mod.TenancyStore(":memory:", tenants_root=self.root)
+        self.httpd = ThreadingHTTPServer(
+            ("127.0.0.1", 0),
+            server.make_handler(self.store, auth_store=self.auth,
+                                tenancy_store=self.ten,
+                                entitlement_store=self.ent))
+        self.port = self.httpd.server_address[1]
+        self.thread = threading.Thread(target=self.httpd.serve_forever,
+                                       daemon=True)
+        self.thread.start()
+
+    def tearDown(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+        self.thread.join()
+        self.store.close()
+        self.auth.close()
+        self.ent.close()
+        self.ten.close()
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def _url(self, path):
+        return f"http://127.0.0.1:{self.port}{path}"
+
+    def _get_html(self, path):
+        try:
+            with urllib.request.urlopen(self._url(path)) as resp:
+                return resp.status, resp.read().decode()
+        except urllib.error.HTTPError as e:
+            body = e.read().decode()
+            e.close()
+            return e.code, body
+
+    def _req(self, method, path, body=None, token=""):
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = "Bearer " + token
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(self._url(path), data=data,
+                                     headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode())
+        except urllib.error.HTTPError as e:
+            code, payload = e.code, json.loads(e.read().decode())
+            e.close()
+            return code, payload
+
+    def _signup(self, company="Acme", email="admin@acme.com", password="pw"):
+        return self._req("POST", "/api/auth/signup",
+                         {"company": company, "email": email,
+                          "password": password})
+
+    # -- shell is served for every deep-linkable workspace route -----------
+    def test_legacy_single_page_still_served_at_root(self):
+        # The legacy page MUST remain (additive constraint) at "/".
+        status, body = self._get_html("/")
+        self.assertEqual(status, 200)
+        self.assertIn("Transmission Console", body)
+
+    def test_every_workspace_route_serves_the_shell(self):
+        for route in navigation.all_tenant_routes():
+            status, body = self._get_html(route)
+            self.assertEqual(status, 200, route)
+            self.assertIn("ANDS Workspace", body)
+            self.assertIn('id="nav-rail"', body)
+
+    def test_deep_link_detail_route_serves_shell(self):
+        # A bookmarked /dossiers/<id> must load the shell (router resolves it).
+        status, body = self._get_html("/dossiers/e123456")
+        self.assertEqual(status, 200)
+        self.assertIn("ANDS Workspace", body)
+
+    def test_shell_uses_history_api_router_and_active_nav(self):
+        _, body = self._get_html("/dashboard")
+        self.assertIn("history.pushState", body)      # real URL changes
+        self.assertIn("popstate", body)               # Back button works
+        self.assertIn('aria-current="page"', body)    # active-nav state
+        self.assertIn('id="crumbs"', body)            # breadcrumbs
+
+    def test_unknown_route_still_404s(self):
+        status, _ = self._get_html("/definitely-not-a-route")
+        self.assertEqual(status, 404)
+
+    # -- entitlement-filtered nav API (REQ-082) ----------------------------
+    def test_tenant_nav_requires_session(self):
+        status, _ = self._req("GET", "/api/tenant/nav")
+        self.assertEqual(status, 401)
+
+    def test_tenant_nav_returns_full_set_for_default_plan(self):
+        _, data = self._signup()
+        status, payload = self._req("GET", "/api/tenant/nav",
+                                    token=data["token"])
+        self.assertEqual(status, 200)
+        routes = [n["route"] for n in payload["nav"]]
+        self.assertEqual(routes, navigation.all_tenant_routes())
+        self.assertEqual(payload["home"]["route"], "/dashboard")
+
+    def test_tenant_nav_hides_non_entitled_area(self):
+        # Owner disables 'fees' for this tenant -> its tab disappears (REQ-082).
+        _, data = self._signup()
+        tid = data["tenant"]["id"]
+        self.ent.set_override(tid, "fees", False)
+        _, payload = self._req("GET", "/api/tenant/nav", token=data["token"])
+        routes = [n["route"] for n in payload["nav"]]
+        self.assertNotIn("/fees", routes)
+        self.assertIn("/dashboard", routes)
+
+    # -- owner nav API is owner-only (REQ-079) -----------------------------
+    def test_owner_nav_forbidden_without_owner(self):
+        status, _ = self._req("GET", "/api/owner/nav")
+        self.assertEqual(status, 403)
+        _, data = self._signup()
+        status, _ = self._req("GET", "/api/owner/nav", token=data["token"])
+        self.assertEqual(status, 403)
+
+    def test_owner_nav_returns_pages_for_owner(self):
+        _, login = self._req("POST", "/api/auth/login",
+                             {"email": "owner@platform", "password": "ownerpw"})
+        status, payload = self._req("GET", "/api/owner/nav",
+                                    token=login["token"])
+        self.assertEqual(status, 200)
+        self.assertEqual([n["route"] for n in payload["nav"]],
+                         ["/owner", "/owner/plans"])
+
+    def test_owner_deep_link_routes_serve_owner_shell(self):
+        for route in ("/owner/plans", "/owner/tenants/abc123"):
+            status, body = self._get_html(route)
+            self.assertEqual(status, 200, route)
+
+
+class Req075IntegrityValidationTests(unittest.TestCase):
+    """REQ-075: referential + checksum integrity between the eCTD backbone and
+    the document store, surfaced as BLOCKING validation findings before export."""
+
+    def _ctx(self, **over):
+        ctx = {
+            "leaves": [{"leaf_id": "cl", "href": "0000/m1/ca/cover.pdf",
+                        "operation": "new", "content": "cover-bytes",
+                        "checksum": ectd.md5_hex("cover-bytes")}],
+            "files": [{"path": "0000/m1/ca/cover.pdf"}],
+        }
+        ctx.update(over)
+        return ctx
+
+    def _ids(self, ctx):
+        return {f["rule_id"] for f in validation.run_validation(ctx, "5.3")["findings"]}
+
+    def test_clean_transaction_has_no_integrity_findings(self):
+        ids = self._ids(self._ctx())
+        self.assertNotIn("R06", ids)
+        self.assertNotIn("B07b", ids)
+
+    def test_orphaned_file_is_blocking(self):
+        ctx = self._ctx()
+        ctx["files"].append({"path": "0000/m1/ca/stray.pdf"})  # referenced by no leaf
+        result = validation.run_validation(ctx, "5.3")
+        self.assertTrue(result["blocking"])
+        r06 = [f for f in result["findings"] if f["rule_id"] == "R06"]
+        self.assertEqual(r06[0]["file"], "0000/m1/ca/stray.pdf")
+        self.assertIn("orphaned", r06[0]["message"])
+
+    def test_checksum_mismatch_is_blocking(self):
+        ctx = self._ctx()
+        ctx["leaves"][0]["checksum"] = "0" * 32  # disagrees with the bytes
+        result = validation.run_validation(ctx, "5.3")
+        self.assertTrue(result["blocking"])
+        b07b = [f for f in result["findings"] if f["rule_id"] == "B07b"]
+        self.assertEqual(b07b[0]["node"], "cl")
+        self.assertIn("mismatch", b07b[0]["message"])
+
+    def test_reused_leaf_without_shipped_bytes_not_flagged(self):
+        # A reused leaf re-ships no content; its bytes are unchanged from the
+        # prior verified sequence, so it must NOT raise a false mismatch.
+        ctx = self._ctx()
+        ctx["leaves"][0]["content"] = None
+        self.assertNotIn("B07b", self._ids(ctx))
+
+    def test_directory_and_backbone_artifacts_are_not_orphans(self):
+        ctx = self._ctx()
+        ctx["files"] += [{"path": "0000/m1/empty", "is_dir": True},
+                         {"path": "0000/index.xml"},
+                         {"path": "0000/index-md5.txt"}]
+        self.assertNotIn("R06", self._ids(ctx))
+
+    def test_integrity_rules_gated_to_5_3(self):
+        ids_53 = {r["rule_id"] for r in validation.get_ruleset("5.3")["rules"]}
+        ids_52 = {r["rule_id"] for r in validation.get_ruleset("5.2")["rules"]}
+        self.assertEqual({"R06", "B07b"} & ids_53, {"R06", "B07b"})
+        self.assertEqual({"R06", "B07b"} & ids_52, set())
+
+
+class CoverageTraceabilityTests(unittest.TestCase):
+    """Lock-in tests for requirements that had real implementations but no
+    token-traceable test. Each asserts existing behaviour; no production code
+    is changed by these tests."""
+
+    def test_req_018_current_view_reconstruction(self):
+        leaves = [
+            {"leaf_id": "a", "operation": "new"},
+            {"leaf_id": "a2", "operation": "replace", "modified_leaf": "a"},
+            {"leaf_id": "b", "operation": "new"},
+            {"leaf_id": "bdel", "operation": "delete", "modified_leaf": "b"},
+        ]
+        live = {l["leaf_id"] for l in ectd.compute_current_view(leaves)["live"]}
+        self.assertEqual(live, {"a2"})  # REQ-018: replace supersedes, delete removes
+
+    def test_req_028_received_by_hc_only_on_hc_ack(self):
+        led = transmission.TransmissionLedger("e012345")
+        led.submit({"sequence": "0000", "size_gb": 5},
+                   now="2026-06-22T10:00:00+00:00")
+        led.receive_mdn("0000")
+        # REQ-028: an MDN alone (and even the FDA ack) is NOT HC delivery.
+        self.assertNotEqual(led._find("0000")["state"],
+                            transmission.STATE_RECEIVED_BY_HC)
+        led.receive_fda_ack("0000", "CORE-9")
+        self.assertNotEqual(led._find("0000")["state"],
+                            transmission.STATE_RECEIVED_BY_HC)
+        led.receive_hc_ack("CORE-9")
+        rec = led._find("0000")
+        self.assertEqual(rec["state"], transmission.STATE_RECEIVED_BY_HC)
+        self.assertEqual(rec.get("core_id"), "CORE-9")  # Core ID captured
+
+    def test_req_047_cross_dossier_reference_blocked(self):
+        pf = rbac.Portfolio("org-1")
+        pf.add_dossier("e100001", product_family="acme", din="02000001")
+        pf.add_dossier("e100002", product_family="acme", din="02000002")
+        self.assertTrue(pf.owns("e100001"))
+        self.assertEqual(len(pf.family_members("acme")), 2)  # one family, two DINs
+        # REQ-047: a prior-leaf ref that is not live in THIS dossier is blocked.
+        findings = pf.validate_prior_leaf_reference(
+            "e100001", "leaf-from-other", dossier_live_leaves=["own-leaf"])
+        self.assertTrue(findings)
+
+    def test_req_050_response_quality_vocabulary_and_window_guard(self):
+        # REQ-050: HC distinguishes acceptable / deficient / unsolicited responses.
+        self.assertEqual(
+            lifecycle.RESPONSE_QUALITIES,
+            frozenset({"acceptable", "deficient", "unsolicited"}))
+        lc = lifecycle.Lifecycle("e123456", "ANDS")
+        lc.start(now="2026-01-01")
+        lc.to_screening(now="2026-01-11")
+        lc.record_screening_outcome("SAL", now="2026-02-01")
+        # No open window -> a response cannot be filed (window closed guard).
+        with self.assertRaises(lifecycle.LifecycleError):
+            lc.resume_clock(now="2026-02-05")
+
+    def test_req_051_concurrent_notice_ids_are_unique(self):
+        # REQ-051: concurrent deficiency notices must be individually addressable.
+        lc = lifecycle.Lifecycle("e123456", "ANDS")
+        ids = [lc._next_notice_id("clarifax") for _ in range(3)]
+        self.assertEqual(len(set(ids)), 3)
+
+    def test_req_071_to_076_workspace_nav_features_present(self):
+        feats = set(entitlements_mod.FEATURES)
+        # REQ-071 dashboard, REQ-072 dossiers/tree, REQ-073 guided submit,
+        # REQ-074 validation/export, REQ-076 review & approval.
+        for f in ("dashboard", "dossiers", "submit", "validation", "reviews"):
+            self.assertIn(f, feats)
+        # normalize_features keeps only known features, in canonical order.
+        self.assertEqual(
+            entitlements_mod.normalize_features(["reviews", "bogus", "dashboard"]),
+            [f for f in entitlements_mod.FEATURES if f in {"reviews", "dashboard"}])
+
+
+class PrismDesignSystemTests(unittest.TestCase):
+    """REQ-086 / UI-4 — Prism/3D design system: self-contained tokens applied
+    consistently across tenant workspace AND owner control plane."""
+
+    def _html(self, path):
+        store = server.SubmissionStore(":memory:")
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.make_handler(store))
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            url = f"http://127.0.0.1:{httpd.server_address[1]}{path}"
+            try:
+                return urllib.request.urlopen(url, timeout=5).read().decode()
+            except urllib.error.HTTPError as e:
+                return e.read().decode()
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join()
+            store.close()
+
+    def test_req_086_prism_tokens_present_in_server_module(self):
+        # REQ-086: all CSS/tokens are vendored inline in server.py — no CDN.
+        self.assertIn("--prism-radius", server._PRISM_TOKENS)
+        self.assertIn("--prism-shadow", server._PRISM_TOKENS)
+        self.assertIn("--prism-accent", server._PRISM_TOKENS)
+        self.assertIn("prefers-reduced-motion", server._PRISM_TOKENS)
+        self.assertIn("prefers-reduced-transparency", server._PRISM_TOKENS)
+
+    def test_req_086_dark_surfaces_include_prism_tokens(self):
+        # Owner console + auth surfaces reuse _PRISM_CSS (= _PRISM_TOKENS + dark theme).
+        for surface in (server.OWNER_CONSOLE_HTML, server.AUTH_HTML):
+            self.assertIn("--prism-radius", surface)
+            self.assertIn("prefers-reduced-motion", surface)
+
+    def test_req_086_workspace_includes_prism_tokens(self):
+        # Tenant workspace shares the same token layer (light theme variant).
+        self.assertIn("--prism-radius", server.WORKSPACE_HTML)
+        self.assertIn("prefers-reduced-motion", server.WORKSPACE_HTML)
+        self.assertIn("REQ-086", server.WORKSPACE_HTML)
+
+    def test_req_086_no_external_cdn_or_font_fetch(self):
+        # REQ-086 offline constraint: no http(s) URLs in the design system.
+        for fragment in (server._PRISM_TOKENS, server._PRISM_CSS,
+                         server.WORKSPACE_HTML, server.OWNER_CONSOLE_HTML):
+            self.assertNotIn("fonts.googleapis", fragment)
+            self.assertNotIn("cdn.jsdelivr", fragment)
+            self.assertNotIn("unpkg.com", fragment)
+            # No web-font fetch / framework import sneaking in via @import or src.
+            self.assertNotIn("@import url(http", fragment)
+            self.assertNotIn("src:url(http", fragment.replace(" ", ""))
+
+    def test_req_086_layered_elevation_and_z_tiers(self):
+        # AC: layered elevation — three multi-level shadow tiers AND a z-layer
+        # stack (surface < card < panel < modal) define the depth/3D system.
+        for tier in ("--prism-shadow-1", "--prism-shadow-2", "--prism-shadow-3"):
+            self.assertIn(tier, server._PRISM_TOKENS)
+        for z in ("--prism-z-surface", "--prism-z-card",
+                  "--prism-z-panel", "--prism-z-modal"):
+            self.assertIn(z, server._PRISM_TOKENS)
+        # The z-stack is strictly increasing (surface behind … modal in front).
+        self.assertIn("--prism-z-surface:0", server._PRISM_TOKENS)
+        self.assertIn("--prism-z-modal:100", server._PRISM_TOKENS)
+
+    def test_req_086_glassmorphism_backdrop_blur_in_both_shells(self):
+        # AC: translucent frosted panels with backdrop blur — present in the
+        # tenant workspace AND the owner/auth (dark) shells.
+        self.assertIn("backdrop-filter:blur", server.WORKSPACE_HTML)
+        self.assertIn("backdrop-filter:blur", server._PRISM_CSS)
+        # The blur radius is token-driven so the reduced-transparency guard can
+        # zero it out in one place.
+        self.assertIn("blur(var(--prism-blur))", server._PRISM_CSS)
+
+    def test_req_086_prismatic_gradient_accent_defined_and_used(self):
+        # AC: subtle prismatic gradients/accent colours for primary surfaces.
+        self.assertIn("--prism-accent:linear-gradient", server._PRISM_TOKENS)
+        # The accent token is actually applied (top-bar / accent strip), not dead.
+        self.assertIn("var(--prism-accent)", server.WORKSPACE_HTML)
+
+    def test_req_086_rounded_cards(self):
+        # AC: generously rounded cards via the shared radius token.
+        self.assertIn("--prism-radius:14px", server._PRISM_TOKENS)
+        self.assertIn("border-radius:var(--prism-radius)", server.WORKSPACE_HTML)
+
+    def test_req_086_micro_interactions_transitions_and_hover(self):
+        # AC: tasteful micro-interactions — transitions plus hover/active lift.
+        self.assertIn("transition:transform var(--prism-ease)", server._PRISM_TOKENS)
+        self.assertIn(".card:hover", server._PRISM_TOKENS)
+        self.assertIn("button:active", server._PRISM_TOKENS)
+
+    def test_req_086_reduced_transparency_guard_in_all_surfaces(self):
+        # GUARD AC: honour prefers-reduced-transparency everywhere (the token
+        # layer is shared, so every surface inherits the opaque fallback).
+        for surface in (server.WORKSPACE_HTML, server.OWNER_CONSOLE_HTML,
+                        server.AUTH_HTML):
+            self.assertIn("prefers-reduced-transparency", surface)
+        # …and it actually neutralises the blur rather than just declaring it.
+        self.assertIn("--prism-blur:0px", server._PRISM_TOKENS)
+
+    def test_req_086_visible_focus_rings_in_both_shells(self):
+        # GUARD AC: visible focus indication preserved on the glass aesthetic.
+        self.assertIn(":focus-visible", server.WORKSPACE_HTML)
+        self.assertIn(":focus", server._PRISM_CSS)
+        self.assertIn("outline:3px", server.WORKSPACE_HTML)
+
+    def test_req_086_responsive_breakpoint_in_workspace(self):
+        # AC: responsive from mobile to wide desktop — the shell collapses the
+        # side rail at a small-viewport breakpoint.
+        self.assertIn("@media (max-width:720px)", server.WORKSPACE_HTML)
+
+    def test_req_086_form_controls_keep_labels_on_glass(self):
+        # GUARD AC: labels are never sacrificed for the glass look — the design
+        # system styles a real <label> block on both shells.
+        self.assertIn("label{display:block", server._PRISM_CSS)
+        self.assertIn("label", server.WORKSPACE_HTML)
+
+    def test_req_086_served_pages_carry_prism_system_live(self):
+        # AC: applied consistently across EVERY rendered screen — assert the
+        # actually-served HTML (not just the constants) carries the system.
+        for path in ("/owner", "/login", "/dashboard"):
+            html = self._html(path)
+            self.assertIn("--prism-radius", html,
+                          msg="Prism tokens missing on served %s" % path)
+            self.assertIn("prefers-reduced-motion", html,
+                          msg="reduced-motion guard missing on served %s" % path)
+            self.assertIn('lang="en"', html,
+                          msg="lang attribute missing on served %s" % path)
 
 if __name__ == "__main__":
     unittest.main()
