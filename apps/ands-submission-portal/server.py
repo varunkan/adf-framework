@@ -3338,6 +3338,38 @@ WORKSPACE_HTML = """<!DOCTYPE html>
   .rdy-empty .cta { display:inline-block; margin-top:14px; padding:10px 20px;
     background:var(--accent); color:#fff; border-radius:8px; text-decoration:none;
     font-weight:600; }
+  /* UI-2 per-page real content: data tables, lists, stepper, eCTD tree */
+  .card h2 { font-size:16px; margin:0 0 8px; }
+  .card .cta, .page > p .cta { display:inline-block; padding:8px 16px;
+    background:var(--accent); color:#fff; border-radius:8px;
+    text-decoration:none; font-weight:600; }
+  table.data { width:100%; border-collapse:collapse; font-size:14px; }
+  table.data th, table.data td { text-align:left; padding:7px 10px;
+    border-bottom:1px solid var(--line); vertical-align:top; }
+  table.data thead th { font-size:12px; text-transform:uppercase;
+    letter-spacing:.04em; color:var(--muted); }
+  table.data tbody th[scope="row"] { font-weight:600; }
+  table.data code { font-family:ui-monospace,Menlo,Consolas,monospace;
+    font-size:13px; }
+  ul.bullets { margin:0; padding-left:20px; } ul.bullets li { margin:4px 0; }
+  ol.stepper { list-style:none; margin:0; padding:0; counter-reset:step; }
+  ol.stepper li { margin:0 0 10px; }
+  ol.stepper a { display:flex; align-items:center; gap:14px; padding:14px 16px;
+    background:rgba(255,255,255,.72); border:1px solid var(--line);
+    border-radius:var(--prism-radius); text-decoration:none; color:var(--ink);
+    box-shadow:var(--prism-shadow-1); }
+  ol.stepper a:hover { background:#eef3fb; }
+  ol.stepper .step-n { flex:0 0 30px; height:30px; border-radius:50%;
+    background:var(--accent); color:#fff; display:flex; align-items:center;
+    justify-content:center; font-weight:700; }
+  ol.stepper .step-t { display:flex; flex-direction:column; }
+  ol.stepper .step-d { color:var(--muted); font-size:13px; }
+  ul.ectd-tree { list-style:none; margin:0; padding:0; font-size:14px; }
+  ul.ectd-tree li { padding:6px 0; border-bottom:1px solid var(--line); }
+  ul.ectd-tree .node-h { display:inline-block; min-width:46px;
+    font-weight:700; color:var(--accent);
+    font-family:ui-monospace,Menlo,Consolas,monospace; }
+  ul.ectd-tree .node-f { color:var(--muted); font-size:12px; }
   #boot-overlay { position:fixed; inset:0; z-index:9999; background:var(--bg);
     display:flex; align-items:center; justify-content:center; color:var(--muted); }
   body.ready #boot-overlay { display:none; }
@@ -3408,18 +3440,218 @@ function renderCrumbs(trail){
   }).join('');
 }
 
+// ---- UI-2 per-page real content -------------------------------------------
+// Each tenant workspace route is its OWN page that REUSES an existing JSON
+// endpoint (the "reuses existing endpoints" column of the UI-2 route map).
+// One shared loader (loadPageView) owns the fetch + loading + error states so
+// no boilerplate is copy-pasted per page; each entry just maps a route to its
+// endpoint and a pure render(data)->html function.
+function rows(items){
+  return '<table class="data"><tbody>' + items.map(function(r){
+    return '<tr><th scope="row">'+esc(r[0])+'</th><td>'+ (r[1]==null?'':r[1]) +'</td></tr>';
+  }).join('') + '</tbody></table>';
+}
+function listCard(title, lead, body){
+  return '<section class="card"><h2>'+esc(title)+'</h2>'
+    + (lead ? '<p class="lead">'+esc(lead)+'</p>' : '') + body + '</section>';
+}
+var PAGE_VIEWS = {
+  '/dossiers': {
+    endpoint: '/api/tenant/submissions',
+    render: function(d){
+      var subs = d.submissions || [];
+      var start = '<p><a class="cta" href="/submit" data-route="/submit">'
+        + 'Start a submission</a></p>';
+      if (!subs.length) return start + listCard('Submissions',
+        'No submissions yet for this tenant.', '');
+      var body = '<table class="data"><thead><tr><th scope="col">Submission</th>'
+        + '<th scope="col">Dossier ID</th><th scope="col">Lifecycle</th>'
+        + '<th scope="col">eCTD</th></tr></thead><tbody>'
+        + subs.map(function(s){
+            var id = s.dossier_id || s.id || s.name || '-';
+            var key = encodeURIComponent(s.id || s.dossier_id || '');
+            return '<tr><th scope="row">'+esc(s.name || s.title || id)+'</th>'
+              + '<td><code>'+esc(s.dossier_id || '-')+'</code></td>'
+              + '<td>'+esc(s.lifecycle_state || s.status || '-')+'</td>'
+              + '<td><a href="/dossiers/'+key+'" data-route="/dossiers/'+key+'">'
+              + 'Open eCTD tree</a></td></tr>';
+          }).join('')
+        + '</tbody></table>';
+      return start + listCard('Submissions',
+        subs.length + ' dossier(s) in this tenant.', body);
+    }
+  },
+  '/enrolment': {
+    endpoint: '/api/activity-types',
+    render: function(d){
+      var ats = d.activity_types || [];
+      var body = '<ul class="bullets">' + ats.map(function(a){
+        return '<li><strong>'+esc(a.code)+'</strong> - '+esc(a.label)+'</li>';
+      }).join('') + '</ul>';
+      return listCard('Enrolment - REP regulatory activities',
+        'REP CO/RT/PI transactions and Dossier-ID requests. Choose the '
+        + 'regulatory activity type to enrol.', body);
+    }
+  },
+  '/validation': {
+    endpoint: '/api/validation/rulesets',
+    render: function(d){
+      var rs = d.rulesets || [];
+      var body = '<table class="data"><thead><tr><th scope="col">Ruleset</th>'
+        + '<th scope="col">Effective</th><th scope="col">Active</th></tr></thead>'
+        + '<tbody>' + rs.map(function(r){
+            return '<tr><th scope="row">v'+esc(r.version)+'</th>'
+              + '<td>'+esc(r.effective)+'</td>'
+              + '<td>'+(r.active?'active':'-')+'</td></tr>';
+          }).join('') + '</tbody></table>';
+      return listCard('Validation - eCTD rulesets',
+        'Active ruleset: v'+esc(d.active)+'. Run checks for Errors/Warnings, '
+        + 'backbone-to-document link & checksum integrity, and the '
+        + 'package-export gate.', body);
+    }
+  },
+  '/fees': {
+    endpoint: '/api/fees/reference',
+    render: function(d){
+      var gs = d.groupings || [];
+      var body = '<table class="data"><thead><tr><th scope="col">Grouping</th>'
+        + '<th scope="col">Basis</th></tr></thead><tbody>'
+        + gs.map(function(g){
+            return '<tr><th scope="row">'+esc(g.label)+'</th>'
+              + '<td>'+esc(g.basis)+'</td></tr>';
+          }).join('') + '</tbody></table>';
+      return listCard('Fees',
+        'ANDS / right-to-sell / mitigation fee calculation and status. '
+        + 'ANDS grouping: '+esc(d.ands_grouping)+'.', body);
+    }
+  },
+  '/transmission': {
+    endpoint: '/api/transmission/account-types',
+    render: function(d){
+      var at = d.account_types || [];
+      var body = '<ul class="bullets">' + at.map(function(a){
+        return '<li><strong>'+esc(a.key)+'</strong> - '+esc(a.label)+'</li>';
+      }).join('') + '</ul>'
+        + rows([['Gateway', esc(d.esg_environment)],
+                ['Recipient centre', esc(d.recipient_center)],
+                ['Gateway ceiling', esc(d.gateway_ceiling_gb)+' GB'],
+                ['Congestion cutoff', esc(d.congestion_cutoff)]]);
+      return listCard('Transmission - ESG / CESG',
+        'Transmit via the gateway, run a Test round-trip, and track '
+        + 'acknowledgements.', body);
+    }
+  },
+  '/reviews': {
+    endpoint: '/api/esign/policy',
+    render: function(d){
+      var p = d.policy || {};
+      return listCard('Reviews & approvals',
+        'Assign reviewers/approvers, capture decisions, and gate transmit on a '
+        + 'documented QA review + e-signature.',
+        rows([['Policy', esc(p.name)],
+              ['Acceptance', esc(p.acceptance)],
+              ['Request contact', esc(p.request_contact)]]));
+    }
+  },
+  '/admin': {
+    endpoint: '/api/rbac/roles',
+    render: function(d){
+      var roles = d.roles || [];
+      var body = '<table class="data"><thead><tr><th scope="col">Role</th>'
+        + '<th scope="col">Capabilities</th></tr></thead><tbody>'
+        + roles.map(function(r){
+            return '<tr><th scope="row">'+esc(r.label)+'</th>'
+              + '<td>'+esc((r.capabilities||[]).join(', '))+'</td></tr>';
+          }).join('') + '</tbody></table>';
+      return listCard('Tenant admin - users & RBAC roles',
+        'This company users and their within-tenant RBAC roles.', body);
+    }
+  }
+};
+
+function loadPageView(page, item, cfg){
+  page.innerHTML = '<h1>'+esc(item.label)+'</h1>'
+    + '<div class="card">Loading '+esc(item.label).toLowerCase()+'…</div>';
+  fetch(cfg.endpoint).then(function(r){
+    if (!r.ok) return null; return r.json();
+  }).then(function(data){
+    var inner = data ? cfg.render(data)
+      : '<div class="card">Unable to load '+esc(item.label)+'.</div>';
+    page.innerHTML = '<h1>'+esc(item.label)+'</h1>'
+      + '<p class="lead">'+esc(item.label)+'</p>' + inner;
+  }).catch(function(){
+    page.innerHTML = '<h1>'+esc(item.label)+'</h1>'
+      + '<div class="card">Unable to load '+esc(item.label)+'.</div>';
+  });
+}
+
+// REQ-073 guided journey index: a real stepper that links to each workflow
+// page in regulatory order (not a stub - the journey IS the destination map).
+var SUBMIT_STAGES = [
+  ['Enrolment', '/enrolment', 'Register the company & request a Dossier ID'],
+  ['Content & upload', '/dossiers', 'Author Modules 1-5 in the eCTD tree'],
+  ['Validate', '/validation', 'Run checks; clear Errors before filing'],
+  ['Fees', '/fees', 'Calculate and confirm the applicable fee'],
+  ['Review & sign', '/reviews', 'QA review + e-signature gate'],
+  ['Transmit', '/transmission', 'Assemble the CESG package & transmit']
+];
+function renderSubmit(page, item){
+  var steps = SUBMIT_STAGES.map(function(s, i){
+    return '<li><a href="'+esc(s[1])+'" data-route="'+esc(s[1])+'">'
+      + '<span class="step-n" aria-hidden="true">'+(i+1)+'</span>'
+      + '<span class="step-t"><strong>'+esc(s[0])+'</strong>'
+      + '<span class="step-d">'+esc(s[2])+'</span></span></a></li>';
+  }).join('');
+  page.innerHTML = '<h1>'+esc(item.label)+'</h1>'
+    + '<p class="lead">A guided, gated path from enrolment to transmit - '
+    + 'each stage is its own page.</p>'
+    + '<ol class="stepper">'+steps+'</ol>';
+}
+
+// REQ-072 dossier workspace - the eCTD Module 1-5 tree, bound to the existing
+// placement table; deep-linkable at /dossiers/:id.
+function renderDossierTree(page, item, detail){
+  page.innerHTML = '<h1>Dossier '+esc(detail)+'</h1>'
+    + '<div class="card">Loading eCTD tree…</div>';
+  fetch('/api/ectd/placement').then(function(r){
+    if (!r.ok) return null; return r.json();
+  }).then(function(data){
+    if (!data){ page.innerHTML = '<h1>Dossier '+esc(detail)+'</h1>'
+      + '<div class="card">Unable to load the eCTD tree.</div>'; return; }
+    var entries = data.entries || [];
+    var tree = '<ul class="ectd-tree">' + entries.map(function(e){
+      return '<li><span class="node-h">'+esc(e.heading)+'</span> '
+        + esc(e.title)
+        + ' <code class="node-f">'+esc(e.folder)+'</code></li>';
+    }).join('') + '</ul>';
+    page.innerHTML = '<h1>Dossier '+esc(detail)+'</h1>'
+      + '<p class="lead">eCTD backbone - Module 1 placement table v'
+      + esc(data.version)+' (as-filed view).</p>'
+      + '<section class="card">'+tree+'</section>';
+  }).catch(function(){
+    page.innerHTML = '<h1>Dossier '+esc(detail)+'</h1>'
+      + '<div class="card">Unable to load the eCTD tree.</div>';
+  });
+}
+
 function renderPage(match, detail){
   var page = document.getElementById('page');
   var item = match.item;
   // REQ-071 / UI-2: the Dashboard is the readiness landing view, not a stub.
   if (item.route === '/dashboard'){ renderDashboard(page); return; }
+  // REQ-072 deep-linkable dossier eCTD tree.
+  if (item.route === '/dossiers' && detail){
+    renderDossierTree(page, item, detail); return; }
+  // REQ-073 guided submission journey.
+  if (item.route === '/submit'){ renderSubmit(page, item); return; }
+  // Every other workflow page renders REAL content from its existing endpoint.
+  var cfg = PAGE_VIEWS[item.route];
+  if (cfg){ loadPageView(page, item, cfg); return; }
+  // Fallback (should not happen for entitled routes): a real, labelled page.
   page.innerHTML = '<h1>'+esc(item.label)+'</h1>'
     + '<p class="lead">'+esc(item.label)+' workspace.</p>'
-    + '<div class="card">This is the <strong>'+esc(item.label)+'</strong>'
-    + ' page (route <code>'+esc(item.route)+'</code>). Each workflow area is its'
-    + ' own deep-linkable page — use the left rail or your browser Back button'
-    + ' to navigate.'
-    + (detail ? ' <br>Viewing item <strong>'+esc(detail)+'</strong>.' : '')
+    + '<div class="card">This workflow area is available from the left rail.'
+    + (detail ? ' Viewing item <strong>'+esc(detail)+'</strong>.' : '')
     + '</div>';
 }
 

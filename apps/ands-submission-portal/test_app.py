@@ -6494,6 +6494,72 @@ class AppShellRoutingApiTests(unittest.TestCase):
             status, body = self._get_html(route)
             self.assertEqual(status, 200, route)
 
+    # -- UI-2: each workspace page renders REAL content, not a placeholder ----
+    # The route->endpoint binding for every workflow page in the UI-2 table.
+    PAGE_BINDINGS = {
+        "/dossiers": "/api/tenant/submissions",
+        "/enrolment": "/api/activity-types",
+        "/validation": "/api/validation/rulesets",
+        "/fees": "/api/fees/reference",
+        "/transmission": "/api/transmission/account-types",
+        "/reviews": "/api/esign/policy",
+        "/admin": "/api/rbac/roles",
+    }
+
+    def test_ui2_no_placeholder_stub_text_in_shell(self):
+        # The old "This is the <page> page (route ...)" stub MUST be gone — each
+        # page now renders real content from an existing endpoint.
+        _, body = self._get_html("/dashboard")
+        self.assertNotIn("This is the <strong>", body)
+        self.assertNotIn("page (route <code>", body)
+
+    def test_ui2_every_page_route_is_bound_to_its_endpoint(self):
+        # The served shell wires each workflow route to its REAL endpoint via the
+        # PAGE_VIEWS registry (UI-2 "reuses existing endpoints" column).
+        _, body = self._get_html("/dashboard")
+        self.assertIn("PAGE_VIEWS", body)
+        for route, endpoint in self.PAGE_BINDINGS.items():
+            self.assertIn("'" + route + "'", body, route)
+            self.assertIn("'" + endpoint + "'", body, endpoint)
+
+    def test_ui2_bound_endpoints_serve_real_data(self):
+        # Each page binds to a LIVE endpoint that returns real, non-empty data —
+        # proving the pages are not stubs pointing at dead routes.
+        self._signup()  # establish a tenant session for tenant-scoped endpoints
+        checks = {
+            "/api/activity-types": "activity_types",
+            "/api/validation/rulesets": "rulesets",
+            "/api/fees/reference": "groupings",
+            "/api/transmission/account-types": "account_types",
+            "/api/esign/policy": "policy",
+            "/api/rbac/roles": "roles",
+        }
+        for endpoint, key in checks.items():
+            status, payload = self._req("GET", endpoint)
+            self.assertEqual(status, 200, endpoint)
+            self.assertIn(key, payload, endpoint)
+            self.assertTrue(payload[key], endpoint)  # non-empty
+
+    def test_ui2_submit_journey_stepper_is_real(self):
+        # /submit is the guided journey index: a real ordered stepper linking to
+        # each workflow page (REQ-073), not a placeholder.
+        _, body = self._get_html("/submit")
+        self.assertIn("SUBMIT_STAGES", body)
+        self.assertIn("renderSubmit", body)
+        self.assertIn("stepper", body)
+
+    def test_ui2_dossier_detail_renders_ectd_tree(self):
+        # /dossiers/:id renders the eCTD Module 1-5 tree bound to the existing
+        # placement table (REQ-072), deep-linkable.
+        _, body = self._get_html("/dossiers/e123456")
+        self.assertIn("renderDossierTree", body)
+        self.assertIn("/api/ectd/placement", body)
+        self.assertIn("ectd-tree", body)
+        # the placement endpoint it consumes is live and non-empty
+        status, payload = self._req("GET", "/api/ectd/placement")
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["entries"])
+
 
 class Req075IntegrityValidationTests(unittest.TestCase):
     """REQ-075: referential + checksum integrity between the eCTD backbone and
