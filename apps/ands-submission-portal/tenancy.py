@@ -93,6 +93,12 @@ class TenantData:
         with self._lock:
             self._conn.close()
 
+    def __del__(self):  # best-effort safety net so a dropped store never leaks
+        try:
+            self._conn.close()
+        except Exception:
+            pass
+
 
 class TenancyStore:
     """Control-plane registry of tenants + the owner-action audit trail."""
@@ -134,6 +140,12 @@ class TenancyStore:
     def close(self) -> None:
         with self._lock:
             self._conn.close()
+
+    def __del__(self):  # best-effort safety net so a dropped store never leaks
+        try:
+            self._conn.close()
+        except Exception:
+            pass
 
     # -- paths (REQ-078) ----------------------------------------------------
     def tenant_db_path(self, tenant_id: str) -> str:

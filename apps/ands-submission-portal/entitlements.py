@@ -18,9 +18,9 @@ SEPARATE control-plane database (REQ-078), never inside a tenant's own DB.
 from __future__ import annotations
 
 import json
-import sqlite3
-import threading
 from datetime import datetime, timezone
+
+from auth import _SqliteStore
 
 
 # ---------------------------------------------------------------------------
@@ -72,14 +72,8 @@ def normalize_features(features) -> list[str]:
     return [f for f in FEATURES if f in wanted]
 
 
-class EntitlementStore:
+class EntitlementStore(_SqliteStore):
     """Plans + per-tenant overrides, persisted to the control-plane DB."""
-
-    def __init__(self, db_path: str = ":memory:"):
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._lock = threading.Lock()
-        self._init_db()
 
     def _init_db(self) -> None:
         with self._lock:
@@ -107,10 +101,6 @@ class EntitlementStore:
                     (DEFAULT_PLAN_ID, DEFAULT_PLAN_NAME,
                      json.dumps(list(FEATURES)), _now()))
                 self._conn.commit()
-
-    def close(self) -> None:
-        with self._lock:
-            self._conn.close()
 
     # -- plans (REQ-080) ----------------------------------------------------
     def _row_to_plan(self, row) -> dict:

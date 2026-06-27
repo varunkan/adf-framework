@@ -60,14 +60,28 @@ def verify_password(password: str, salt_hex: str, hash_hex: str) -> bool:
     return hmac.compare_digest(candidate, hash_hex)
 
 
-class AuthStore:
-    """Users + sessions in the control-plane DB."""
+class _SqliteStore:
+    """Shared sqlite3 connection + lock boilerplate (DRY base for store classes)."""
 
     def __init__(self, db_path: str = ":memory:"):
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._lock = threading.Lock()
         self._init_db()
+
+    def close(self) -> None:
+        with self._lock:
+            self._conn.close()
+
+    def __del__(self):  # best-effort safety net so a dropped store never leaks
+        try:
+            self._conn.close()
+        except Exception:
+            pass
+
+
+class AuthStore(_SqliteStore):
+    """Users + sessions in the control-plane DB."""
 
     def _init_db(self) -> None:
         with self._lock:
@@ -92,10 +106,6 @@ class AuthStore:
                        created_at TEXT NOT NULL,
                        expires_at TEXT NOT NULL)""")
             self._conn.commit()
-
-    def close(self) -> None:
-        with self._lock:
-            self._conn.close()
 
     # -- users --------------------------------------------------------------
     @staticmethod
