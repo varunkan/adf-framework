@@ -37,6 +37,10 @@ def _stub_upstream() -> FastAPI:
     def validation_ping():
         return {"pong": "validation"}
 
+    @up.get("/api/identity/ping")
+    def identity_ping():
+        return {"pong": "identity"}
+
     return up
 
 
@@ -79,6 +83,7 @@ def test_other_prefixes_route_to_their_service():
     transport = httpx.ASGITransport(app=_stub_upstream())
     up = httpx.AsyncClient(transport=transport, base_url="http://x")
     client = TestClient(build_app(clients={"collaboration": up, "dossier": up,
-                                           "validation": up}))
+                                           "validation": up, "identity": up}))
     assert client.get("/api/dossier/ping").json() == {"pong": True}
     assert client.get("/api/validation/ping").json() == {"pong": "validation"}
+    assert client.get("/api/identity/ping").json() == {"pong": "identity"}

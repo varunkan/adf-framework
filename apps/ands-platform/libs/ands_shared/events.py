@@ -35,6 +35,9 @@ class EventType(str):
     # collaboration context
     COLLAB_TASK_ASSIGNED = "collab.task_assigned"
     COLLAB_COMMENT_ADDED = "collab.comment_added"
+    # identity context
+    TENANT_PROVISIONED = "identity.tenant_provisioned"
+    USER_INVITED = "identity.user_invited"
 
 
 class EventEnvelope(BaseModel):
