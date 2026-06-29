@@ -20,10 +20,12 @@ from ands_shared.appfactory import REQUEST_ID_HEADER
 SERVICES = {
     "collaboration": os.environ.get("COLLAB_URL", "http://collaboration:8000"),
     "dossier": os.environ.get("DOSSIER_URL", "http://dossier:8000"),
+    "validation": os.environ.get("VALIDATION_URL", "http://validation:8000"),
 }
 PREFIX_TO_SERVICE = {
     "/api/collab": "collaboration",
     "/api/dossier": "dossier",
+    "/api/validation": "validation",
 }
 
 # hop-by-hop headers we never forward verbatim
@@ -58,6 +60,11 @@ def build_app(clients: dict | None = None) -> FastAPI:
                    methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
     async def dossier(rest: str, request: Request):  # noqa: ANN202, ARG001
         return await _proxy("dossier", request)
+
+    @app.api_route("/api/validation/{rest:path}",
+                   methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+    async def validation(rest: str, request: Request):  # noqa: ANN202, ARG001
+        return await _proxy("validation", request)
 
     @app.get("/gateway/health", tags=["meta"])
     async def gateway_health():  # noqa: ANN202

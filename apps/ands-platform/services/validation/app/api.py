@@ -1,0 +1,43 @@
+"""FastAPI surface for the validation service."""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, FastAPI, Query
+
+from ands_shared import create_app
+
+from .models import FixIn, InlineIn, ValidateIn
+from .service import ValidationService
+
+
+def build_app(service: ValidationService) -> FastAPI:
+    app = create_app(title="validation",
+                     description="ANDS eCTD technical validation (REQ-104)")
+    router = APIRouter(prefix="/api/validation", tags=["validation"])
+
+    @router.get("/rulesets")
+    def rulesets():
+        return service.list_rulesets()
+
+    @router.get("/ruleset")
+    def ruleset(version: str = ""):
+        return service.ruleset(version)
+
+    @router.post("/run")
+    def run(body: ValidateIn):
+        return service.validate(body.model_dump())
+
+    @router.post("/inline")
+    def inline(body: InlineIn):
+        return service.inline(body.model_dump())
+
+    @router.post("/fix")
+    def fix(body: FixIn):
+        return service.fix(body.model_dump())
+
+    @router.get("/report")
+    def report(dossier_id: str = Query(...), sequence: str = "0000"):
+        return service.report(dossier_id, sequence)
+
+    app.include_router(router)
+    return app

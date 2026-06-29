@@ -1,0 +1,11 @@
+"""Repository port for the validation service (stores run results/reports)."""
+
+from __future__ import annotations
+
+from typing import Protocol
+
+
+class ValidationRepository(Protocol):
+    def save_run(self, dossier_id: str, sequence: str, result: dict) -> dict: ...
+    def latest_run(self, dossier_id: str, sequence: str) -> dict | None: ...
+    def get_run(self, run_id: str) -> dict | None: ...

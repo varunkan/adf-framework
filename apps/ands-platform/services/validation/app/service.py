@@ -1,0 +1,95 @@
+"""Validation application service — run/inline/fix + event emission (REQ-104).
+
+``validate`` persists the run and publishes ``validation.completed`` always and
+``validation.failed`` when blocking — the latter is what the collaboration
+service consumes to notify owners of a blocking defect.
+"""
+
+from __future__ import annotations
+
+from ands_shared import EventEnvelope, EventType, ProblemError
+
+from . import engine, rules
+from .ports import ValidationRepository
+
+
+def _s(v) -> str:
+    return str(v or "").strip()
+
+
+class ValidationService:
+    def __init__(self, repo: ValidationRepository, bus,
+                 *, source: str = "validation") -> None:
+        self.repo = repo
+        self.bus = bus
+        self.source = source
+
+    def register(self) -> "ValidationService":
+        return self
+
+    # -- rulesets -----------------------------------------------------------
+    def list_rulesets(self) -> dict:
+        return {"active": rules.ACTIVE_RULESET_VERSION,
+                "versions": [{"version": v, "effective": meta["effective"]}
+                             for v, meta in sorted(rules.RULESETS.items())]}
+
+    def ruleset(self, version: str) -> dict:
+        try:
+            return rules.ruleset_catalog(version or rules.ACTIVE_RULESET_VERSION)
+        except rules.UnknownRulesetError as exc:
+            raise ProblemError(404, "Unknown ruleset", detail=str(exc))
+
+    # -- run / inline / fix -------------------------------------------------
+    def validate(self, data: dict) -> dict:
+        ctx = data.get("context") or {}
+        version = _s(data.get("version")) or rules.ACTIVE_RULESET_VERSION
+        try:
+            result = engine.run_validation(ctx, version)
+        except rules.UnknownRulesetError as exc:
+            raise ProblemError(422, "Unknown ruleset", detail=str(exc))
+        dossier_id = _s(data.get("dossier_id")) or _s(ctx.get("dossier_id"))
+        sequence = _s(data.get("sequence")) or _s(ctx.get("sequence")) or "0000"
+        run = self.repo.save_run(dossier_id, sequence, result)
+
+        self.bus.publish(EventEnvelope.make(
+            EventType.VALIDATION_COMPLETED, source=self.source,
+            dossier_id=dossier_id,
+            data={"run_id": run["id"], "sequence": sequence,
+                  "blocking": result["blocking"],
+                  "error_count": result["error_count"],
+                  "warning_count": result["warning_count"]}))
+        if result["blocking"]:
+            top = result["errors"][0]
+            self.bus.publish(EventEnvelope.make(
+                EventType.VALIDATION_FAILED, source=self.source,
+                dossier_id=dossier_id,
+                data={"run_id": run["id"], "sequence": sequence,
+                      "error_count": result["error_count"],
+                      "finding": {"rule": top["rule_id"],
+                                  "message": top["message"]},
+                      "recipients": data.get("notify") or []}))
+        return {"run_id": run["id"], **result}
+
+    def inline(self, data: dict) -> dict:
+        ctx = data.get("context") or {}
+        version = _s(data.get("version")) or rules.ACTIVE_RULESET_VERSION
+        try:
+            return engine.inline_findings(ctx, version)
+        except rules.UnknownRulesetError as exc:
+            raise ProblemError(422, "Unknown ruleset", detail=str(exc))
+
+    def fix(self, data: dict) -> dict:
+        ctx = data.get("context") or {}
+        try:
+            new_ctx = engine.apply_fix(ctx, _s(data.get("fix_id")),
+                                       _s(data.get("file")))
+        except ValueError as exc:
+            raise ProblemError(422, "Unknown fix", detail=str(exc))
+        return {"context": new_ctx, "inline": engine.inline_findings(new_ctx)}
+
+    def report(self, dossier_id: str, sequence: str) -> dict:
+        run = self.repo.latest_run(_s(dossier_id), _s(sequence) or "0000")
+        if not run:
+            raise ProblemError(404, "No validation run for dossier/sequence",
+                               detail=f"{dossier_id}/{sequence}")
+        return run

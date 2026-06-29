@@ -33,6 +33,10 @@ def _stub_upstream() -> FastAPI:
     def dossier_ping():
         return {"pong": True}
 
+    @up.get("/api/validation/ping")
+    def validation_ping():
+        return {"pong": "validation"}
+
     return up
 
 
@@ -71,10 +75,10 @@ def test_proxy_passes_through_upstream_status(client):
     assert r.json()["title"] == "conflict"
 
 
-def test_dossier_prefix_routes_to_dossier_service():
+def test_other_prefixes_route_to_their_service():
     transport = httpx.ASGITransport(app=_stub_upstream())
     up = httpx.AsyncClient(transport=transport, base_url="http://x")
-    client = TestClient(build_app(clients={"collaboration": up, "dossier": up}))
-    r = client.get("/api/dossier/ping")
-    assert r.status_code == 200
-    assert r.json() == {"pong": True}
+    client = TestClient(build_app(clients={"collaboration": up, "dossier": up,
+                                           "validation": up}))
+    assert client.get("/api/dossier/ping").json() == {"pong": True}
+    assert client.get("/api/validation/ping").json() == {"pong": "validation"}
