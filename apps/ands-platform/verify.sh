@@ -12,7 +12,7 @@ if [ ! -x "$PY" ]; then
 fi
 
 fail=0
-for suite in services/collaboration gateway; do
+for suite in services/collaboration services/dossier gateway; do
   echo "== $suite =="
   "$PY" -m pytest "$HERE/$suite" -q || fail=1
 done

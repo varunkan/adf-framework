@@ -29,6 +29,10 @@ def _stub_upstream() -> FastAPI:
     def boom():
         return JSONResponse(status_code=409, content={"title": "conflict"})
 
+    @up.get("/api/dossier/ping")
+    def dossier_ping():
+        return {"pong": True}
+
     return up
 
 
@@ -65,3 +69,12 @@ def test_proxy_passes_through_upstream_status(client):
     r = client.get("/api/collab/boom")
     assert r.status_code == 409
     assert r.json()["title"] == "conflict"
+
+
+def test_dossier_prefix_routes_to_dossier_service():
+    transport = httpx.ASGITransport(app=_stub_upstream())
+    up = httpx.AsyncClient(transport=transport, base_url="http://x")
+    client = TestClient(build_app(clients={"collaboration": up, "dossier": up}))
+    r = client.get("/api/dossier/ping")
+    assert r.status_code == 200
+    assert r.json() == {"pong": True}

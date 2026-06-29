@@ -30,6 +30,8 @@ class EventType(str):
     TRANSMISSION_HC_ACK = "transmission.hc_ack"
     # dossier context
     SEQUENCE_PUBLISHED = "sequence.published"
+    CONTENT_PLAN_ITEM_ASSIGNED = "dossier.content_plan.item_assigned"
+    BILINGUAL_PM_BLOCKED = "dossier.bilingual_pm.blocked"
     # collaboration context
     COLLAB_TASK_ASSIGNED = "collab.task_assigned"
     COLLAB_COMMENT_ADDED = "collab.comment_added"

@@ -68,8 +68,8 @@ PYTHONPATH=.:../../libs ../../.venv/bin/uvicorn app.main:app --port 8000
 | Service | Status | Owns |
 |---------|--------|------|
 | **collaboration** | ✅ built (REQ-109) | comments, tasks, notifications; consumes `validation.failed` / `transmission.hc_ack`, emits `collab.task_assigned` |
+| **dossier** | ✅ built (REQ-103, REQ-098) | eCTD Module-1 placement, submission content plans, bilingual Product Monograph; emits `dossier.content_plan.item_assigned`, `dossier.bilingual_pm.blocked` |
 | identity | ⏳ | auth, tenancy, entitlements, rbac, privacy |
-| dossier | ⏳ | eCTD authoring/assembly, content plan, monograph |
 | validation | ⏳ | eCTD validation, report ingest, live validation |
 | lifecycle | ⏳ | DSTS lifecycle, HC calendar |
 | transmission | ⏳ | FDA-ESG ride-along |
