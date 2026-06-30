@@ -41,6 +41,8 @@ class EventType(str):
     # identity context
     TENANT_PROVISIONED = "identity.tenant_provisioned"
     USER_INVITED = "identity.user_invited"
+    # registry context
+    REGISTRATION_STATUS_CHANGED = "registration.status_changed"
 
 
 class EventEnvelope(BaseModel):

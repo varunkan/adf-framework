@@ -28,6 +28,7 @@ SERVICES = {
                                    "http://transmission:8000"),
     "governance": os.environ.get("GOVERNANCE_URL", "http://governance:8000"),
     "readiness": os.environ.get("READINESS_URL", "http://readiness:8000"),
+    "registry": os.environ.get("REGISTRY_URL", "http://registry:8000"),
 }
 PREFIX_TO_SERVICE = {
     "/api/collab": "collaboration",
@@ -39,6 +40,7 @@ PREFIX_TO_SERVICE = {
     "/api/transmission": "transmission",
     "/api/governance": "governance",
     "/api/readiness": "readiness",
+    "/api/registry": "registry",
 }
 
 # hop-by-hop headers we never forward verbatim
@@ -108,6 +110,11 @@ def build_app(clients: dict | None = None) -> FastAPI:
                    methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
     async def readiness(rest: str, request: Request):  # noqa: ANN202, ARG001
         return await _proxy("readiness", request)
+
+    @app.api_route("/api/registry/{rest:path}",
+                   methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+    async def registry(rest: str, request: Request):  # noqa: ANN202, ARG001
+        return await _proxy("registry", request)
 
     @app.get("/gateway/health", tags=["meta"])
     async def gateway_health():  # noqa: ANN202

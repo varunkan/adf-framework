@@ -61,6 +61,10 @@ def _stub_upstream() -> FastAPI:
     def readiness_ping():
         return {"pong": "readiness"}
 
+    @up.get("/api/registry/ping")
+    def registry_ping():
+        return {"pong": "registry"}
+
     return up
 
 
@@ -105,7 +109,7 @@ def test_other_prefixes_route_to_their_service():
     client = TestClient(build_app(clients={
         "collaboration": up, "dossier": up, "validation": up, "identity": up,
         "lifecycle": up, "fees": up, "transmission": up, "governance": up,
-        "readiness": up}))
+        "readiness": up, "registry": up}))
     assert client.get("/api/dossier/ping").json() == {"pong": True}
     assert client.get("/api/validation/ping").json() == {"pong": "validation"}
     assert client.get("/api/identity/ping").json() == {"pong": "identity"}
@@ -114,3 +118,4 @@ def test_other_prefixes_route_to_their_service():
     assert client.get("/api/transmission/ping").json() == {"pong": "transmission"}
     assert client.get("/api/governance/ping").json() == {"pong": "governance"}
     assert client.get("/api/readiness/ping").json() == {"pong": "readiness"}
+    assert client.get("/api/registry/ping").json() == {"pong": "registry"}
