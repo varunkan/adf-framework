@@ -30,3 +30,9 @@ class BatchIn(BaseModel):
     contexts: list[dict] = Field(default_factory=list)
     version: str | None = None
     profile: str = "eCTD"
+
+
+class RemediateIn(BaseModel):
+    file: dict = Field(default_factory=dict)
+    ops: list[str] | None = None
+    dossier_id: str = ""

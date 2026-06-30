@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from ands_shared import EventEnvelope, EventType, ProblemError
 
-from . import engine, rules
+from . import engine, remediation, rules
 from .ports import ValidationRepository
 
 
@@ -115,6 +115,20 @@ class ValidationService:
         if not job:
             raise ProblemError(404, "validation job not found", detail=_s(job_id))
         return job
+
+    # -- PDF remediation pipeline (REQ-108) --------------------------------
+    def remediation_plan(self, pdf: dict) -> dict:
+        return {"plan": remediation.remediation_plan(pdf or {})}
+
+    def remediate(self, data: dict) -> dict:
+        result = remediation.remediate_pdf(data.get("file") or {},
+                                           data.get("ops"))
+        if result["remediated"]:
+            self.bus.publish(EventEnvelope.make(
+                EventType.DOCUMENT_REMEDIATED, source=self.source,
+                dossier_id=_s(data.get("dossier_id")),
+                data={"path": result["path"], "changes": result["changes"]}))
+        return result
 
     def report(self, dossier_id: str, sequence: str) -> dict:
         run = self.repo.latest_run(_s(dossier_id), _s(sequence) or "0000")

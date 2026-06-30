@@ -25,6 +25,7 @@ class EventType(str):
     # validation context
     VALIDATION_COMPLETED = "validation.completed"
     VALIDATION_FAILED = "validation.failed"
+    DOCUMENT_REMEDIATED = "document.remediated"
     # transmission context
     TRANSMISSION_SENT = "transmission.sent"
     TRANSMISSION_HC_ACK = "transmission.hc_ack"

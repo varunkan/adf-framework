@@ -6,7 +6,7 @@ from fastapi import APIRouter, FastAPI, Query
 
 from ands_shared import create_app
 
-from .models import BatchIn, FixIn, InlineIn, ValidateIn
+from .models import BatchIn, FixIn, InlineIn, RemediateIn, ValidateIn
 from .service import ValidationService
 
 
@@ -51,6 +51,15 @@ def build_app(service: ValidationService) -> FastAPI:
     @router.get("/batch/{job_id}")
     def get_job(job_id: str):
         return service.get_job(job_id)
+
+    # -- PDF remediation pipeline (REQ-108) ----------------------------
+    @router.post("/remediation-plan")
+    def remediation_plan(body: RemediateIn):
+        return service.remediation_plan(body.file)
+
+    @router.post("/remediate")
+    def remediate(body: RemediateIn):
+        return service.remediate(body.model_dump())
 
     app.include_router(router)
     return app
