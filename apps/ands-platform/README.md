@@ -71,7 +71,7 @@ PYTHONPATH=.:../../libs ../../.venv/bin/uvicorn app.main:app --port 8000
 | **dossier** | ✅ built (REQ-103, REQ-098) | eCTD Module-1 placement, submission content plans, bilingual Product Monograph; emits `dossier.content_plan.item_assigned`, `dossier.bilingual_pm.blocked` |
 | **validation** | ✅ built (REQ-104) | versioned HC eCTD rule engine (run/inline/fix), persisted reports; emits `validation.completed` / `validation.failed` (→ collaboration notifies) |
 | **identity** | ✅ built (REQ-077..084) | self-serve signup, login/sessions (PBKDF2), tenants, plans+overrides → effective entitlements, RBAC authorize; emits `identity.tenant_provisioned` |
-| lifecycle | ⏳ | DSTS lifecycle, HC calendar |
+| **lifecycle** | ✅ built (REQ-030/031/062) | DSTS state machine (Screening→Review→NOC/NOD/NON), statutory-holiday deadline calendar, 25% missed-service-standard credit; emits `lifecycle.transitioned`, `lifecycle.service_standard_missed` |
 | transmission | ⏳ | FDA-ESG ride-along |
 | fees | ⏳ | fee schedule |
 | governance | ⏳ | e-sign, retention, DR, audit |

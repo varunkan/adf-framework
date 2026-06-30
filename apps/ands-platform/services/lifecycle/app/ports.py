@@ -1,0 +1,11 @@
+"""Repository port for the lifecycle service."""
+
+from __future__ import annotations
+
+from typing import Protocol
+
+
+class LifecycleRepository(Protocol):
+    def save(self, state: dict) -> dict: ...
+    def get(self, dossier_id: str) -> dict | None: ...
+    def list(self) -> list[dict]: ...

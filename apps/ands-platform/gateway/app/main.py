@@ -22,12 +22,14 @@ SERVICES = {
     "dossier": os.environ.get("DOSSIER_URL", "http://dossier:8000"),
     "validation": os.environ.get("VALIDATION_URL", "http://validation:8000"),
     "identity": os.environ.get("IDENTITY_URL", "http://identity:8000"),
+    "lifecycle": os.environ.get("LIFECYCLE_URL", "http://lifecycle:8000"),
 }
 PREFIX_TO_SERVICE = {
     "/api/collab": "collaboration",
     "/api/dossier": "dossier",
     "/api/validation": "validation",
     "/api/identity": "identity",
+    "/api/lifecycle": "lifecycle",
 }
 
 # hop-by-hop headers we never forward verbatim
@@ -72,6 +74,11 @@ def build_app(clients: dict | None = None) -> FastAPI:
                    methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
     async def identity(rest: str, request: Request):  # noqa: ANN202, ARG001
         return await _proxy("identity", request)
+
+    @app.api_route("/api/lifecycle/{rest:path}",
+                   methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+    async def lifecycle(rest: str, request: Request):  # noqa: ANN202, ARG001
+        return await _proxy("lifecycle", request)
 
     @app.get("/gateway/health", tags=["meta"])
     async def gateway_health():  # noqa: ANN202

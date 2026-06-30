@@ -41,6 +41,10 @@ def _stub_upstream() -> FastAPI:
     def identity_ping():
         return {"pong": "identity"}
 
+    @up.get("/api/lifecycle/ping")
+    def lifecycle_ping():
+        return {"pong": "lifecycle"}
+
     return up
 
 
@@ -82,8 +86,10 @@ def test_proxy_passes_through_upstream_status(client):
 def test_other_prefixes_route_to_their_service():
     transport = httpx.ASGITransport(app=_stub_upstream())
     up = httpx.AsyncClient(transport=transport, base_url="http://x")
-    client = TestClient(build_app(clients={"collaboration": up, "dossier": up,
-                                           "validation": up, "identity": up}))
+    client = TestClient(build_app(clients={
+        "collaboration": up, "dossier": up, "validation": up, "identity": up,
+        "lifecycle": up}))
     assert client.get("/api/dossier/ping").json() == {"pong": True}
     assert client.get("/api/validation/ping").json() == {"pong": "validation"}
     assert client.get("/api/identity/ping").json() == {"pong": "identity"}
+    assert client.get("/api/lifecycle/ping").json() == {"pong": "lifecycle"}

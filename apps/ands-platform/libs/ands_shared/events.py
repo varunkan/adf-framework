@@ -28,6 +28,9 @@ class EventType(str):
     # transmission context
     TRANSMISSION_SENT = "transmission.sent"
     TRANSMISSION_HC_ACK = "transmission.hc_ack"
+    # lifecycle context
+    LIFECYCLE_TRANSITIONED = "lifecycle.transitioned"
+    SERVICE_STANDARD_MISSED = "lifecycle.service_standard_missed"
     # dossier context
     SEQUENCE_PUBLISHED = "sequence.published"
     CONTENT_PLAN_ITEM_ASSIGNED = "dossier.content_plan.item_assigned"
