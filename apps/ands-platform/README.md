@@ -84,5 +84,6 @@ PYTHONPATH=.:../../libs ../../.venv/bin/uvicorn app.main:app --port 8000
 | **governance** | ✅ built (REQ-039/053/068/060) | tamper-evident e-signature gate (QA review + manifest) **and** the event-sourced audit trail — subscribes to `*` and records every domain event, append-only, with text export |
 | **readiness (BFF)** | ✅ built (REQ-071) | event-driven projection — consumes validation/transmission/lifecycle/bilingual-PM events into a per-dossier READY/BLOCKED dashboard with drill-in blockers |
 | **registry** | ✅ built (REQ-111) | marketed-product registration registry (product × country × dossier × DIN × status) with status state machine + post-NOC Right-to-Sell obligation; emits `registration.status_changed` |
+| **webhooks** | ✅ built (SAAS-REQ-011) | tenants register endpoints (by event type/tenant); subscribes to the bus `*` and enqueues HMAC-signed deliveries to an append-only outbox |
 
 Migration order and per-service recipe: see the ADR.

@@ -12,7 +12,7 @@ if [ ! -x "$PY" ]; then
 fi
 
 fail=0
-for suite in services/identity services/collaboration services/dossier services/validation services/lifecycle services/fees services/transmission services/governance services/readiness services/registry gateway integration; do
+for suite in services/identity services/collaboration services/dossier services/validation services/lifecycle services/fees services/transmission services/governance services/readiness services/registry services/webhooks gateway integration; do
   echo "== $suite =="
   "$PY" -m pytest "$HERE/$suite" -q || fail=1
 done
