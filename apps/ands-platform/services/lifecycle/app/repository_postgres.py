@@ -5,11 +5,16 @@ from __future__ import annotations
 import json
 import threading
 
-from ands_shared import utcnow_iso
+from ands_shared import new_id, utcnow_iso
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS lifecycles (
     dossier_id TEXT PRIMARY KEY, state TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS correspondence (
+    id TEXT PRIMARY KEY, dossier_id TEXT NOT NULL, kind TEXT NOT NULL,
+    kind_label TEXT NOT NULL, subject TEXT NOT NULL, body TEXT,
+    direction TEXT NOT NULL, received_at TEXT, reference TEXT,
+    created_at TEXT NOT NULL);
 """
 
 
@@ -53,3 +58,34 @@ class PostgresLifecycleRepository:
             cur.execute("SELECT state FROM lifecycles ORDER BY updated_at")
             rows = cur.fetchall()
         return [json.loads(r[0]) for r in rows]
+
+    # -- HC correspondence (REQ-112) ---------------------------------------
+    def _all(self, sql, params=()):
+        with self._lock:
+            cur = self._conn.cursor()
+            cur.execute(sql, params)
+            cols = [d[0] for d in cur.description]
+            return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+    def add_correspondence(self, record: dict) -> dict:
+        cid = new_id()
+        with self._lock:
+            cur = self._conn.cursor()
+            cur.execute(
+                "INSERT INTO correspondence (id, dossier_id, kind, kind_label, "
+                "subject, body, direction, received_at, reference, created_at) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (cid, record["dossier_id"], record["kind"], record["kind_label"],
+                 record["subject"], record.get("body"), record["direction"],
+                 record.get("received_at"), record.get("reference"),
+                 utcnow_iso()))
+            self._conn.commit()
+        return self._all("SELECT * FROM correspondence WHERE id = %s", (cid,))[0]
+
+    def list_correspondence(self, dossier_id: str, kind: str = "") -> list[dict]:
+        if str(kind or "").strip():
+            return self._all("SELECT * FROM correspondence WHERE dossier_id = %s "
+                             "AND kind = %s ORDER BY created_at",
+                             (dossier_id, kind))
+        return self._all("SELECT * FROM correspondence WHERE dossier_id = %s "
+                         "ORDER BY created_at", (dossier_id,))

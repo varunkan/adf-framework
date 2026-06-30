@@ -6,7 +6,7 @@ from fastapi import APIRouter, FastAPI, Query
 
 from ands_shared import create_app
 
-from .models import DeadlineIn, StartIn, TransitionIn
+from .models import CorrespondenceIn, DeadlineIn, StartIn, TransitionIn
 from .service import LifecycleService
 
 
@@ -38,6 +38,15 @@ def build_app(service: LifecycleService) -> FastAPI:
     @router.get("/state/{dossier_id}")
     def state(dossier_id: str):
         return service.get(dossier_id)
+
+    # -- HC correspondence hub (REQ-112) -------------------------------
+    @router.post("/correspondence", status_code=201)
+    def log_correspondence(body: CorrespondenceIn):
+        return service.log_correspondence(body.model_dump())
+
+    @router.get("/correspondence")
+    def list_correspondence(dossier_id: str = Query(...), kind: str = ""):
+        return service.list_correspondence(dossier_id, kind)
 
     app.include_router(router)
     return app

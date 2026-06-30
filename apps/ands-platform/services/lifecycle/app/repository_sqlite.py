@@ -7,13 +7,25 @@ from __future__ import annotations
 
 import json
 
-from ands_shared import SqliteDb, utcnow_iso
+from ands_shared import SqliteDb, new_id, utcnow_iso
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS lifecycles (
     dossier_id TEXT PRIMARY KEY,
     state      TEXT NOT NULL,
     updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS correspondence (
+    id          TEXT PRIMARY KEY,
+    dossier_id  TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    kind_label  TEXT NOT NULL,
+    subject     TEXT NOT NULL,
+    body        TEXT,
+    direction   TEXT NOT NULL,
+    received_at TEXT,
+    reference   TEXT,
+    created_at  TEXT NOT NULL
 );
 """
 
@@ -40,3 +52,27 @@ class SqliteLifecycleRepository:
         rows = self.db.fetchall(
             "SELECT state FROM lifecycles ORDER BY updated_at")
         return [json.loads(r["state"]) for r in rows]
+
+    # -- HC correspondence (REQ-112) ---------------------------------------
+    def add_correspondence(self, record: dict) -> dict:
+        cid = new_id()
+        self.db.execute(
+            "INSERT INTO correspondence (id, dossier_id, kind, kind_label, "
+            "subject, body, direction, received_at, reference, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (cid, record["dossier_id"], record["kind"], record["kind_label"],
+             record["subject"], record.get("body"), record["direction"],
+             record.get("received_at"), record.get("reference"), utcnow_iso()))
+        return dict(self.db.fetchone(
+            "SELECT * FROM correspondence WHERE id = ?", (cid,)))
+
+    def list_correspondence(self, dossier_id: str, kind: str = "") -> list[dict]:
+        if str(kind or "").strip():
+            rows = self.db.fetchall(
+                "SELECT * FROM correspondence WHERE dossier_id = ? AND kind = ? "
+                "ORDER BY created_at", (dossier_id, kind))
+        else:
+            rows = self.db.fetchall(
+                "SELECT * FROM correspondence WHERE dossier_id = ? "
+                "ORDER BY created_at", (dossier_id,))
+        return [dict(r) for r in rows]

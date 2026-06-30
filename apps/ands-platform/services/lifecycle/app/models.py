@@ -25,3 +25,13 @@ class DeadlineIn(BaseModel):
     days: int = 0
     notice_type: str = ""
     basis: str | None = None
+
+
+class CorrespondenceIn(BaseModel):
+    dossier_id: str = ""
+    kind: str = ""
+    subject: str = ""
+    body: str = ""
+    direction: str = "inbound"
+    received_at: str = ""
+    reference: str = ""

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ands_shared import EventEnvelope, EventType, ProblemError
 
-from . import hc_calendar, lifecycle
+from . import correspondence, hc_calendar, lifecycle
 from .ports import LifecycleRepository
 
 
@@ -105,3 +105,15 @@ class LifecycleService:
 
     def holidays(self, year: int) -> dict:
         return {"year": year, "holidays": hc_calendar.statutory_holidays(year)}
+
+    # -- HC correspondence hub (REQ-112) -----------------------------------
+    def log_correspondence(self, data: dict) -> dict:
+        res = correspondence.validate_correspondence(data)
+        if not res["valid"]:
+            raise ProblemError(422, "Invalid correspondence",
+                               errors=res["errors"])
+        return self.repo.add_correspondence(res["record"])
+
+    def list_correspondence(self, dossier_id: str, kind: str = "") -> dict:
+        items = self.repo.list_correspondence(_s(dossier_id), kind)
+        return {"correspondence": items, "count": len(items)}
