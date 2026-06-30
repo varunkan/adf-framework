@@ -82,6 +82,13 @@ def test_gateway_health_aggregates_upstreams(client):
     assert r.json() == {"status": "ok", "services": {"collaboration": "ok"}}
 
 
+def test_gateway_service_catalog(client):
+    cat = client.get("/gateway/services").json()
+    services = {r["service"] for r in cat["routes"]}
+    assert "collaboration" in services and "registry" in services
+    assert cat["count"] == len(services)
+
+
 def test_proxy_forwards_post_body_and_request_id(client):
     r = client.post("/api/collab/echo", json={"hi": 1})
     assert r.status_code == 200

@@ -129,6 +129,13 @@ def build_app(clients: dict | None = None) -> FastAPI:
         healthy = all(v == "ok" for v in statuses.values())
         return {"status": "ok" if healthy else "degraded", "services": statuses}
 
+    @app.get("/gateway/services", tags=["meta"])
+    async def gateway_services():  # noqa: ANN202
+        """The routing catalog: which path prefix maps to which service."""
+        return {"routes": [{"prefix": p, "service": s}
+                           for p, s in sorted(PREFIX_TO_SERVICE.items())],
+                "count": len(PREFIX_TO_SERVICE)}
+
     return app
 
 
