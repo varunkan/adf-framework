@@ -117,6 +117,7 @@ export default function Page() {
                 stage={activeStage}
                 view={view}
                 onAdvance={advance}
+                onView={setView}
                 busy={busy}
               />
             )}
@@ -125,6 +126,7 @@ export default function Page() {
             <SubmissionTower
               tiles={view.readiness.tiles}
               status={view.readiness.status}
+              modules={activeStage?.key === "content" ? view.content.tower : undefined}
             />
             <ReadinessCard data={view.readiness} onResume={setActiveKey} />
           </aside>

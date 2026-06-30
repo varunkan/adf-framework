@@ -1,7 +1,7 @@
 "use client";
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
-import type { Tile } from "@/lib/types";
+import type { ModuleTower, Tile } from "@/lib/types";
 
 const TowerScene = dynamic(() => import("./TowerScene"), { ssr: false });
 
@@ -39,30 +39,54 @@ function CssTower({ tiles, ready }: { tiles: Tile[]; ready: boolean }) {
   );
 }
 
+const MODULE_STATE: Record<string, Tile["state"]> = {
+  pass: "pass",
+  partial: "current",
+  todo: "todo",
+  na: "todo",
+};
+
 export function SubmissionTower({
   tiles,
   status,
+  modules,
 }: {
   tiles: Tile[];
   status: "READY" | "BLOCKED";
+  modules?: ModuleTower[];
 }) {
   const [webgl, setWebgl] = useState(false);
   useEffect(() => {
     setWebgl(hasWebGL() && !reducedMotion());
   }, []);
   const ready = status === "READY";
-  const passed = tiles.filter((t) => t.state === "pass").length;
+
+  // In the content step the tower shows the literal eCTD Module 1-5 fill;
+  // elsewhere it shows overall journey progress.
+  const display: Tile[] = modules
+    ? modules.map((m) => ({
+        key: `m${m.module}`,
+        label: `Module ${m.module}`,
+        state: MODULE_STATE[m.state] ?? "todo",
+        reg: "",
+      }))
+    : tiles;
+  const passed = display.filter((t) => t.state === "pass").length;
+
   return (
     <div className="tower-host" role="img"
-      aria-label={`Submission tower — ${passed} of ${tiles.length} stages complete, ${status}`}>
+      aria-label={`Submission tower — ${passed} of ${display.length} ${modules ? "modules placed" : "stages complete"}, ${status}`}>
       {webgl ? (
-        <TowerScene tiles={tiles} ready={ready} />
+        <TowerScene tiles={display} ready={ready} />
       ) : (
-        <CssTower tiles={tiles} ready={ready} />
+        <CssTower tiles={display} ready={ready} />
       )}
       <div className="tower-cap">
-        Your submission · <b>Module 1–5</b> — {passed}/{tiles.length} green
-        {ready ? " · READY ✦" : ""}
+        {modules ? (
+          <>Placing into <b>Module 1–5</b> — {passed}/{display.length} complete</>
+        ) : (
+          <>Your submission · <b>Module 1–5</b> — {passed}/{display.length} green{ready ? " · READY ✦" : ""}</>
+        )}
       </div>
     </div>
   );

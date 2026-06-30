@@ -1,5 +1,10 @@
 // Thin client over the same-origin /api/journey proxy (-> the journey BFF).
-import type { Catalog, IntakeAssessment, JourneyView } from "./types";
+import type {
+  Catalog,
+  IntakeAssessment,
+  JourneyView,
+  TrackSummary,
+} from "./types";
 
 const BASE = "/api/journey";
 
@@ -47,6 +52,27 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+
+  placeDoc: (id: string, slot_key: string, doc: string, languages?: string[]) =>
+    j<JourneyView>(`/${id}/content/place`, {
+      method: "POST",
+      body: JSON.stringify({ slot_key, doc, languages: languages ?? null }),
+    }),
+
+  logNotice: (id: string, type: string, date: string) =>
+    j<JourneyView>(`/${id}/track/notice`, {
+      method: "POST",
+      body: JSON.stringify({ type, date }),
+    }),
+
+  pauseClock: (id: string, type: string, paused: boolean) =>
+    j<any>(`/${id}/track/pause`, {
+      method: "POST",
+      body: JSON.stringify({ type, paused }),
+    }),
+
+  track: (id: string, as_of: string) =>
+    j<TrackSummary>(`/${id}/track?as_of=${encodeURIComponent(as_of)}`),
 };
 
 // session id persistence so a returning user resumes exactly where they were

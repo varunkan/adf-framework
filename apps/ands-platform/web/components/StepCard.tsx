@@ -4,6 +4,8 @@ import { api } from "@/lib/api";
 import type { JourneyView, Stage } from "@/lib/types";
 import { Term } from "./Term";
 import { DrugIntake } from "./DrugIntake";
+import { ContentSlots } from "./ContentSlots";
+import { TrackView } from "./TrackView";
 
 type AdvanceFn = (step: string, data?: Record<string, any>) => Promise<void>;
 
@@ -11,11 +13,13 @@ export function StepCard({
   stage,
   view,
   onAdvance,
+  onView,
   busy,
 }: {
   stage: Stage;
   view: JourneyView;
   onAdvance: AdvanceFn;
+  onView: (v: JourneyView) => void;
   busy: boolean;
 }) {
   const [form, setForm] = useState<Record<string, any>>({});
@@ -120,26 +124,13 @@ export function StepCard({
             letter, forms, the bilingual Product Monograph). For an ANDS, Module 5
             holds your <Term k="bioequivalence">bioequivalence</Term> reports and
             Module 3 your <Term k="CMC" />. A misplaced document bounces the whole
-            package.
+            package — drag each document onto its slot and watch the tower fill.
           </div>
-          {view.intake?.route?.content_model && (
-            <div className="tiles" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
-              {view.intake.route.content_model.modules.map((m) => (
-                <div
-                  key={m.module}
-                  className={`tile ${m.suppressed ? "todo" : "current"}`}
-                  title={m.title}
-                >
-                  <span className="d" />
-                  M{m.module} {m.suppressed ? "(n/a)" : m.required ? "•req" : ""}
-                </div>
-              ))}
-            </div>
-          )}
-          <p className="mut" style={{ fontSize: 13 }}>
-            (In the full editor you drag documents onto the tower&apos;s module
-            slots. For this guided walk, confirm when your required items are in.)
-          </p>
+          <ContentSlots
+            sessionId={view.id}
+            content={view.content}
+            onUpdate={onView}
+          />
         </>
       )}
 
@@ -208,7 +199,12 @@ export function StepCard({
 
       {stage.key === "transmit" && <TransmitStep sig={sig} />}
 
-      {stage.key === "track" && <TrackStep />}
+      {stage.key === "track" && (
+        <>
+          <TrackStep />
+          <TrackView sessionId={view.id} />
+        </>
+      )}
 
       {(localErr || false) && <div className="notice bad">{localErr}</div>}
 

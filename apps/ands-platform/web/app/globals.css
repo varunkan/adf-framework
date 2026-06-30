@@ -186,6 +186,61 @@ button:disabled{opacity:.45;cursor:not-allowed;transform:none}
 .slab.todo{background:linear-gradient(135deg,rgba(255,255,255,.22),rgba(255,255,255,.08));
   color:#cdd9ee}
 
+/* ── content slots (drag-drop document placement) ─────────────────── */
+.content-slots{margin-top:6px}
+.slot-tray{display:flex;flex-wrap:wrap;gap:8px;padding:12px;border-radius:12px;
+  background:rgba(0,0,0,.22);border:1px solid var(--line);margin-bottom:16px}
+.doc-chip{font-size:12.5px;font-weight:600;padding:8px 12px;border-radius:9px;
+  background:rgba(91,140,255,.16);border:1px solid var(--line);color:var(--ink);
+  cursor:grab}
+.doc-chip:hover{transform:translateY(-1px);box-shadow:var(--prism-shadow-2)}
+.doc-chip:active{cursor:grabbing}
+.doc-chip.placed{background:rgba(55,211,155,.16);border-color:rgba(55,211,155,.4);
+  opacity:.7;cursor:default}
+.slot-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media (max-width:640px){.slot-grid{grid-template-columns:1fr}}
+.slot{display:flex;flex-direction:column;gap:3px;padding:12px 13px;border-radius:11px;
+  border:1.5px dashed var(--line);background:rgba(255,255,255,.03);min-height:74px}
+.slot.drop-active{border-color:var(--brand);border-style:solid;
+  background:rgba(91,140,255,.14);transform:translateY(-1px)}
+.slot.filled{border-style:solid;border-color:rgba(55,211,155,.5);
+  background:rgba(55,211,155,.1)}
+.slot.partial{border-style:solid;border-color:rgba(255,209,102,.5);
+  background:rgba(255,209,102,.1)}
+.slot.na{opacity:.55;border-style:solid;min-height:auto;flex-direction:row;
+  align-items:center;gap:8px}
+.slot-mod{font-size:11px;font-weight:800;letter-spacing:.04em;color:var(--violet);
+  background:rgba(155,107,255,.15);padding:1px 7px;border-radius:6px;align-self:flex-start}
+.slot-title{font-size:13.5px;font-weight:600}
+.slot-state{font-size:12px;color:var(--mut)}
+.slot.filled .slot-state{color:var(--ok)}.slot.partial .slot-state{color:var(--warn)}
+.optional-slots{margin-top:14px}
+.optional-slots summary{cursor:pointer;font-size:13px;color:var(--mut);
+  margin-bottom:8px}
+
+/* ── track view (deadline timers) ─────────────────────────────────── */
+.phase-pill{display:inline-flex;align-items:center;gap:9px;font-size:13.5px;
+  font-weight:600;padding:8px 13px;border-radius:999px;border:1px solid var(--line);
+  background:rgba(91,140,255,.12);margin-bottom:6px}
+.phase-pill .d{width:8px;height:8px;border-radius:50%;background:var(--brand);
+  box-shadow:0 0 8px var(--brand)}
+.track-actions{margin:14px 0 6px}
+.timer{display:flex;gap:16px;align-items:flex-start;padding:14px 16px;
+  border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.04);
+  margin-top:12px}
+.timer.overdue{border-color:rgba(255,107,107,.5);background:rgba(255,107,107,.1)}
+.timer.paused{border-color:rgba(255,209,102,.45);background:rgba(255,209,102,.08)}
+.timer-head{display:flex;flex-direction:column;align-items:center;min-width:66px;
+  padding-top:2px}
+.timer-count{font-size:30px;font-weight:800;line-height:1;
+  background:var(--prism-accent);-webkit-background-clip:text;background-clip:text;
+  color:transparent}
+.timer.overdue .timer-count{background:none;color:var(--bad)}
+.timer.paused .timer-count{background:none;color:var(--warn)}
+.timer-unit{font-size:11px;color:var(--mut);text-transform:uppercase;
+  letter-spacing:.06em;margin-top:3px}
+.timer-body{flex:1;min-width:0}
+
 /* hero (pre-start) */
 .hero{max-width:760px;margin:8vh auto 0;text-align:center;padding:0 22px}
 .hero h1{font-size:42px;line-height:1.08;margin:0 0 16px;letter-spacing:-.5px}
