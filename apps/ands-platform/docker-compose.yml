@@ -165,6 +165,27 @@ services:
     depends_on: [governance-db, redis]
     expose: ["8000"]
 
+  readiness-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ands
+      POSTGRES_PASSWORD: ands
+      POSTGRES_DB: readiness
+    volumes:
+      - readiness-pg:/var/lib/postgresql/data
+
+  readiness:
+    build:
+      context: .
+      dockerfile: services/readiness/Dockerfile
+    environment:
+      ANDS_DB_BACKEND: postgres
+      ANDS_PG_DSN: postgresql://ands:ands@readiness-db:5432/readiness
+      ANDS_BUS: redis
+      ANDS_REDIS_URL: redis://redis:6379/0
+    depends_on: [readiness-db, redis]
+    expose: ["8000"]
+
   gateway:
     build:
       context: .
@@ -178,8 +199,9 @@ services:
       FEES_URL: http://fees:8000
       TRANSMISSION_URL: http://transmission:8000
       GOVERNANCE_URL: http://governance:8000
+      READINESS_URL: http://readiness:8000
     depends_on: [collaboration, dossier, validation, identity, lifecycle, fees,
-                 transmission, governance]
+                 transmission, governance, readiness]
     ports: ["8080:8000"]
 
 volumes:
@@ -190,3 +212,4 @@ volumes:
   lifecycle-pg:
   transmission-pg:
   governance-pg:
+  readiness-pg:

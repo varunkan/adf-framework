@@ -75,6 +75,6 @@ PYTHONPATH=.:../../libs ../../.venv/bin/uvicorn app.main:app --port 8000
 | **fees** | ✅ built (REQ-035/036/037) | stateless calculator: Schedule-1 fee + fiscal-year escalation, small-business remission/deferral, per-DIN Right-to-Sell |
 | **transmission** | ✅ built (REQ-003/025/027/046) | FDA-ESG NextGen config + Test-gateway gate, 10 GB routing, one-at-a-time MDN→FDA→HC ack chain; emits `transmission.sent`, `transmission.hc_ack` (→ collaboration notifies) |
 | **governance** | ✅ built (REQ-039/053/068/060) | tamper-evident e-signature gate (QA review + manifest) **and** the event-sourced audit trail — subscribes to `*` and records every domain event, append-only, with text export |
-| readiness (BFF) | ⏳ | event-driven dashboard aggregation |
+| **readiness (BFF)** | ✅ built (REQ-071) | event-driven projection — consumes validation/transmission/lifecycle/bilingual-PM events into a per-dossier READY/BLOCKED dashboard with drill-in blockers |
 
 Migration order and per-service recipe: see the ADR.
