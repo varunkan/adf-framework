@@ -63,3 +63,15 @@ class PmXrefIn(BaseModel):
     refs: list = Field(default_factory=list)
     xrefs: list[dict] = Field(default_factory=list)
     present_targets: list[str] | None = None
+
+
+class LeafIn(BaseModel):
+    dossier_id: str = ""
+    sequence: str = "0000"
+    leaf_id: str = ""
+    operation: str = "new"
+    heading: str = ""
+    title: str = ""
+    href: str = ""
+    modified_leaf: str = ""
+    content: str = ""

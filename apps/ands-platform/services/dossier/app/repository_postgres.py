@@ -6,6 +6,7 @@ docker-compose, not in the sandbox.
 
 from __future__ import annotations
 
+import json
 import threading
 
 from ands_shared import new_id, utcnow_iso
@@ -24,6 +25,8 @@ CREATE TABLE IF NOT EXISTS pm_leaves (
     dossier_id TEXT NOT NULL, lang TEXT NOT NULL, leaf_id TEXT NOT NULL,
     title TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, heading TEXT NOT NULL,
     updated_at TEXT NOT NULL, PRIMARY KEY (dossier_id, lang));
+CREATE TABLE IF NOT EXISTS dossiers (
+    dossier_id TEXT PRIMARY KEY, model TEXT NOT NULL, updated_at TEXT NOT NULL);
 """
 
 _ITEM_PATCHABLE = ("assignee", "due_date", "status")
@@ -133,3 +136,16 @@ class PostgresDossierRepository:
     def list_pm_leaves(self, dossier_id) -> list[dict]:
         return self._all("SELECT * FROM pm_leaves WHERE dossier_id = %s "
                          "ORDER BY lang", (dossier_id,))
+
+    # -- eCTD assembly model (REQ-107) -------------------------------------
+    def get_dossier(self, dossier_id) -> dict | None:
+        row = self._one("SELECT model FROM dossiers WHERE dossier_id = %s",
+                        (dossier_id,))
+        return json.loads(row["model"]) if row else None
+
+    def save_dossier(self, model: dict) -> dict:
+        self._exec("INSERT INTO dossiers (dossier_id, model, updated_at) "
+                   "VALUES (%s,%s,%s) ON CONFLICT (dossier_id) DO UPDATE SET "
+                   "model=excluded.model, updated_at=excluded.updated_at",
+                   (model["dossier_id"], json.dumps(model), utcnow_iso()))
+        return model

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from ands_shared import SqliteDb, new_id, utcnow_iso
 
 _SCHEMA = """
@@ -36,6 +38,11 @@ CREATE TABLE IF NOT EXISTS pm_leaves (
     heading     TEXT NOT NULL,
     updated_at  TEXT NOT NULL,
     PRIMARY KEY (dossier_id, lang)
+);
+CREATE TABLE IF NOT EXISTS dossiers (
+    dossier_id  TEXT PRIMARY KEY,
+    model       TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
 );
 """
 
@@ -135,3 +142,17 @@ class SqliteDossierRepository:
             "SELECT * FROM pm_leaves WHERE dossier_id = ? ORDER BY lang",
             (dossier_id,))
         return [dict(r) for r in rows]
+
+    # -- eCTD assembly model (REQ-107) -------------------------------------
+    def get_dossier(self, dossier_id: str) -> dict | None:
+        row = self.db.fetchone(
+            "SELECT model FROM dossiers WHERE dossier_id = ?", (dossier_id,))
+        return json.loads(row["model"]) if row else None
+
+    def save_dossier(self, model: dict) -> dict:
+        self.db.execute(
+            "INSERT INTO dossiers (dossier_id, model, updated_at) "
+            "VALUES (?, ?, ?) ON CONFLICT(dossier_id) DO UPDATE SET "
+            "model=excluded.model, updated_at=excluded.updated_at",
+            (model["dossier_id"], json.dumps(model), utcnow_iso()))
+        return model

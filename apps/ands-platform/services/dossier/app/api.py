@@ -8,8 +8,8 @@ from ands_shared import create_app
 
 from . import ectd
 from .models import (AdminSequenceIn, ContentPlanIn, ItemAssignIn, ItemStatusIn,
-                     PmLeafIn, PmXmlBuildIn, PmXmlGateIn, PmXmlValidateIn,
-                     PmXrefIn)
+                     LeafIn, PmLeafIn, PmXmlBuildIn, PmXmlGateIn,
+                     PmXmlValidateIn, PmXrefIn)
 from .service import DossierService
 
 
@@ -76,6 +76,23 @@ def build_app(service: DossierService) -> FastAPI:
     @router.post("/monograph/xref/resolve")
     def pm_xref_resolve(body: PmXrefIn):
         return service.resolve_pm_xrefs(body.model_dump())
+
+    # -- eCTD assembly + Application Viewer (REQ-107) ------------------
+    @router.post("/ectd/leaf", status_code=201)
+    def add_leaf(body: LeafIn):
+        return service.add_leaf(body.model_dump())
+
+    @router.get("/ectd/{dossier_id}/current-view")
+    def current_view(dossier_id: str):
+        return service.current_view(dossier_id)
+
+    @router.get("/ectd/{dossier_id}/viewer/files")
+    def files_view(dossier_id: str):
+        return service.files_view(dossier_id)
+
+    @router.get("/ectd/{dossier_id}/viewer/outline/{sequence}")
+    def outline_view(dossier_id: str, sequence: str):
+        return service.outline_view(dossier_id, sequence)
 
     app.include_router(router)
     return app

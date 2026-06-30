@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from ands_shared import EventEnvelope, EventType, ProblemError
 
-from . import admin_sequence, content_plan, monograph, pm_xml, pm_xref
+from . import (admin_sequence, assembly, content_plan, monograph, pm_xml,
+               pm_xref)
 from .ports import DossierRepository
 
 
@@ -126,3 +127,36 @@ class DossierService:
             data.get("refs") else (data.get("xrefs") or [])
         present = data.get("present_targets")
         return pm_xref.resolve_pm_xrefs(refs, present)
+
+    # -- eCTD assembly + Application Viewer (REQ-107) ----------------------
+    def _dossier_model(self, dossier_id: str, *, create: bool = False) -> dict:
+        model = self.repo.get_dossier(_s(dossier_id))
+        if model:
+            return model
+        if create:
+            return assembly.new_dossier(dossier_id)
+        raise ProblemError(404, "no eCTD dossier", detail=_s(dossier_id))
+
+    def add_leaf(self, data: dict) -> dict:
+        dossier_id = _s(data.get("dossier_id"))
+        sequence = _s(data.get("sequence")) or "0000"
+        if not dossier_id:
+            raise ProblemError(422, "dossier_id is required",
+                               rule="dossier_id_required")
+        model = self._dossier_model(dossier_id, create=True)
+        try:
+            record = assembly.add_leaf(model, sequence, data.get("leaf") or data)
+        except ValueError as exc:
+            raise ProblemError(422, str(exc), rule="leaf_operation_invalid")
+        self.repo.save_dossier(model)
+        return {"leaf": record, "current_view": assembly.current_view(model)}
+
+    def current_view(self, dossier_id: str) -> dict:
+        return assembly.current_view(self._dossier_model(dossier_id))
+
+    def files_view(self, dossier_id: str) -> dict:
+        return assembly.build_files_view(self._dossier_model(dossier_id))
+
+    def outline_view(self, dossier_id: str, sequence: str) -> dict:
+        return assembly.build_outline_view(self._dossier_model(dossier_id),
+                                           sequence)
