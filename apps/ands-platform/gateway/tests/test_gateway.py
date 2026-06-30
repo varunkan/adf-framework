@@ -53,6 +53,10 @@ def _stub_upstream() -> FastAPI:
     def transmission_ping():
         return {"pong": "transmission"}
 
+    @up.get("/api/governance/ping")
+    def governance_ping():
+        return {"pong": "governance"}
+
     return up
 
 
@@ -96,10 +100,11 @@ def test_other_prefixes_route_to_their_service():
     up = httpx.AsyncClient(transport=transport, base_url="http://x")
     client = TestClient(build_app(clients={
         "collaboration": up, "dossier": up, "validation": up, "identity": up,
-        "lifecycle": up, "fees": up, "transmission": up}))
+        "lifecycle": up, "fees": up, "transmission": up, "governance": up}))
     assert client.get("/api/dossier/ping").json() == {"pong": True}
     assert client.get("/api/validation/ping").json() == {"pong": "validation"}
     assert client.get("/api/identity/ping").json() == {"pong": "identity"}
     assert client.get("/api/lifecycle/ping").json() == {"pong": "lifecycle"}
     assert client.get("/api/fees/ping").json() == {"pong": "fees"}
     assert client.get("/api/transmission/ping").json() == {"pong": "transmission"}
+    assert client.get("/api/governance/ping").json() == {"pong": "governance"}

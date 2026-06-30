@@ -37,11 +37,15 @@ class InMemoryEventBus:
         self.published: list[EventEnvelope] = []
 
     def subscribe(self, event_type: str, handler: Handler) -> None:
+        """Subscribe to one event type, or to ``"*"`` for every event (the
+        wildcard is how the governance/audit service records the whole stream)."""
         self._handlers.setdefault(event_type, []).append(handler)
 
     def publish(self, event: EventEnvelope) -> None:
         self.published.append(event)
         for handler in list(self._handlers.get(event.type, ())):
+            handler(event)
+        for handler in list(self._handlers.get("*", ())):
             handler(event)
 
     # -- test affordance ----------------------------------------------------

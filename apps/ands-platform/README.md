@@ -74,7 +74,7 @@ PYTHONPATH=.:../../libs ../../.venv/bin/uvicorn app.main:app --port 8000
 | **lifecycle** | ✅ built (REQ-030/031/062) | DSTS state machine (Screening→Review→NOC/NOD/NON), statutory-holiday deadline calendar, 25% missed-service-standard credit; emits `lifecycle.transitioned`, `lifecycle.service_standard_missed` |
 | **fees** | ✅ built (REQ-035/036/037) | stateless calculator: Schedule-1 fee + fiscal-year escalation, small-business remission/deferral, per-DIN Right-to-Sell |
 | **transmission** | ✅ built (REQ-003/025/027/046) | FDA-ESG NextGen config + Test-gateway gate, 10 GB routing, one-at-a-time MDN→FDA→HC ack chain; emits `transmission.sent`, `transmission.hc_ack` (→ collaboration notifies) |
-| governance | ⏳ | e-sign, retention, DR, audit |
+| **governance** | ✅ built (REQ-039/053/068/060) | tamper-evident e-signature gate (QA review + manifest) **and** the event-sourced audit trail — subscribes to `*` and records every domain event, append-only, with text export |
 | readiness (BFF) | ⏳ | event-driven dashboard aggregation |
 
 Migration order and per-service recipe: see the ADR.
