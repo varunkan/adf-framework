@@ -69,6 +69,10 @@ def _stub_upstream() -> FastAPI:
     def webhooks_ping():
         return {"pong": "webhooks"}
 
+    @up.get("/api/journey/ping")
+    def journey_ping():
+        return {"pong": "journey"}
+
     return up
 
 
@@ -120,7 +124,7 @@ def test_other_prefixes_route_to_their_service():
     client = TestClient(build_app(clients={
         "collaboration": up, "dossier": up, "validation": up, "identity": up,
         "lifecycle": up, "fees": up, "transmission": up, "governance": up,
-        "readiness": up, "registry": up, "webhooks": up}))
+        "readiness": up, "registry": up, "webhooks": up, "journey": up}))
     assert client.get("/api/dossier/ping").json() == {"pong": True}
     assert client.get("/api/validation/ping").json() == {"pong": "validation"}
     assert client.get("/api/identity/ping").json() == {"pong": "identity"}
@@ -131,3 +135,4 @@ def test_other_prefixes_route_to_their_service():
     assert client.get("/api/readiness/ping").json() == {"pong": "readiness"}
     assert client.get("/api/registry/ping").json() == {"pong": "registry"}
     assert client.get("/api/webhooks/ping").json() == {"pong": "webhooks"}
+    assert client.get("/api/journey/ping").json() == {"pong": "journey"}

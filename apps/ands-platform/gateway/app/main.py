@@ -30,6 +30,7 @@ SERVICES = {
     "readiness": os.environ.get("READINESS_URL", "http://readiness:8000"),
     "registry": os.environ.get("REGISTRY_URL", "http://registry:8000"),
     "webhooks": os.environ.get("WEBHOOKS_URL", "http://webhooks:8000"),
+    "journey": os.environ.get("JOURNEY_URL", "http://journey:8000"),
 }
 PREFIX_TO_SERVICE = {
     "/api/collab": "collaboration",
@@ -43,6 +44,7 @@ PREFIX_TO_SERVICE = {
     "/api/readiness": "readiness",
     "/api/registry": "registry",
     "/api/webhooks": "webhooks",
+    "/api/journey": "journey",
 }
 
 # hop-by-hop headers we never forward verbatim
@@ -122,6 +124,11 @@ def build_app(clients: dict | None = None) -> FastAPI:
                    methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
     async def webhooks(rest: str, request: Request):  # noqa: ANN202, ARG001
         return await _proxy("webhooks", request)
+
+    @app.api_route("/api/journey/{rest:path}",
+                   methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+    async def journey(rest: str, request: Request):  # noqa: ANN202, ARG001
+        return await _proxy("journey", request)
 
     @app.get("/gateway/health", tags=["meta"])
     async def gateway_health():  # noqa: ANN202

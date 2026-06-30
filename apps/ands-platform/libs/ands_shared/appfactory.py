@@ -11,6 +11,7 @@ import os
 import time
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from .ids import new_id
@@ -23,12 +24,28 @@ REQUEST_ID_HEADER = "X-Request-ID"
 _EXEMPT_PATHS = ("/health", "/metrics")
 
 
+def _cors_origins(explicit: list[str] | None) -> list[str]:
+    """Allowed browser origins — explicit arg, else ANDS_CORS_ORIGINS (CSV).
+    The guided front-end is a separate origin, so the gateway/BFF need CORS."""
+    if explicit is not None:
+        return explicit
+    raw = os.environ.get("ANDS_CORS_ORIGINS", "").strip()
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
 def create_app(*, title: str, version: str = "0.1.0", description: str = "",
-               rate_limit: float | None = None,
-               burst: int | None = None) -> FastAPI:
+               rate_limit: float | None = None, burst: int | None = None,
+               cors_origins: list[str] | None = None) -> FastAPI:
     app = FastAPI(title=title, version=version, description=description)
     app.state.metrics = Metrics(service=title)
     install_problem_handlers(app)
+
+    origins = _cors_origins(cors_origins)
+    if origins:
+        app.add_middleware(
+            CORSMiddleware, allow_origins=origins, allow_credentials=True,
+            allow_methods=["*"], allow_headers=["*"],
+            expose_headers=[REQUEST_ID_HEADER])
 
     # Rate limiting is off unless a rate is given (arg or ANDS_RATE_LIMIT env).
     rate = (rate_limit if rate_limit is not None
