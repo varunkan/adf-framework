@@ -45,6 +45,10 @@ def _stub_upstream() -> FastAPI:
     def lifecycle_ping():
         return {"pong": "lifecycle"}
 
+    @up.get("/api/fees/ping")
+    def fees_ping():
+        return {"pong": "fees"}
+
     return up
 
 
@@ -88,8 +92,9 @@ def test_other_prefixes_route_to_their_service():
     up = httpx.AsyncClient(transport=transport, base_url="http://x")
     client = TestClient(build_app(clients={
         "collaboration": up, "dossier": up, "validation": up, "identity": up,
-        "lifecycle": up}))
+        "lifecycle": up, "fees": up}))
     assert client.get("/api/dossier/ping").json() == {"pong": True}
     assert client.get("/api/validation/ping").json() == {"pong": "validation"}
     assert client.get("/api/identity/ping").json() == {"pong": "identity"}
     assert client.get("/api/lifecycle/ping").json() == {"pong": "lifecycle"}
+    assert client.get("/api/fees/ping").json() == {"pong": "fees"}

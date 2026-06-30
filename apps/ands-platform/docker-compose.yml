@@ -116,6 +116,13 @@ services:
     depends_on: [lifecycle-db, redis]
     expose: ["8000"]
 
+  # fees is stateless — no Postgres.
+  fees:
+    build:
+      context: .
+      dockerfile: services/fees/Dockerfile
+    expose: ["8000"]
+
   gateway:
     build:
       context: .
@@ -126,7 +133,8 @@ services:
       VALIDATION_URL: http://validation:8000
       IDENTITY_URL: http://identity:8000
       LIFECYCLE_URL: http://lifecycle:8000
-    depends_on: [collaboration, dossier, validation, identity, lifecycle]
+      FEES_URL: http://fees:8000
+    depends_on: [collaboration, dossier, validation, identity, lifecycle, fees]
     ports: ["8080:8000"]
 
 volumes:

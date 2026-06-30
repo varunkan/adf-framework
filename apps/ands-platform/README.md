@@ -72,8 +72,8 @@ PYTHONPATH=.:../../libs ../../.venv/bin/uvicorn app.main:app --port 8000
 | **validation** | ✅ built (REQ-104) | versioned HC eCTD rule engine (run/inline/fix), persisted reports; emits `validation.completed` / `validation.failed` (→ collaboration notifies) |
 | **identity** | ✅ built (REQ-077..084) | self-serve signup, login/sessions (PBKDF2), tenants, plans+overrides → effective entitlements, RBAC authorize; emits `identity.tenant_provisioned` |
 | **lifecycle** | ✅ built (REQ-030/031/062) | DSTS state machine (Screening→Review→NOC/NOD/NON), statutory-holiday deadline calendar, 25% missed-service-standard credit; emits `lifecycle.transitioned`, `lifecycle.service_standard_missed` |
+| **fees** | ✅ built (REQ-035/036/037) | stateless calculator: Schedule-1 fee + fiscal-year escalation, small-business remission/deferral, per-DIN Right-to-Sell |
 | transmission | ⏳ | FDA-ESG ride-along |
-| fees | ⏳ | fee schedule |
 | governance | ⏳ | e-sign, retention, DR, audit |
 | readiness (BFF) | ⏳ | event-driven dashboard aggregation |
 
