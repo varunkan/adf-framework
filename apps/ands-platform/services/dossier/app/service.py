@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ands_shared import EventEnvelope, EventType, ProblemError
 
-from . import content_plan, monograph
+from . import admin_sequence, content_plan, monograph
 from .ports import DossierRepository
 
 
@@ -86,6 +86,14 @@ class DossierService:
             raise ProblemError(422, "Invalid Product Monograph leaf",
                                errors=res["errors"])
         return self.repo.upsert_pm_leaf(res["leaf"])
+
+    # -- administrative / corrective sequences (REQ-092) -------------------
+    def build_admin_sequence(self, data: dict) -> dict:
+        result = admin_sequence.build_admin_sequence(data)
+        if "errors" in result:
+            raise ProblemError(422, "Invalid administrative sequence",
+                               errors=result["errors"])
+        return result
 
     def monograph_status(self, dossier_id: str) -> dict:
         leaves = self.repo.list_pm_leaves(_s(dossier_id))

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ContentPlanIn(BaseModel):
@@ -28,3 +28,12 @@ class PmLeafIn(BaseModel):
     title: str = ""
     version: int = 1
     leaf_id: str | None = None
+
+
+class AdminSequenceIn(BaseModel):
+    dossier_id: str = ""
+    activity: str = ""
+    sequence: str = ""
+    operations: list[dict] = Field(default_factory=list)
+    present_documents: list[dict] = Field(default_factory=list)
+    cover_letter_generated: bool = True

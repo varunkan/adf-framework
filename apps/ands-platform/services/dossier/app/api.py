@@ -7,7 +7,8 @@ from fastapi import APIRouter, FastAPI, Query
 from ands_shared import create_app
 
 from . import ectd
-from .models import ContentPlanIn, ItemAssignIn, ItemStatusIn, PmLeafIn
+from .models import (AdminSequenceIn, ContentPlanIn, ItemAssignIn, ItemStatusIn,
+                     PmLeafIn)
 from .service import DossierService
 
 
@@ -47,6 +48,11 @@ def build_app(service: DossierService) -> FastAPI:
     @router.get("/monograph/status")
     def monograph_status(dossier_id: str = Query(...)):
         return service.monograph_status(dossier_id)
+
+    # -- administrative / corrective sequences (REQ-092) ----------------
+    @router.post("/admin-sequence", status_code=201)
+    def admin_sequence(body: AdminSequenceIn):
+        return service.build_admin_sequence(body.model_dump())
 
     app.include_router(router)
     return app
