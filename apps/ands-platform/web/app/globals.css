@@ -62,8 +62,13 @@ header.topbar{display:flex;align-items:center;gap:14px;padding:14px 26px;
 /* ── layout ───────────────────────────────────────────────────────── */
 .stage{max-width:1240px;margin:0 auto;padding:26px 24px 80px;
   display:grid;grid-template-columns:230px 1fr 360px;gap:24px;align-items:start}
+/* On narrow screens stack to one column and surface the spatial tower +
+   readiness ABOVE the full journey list (the status the user wants on a phone). */
 @media (max-width:1100px){.stage{grid-template-columns:1fr;}
-  .rail{order:2}.spatial{order:3}.main{order:1}}
+  .main{order:1}.spatial{order:2}.rail{order:3}
+  .rail,.spatial{position:static}}
+/* The tagline wraps badly beside the brand on phones — drop it there. */
+@media (max-width:600px){.brand small{display:none}}
 
 /* ── the gated step rail (Prism CSS-3D) ───────────────────────────── */
 .rail{position:sticky;top:84px}
@@ -120,8 +125,12 @@ button:disabled{opacity:.45;cursor:not-allowed;transform:none}
 /* inline jargon term */
 .term{border-bottom:1px dashed rgba(155,107,255,.7);cursor:help;color:#d8c8ff;
   position:relative}
-.term:hover .term-pop,.term:focus .term-pop{opacity:1;visibility:visible;
-  transform:translateY(0)}
+.term:hover .term-pop,.term:focus .term-pop,.term:focus-within .term-pop{
+  opacity:1;visibility:visible;transform:translateY(0)}
+.term:focus-visible{outline:2px solid var(--violet);outline-offset:2px;
+  border-radius:3px}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;
+  overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .term-pop{position:absolute;left:0;bottom:130%;width:280px;z-index:60;
   background:#141d33;border:1px solid var(--line);border-radius:10px;padding:11px 13px;
   font-size:12.5px;color:#dbe6f7;line-height:1.5;box-shadow:var(--prism-shadow-3);

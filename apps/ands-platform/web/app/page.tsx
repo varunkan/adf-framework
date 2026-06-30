@@ -96,6 +96,12 @@ export default function Page() {
         )}
       </header>
 
+      <div className="sr-only" aria-live="polite">
+        {view && activeStage
+          ? `Step: ${activeStage.label}. ${view.readiness.status === "READY" ? "Ready to file." : `${view.readiness.percent} percent ready.`}`
+          : ""}
+      </div>
+
       {!view ? (
         <Hero booting={booting} busy={busy} error={error} onStart={start} />
       ) : (
