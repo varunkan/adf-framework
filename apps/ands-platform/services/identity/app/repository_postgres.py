@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     expires_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS tenants (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, plan_id TEXT NOT NULL,
-    status TEXT NOT NULL, created_at TEXT NOT NULL);
+    status TEXT NOT NULL, created_at TEXT NOT NULL,
+    billing_status TEXT NOT NULL DEFAULT 'active', grace_until TEXT);
 CREATE TABLE IF NOT EXISTS plans (
     id TEXT PRIMARY KEY, name TEXT UNIQUE NOT NULL, features TEXT NOT NULL,
     created_at TEXT NOT NULL);
@@ -146,6 +147,11 @@ class PostgresIdentityRepository:
     def set_tenant_status(self, tenant_id, status):
         self._exec("UPDATE tenants SET status = %s WHERE id = %s",
                    (status, tenant_id))
+        return self.get_tenant(tenant_id)
+
+    def set_billing(self, tenant_id, billing_status, grace_until):
+        self._exec("UPDATE tenants SET billing_status = %s, grace_until = %s "
+                   "WHERE id = %s", (billing_status, grace_until, tenant_id))
         return self.get_tenant(tenant_id)
 
     # plans + overrides

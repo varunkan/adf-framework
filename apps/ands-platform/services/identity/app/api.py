@@ -7,8 +7,9 @@ from fastapi import APIRouter, FastAPI, Header, Query
 from ands_shared import ProblemError, create_app
 
 from . import rbac
-from .models import (AssignPlanIn, AuthorizeIn, CreatePlanIn, LoginIn,
-                     MfaVerifyIn, OverrideIn, ProvisionTenantIn, SignupIn)
+from .models import (AssignPlanIn, AuthorizeIn, BillingIn, CreatePlanIn,
+                     LoginIn, MfaVerifyIn, OverrideIn, ProvisionTenantIn,
+                     SignupIn)
 from .service import IdentityService
 
 
@@ -69,6 +70,23 @@ def build_app(service: IdentityService) -> FastAPI:
     @router.post("/authorize")
     def authorize(body: AuthorizeIn):
         return service.authorize(body.model_dump())
+
+    # -- subscription billing (SAAS-REQ-002) ---------------------------
+    @router.post("/owner/billing")
+    def set_billing(body: BillingIn, authorization: str = Header(default="")):
+        return service.set_billing(_bearer(authorization), body.model_dump())
+
+    @router.get("/billing")
+    def billing(tenant_id: str = Query(...),
+                authorization: str = Header(default="")):
+        principal = service.resolve(_bearer(authorization))
+        if not principal:
+            raise ProblemError(401, "authentication required", rule="no_session")
+        if principal["role"] != rbac.OWNER_ROLE \
+                and principal["tenant_id"] != tenant_id:
+            raise ProblemError(403, "cross-tenant access denied",
+                               rule="cross_tenant_denied")
+        return service.billing_access(tenant_id)
 
     # -- owner control plane --------------------------------------------
     @router.post("/owner/tenants", status_code=201)

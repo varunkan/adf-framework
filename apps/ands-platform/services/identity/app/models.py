@@ -50,3 +50,9 @@ class AuthorizeIn(BaseModel):
     principal: dict = Field(default_factory=dict)
     capability: str = ""
     resource: dict = Field(default_factory=dict)
+
+
+class BillingIn(BaseModel):
+    tenant_id: str = ""
+    billing_status: str = ""
+    grace_until: str = ""

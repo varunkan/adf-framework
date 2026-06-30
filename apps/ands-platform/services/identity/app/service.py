@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from ands_shared import EventEnvelope, EventType, ProblemError, new_id
 
-from . import entitlements, rbac, security
+from . import billing, entitlements, rbac, security
 from .ports import IdentityRepository
 
 PLATFORM_TENANT = ""          # owner accounts live outside any tenant
@@ -215,6 +215,27 @@ class IdentityService:
         self.repo.set_override(_s(data.get("tenant_id")), feature,
                                bool(data.get("enabled")))
         return self.entitlements(_s(data.get("tenant_id")))
+
+    # -- subscription billing (SAAS-REQ-002) -------------------------------
+    def set_billing(self, token: str, data: dict) -> dict:
+        self._require_owner(token)
+        tenant_id = _s(data.get("tenant_id"))
+        status = _s(data.get("billing_status"))
+        if status not in billing.BILLING_STATUSES:
+            raise ProblemError(422, "unknown billing status",
+                               rule="billing_status_invalid")
+        if not self.repo.get_tenant(tenant_id):
+            raise ProblemError(404, "unknown tenant", rule="tenant_unknown")
+        return self.repo.set_billing(tenant_id, status,
+                                     _s(data.get("grace_until")) or None)
+
+    def billing_access(self, tenant_id: str) -> dict:
+        tenant = self.repo.get_tenant(_s(tenant_id))
+        if not tenant:
+            raise ProblemError(404, "unknown tenant", rule="tenant_unknown")
+        access = billing.effective_access(
+            tenant.get("billing_status"), tenant.get("grace_until"))
+        return {"tenant_id": tenant_id, **access}
 
     # -- entitlements + authorize ------------------------------------------
     def entitlements(self, tenant_id: str) -> dict:
