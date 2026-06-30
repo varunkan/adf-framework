@@ -1,0 +1,201 @@
+/* ── Prism / 3D design system — ported from the monolith (REQ-086, UI-4) ── */
+:root{
+  --prism-radius:14px; --prism-blur:8px;
+  --prism-shadow-1:0 1px 2px rgba(11,18,32,.10);
+  --prism-shadow-2:0 8px 22px rgba(11,18,32,.16);
+  --prism-shadow-3:0 20px 50px rgba(11,18,32,.30);
+  --prism-z-surface:0; --prism-z-card:1; --prism-z-panel:10; --prism-z-modal:100;
+  --prism-accent:linear-gradient(120deg,#5b8cff 0,#9b6bff 55%,#37d39b 100%);
+  --prism-ease:200ms cubic-bezier(.2,.6,.2,1);
+
+  --bg:#0b1220; --panel:rgba(255,255,255,.06); --line:rgba(255,255,255,.14);
+  --ink:#eef3fb; --mut:#9fb0c9; --brand:#5b8cff; --violet:#9b6bff;
+  --ok:#37d39b; --warn:#ffd166; --bad:#ff6b6b; --radius:14px;
+}
+
+*{box-sizing:border-box}
+html,body{padding:0;margin:0}
+body{
+  font:15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  color:var(--ink); min-height:100vh;
+  background:
+    radial-gradient(1200px 600px at 8% -12%,#1a2c52 0,transparent 60%),
+    radial-gradient(900px 520px at 112% 8%,#3a1f57 0,transparent 55%),
+    radial-gradient(700px 700px at 50% 120%,#10324a 0,transparent 60%),
+    var(--bg);
+  background-attachment:fixed;
+}
+a{color:var(--brand);text-decoration:none}
+.mut{color:var(--mut)}
+.accent-text{background:var(--prism-accent);-webkit-background-clip:text;
+  background-clip:text;color:transparent}
+
+/* micro-interactions — GPU-friendly transform/shadow only */
+a,button,input,select,.card,.tile,.stepdot{transition:transform var(--prism-ease),
+  box-shadow var(--prism-ease),background var(--prism-ease),
+  border-color var(--prism-ease),opacity var(--prism-ease)}
+
+/* ── glass surfaces ───────────────────────────────────────────────── */
+.glass{background:linear-gradient(180deg,rgba(255,255,255,.07),rgba(255,255,255,.025));
+  border:1px solid var(--line);border-radius:var(--radius);
+  backdrop-filter:blur(var(--prism-blur));box-shadow:var(--prism-shadow-2)}
+.card{background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--radius);padding:22px;box-shadow:var(--prism-shadow-2);
+  z-index:var(--prism-z-card)}
+
+/* ── top bar ──────────────────────────────────────────────────────── */
+header.topbar{display:flex;align-items:center;gap:14px;padding:14px 26px;
+  border-bottom:1px solid var(--line);position:sticky;top:0;z-index:50;
+  background:linear-gradient(180deg,rgba(13,20,38,.86),rgba(13,20,38,.55));
+  backdrop-filter:blur(calc(var(--prism-blur) * 1.4));box-shadow:var(--prism-shadow-1)}
+.brand{font-weight:800;letter-spacing:.3px;font-size:17px;display:flex;
+  align-items:center;gap:10px}
+.brand .dot{width:12px;height:12px;border-radius:4px;background:var(--prism-accent);
+  box-shadow:0 0 16px rgba(91,140,255,.7);transform:rotate(12deg)}
+.brand small{font-weight:500;color:var(--mut);letter-spacing:0}
+.topbar .spacer{margin-left:auto}
+.chip{font-size:12px;padding:5px 11px;border-radius:999px;border:1px solid var(--line);
+  background:rgba(91,140,255,.16)}
+.chip.ready{background:rgba(55,211,155,.18);color:#bdf3df}
+.chip.blocked{background:rgba(255,209,102,.16);color:#ffe3a3}
+
+/* ── layout ───────────────────────────────────────────────────────── */
+.stage{max-width:1240px;margin:0 auto;padding:26px 24px 80px;
+  display:grid;grid-template-columns:230px 1fr 360px;gap:24px;align-items:start}
+@media (max-width:1100px){.stage{grid-template-columns:1fr;}
+  .rail{order:2}.spatial{order:3}.main{order:1}}
+
+/* ── the gated step rail (Prism CSS-3D) ───────────────────────────── */
+.rail{position:sticky;top:84px}
+.rail h3{font-size:12px;text-transform:uppercase;letter-spacing:.12em;
+  color:var(--mut);margin:0 0 14px}
+.steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.step{display:flex;gap:12px;align-items:flex-start;padding:9px 11px;border-radius:11px;
+  cursor:pointer;border:1px solid transparent;position:relative;
+  transform-style:preserve-3d}
+.step:hover{background:rgba(255,255,255,.04)}
+.step.current{background:linear-gradient(110deg,rgba(91,140,255,.22),rgba(155,107,255,.12));
+  border-color:rgba(91,140,255,.5);box-shadow:var(--prism-shadow-2);
+  transform:translateZ(8px) translateX(2px)}
+.step.locked{opacity:.5;cursor:not-allowed}
+.step.done .stepdot{background:var(--ok);color:#06281c;border-color:transparent}
+.stepdot{flex:0 0 auto;width:26px;height:26px;border-radius:8px;display:grid;
+  place-items:center;font-size:13px;font-weight:700;border:1px solid var(--line);
+  background:rgba(255,255,255,.06)}
+.step.current .stepdot{background:var(--prism-accent);color:#0a142b;border-color:transparent;
+  box-shadow:0 0 14px rgba(91,140,255,.55)}
+.step .lbl{font-size:13.5px;font-weight:600;line-height:1.3}
+.step .sub{font-size:11px;color:var(--mut)}
+.step.locked .sub{color:#8aa}
+
+/* ── the current step card ────────────────────────────────────────── */
+.main{min-width:0}
+.stepcard{padding:26px 28px}
+.eyebrow{font-size:12px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--mut);margin:0 0 6px;display:flex;gap:8px;align-items:center}
+.stepcard h1{font-size:27px;margin:0 0 12px;line-height:1.15}
+.lede{font-size:16px;color:#cdd9ee;margin:0 0 18px;max-width:62ch}
+.teach{background:rgba(91,140,255,.09);border:1px solid rgba(91,140,255,.22);
+  border-radius:12px;padding:13px 16px;margin:14px 0;font-size:14px}
+.teach b{color:#cfe0ff}
+.teach ul{margin:8px 0 0;padding-left:18px}.teach li{margin:4px 0}
+
+label{display:block;font-size:13px;color:var(--mut);margin:14px 0 5px;font-weight:600}
+input,select,textarea{width:100%;padding:11px 13px;border-radius:10px;color:var(--ink);
+  background:rgba(0,0,0,.28);border:1px solid var(--line);font:inherit}
+input:focus,select:focus,textarea:focus{outline:3px solid var(--brand);outline-offset:1px}
+.field-row{display:flex;gap:14px;flex-wrap:wrap}.field-row>div{flex:1;min-width:170px}
+
+button{cursor:pointer;border:1px solid var(--line);border-radius:11px;
+  padding:11px 18px;color:var(--ink);font-weight:700;font-size:14.5px;
+  background:linear-gradient(180deg,rgba(91,140,255,.38),rgba(91,140,255,.2))}
+button:hover{transform:translateY(-1px);box-shadow:var(--prism-shadow-2)}
+button:active{transform:translateY(0)}
+button.ghost{background:rgba(255,255,255,.06);font-weight:600}
+button:disabled{opacity:.45;cursor:not-allowed;transform:none}
+.cta-row{display:flex;gap:12px;align-items:center;margin-top:22px;flex-wrap:wrap}
+.nexthint{font-size:13px;color:var(--mut)}
+.nexthint b{color:#cfe0ff}
+
+/* inline jargon term */
+.term{border-bottom:1px dashed rgba(155,107,255,.7);cursor:help;color:#d8c8ff;
+  position:relative}
+.term:hover .term-pop,.term:focus .term-pop{opacity:1;visibility:visible;
+  transform:translateY(0)}
+.term-pop{position:absolute;left:0;bottom:130%;width:280px;z-index:60;
+  background:#141d33;border:1px solid var(--line);border-radius:10px;padding:11px 13px;
+  font-size:12.5px;color:#dbe6f7;line-height:1.5;box-shadow:var(--prism-shadow-3);
+  opacity:0;visibility:hidden;transform:translateY(6px);transition:all var(--prism-ease)}
+
+/* advisories / notices */
+.notice{padding:11px 15px;border-radius:11px;border:1px solid var(--line);
+  background:rgba(91,140,255,.12);margin:12px 0;font-size:14px}
+.notice.warn{background:rgba(255,209,102,.13);border-color:rgba(255,209,102,.35)}
+.notice.bad{background:rgba(255,107,107,.14);border-color:rgba(255,107,107,.4)}
+.notice.ok{background:rgba(55,211,155,.13);border-color:rgba(55,211,155,.36)}
+
+/* ── readiness card (right column) ────────────────────────────────── */
+.spatial{position:sticky;top:84px;display:flex;flex-direction:column;gap:20px}
+.ready-card h3{margin:0 0 2px;font-size:15px}
+.ready-status{font-size:13px;font-weight:700;letter-spacing:.04em}
+.ready-status.READY{color:var(--ok)}.ready-status.BLOCKED{color:var(--warn)}
+.progress{height:8px;border-radius:999px;background:rgba(255,255,255,.08);
+  overflow:hidden;margin:12px 0}
+.progress > i{display:block;height:100%;background:var(--prism-accent);
+  border-radius:999px;transition:width 400ms var(--prism-ease)}
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+.tile{font-size:12px;padding:9px 10px;border-radius:10px;border:1px solid var(--line);
+  background:rgba(255,255,255,.04);display:flex;align-items:center;gap:7px}
+.tile .d{width:8px;height:8px;border-radius:50%;flex:0 0 auto;background:var(--mut)}
+.tile.pass .d{background:var(--ok)}.tile.current .d{background:var(--brand);
+  box-shadow:0 0 8px var(--brand)}.tile.todo .d{background:rgba(255,255,255,.25)}
+.blockers{margin-top:14px;font-size:13px}
+.blockers .b{padding:10px 12px;border-radius:10px;background:rgba(255,209,102,.1);
+  border:1px solid rgba(255,209,102,.3);margin-top:8px}
+.blockers .b b{color:#ffe3a3}
+
+/* ── spatial submission tower (CSS-3D fallback + WebGL host) ───────── */
+.tower-host{position:relative;height:330px;border-radius:14px;overflow:hidden;
+  border:1px solid var(--line);background:
+    radial-gradient(120% 90% at 50% 0%,rgba(91,140,255,.16),transparent 60%),
+    rgba(8,13,26,.55)}
+.tower-host canvas{display:block;width:100%!important;height:100%!important}
+.tower-cap{position:absolute;left:12px;bottom:10px;font-size:11px;color:var(--mut)}
+.tower-cap b{color:#cfe0ff}
+
+/* CSS-3D fallback stack */
+.css-tower{height:100%;display:grid;place-items:center;perspective:900px}
+.css-tower .stack{transform:rotateX(54deg) rotateZ(45deg);transform-style:preserve-3d;
+  display:flex;flex-direction:column-reverse;gap:9px;animation:spin 26s linear infinite}
+@keyframes spin{to{transform:rotateX(54deg) rotateZ(405deg)}}
+.slab{width:118px;height:34px;border-radius:8px;border:1px solid rgba(255,255,255,.25);
+  display:grid;place-items:center;font-size:12px;font-weight:700;color:#06121f;
+  box-shadow:0 10px 18px rgba(0,0,0,.35);transform-style:preserve-3d}
+.slab.pass{background:linear-gradient(135deg,#37d39b,#1fa67a)}
+.slab.current{background:linear-gradient(135deg,#5b8cff,#9b6bff);color:#0a142b;
+  box-shadow:0 0 26px rgba(91,140,255,.6)}
+.slab.todo{background:linear-gradient(135deg,rgba(255,255,255,.22),rgba(255,255,255,.08));
+  color:#cdd9ee}
+
+/* hero (pre-start) */
+.hero{max-width:760px;margin:8vh auto 0;text-align:center;padding:0 22px}
+.hero h1{font-size:42px;line-height:1.08;margin:0 0 16px;letter-spacing:-.5px}
+.hero p{font-size:18px;color:#cdd9ee;margin:0 auto 26px;max-width:60ch}
+.hero .start{font-size:16px;padding:14px 26px}
+.hero .sub{margin-top:18px;font-size:13px;color:var(--mut)}
+
+.skeleton{opacity:.6}
+.center{display:grid;place-items:center;min-height:60vh}
+
+/* ── GUARD: reduced motion ────────────────────────────────────────── */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{transition:none!important;animation:none!important;
+    scroll-behavior:auto!important}
+  .css-tower .stack{animation:none!important}
+  .card:hover,button:hover,button:active,.step.current{transform:none!important}
+}
+/* ── GUARD: reduced transparency ──────────────────────────────────── */
+@media (prefers-reduced-transparency:reduce){
+  :root{--prism-blur:0px}
+  header.topbar,.glass,.card{backdrop-filter:none!important}
+}

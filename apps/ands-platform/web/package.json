@@ -1,0 +1,27 @@
+{
+  "name": "ands-platform-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Guided 3D-spatial drug-filing experience — file an ANDS like a story",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "^14.2.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "three": "^0.169.0",
+    "@react-three/fiber": "^8.17.0",
+    "framer-motion": "^11.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@types/three": "^0.169.0",
+    "typescript": "^5.6.0"
+  }
+}
