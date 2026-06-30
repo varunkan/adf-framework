@@ -7,8 +7,8 @@ from fastapi import APIRouter, FastAPI, Query
 from ands_shared import create_app
 
 from . import ectd
-from .models import (AdminSequenceIn, ContentPlanIn, ItemAssignIn, ItemStatusIn,
-                     LeafIn, PmLeafIn, PmXmlBuildIn, PmXmlGateIn,
+from .models import (AdminSequenceIn, BinderIn, ContentPlanIn, ItemAssignIn,
+                     ItemStatusIn, LeafIn, PmLeafIn, PmXmlBuildIn, PmXmlGateIn,
                      PmXmlValidateIn, PmXrefIn)
 from .service import DossierService
 
@@ -93,6 +93,27 @@ def build_app(service: DossierService) -> FastAPI:
     @router.get("/ectd/{dossier_id}/viewer/outline/{sequence}")
     def outline_view(dossier_id: str, sequence: str):
         return service.outline_view(dossier_id, sequence)
+
+    # -- submission archive / binder (REQ-110) ------------------------
+    @router.post("/archive", status_code=201)
+    def create_binder(body: BinderIn):
+        return service.create_binder(body.model_dump())
+
+    @router.get("/archive")
+    def list_binders(dossier_id: str = Query(...)):
+        return service.list_binders(dossier_id)
+
+    @router.get("/archive/share/{token}")
+    def shared_binder(token: str):
+        return service.get_shared_binder(token)
+
+    @router.get("/archive/{binder_id}")
+    def get_binder(binder_id: str):
+        return service.get_binder(binder_id)
+
+    @router.post("/archive/{binder_id}/share", status_code=201)
+    def share_binder(binder_id: str):
+        return service.share_binder(binder_id)
 
     app.include_router(router)
     return app

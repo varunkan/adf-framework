@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from ands_shared import EventEnvelope, EventType, ProblemError
 
-from . import (admin_sequence, assembly, content_plan, monograph, pm_xml,
-               pm_xref)
+import secrets
+
+from . import (admin_sequence, archive, assembly, content_plan, monograph,
+               pm_xml, pm_xref)
 from .ports import DossierRepository
 
 
@@ -160,3 +162,38 @@ class DossierService:
     def outline_view(self, dossier_id: str, sequence: str) -> dict:
         return assembly.build_outline_view(self._dossier_model(dossier_id),
                                            sequence)
+
+    # -- submission archive / binder (REQ-110) -----------------------------
+    def create_binder(self, data: dict) -> dict:
+        dossier_id = _s(data.get("dossier_id"))
+        sequence = _s(data.get("sequence")) or "0000"
+        model = self._dossier_model(dossier_id)   # 404 if no eCTD dossier
+        binder = archive.build_binder(
+            model, sequence=sequence,
+            validation_report=data.get("validation_report"),
+            transmission=data.get("transmission"))
+        return self.repo.save_binder(dossier_id, sequence, binder)
+
+    def get_binder(self, binder_id: str) -> dict:
+        rec = self.repo.get_binder(_s(binder_id))
+        if not rec:
+            raise ProblemError(404, "binder not found", detail=_s(binder_id))
+        return rec
+
+    def list_binders(self, dossier_id: str) -> dict:
+        binders = self.repo.list_binders(_s(dossier_id))
+        return {"binders": binders, "count": len(binders)}
+
+    def share_binder(self, binder_id: str) -> dict:
+        rec = self.get_binder(binder_id)
+        token = rec.get("share_token") or secrets.token_urlsafe(24)
+        self.repo.set_share_token(binder_id, token)
+        return {"binder_id": binder_id, "share_token": token,
+                "url": f"/api/dossier/archive/share/{token}"}
+
+    def get_shared_binder(self, token: str) -> dict:
+        rec = self.repo.get_by_share_token(_s(token))
+        if not rec:
+            raise ProblemError(404, "share link not found or revoked")
+        return {"dossier_id": rec["dossier_id"], "sequence": rec["sequence"],
+                "binder": rec["binder"], "read_only": True}

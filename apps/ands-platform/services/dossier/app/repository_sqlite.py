@@ -44,6 +44,14 @@ CREATE TABLE IF NOT EXISTS dossiers (
     model       TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS binders (
+    id          TEXT PRIMARY KEY,
+    dossier_id  TEXT NOT NULL,
+    sequence    TEXT NOT NULL,
+    binder      TEXT NOT NULL,
+    share_token TEXT,
+    created_at  TEXT NOT NULL
+);
 """
 
 # columns a caller may patch on a plan item
@@ -156,3 +164,36 @@ class SqliteDossierRepository:
             "model=excluded.model, updated_at=excluded.updated_at",
             (model["dossier_id"], json.dumps(model), utcnow_iso()))
         return model
+
+    # -- submission archive / binder (REQ-110) -----------------------------
+    def save_binder(self, dossier_id, sequence, binder) -> dict:
+        bid = new_id()
+        self.db.execute(
+            "INSERT INTO binders (id, dossier_id, sequence, binder, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (bid, dossier_id, sequence, json.dumps(binder), utcnow_iso()))
+        return self.get_binder(bid)
+
+    def _binder_row(self, row) -> dict:
+        rec = dict(row)
+        rec["binder"] = json.loads(rec["binder"])
+        return rec
+
+    def get_binder(self, binder_id) -> dict | None:
+        row = self.db.fetchone("SELECT * FROM binders WHERE id = ?", (binder_id,))
+        return self._binder_row(row) if row else None
+
+    def list_binders(self, dossier_id) -> list[dict]:
+        rows = self.db.fetchall(
+            "SELECT id, dossier_id, sequence, share_token, created_at FROM "
+            "binders WHERE dossier_id = ? ORDER BY created_at", (dossier_id,))
+        return [dict(r) for r in rows]
+
+    def set_share_token(self, binder_id, token) -> None:
+        self.db.execute("UPDATE binders SET share_token = ? WHERE id = ?",
+                        (token, binder_id))
+
+    def get_by_share_token(self, token) -> dict | None:
+        row = self.db.fetchone(
+            "SELECT * FROM binders WHERE share_token = ?", (token,))
+        return self._binder_row(row) if row else None

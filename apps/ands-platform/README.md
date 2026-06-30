@@ -68,7 +68,7 @@ PYTHONPATH=.:../../libs ../../.venv/bin/uvicorn app.main:app --port 8000
 | Service | Status | Owns |
 |---------|--------|------|
 | **collaboration** | ✅ built (REQ-109) | comments, tasks, notifications; consumes `validation.failed` / `transmission.hc_ack`, emits `collab.task_assigned` |
-| **dossier** | ✅ built (REQ-103, REQ-098) | eCTD Module-1 placement, submission content plans, bilingual Product Monograph; emits `dossier.content_plan.item_assigned`, `dossier.bilingual_pm.blocked` |
+| **dossier** | ✅ built (REQ-103/098/092/099/101/107/110) | content plans, bilingual PM, admin/corrective sequences, XML PM build/validate, PM cross-refs, eCTD assembly + Application Viewer (Files/Outline), submission archive/binder + share links; emits `content_plan.item_assigned`, `bilingual_pm.blocked` |
 | **validation** | ✅ built (REQ-104) | versioned HC eCTD rule engine (run/inline/fix), persisted reports; emits `validation.completed` / `validation.failed` (→ collaboration notifies) |
 | **identity** | ✅ built (REQ-077..084) | self-serve signup, login/sessions (PBKDF2), tenants, plans+overrides → effective entitlements, RBAC authorize; emits `identity.tenant_provisioned` |
 | **lifecycle** | ✅ built (REQ-030/031/062) | DSTS state machine (Screening→Review→NOC/NOD/NON), statutory-holiday deadline calendar, 25% missed-service-standard credit; emits `lifecycle.transitioned`, `lifecycle.service_standard_missed` |

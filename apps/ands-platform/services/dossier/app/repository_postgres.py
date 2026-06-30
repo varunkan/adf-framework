@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS pm_leaves (
     updated_at TEXT NOT NULL, PRIMARY KEY (dossier_id, lang));
 CREATE TABLE IF NOT EXISTS dossiers (
     dossier_id TEXT PRIMARY KEY, model TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS binders (
+    id TEXT PRIMARY KEY, dossier_id TEXT NOT NULL, sequence TEXT NOT NULL,
+    binder TEXT NOT NULL, share_token TEXT, created_at TEXT NOT NULL);
 """
 
 _ITEM_PATCHABLE = ("assignee", "due_date", "status")
@@ -149,3 +152,32 @@ class PostgresDossierRepository:
                    "model=excluded.model, updated_at=excluded.updated_at",
                    (model["dossier_id"], json.dumps(model), utcnow_iso()))
         return model
+
+    # -- submission archive / binder (REQ-110) -----------------------------
+    def save_binder(self, dossier_id, sequence, binder) -> dict:
+        bid = new_id()
+        self._exec("INSERT INTO binders (id, dossier_id, sequence, binder, "
+                   "created_at) VALUES (%s,%s,%s,%s,%s)",
+                   (bid, dossier_id, sequence, json.dumps(binder), utcnow_iso()))
+        return self.get_binder(bid)
+
+    def get_binder(self, binder_id) -> dict | None:
+        row = self._one("SELECT * FROM binders WHERE id = %s", (binder_id,))
+        if row:
+            row["binder"] = json.loads(row["binder"])
+        return row
+
+    def list_binders(self, dossier_id) -> list[dict]:
+        return self._all("SELECT id, dossier_id, sequence, share_token, "
+                         "created_at FROM binders WHERE dossier_id = %s "
+                         "ORDER BY created_at", (dossier_id,))
+
+    def set_share_token(self, binder_id, token) -> None:
+        self._exec("UPDATE binders SET share_token = %s WHERE id = %s",
+                   (token, binder_id))
+
+    def get_by_share_token(self, token) -> dict | None:
+        row = self._one("SELECT * FROM binders WHERE share_token = %s", (token,))
+        if row:
+            row["binder"] = json.loads(row["binder"])
+        return row

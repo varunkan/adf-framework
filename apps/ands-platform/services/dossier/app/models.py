@@ -75,3 +75,10 @@ class LeafIn(BaseModel):
     href: str = ""
     modified_leaf: str = ""
     content: str = ""
+
+
+class BinderIn(BaseModel):
+    dossier_id: str = ""
+    sequence: str = "0000"
+    validation_report: dict | None = None
+    transmission: dict | None = None
