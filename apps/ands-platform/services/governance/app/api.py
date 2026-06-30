@@ -7,8 +7,8 @@ from fastapi.responses import PlainTextResponse
 
 from ands_shared import create_app
 
-from .models import (GateIn, HcRecordIn, HcRequestIn, QaReviewIn, SignIn,
-                     VerifyIn)
+from .models import (DeletionIn, ExportIn, GateIn, HcRecordIn, HcRequestIn,
+                     LegalHoldIn, QaReviewIn, SignIn, VerifyIn)
 from .service import GovernanceService
 
 
@@ -54,6 +54,19 @@ def build_app(service: GovernanceService) -> FastAPI:
     @router.get("/audit/export", response_class=PlainTextResponse)
     def audit_export():
         return service.export_audit()
+
+    # -- tenant data export & portability (SAAS-REQ-004) ---------------
+    @router.post("/export")
+    def export_tenant(body: ExportIn):
+        return service.export_tenant(body.model_dump())
+
+    @router.post("/legal-hold")
+    def legal_hold(body: LegalHoldIn):
+        return service.set_legal_hold(body.model_dump())
+
+    @router.post("/deletion-request")
+    def deletion_request(body: DeletionIn):
+        return service.request_deletion(body.model_dump())
 
     app.include_router(router)
     return app

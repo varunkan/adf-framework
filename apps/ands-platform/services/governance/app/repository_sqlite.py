@@ -20,6 +20,11 @@ CREATE TABLE IF NOT EXISTS audit_events (
     detail     TEXT NOT NULL DEFAULT '{}',
     seq        INTEGER
 );
+CREATE TABLE IF NOT EXISTS legal_holds (
+    tenant_id  TEXT PRIMARY KEY,
+    active     INTEGER NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -47,9 +52,11 @@ class SqliteAuditRepository:
         rec["detail"] = json.loads(rec["detail"])
         return rec
 
-    def list(self, *, category: str = "", dossier_id: str = "") -> list[dict]:
+    def list(self, *, category: str = "", dossier_id: str = "",
+             tenant_id: str = "") -> list[dict]:
         clauses, params = [], []
-        for col, val in (("category", category), ("dossier_id", dossier_id)):
+        for col, val in (("category", category), ("dossier_id", dossier_id),
+                         ("tenant_id", tenant_id)):
             if str(val or "").strip():
                 clauses.append(f"{col} = ?")   # col is a hardcoded literal
                 params.append(str(val).strip())
@@ -66,3 +73,16 @@ class SqliteAuditRepository:
     def count(self) -> int:
         return int(self.db.fetchone(
             "SELECT COUNT(*) AS n FROM audit_events")["n"])
+
+    # -- legal holds (SAAS-REQ-004) ----------------------------------------
+    def set_legal_hold(self, tenant_id: str, active: bool) -> None:
+        self.db.execute(
+            "INSERT INTO legal_holds (tenant_id, active, updated_at) "
+            "VALUES (?, ?, ?) ON CONFLICT(tenant_id) DO UPDATE SET "
+            "active=excluded.active, updated_at=excluded.updated_at",
+            (tenant_id, 1 if active else 0, utcnow_iso()))
+
+    def get_legal_hold(self, tenant_id: str) -> bool:
+        row = self.db.fetchone(
+            "SELECT active FROM legal_holds WHERE tenant_id = ?", (tenant_id,))
+        return bool(row["active"]) if row else False

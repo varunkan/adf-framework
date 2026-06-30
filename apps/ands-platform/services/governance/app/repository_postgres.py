@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS audit_events (
     action TEXT NOT NULL, dossier_id TEXT NOT NULL DEFAULT '',
     tenant_id TEXT NOT NULL DEFAULT '', detail TEXT NOT NULL DEFAULT '{}',
     seq BIGSERIAL);
+CREATE TABLE IF NOT EXISTS legal_holds (
+    tenant_id TEXT PRIMARY KEY, active INTEGER NOT NULL, updated_at TEXT NOT NULL);
 """
 
 
@@ -57,9 +59,11 @@ class PostgresAuditRepository:
         rec["detail"] = json.loads(rec["detail"])
         return rec
 
-    def list(self, *, category: str = "", dossier_id: str = "") -> list[dict]:
+    def list(self, *, category: str = "", dossier_id: str = "",
+             tenant_id: str = "") -> list[dict]:
         clauses, params = [], []
-        for col, val in (("category", category), ("dossier_id", dossier_id)):
+        for col, val in (("category", category), ("dossier_id", dossier_id),
+                         ("tenant_id", tenant_id)):
             if str(val or "").strip():
                 clauses.append(f"{col} = %s")
                 params.append(str(val).strip())
@@ -72,3 +76,18 @@ class PostgresAuditRepository:
 
     def count(self) -> int:
         return int(self._all("SELECT COUNT(*) AS n FROM audit_events")[0]["n"])
+
+    def set_legal_hold(self, tenant_id: str, active: bool) -> None:
+        with self._lock:
+            cur = self._conn.cursor()
+            cur.execute(
+                "INSERT INTO legal_holds (tenant_id, active, updated_at) "
+                "VALUES (%s,%s,%s) ON CONFLICT (tenant_id) DO UPDATE SET "
+                "active=excluded.active, updated_at=excluded.updated_at",
+                (tenant_id, 1 if active else 0, utcnow_iso()))
+            self._conn.commit()
+
+    def get_legal_hold(self, tenant_id: str) -> bool:
+        rows = self._all("SELECT active FROM legal_holds WHERE tenant_id = %s",
+                         (tenant_id,))
+        return bool(rows[0]["active"]) if rows else False

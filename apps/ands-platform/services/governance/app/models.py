@@ -48,3 +48,17 @@ class HcRecordIn(BaseModel):
     org: str = ""
     reference: str = ""
     at: str = ""
+
+
+class ExportIn(BaseModel):
+    tenant_id: str = ""
+    attachments: dict = Field(default_factory=dict)
+
+
+class LegalHoldIn(BaseModel):
+    tenant_id: str = ""
+    active: bool = False
+
+
+class DeletionIn(BaseModel):
+    tenant_id: str = ""

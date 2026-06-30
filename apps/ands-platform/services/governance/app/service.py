@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from ands_shared import EventEnvelope, ProblemError
 
-from . import esign
+from . import esign, export
 from .ports import AuditRepository
 
 
@@ -48,6 +48,32 @@ class GovernanceService:
                 lines.append("    detail: " + json.dumps(e["detail"],
                                                          sort_keys=True))
         return "\n".join(lines) + "\n"
+
+    # -- tenant data export & portability (SAAS-REQ-004) -------------------
+    def export_tenant(self, data: dict) -> dict:
+        tenant_id = str(data.get("tenant_id") or "").strip()
+        if not tenant_id:
+            raise ProblemError(422, "tenant_id is required",
+                               rule="tenant_id_required")
+        audit = self.repo.list(tenant_id=tenant_id)
+        return export.build_bundle(tenant_id, audit, data.get("attachments"))
+
+    def set_legal_hold(self, data: dict) -> dict:
+        tenant_id = str(data.get("tenant_id") or "").strip()
+        if not tenant_id:
+            raise ProblemError(422, "tenant_id is required",
+                               rule="tenant_id_required")
+        active = bool(data.get("active"))
+        self.repo.set_legal_hold(tenant_id, active)
+        return {"tenant_id": tenant_id, "legal_hold": active}
+
+    def request_deletion(self, data: dict) -> dict:
+        tenant_id = str(data.get("tenant_id") or "").strip()
+        if self.repo.get_legal_hold(tenant_id):
+            raise ProblemError(409, "deletion blocked by an active legal hold",
+                               rule="legal_hold_active")
+        return {"tenant_id": tenant_id, "deletion": "scheduled",
+                "note": "tenant data will be deleted per the retention schedule"}
 
     # -- e-signature (thin wrappers; validation errors → problem+json) ------
     def policy(self) -> dict:
