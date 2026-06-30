@@ -18,6 +18,12 @@ CREATE TABLE IF NOT EXISTS validation_runs (
     result          TEXT NOT NULL,
     created_at      TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS validation_jobs (
+    id          TEXT PRIMARY KEY,
+    status      TEXT NOT NULL,
+    result      TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
 """
 
 
@@ -54,3 +60,21 @@ class SqliteValidationRepository:
             "SELECT * FROM validation_runs WHERE dossier_id = ? AND sequence = ? "
             "ORDER BY created_at DESC, id DESC LIMIT 1", (dossier_id, sequence))
         return self._hydrate(row) if row else None
+
+    # -- batch jobs (REQ-116) ----------------------------------------------
+    def save_job(self, result: dict) -> dict:
+        jid = new_id()
+        self.db.execute(
+            "INSERT INTO validation_jobs (id, status, result, created_at) "
+            "VALUES (?, 'complete', ?, ?)",
+            (jid, json.dumps(result), utcnow_iso()))
+        return self.get_job(jid)
+
+    def get_job(self, job_id: str) -> dict | None:
+        row = self.db.fetchone(
+            "SELECT * FROM validation_jobs WHERE id = ?", (job_id,))
+        if not row:
+            return None
+        rec = dict(row)
+        rec["result"] = json.loads(rec["result"])
+        return rec

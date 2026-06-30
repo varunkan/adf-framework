@@ -96,6 +96,26 @@ class ValidationService:
             raise ProblemError(422, "Unknown fix", detail=str(exc))
         return {"context": new_ctx, "inline": engine.inline_findings(new_ctx)}
 
+    # -- batch validation jobs (REQ-116) -----------------------------------
+    def submit_batch(self, data: dict) -> dict:
+        contexts = data.get("contexts") or []
+        if not contexts:
+            raise ProblemError(422, "contexts is required and non-empty",
+                               rule="contexts_required")
+        version = _s(data.get("version")) or rules.ACTIVE_RULESET_VERSION
+        profile = _s(data.get("profile")) or rules.PROFILE_ECTD
+        try:
+            result = engine.run_batch(contexts, version, profile)
+        except (rules.UnknownRulesetError, rules.UnknownProfileError) as exc:
+            raise ProblemError(422, "Invalid ruleset/profile", detail=str(exc))
+        return self.repo.save_job(result)
+
+    def get_job(self, job_id: str) -> dict:
+        job = self.repo.get_job(_s(job_id))
+        if not job:
+            raise ProblemError(404, "validation job not found", detail=_s(job_id))
+        return job
+
     def report(self, dossier_id: str, sequence: str) -> dict:
         run = self.repo.latest_run(_s(dossier_id), _s(sequence) or "0000")
         if not run:

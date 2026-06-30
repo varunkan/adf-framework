@@ -58,6 +58,25 @@ def inline_findings(ctx: dict, version: str = ACTIVE_RULESET_VERSION,
             "warning_count": result["warning_count"]}
 
 
+def run_batch(contexts: list, version: str = ACTIVE_RULESET_VERSION,
+              profile: str = rules.PROFILE_ECTD) -> dict:
+    """REQ-116: validate many transactions and aggregate the outcome."""
+    items, total_e, total_w, blocking = [], 0, 0, 0
+    for ctx in (contexts or []):
+        r = run_validation(ctx or {}, version, profile)
+        items.append({"dossier_id": (ctx or {}).get("dossier_id", ""),
+                      "sequence": (ctx or {}).get("sequence", "0000"),
+                      "blocking": r["blocking"], "error_count": r["error_count"],
+                      "warning_count": r["warning_count"]})
+        total_e += r["error_count"]
+        total_w += r["warning_count"]
+        blocking += 1 if r["blocking"] else 0
+    return {"profile": profile, "ruleset_version": version, "items": items,
+            "count": len(items), "total_errors": total_e,
+            "total_warnings": total_w, "blocking_count": blocking,
+            "all_clear": blocking == 0}
+
+
 def apply_fix(ctx: dict, fix_id: str, file: str) -> dict:
     """REQ-104: apply a one-click fix; returns an updated copy of ``ctx``.
 

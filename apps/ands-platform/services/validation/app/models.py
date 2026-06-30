@@ -24,3 +24,9 @@ class FixIn(BaseModel):
     context: dict = Field(default_factory=dict)
     fix_id: str = ""
     file: str = ""
+
+
+class BatchIn(BaseModel):
+    contexts: list[dict] = Field(default_factory=list)
+    version: str | None = None
+    profile: str = "eCTD"

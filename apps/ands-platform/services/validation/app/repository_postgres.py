@@ -13,6 +13,9 @@ CREATE TABLE IF NOT EXISTS validation_runs (
     ruleset_version TEXT NOT NULL, blocking INTEGER NOT NULL,
     error_count INTEGER NOT NULL, warning_count INTEGER NOT NULL,
     result TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS validation_jobs (
+    id TEXT PRIMARY KEY, status TEXT NOT NULL, result TEXT NOT NULL,
+    created_at TEXT NOT NULL);
 """
 
 
@@ -72,3 +75,16 @@ class PostgresValidationRepository:
             "SELECT * FROM validation_runs WHERE dossier_id = %s AND "
             "sequence = %s ORDER BY created_at DESC, id DESC LIMIT 1",
             (dossier_id, sequence)))
+
+    def save_job(self, result: dict) -> dict:
+        jid = new_id()
+        self._exec("INSERT INTO validation_jobs (id, status, result, "
+                   "created_at) VALUES (%s,'complete',%s,%s)",
+                   (jid, json.dumps(result), utcnow_iso()))
+        return self.get_job(jid)
+
+    def get_job(self, job_id: str) -> dict | None:
+        rec = self._one("SELECT * FROM validation_jobs WHERE id = %s", (job_id,))
+        if rec:
+            rec["result"] = json.loads(rec["result"])
+        return rec

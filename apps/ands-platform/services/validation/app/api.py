@@ -6,7 +6,7 @@ from fastapi import APIRouter, FastAPI, Query
 
 from ands_shared import create_app
 
-from .models import FixIn, InlineIn, ValidateIn
+from .models import BatchIn, FixIn, InlineIn, ValidateIn
 from .service import ValidationService
 
 
@@ -42,6 +42,15 @@ def build_app(service: ValidationService) -> FastAPI:
     @router.get("/report")
     def report(dossier_id: str = Query(...), sequence: str = "0000"):
         return service.report(dossier_id, sequence)
+
+    # -- batch validation jobs (REQ-116) -------------------------------
+    @router.post("/batch", status_code=201)
+    def submit_batch(body: BatchIn):
+        return service.submit_batch(body.model_dump())
+
+    @router.get("/batch/{job_id}")
+    def get_job(job_id: str):
+        return service.get_job(job_id)
 
     app.include_router(router)
     return app
