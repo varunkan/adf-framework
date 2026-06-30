@@ -7,7 +7,7 @@ from app import engine, rules
 
 def test_profiles_listed():
     profs = {p["key"] for p in rules.list_validation_profiles()["profiles"]}
-    assert profs == {"eCTD", "non-eCTD"}
+    assert {"eCTD", "non-eCTD"} <= profs   # GRP added by F8/REQ-117
 
 
 def test_non_ectd_drops_backbone_rules():

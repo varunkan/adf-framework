@@ -396,9 +396,53 @@ REMEDIATIONS = {"grant-read": "readable", "decrypt-pdf": "encrypted"}
 # backbone (index.xml well-formedness, backbone MD5, ca-regional dossier match).
 PROFILE_ECTD = "eCTD"
 PROFILE_NON_ECTD = "non-eCTD"
+PROFILE_GRP = "GRP"
 PROFILES = {PROFILE_ECTD: "Health Canada eCTD",
-            PROFILE_NON_ECTD: "Health Canada non-eCTD (folder structure)"}
+            PROFILE_NON_ECTD: "Health Canada non-eCTD (folder structure)",
+            PROFILE_GRP: "Extended GRP (stricter than HC minimum)"}
 _ECTD_ONLY_RULES = frozenset({"X01", "B07", "G01"})
+
+GRP_MIN_DPI = 300
+
+
+def _check_grp_bookmarks(ctx):
+    # GRP elevates A11 (missing bookmarks) from a warning to a blocking error.
+    out = []
+    for f in _files(ctx):
+        if f.get("kind") == "pdf" and f.get("bookmarks") is False:
+            p = _norm(f.get("path"))
+            out.append({"file": p, "node": p, "remediable": False, "fix_id": "",
+                        "message": f"PDF '{p}' has no bookmarks; the GRP profile "
+                                   "requires navigation bookmarks (GRP01)"})
+    return out
+
+
+def _check_grp_dpi(ctx):
+    out = []
+    for f in _files(ctx):
+        if f.get("kind") != "pdf" or not f.get("scanned"):
+            continue
+        try:
+            dpi = int(f.get("dpi") or 0)
+        except (TypeError, ValueError):
+            dpi = 0
+        if dpi and dpi < GRP_MIN_DPI:
+            p = _norm(f.get("path"))
+            out.append({"file": p, "node": p, "remediable": False, "fix_id": "",
+                        "message": f"scanned PDF '{p}' is {dpi} DPI; the GRP "
+                                   f"profile requires >= {GRP_MIN_DPI} DPI (GRP02)"})
+    return out
+
+
+# GRP-only rules — appended on top of the full eCTD catalog under the GRP profile.
+_GRP_EXTRA_RULES = [
+    {"rule_id": "GRP01", "category": "PDF", "severity": SEVERITY_ERROR,
+     "description": "PDF documents must carry navigation bookmarks (GRP)",
+     "min_version": "5.3", "check": _check_grp_bookmarks},
+    {"rule_id": "GRP02", "category": "PDF", "severity": SEVERITY_ERROR,
+     "description": "Scanned PDFs are at least 300 DPI (GRP)",
+     "min_version": "5.3", "check": _check_grp_dpi},
+]
 
 
 class UnknownProfileError(ValueError):
@@ -423,7 +467,8 @@ def get_ruleset(version: str = ACTIVE_RULESET_VERSION,
             f"unknown validation profile '{profile}'; available: "
             f"{', '.join(PROFILES)}")
     target = _vtuple(version)
-    rules = [{**r, "ruleset_version": version} for r in RULE_CATALOG
+    catalog = RULE_CATALOG + (_GRP_EXTRA_RULES if profile == PROFILE_GRP else [])
+    rules = [{**r, "ruleset_version": version} for r in catalog
              if _vtuple(r["min_version"]) <= target
              and not (profile == PROFILE_NON_ECTD
                       and r["rule_id"] in _ECTD_ONLY_RULES)]
