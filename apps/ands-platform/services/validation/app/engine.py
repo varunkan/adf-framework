@@ -13,10 +13,11 @@ from .rules import (ACTIVE_RULESET_VERSION, CATEGORIES, SEVERITY_COLOUR,
                     SEVERITY_ERROR, SEVERITY_WARNING)
 
 
-def run_validation(ctx: dict, version: str = ACTIVE_RULESET_VERSION) -> dict:
-    """Run the versioned ruleset; split into errors/warnings; blocking iff any
-    Error. Warnings never block (HC's two-tier model)."""
-    rs = rules.get_ruleset(version)
+def run_validation(ctx: dict, version: str = ACTIVE_RULESET_VERSION,
+                   profile: str = rules.PROFILE_ECTD) -> dict:
+    """Run the versioned ruleset under a profile; split into errors/warnings;
+    blocking iff any Error. Warnings never block (HC's two-tier model)."""
+    rs = rules.get_ruleset(version, profile)
     findings = []
     for rule in rs["rules"]:
         for partial in (rule["check"](ctx) or []):
@@ -33,15 +34,17 @@ def run_validation(ctx: dict, version: str = ACTIVE_RULESET_VERSION) -> dict:
     for f in findings:
         by_category.setdefault(f["category"], []).append(f)
     return {
-        "ruleset_version": rs["version"], "ruleset_effective": rs["effective"],
+        "ruleset_version": rs["version"], "profile": rs["profile"],
+        "ruleset_effective": rs["effective"],
         "findings": findings, "errors": errors, "warnings": warnings,
         "error_count": len(errors), "warning_count": len(warnings),
         "blocking": bool(errors), "by_category": by_category}
 
 
-def inline_findings(ctx: dict, version: str = ACTIVE_RULESET_VERSION) -> dict:
+def inline_findings(ctx: dict, version: str = ACTIVE_RULESET_VERSION,
+                    profile: str = rules.PROFILE_ECTD) -> dict:
     """REQ-104: defects keyed to file/node for the inline authoring gutter."""
-    result = run_validation(ctx, version)
+    result = run_validation(ctx, version, profile)
     gutter: dict = {}
     for f in result["findings"]:
         gutter.setdefault(f["file"] or f["node"], []).append({

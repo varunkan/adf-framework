@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 class ValidateIn(BaseModel):
     context: dict = Field(default_factory=dict)
     version: str | None = None
+    profile: str = "eCTD"
     dossier_id: str = ""
     sequence: str = ""
     notify: list[str] = Field(default_factory=list)
@@ -16,6 +17,7 @@ class ValidateIn(BaseModel):
 class InlineIn(BaseModel):
     context: dict = Field(default_factory=dict)
     version: str | None = None
+    profile: str = "eCTD"
 
 
 class FixIn(BaseModel):

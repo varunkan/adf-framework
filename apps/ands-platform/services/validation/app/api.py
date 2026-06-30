@@ -19,9 +19,13 @@ def build_app(service: ValidationService) -> FastAPI:
     def rulesets():
         return service.list_rulesets()
 
+    @router.get("/profiles")
+    def profiles():
+        return service.profiles()
+
     @router.get("/ruleset")
-    def ruleset(version: str = ""):
-        return service.ruleset(version)
+    def ruleset(version: str = "", profile: str = "eCTD"):
+        return service.ruleset(version, profile)
 
     @router.post("/run")
     def run(body: ValidateIn):

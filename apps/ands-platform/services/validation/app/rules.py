@@ -391,23 +391,51 @@ RULE_CATALOG = [
 # remediable fixes (REQ-104 inline one-click fix)
 REMEDIATIONS = {"grant-read": "readable", "decrypt-pdf": "encrypted"}
 
+# REQ-102 — validation profiles. The non-eCTD (HC folder-structure zip) profile
+# runs the same content rules but skips the checks that assume an eCTD XML
+# backbone (index.xml well-formedness, backbone MD5, ca-regional dossier match).
+PROFILE_ECTD = "eCTD"
+PROFILE_NON_ECTD = "non-eCTD"
+PROFILES = {PROFILE_ECTD: "Health Canada eCTD",
+            PROFILE_NON_ECTD: "Health Canada non-eCTD (folder structure)"}
+_ECTD_ONLY_RULES = frozenset({"X01", "B07", "G01"})
 
-def get_ruleset(version: str = ACTIVE_RULESET_VERSION) -> dict:
+
+class UnknownProfileError(ValueError):
+    """An unpublished validation profile was requested."""
+
+
+def list_validation_profiles() -> dict:
+    return {"default": PROFILE_ECTD,
+            "profiles": [{"key": k, "label": v} for k, v in PROFILES.items()]}
+
+
+def get_ruleset(version: str = ACTIVE_RULESET_VERSION,
+                profile: str = PROFILE_ECTD) -> dict:
     version = _norm(version) or ACTIVE_RULESET_VERSION
     if version not in RULESETS:
         raise UnknownRulesetError(
             f"unknown ruleset version '{version}'; published: "
             f"{', '.join(sorted(RULESETS))}")
+    profile = _norm(profile) or PROFILE_ECTD
+    if profile not in PROFILES:
+        raise UnknownProfileError(
+            f"unknown validation profile '{profile}'; available: "
+            f"{', '.join(PROFILES)}")
     target = _vtuple(version)
     rules = [{**r, "ruleset_version": version} for r in RULE_CATALOG
-             if _vtuple(r["min_version"]) <= target]
-    return {"version": version, "effective": RULESETS[version]["effective"],
-            "rules": rules}
+             if _vtuple(r["min_version"]) <= target
+             and not (profile == PROFILE_NON_ECTD
+                      and r["rule_id"] in _ECTD_ONLY_RULES)]
+    return {"version": version, "profile": profile,
+            "effective": RULESETS[version]["effective"], "rules": rules}
 
 
-def ruleset_catalog(version: str = ACTIVE_RULESET_VERSION) -> dict:
-    rs = get_ruleset(version)
-    return {"version": rs["version"], "effective": rs["effective"],
+def ruleset_catalog(version: str = ACTIVE_RULESET_VERSION,
+                    profile: str = PROFILE_ECTD) -> dict:
+    rs = get_ruleset(version, profile)
+    return {"version": rs["version"], "profile": rs["profile"],
+            "effective": rs["effective"],
             "rules": [{k: r[k] for k in ("rule_id", "category", "severity",
                                          "description", "ruleset_version")}
                       for r in rs["rules"]]}
