@@ -1,0 +1,39 @@
+name: ands-platform CI
+
+# Scoped to the platform so it never interferes with the repo's main ci.yml.
+on:
+  push:
+    paths: ["apps/ands-platform/**", ".github/workflows/ands-platform-ci.yml"]
+  pull_request:
+    paths: ["apps/ands-platform/**", ".github/workflows/ands-platform-ci.yml"]
+
+jobs:
+  test:
+    name: verify (all services + gateway + integration)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/ands-platform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"   # stable; the sandbox's 3.15-alpha is local-only
+      - name: Create venv + install
+        run: |
+          python -m venv .venv
+          ./.venv/bin/pip install --upgrade pip
+          ./.venv/bin/pip install -r requirements-dev.txt
+      - name: Run every suite (SQLite + in-memory-bus adapters)
+        run: ./verify.sh
+
+  compose-build:
+    name: docker compose build (image sanity)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/ands-platform
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build all service images
+        run: docker compose build

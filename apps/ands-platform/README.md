@@ -44,6 +44,13 @@ python3 -m venv .venv && ./.venv/bin/pip install -r requirements-dev.txt
 ./verify.sh
 ```
 
+## Operations
+
+- `make venv && make test` — create the venv and run every suite (`verify.sh`).
+- CI: [`.github/workflows/ands-platform-ci.yml`](../../.github/workflows/ands-platform-ci.yml) runs the full suite + `docker compose build` on every platform change.
+- Kubernetes: [`ops/k8s/`](ops/k8s/) — namespace, Redis, the gateway, and `collaboration` as the replicable per-service pattern.
+- Observability: every service exposes `/health` and Prometheus `/metrics`; the gateway exposes `/gateway/health` and `/gateway/services`.
+
 ## Run the mesh locally (Docker)
 
 ```bash
