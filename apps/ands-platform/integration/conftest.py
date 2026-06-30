@@ -67,6 +67,29 @@ def mesh():
     governance = g["app.service"].GovernanceService(
         _mem(g["app.repository_sqlite"].SqliteAuditRepository), bus).register()
 
+    i = _load("identity", ["app.service", "app.repository_sqlite"])
+    identity = i["app.service"].IdentityService(
+        _mem(i["app.repository_sqlite"].SqliteIdentityRepository), bus).register()
+
+    d = _load("dossier", ["app.service", "app.repository_sqlite"])
+    dossier = d["app.service"].DossierService(
+        _mem(d["app.repository_sqlite"].SqliteDossierRepository), bus).register()
+
+    lc = _load("lifecycle", ["app.service", "app.repository_sqlite"])
+    lifecycle = lc["app.service"].LifecycleService(
+        _mem(lc["app.repository_sqlite"].SqliteLifecycleRepository),
+        bus).register()
+
+    rg = _load("registry", ["app.service", "app.repository_sqlite"])
+    registry = rg["app.service"].RegistryService(
+        _mem(rg["app.repository_sqlite"].SqliteRegistrationRepository),
+        bus).register()
+
+    f = _load("fees", ["app.service"])
+    fees = f["app.service"].FeesService()   # stateless — no repo/bus
+
     return SimpleNamespace(bus=bus, validation=validation,
                            transmission=transmission, collaboration=collaboration,
-                           readiness=readiness, governance=governance)
+                           readiness=readiness, governance=governance,
+                           identity=identity, dossier=dossier,
+                           lifecycle=lifecycle, registry=registry, fees=fees)
