@@ -35,3 +35,11 @@ class CorrespondenceIn(BaseModel):
     direction: str = "inbound"
     received_at: str = ""
     reference: str = ""
+
+
+class NoticeIn(BaseModel):
+    dossier_id: str = ""
+    notice: str = ""          # SAL/SDN/SRL/NOC/NOD/NON
+    date: str = ""
+    subject: str = ""
+    reference: str = ""

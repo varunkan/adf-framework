@@ -12,6 +12,24 @@ def _s(v) -> str:
     return str(v or "").strip()
 
 
+_SCREENING_NOTICES = {"SAL", "SDN", "SRL"}
+_DECISION_NOTICES = {"NOC", "NOD", "NON"}
+# REQ-096 — the next-action shortcut offered when each notice is ingested.
+_RESPONSE_SHORTCUTS = {
+    "SAL": {"action": "continue",
+            "label": "Accepted at screening — proceeds to review"},
+    "SDN": {"action": "file_response_sequence", "window_days": 45,
+            "label": "Respond to the Screening Deficiency Notice within 45 days"},
+    "SRL": {"action": "none", "label": "Rejected at screening"},
+    "NOD": {"action": "file_clarifax_or_response", "window_days": 90,
+            "label": "Respond to the Notice of Deficiency within 90 days "
+                     "(45 for DIN)"},
+    "NON": {"action": "file_response_sequence", "window_days": 90,
+            "label": "Respond to the Notice of Non-compliance"},
+    "NOC": {"action": "none", "label": "Approved — no response required"},
+}
+
+
 class LifecycleService:
     def __init__(self, repo: LifecycleRepository, bus,
                  *, source: str = "lifecycle") -> None:
@@ -105,6 +123,29 @@ class LifecycleService:
 
     def holidays(self, year: int) -> dict:
         return {"year": year, "holidays": hc_calendar.statutory_holidays(year)}
+
+    # -- HC notice ingestion (REQ-096) -------------------------------------
+    def ingest_notice(self, data: dict) -> dict:
+        """Ingest an HC notice: advance the DSTS state machine, log it as
+        inbound correspondence, and return a response-sequence shortcut."""
+        dossier_id = _s(data.get("dossier_id"))
+        notice = _s(data.get("notice")).upper()
+        date = _s(data.get("date"))
+        if notice in _SCREENING_NOTICES:
+            state = self.transition({"dossier_id": dossier_id, "kind": "screening",
+                                     "value": notice, "date": date})
+        elif notice in _DECISION_NOTICES:
+            state = self.transition({"dossier_id": dossier_id, "kind": "decision",
+                                     "value": notice, "date": date})
+        else:
+            raise ProblemError(422, f"unknown HC notice: {notice}",
+                               rule="notice_unknown")
+        corr = self.log_correspondence({
+            "dossier_id": dossier_id, "kind": notice, "direction": "inbound",
+            "subject": _s(data.get("subject")) or f"{notice} received",
+            "received_at": date, "reference": _s(data.get("reference"))})
+        return {"state": state, "correspondence": corr,
+                "response": _RESPONSE_SHORTCUTS.get(notice, {})}
 
     # -- HC correspondence hub (REQ-112) -----------------------------------
     def log_correspondence(self, data: dict) -> dict:

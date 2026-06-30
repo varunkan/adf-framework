@@ -6,7 +6,8 @@ from fastapi import APIRouter, FastAPI, Query
 
 from ands_shared import create_app
 
-from .models import CorrespondenceIn, DeadlineIn, StartIn, TransitionIn
+from .models import (CorrespondenceIn, DeadlineIn, NoticeIn, StartIn,
+                     TransitionIn)
 from .service import LifecycleService
 
 
@@ -22,6 +23,10 @@ def build_app(service: LifecycleService) -> FastAPI:
     @router.post("/transition")
     def transition(body: TransitionIn):
         return service.transition(body.model_dump())
+
+    @router.post("/notice")
+    def ingest_notice(body: NoticeIn):
+        return service.ingest_notice(body.model_dump())
 
     @router.get("/service-standard")
     def service_standard(submission_type: str = "ANDS"):
