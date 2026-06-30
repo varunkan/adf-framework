@@ -37,3 +37,22 @@ class AdminSequenceIn(BaseModel):
     operations: list[dict] = Field(default_factory=list)
     present_documents: list[dict] = Field(default_factory=list)
     cover_letter_generated: bool = True
+
+
+class PmXmlBuildIn(BaseModel):
+    dossier_id: str = ""
+    lang: str = "en"
+    product_name: str = ""
+    din: str = ""
+    sections: list[dict] = Field(default_factory=list)
+    images: list[dict] = Field(default_factory=list)
+
+
+class PmXmlValidateIn(BaseModel):
+    xml: str = ""
+
+
+class PmXmlGateIn(BaseModel):
+    xml_pm_required: bool = False
+    has_xml_pm: bool = False
+    has_pdf_pm: bool = False

@@ -8,7 +8,7 @@ from ands_shared import create_app
 
 from . import ectd
 from .models import (AdminSequenceIn, ContentPlanIn, ItemAssignIn, ItemStatusIn,
-                     PmLeafIn)
+                     PmLeafIn, PmXmlBuildIn, PmXmlGateIn, PmXmlValidateIn)
 from .service import DossierService
 
 
@@ -53,6 +53,19 @@ def build_app(service: DossierService) -> FastAPI:
     @router.post("/admin-sequence", status_code=201)
     def admin_sequence(body: AdminSequenceIn):
         return service.build_admin_sequence(body.model_dump())
+
+    # -- XML Product Monograph (REQ-099) --------------------------------
+    @router.post("/monograph/xml/build")
+    def pm_xml_build(body: PmXmlBuildIn):
+        return service.build_monograph_xml(body.model_dump())
+
+    @router.post("/monograph/xml/validate")
+    def pm_xml_validate(body: PmXmlValidateIn):
+        return service.validate_monograph_xml(body.xml)
+
+    @router.post("/monograph/xml/gate")
+    def pm_xml_gate(body: PmXmlGateIn):
+        return service.require_xml_pm(body.model_dump())
 
     app.include_router(router)
     return app

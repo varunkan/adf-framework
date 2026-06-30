@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ands_shared import EventEnvelope, EventType, ProblemError
 
-from . import admin_sequence, content_plan, monograph
+from . import admin_sequence, content_plan, monograph, pm_xml
 from .ports import DossierRepository
 
 
@@ -105,3 +105,14 @@ class DossierService:
                 dossier_id=_s(dossier_id),
                 data={"findings": result["findings"]}))
         return result
+
+    # -- XML Product Monograph (REQ-099) -----------------------------------
+    def build_monograph_xml(self, data: dict) -> dict:
+        xml = pm_xml.build_monograph_xml(data)
+        return {"xml": xml, "validation": pm_xml.validate_monograph_xml(xml)}
+
+    def validate_monograph_xml(self, xml: str) -> dict:
+        return pm_xml.validate_monograph_xml(xml)
+
+    def require_xml_pm(self, ctx: dict) -> dict:
+        return pm_xml.require_xml_pm(ctx)
