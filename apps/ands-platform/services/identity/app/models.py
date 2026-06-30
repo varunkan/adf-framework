@@ -16,6 +16,11 @@ class LoginIn(BaseModel):
     email: str = ""
     password: str = ""
     tenant_id: str = ""
+    mfa_code: str = ""
+
+
+class MfaVerifyIn(BaseModel):
+    code: str = ""
 
 
 class ProvisionTenantIn(BaseModel):

@@ -16,7 +16,9 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, email TEXT NOT NULL,
     pw_salt TEXT NOT NULL, pw_hash TEXT NOT NULL, role TEXT NOT NULL,
-    name TEXT, created_at TEXT NOT NULL, UNIQUE (tenant_id, email));
+    name TEXT, created_at TEXT NOT NULL,
+    mfa_secret TEXT, mfa_enabled INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (tenant_id, email));
 CREATE TABLE IF NOT EXISTS sessions (
     token TEXT PRIMARY KEY, user_id TEXT NOT NULL, tenant_id TEXT NOT NULL,
     role TEXT NOT NULL, email TEXT NOT NULL, created_at TEXT NOT NULL,
@@ -72,6 +74,15 @@ class SqliteIdentityRepository:
             "SELECT * FROM users WHERE tenant_id = ? AND email = ?",
             (tenant_id, email))
         return dict(row) if row else None
+
+    def get_user_raw(self, user_id) -> dict | None:
+        row = self.db.fetchone("SELECT * FROM users WHERE id = ?", (user_id,))
+        return dict(row) if row else None
+
+    def set_mfa(self, user_id, secret, enabled) -> None:
+        self.db.execute(
+            "UPDATE users SET mfa_secret = ?, mfa_enabled = ? WHERE id = ?",
+            (secret, 1 if enabled else 0, user_id))
 
     def list_users(self, tenant_id) -> list[dict]:
         rows = self.db.fetchall(

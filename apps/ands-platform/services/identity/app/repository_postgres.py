@@ -13,7 +13,9 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, email TEXT NOT NULL,
     pw_salt TEXT NOT NULL, pw_hash TEXT NOT NULL, role TEXT NOT NULL,
-    name TEXT, created_at TEXT NOT NULL, UNIQUE (tenant_id, email));
+    name TEXT, created_at TEXT NOT NULL,
+    mfa_secret TEXT, mfa_enabled INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (tenant_id, email));
 CREATE TABLE IF NOT EXISTS sessions (
     token TEXT PRIMARY KEY, user_id TEXT NOT NULL, tenant_id TEXT NOT NULL,
     role TEXT NOT NULL, email TEXT NOT NULL, created_at TEXT NOT NULL,
@@ -93,6 +95,13 @@ class PostgresIdentityRepository:
     def get_by_email_raw(self, tenant_id, email):
         return self._one("SELECT * FROM users WHERE tenant_id = %s AND "
                          "email = %s", (tenant_id, email))
+
+    def get_user_raw(self, user_id):
+        return self._one("SELECT * FROM users WHERE id = %s", (user_id,))
+
+    def set_mfa(self, user_id, secret, enabled):
+        self._exec("UPDATE users SET mfa_secret = %s, mfa_enabled = %s "
+                   "WHERE id = %s", (secret, 1 if enabled else 0, user_id))
 
     def list_users(self, tenant_id):
         return [self._public(r) for r in self._all(

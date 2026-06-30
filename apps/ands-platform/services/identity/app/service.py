@@ -87,8 +87,38 @@ class IdentityService:
                 _s(data.get("password")), row["pw_salt"], row["pw_hash"]):
             raise ProblemError(401, "invalid credentials",
                                rule="auth_failed")
+        if row.get("mfa_enabled"):
+            if not security.verify_totp(row.get("mfa_secret"),
+                                        data.get("mfa_code")):
+                raise ProblemError(401, "an MFA code is required",
+                                   rule="mfa_required")
         user = self.repo._public(row)
         return {"user": user, "token": self._start_session(user)}
+
+    # -- MFA (SAAS-NFR-003) -------------------------------------------------
+    def enroll_mfa(self, token: str) -> dict:
+        principal = self.me(token)
+        secret = security.new_totp_secret()
+        self.repo.set_mfa(principal["user_id"], secret, False)
+        return {"secret": secret, "enabled": False,
+                "provisioning_uri": security.provisioning_uri(
+                    secret, principal["email"])}
+
+    def verify_mfa(self, token: str, code: str) -> dict:
+        principal = self.me(token)
+        user = self.repo.get_user_raw(principal["user_id"]) or {}
+        secret = user.get("mfa_secret")
+        if not secret:
+            raise ProblemError(422, "MFA is not enrolled", rule="mfa_not_enrolled")
+        if not security.verify_totp(secret, code):
+            raise ProblemError(401, "invalid MFA code", rule="mfa_invalid")
+        self.repo.set_mfa(principal["user_id"], secret, True)
+        return {"enabled": True}
+
+    def mfa_status(self, token: str) -> dict:
+        principal = self.me(token)
+        user = self.repo.get_user_raw(principal["user_id"]) or {}
+        return {"enabled": bool(user.get("mfa_enabled"))}
 
     def _start_session(self, user: dict) -> str:
         token = security.new_session_token()
