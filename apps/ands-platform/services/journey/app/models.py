@@ -29,3 +29,19 @@ class DossierAssessIn(BaseModel):
     branch: str = "pharmaceutical"
     request_date: str = ""
     first_filing_date: str = ""
+
+
+class PlaceDocIn(BaseModel):
+    slot_key: str
+    doc: str | dict = ""                       # a filename or a doc descriptor
+    languages: list | None = None              # for the bilingual PM slot
+
+
+class NoticeIn(BaseModel):
+    type: str                                  # SDN / SAL / clarifax / NOD / NON / NOC
+    date: str = ""                             # YYYY-MM-DD
+
+
+class PauseIn(BaseModel):
+    type: str                                  # the notice type to pause/resume
+    paused: bool = True

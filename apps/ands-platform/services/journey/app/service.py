@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from ands_shared import EventEnvelope, ProblemError, new_id
 
-from . import drug_intake, dossier_id, journey, readiness_card
+from . import content_slots, drug_intake, dossier_id, journey, readiness_card, tracking
 from .ports import SessionRepository
 
 # step key -> the signal a successful CTA writes (validated below against STAGES).
@@ -40,6 +40,17 @@ class JourneyService:
             data=data))
 
     # -- views --------------------------------------------------------------
+    def _content(self, signals: dict) -> dict:
+        """The eCTD Module 1-5 slot view (drives drag-drop placement + tower)."""
+        slots = signals.get("content_slots") or content_slots.plan(
+            cs_be_only=bool(signals.get("cs_be_only")))
+        return {
+            "slots": slots,
+            "progress": content_slots.progress(slots),
+            "gate": content_slots.checklist_gate(slots),
+            "tower": content_slots.tower_view(slots),
+        }
+
     def _view(self, session: dict) -> dict:
         signals = session.get("signals") or {}
         title = (session.get("title")
@@ -50,6 +61,7 @@ class JourneyService:
             "tenant_id": session.get("tenant_id", ""),
             "journey": journey.journey(signals, sub_id=session["id"], title=title),
             "readiness": readiness_card.card(signals),
+            "content": self._content(signals),
             "intake": session.get("intake"),
             "signals": signals,
         }
@@ -127,6 +139,15 @@ class JourneyService:
             "submission_type"))
         if stype:
             signals["submission_type"] = stype
+        # Carry CS-BE-only into the content plan (suppresses Modules 2.4-2.7).
+        # Rebuild the plan only while it is still untouched (no docs placed yet).
+        if "cs_be_only" in answers:
+            signals["cs_be_only"] = bool(answers.get("cs_be_only"))
+            slots = signals.get("content_slots")
+            untouched = not slots or all(s.get("state") == "empty" for s in slots)
+            if untouched:
+                signals["content_slots"] = content_slots.plan(
+                    cs_be_only=signals["cs_be_only"])
 
     # -- dossier-id guidance ------------------------------------------------
     def assess_dossier_id(self, data: dict) -> dict:
@@ -169,6 +190,13 @@ class JourneyService:
             signals["sequence"] = _s(data.get("sequence")) or "0000"
             signals["submission_created"] = True
         elif step == "content":
+            slots = signals.get("content_slots")
+            if slots:
+                gate = content_slots.checklist_gate(slots)
+                if not gate["complete"]:
+                    raise ProblemError(
+                        422, "required documents are still missing",
+                        detail="; ".join(m["title"] for m in gate["missing"]))
             signals["content_done"] = True
         elif step == "validate":
             errors = data.get("errors", 0)
@@ -194,3 +222,50 @@ class JourneyService:
         self.repo.update(session["id"], session)
         self._emit(f"journey.step.{step}", session)
         return self._view(session)
+
+    # -- content slots (drag-drop document placement onto Module 1-5) -------
+    def place_document(self, session_id: str, slot_key: str, doc,
+                       languages=None) -> dict:
+        session = self._load(session_id)
+        signals = session.setdefault("signals", {})
+        slots = signals.get("content_slots") or content_slots.plan(
+            cs_be_only=bool(signals.get("cs_be_only")))
+        try:
+            slots = content_slots.place(slots, slot_key, doc, languages=languages)
+        except ValueError as exc:
+            raise ProblemError(422, "unknown content slot", detail=str(exc))
+        signals["content_slots"] = slots
+        signals["content_done"] = content_slots.checklist_gate(slots)["complete"]
+        self.repo.update(session["id"], session)
+        self._emit("journey.content.placed", session, slot=_s(slot_key))
+        return self._view(session)
+
+    # -- post-filing tracking (HC review + deadline timers) ----------------
+    def _tracking(self, signals: dict) -> dict:
+        return signals.setdefault("tracking", {"notices": [], "paused": []})
+
+    def log_notice(self, session_id: str, notice: dict) -> dict:
+        session = self._load(session_id)
+        tr = self._tracking(session.setdefault("signals", {}))
+        tr["notices"].append({"type": _s((notice or {}).get("type")),
+                              "date": _s((notice or {}).get("date"))})
+        self.repo.update(session["id"], session)
+        self._emit("journey.track.notice", session,
+                   notice_type=_s((notice or {}).get("type")))
+        return self._view(session)
+
+    def set_pause(self, session_id: str, ntype: str, paused: bool = True) -> dict:
+        session = self._load(session_id)
+        tr = self._tracking(session.setdefault("signals", {}))
+        current = set(tr.get("paused") or [])
+        current.add(_s(ntype)) if paused else current.discard(_s(ntype))
+        tr["paused"] = sorted(current)
+        self.repo.update(session["id"], session)
+        return tr
+
+    def track_view(self, session_id: str, as_of: str) -> dict:
+        session = self._load(session_id)
+        tr = (session.get("signals") or {}).get("tracking") \
+            or {"notices": [], "paused": []}
+        return tracking.summarize(tr.get("notices") or [], _s(as_of),
+                                  paused=tr.get("paused") or [])

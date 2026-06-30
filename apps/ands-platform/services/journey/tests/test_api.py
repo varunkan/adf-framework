@@ -98,3 +98,95 @@ def test_intake_with_session_persists(ctx):
     body = client.get(f"/api/journey/{sid}").json()
     assert body["title"] == "Drugazole"
     assert body["intake"]["route"]["submission_type"] == "ANDS"
+
+
+# -- content slots (drag-drop placement onto Module 1-5) --------------------
+def _start(client):
+    return client.post("/api/journey/start", json={}).json()["id"]
+
+
+def test_view_exposes_module_tower(client):
+    sid = _start(client)
+    v = client.get(f"/api/journey/{sid}").json()
+    tower = {t["module"]: t["state"] for t in v["content"]["tower"]}
+    assert tower["1"] == "todo" and tower["4"] == "na"   # M4 n/a for a generic
+    assert v["content"]["gate"]["complete"] is False
+
+
+def test_place_documents_completes_content_and_lights_tower(client):
+    sid = _start(client)
+    v = client.get(f"/api/journey/{sid}").json()
+    required = [s["key"] for s in v["content"]["slots"]
+               if s["required"] and s["applicable"]]
+    for key in required:
+        body = {"slot_key": key, "doc": f"{key}.pdf"}
+        if key == "m1_product_monograph":
+            body["languages"] = ["en", "fr"]
+        assert client.post(f"/api/journey/{sid}/content/place",
+                           json=body).status_code == 200
+    v2 = client.get(f"/api/journey/{sid}").json()
+    assert v2["content"]["gate"]["complete"] is True
+    assert all(t["state"] in ("pass", "na") for t in v2["content"]["tower"])
+
+
+def test_bilingual_pm_needs_both_languages(client):
+    sid = _start(client)
+    r = client.post(f"/api/journey/{sid}/content/place",
+                    json={"slot_key": "m1_product_monograph", "doc": "pm.pdf",
+                          "languages": ["en"]})
+    slots = {s["key"]: s for s in r.json()["content"]["slots"]}
+    assert slots["m1_product_monograph"]["state"] == "partial"
+
+
+def test_place_unknown_slot_422(client):
+    sid = _start(client)
+    r = client.post(f"/api/journey/{sid}/content/place",
+                    json={"slot_key": "nope", "doc": "x"})
+    assert r.status_code == 422
+
+
+def test_content_advance_blocked_until_required_filled(client):
+    sid = _start(client)
+    client.post(f"/api/journey/{sid}/content/place",
+                json={"slot_key": "m1_cover_letter", "doc": "c.pdf"})
+    r = client.post(f"/api/journey/{sid}/advance",
+                    json={"step": "content", "data": {}})
+    assert r.status_code == 422   # slots present but required items still missing
+
+
+# -- post-filing tracking (deadline timers) ---------------------------------
+def test_track_sdn_timer_and_srl_advisory(client):
+    sid = _start(client)
+    client.post(f"/api/journey/{sid}/track/notice",
+                json={"type": "SDN", "date": "2026-06-01"})
+    tv = client.get(f"/api/journey/{sid}/track",
+                    params={"as_of": "2026-06-10"}).json()
+    assert tv["phase"]["phase"] == "screening"
+    timer = tv["timers"][0]
+    assert timer["window_days"] == 45 and timer["days_remaining"] == 36
+    assert timer["overdue"] is False
+    assert any(a["rule"] == "srl_risk" for a in tv["advisories"])
+
+
+def test_track_pause_the_clock(client):
+    sid = _start(client)
+    client.post(f"/api/journey/{sid}/track/notice",
+                json={"type": "clarifax", "date": "2026-06-01"})
+    overdue = client.get(f"/api/journey/{sid}/track",
+                         params={"as_of": "2026-07-01"}).json()
+    assert overdue["timers"][0]["overdue"] is True
+    client.post(f"/api/journey/{sid}/track/pause",
+                json={"type": "clarifax", "paused": True})
+    paused = client.get(f"/api/journey/{sid}/track",
+                        params={"as_of": "2026-07-01"}).json()
+    assert paused["timers"][0]["paused"] is True
+    assert paused["timers"][0]["overdue"] is False
+
+
+def test_noc_moves_to_decision(client):
+    sid = _start(client)
+    client.post(f"/api/journey/{sid}/track/notice",
+                json={"type": "NOC", "date": "2026-09-01"})
+    tv = client.get(f"/api/journey/{sid}/track",
+                    params={"as_of": "2026-09-02"}).json()
+    assert tv["phase"]["phase"] == "decision" and tv["timers"] == []

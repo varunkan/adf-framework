@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, Query
 
 from ands_shared import create_app
 
-from .models import AdvanceIn, DossierAssessIn, IntakeIn, StartIn
+from .models import (AdvanceIn, DossierAssessIn, IntakeIn, NoticeIn, PauseIn,
+                     PlaceDocIn, StartIn)
 from .service import JourneyService
 
 
@@ -47,6 +48,27 @@ def build_app(service: JourneyService) -> FastAPI:
     @router.post("/dossier-id/assess")
     def dossier_id_assess(body: DossierAssessIn):
         return service.assess_dossier_id(body.model_dump())
+
+    @router.post("/{session_id}/content/place")
+    def content_place(session_id: str, body: PlaceDocIn):
+        """Drop a document onto an eCTD Module slot (lights up the tower)."""
+        return service.place_document(session_id, body.slot_key, body.doc,
+                                      body.languages)
+
+    @router.post("/{session_id}/track/notice")
+    def track_notice(session_id: str, body: NoticeIn):
+        """Log a Health Canada notice (SDN/SAL/clarifax/NOD/NON/NOC)."""
+        return service.log_notice(session_id, body.model_dump())
+
+    @router.post("/{session_id}/track/pause")
+    def track_pause(session_id: str, body: PauseIn):
+        """Pause / resume the clock on a clarifax response timer."""
+        return service.set_pause(session_id, body.type, body.paused)
+
+    @router.get("/{session_id}/track")
+    def track(session_id: str, as_of: str = Query(...)):
+        """The live review phase + deadline timers (as_of = the caller's today)."""
+        return service.track_view(session_id, as_of)
 
     app.include_router(router)
     return app
