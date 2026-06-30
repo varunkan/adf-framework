@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ands_shared import EventEnvelope, EventType, ProblemError
 
-from . import admin_sequence, content_plan, monograph, pm_xml
+from . import admin_sequence, content_plan, monograph, pm_xml, pm_xref
 from .ports import DossierRepository
 
 
@@ -116,3 +116,13 @@ class DossierService:
 
     def require_xml_pm(self, ctx: dict) -> dict:
         return pm_xml.require_xml_pm(ctx)
+
+    # -- annotated PM cross-references (REQ-101) ---------------------------
+    def xref_targets(self) -> dict:
+        return {"targets": pm_xref.valid_targets()}
+
+    def resolve_pm_xrefs(self, data: dict) -> dict:
+        refs = pm_xref.build_pm_xrefs(data) if data.get("sections") or \
+            data.get("refs") else (data.get("xrefs") or [])
+        present = data.get("present_targets")
+        return pm_xref.resolve_pm_xrefs(refs, present)

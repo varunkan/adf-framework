@@ -8,7 +8,8 @@ from ands_shared import create_app
 
 from . import ectd
 from .models import (AdminSequenceIn, ContentPlanIn, ItemAssignIn, ItemStatusIn,
-                     PmLeafIn, PmXmlBuildIn, PmXmlGateIn, PmXmlValidateIn)
+                     PmLeafIn, PmXmlBuildIn, PmXmlGateIn, PmXmlValidateIn,
+                     PmXrefIn)
 from .service import DossierService
 
 
@@ -66,6 +67,15 @@ def build_app(service: DossierService) -> FastAPI:
     @router.post("/monograph/xml/gate")
     def pm_xml_gate(body: PmXmlGateIn):
         return service.require_xml_pm(body.model_dump())
+
+    # -- annotated PM cross-references (REQ-101) ------------------------
+    @router.get("/monograph/xref/targets")
+    def pm_xref_targets():
+        return service.xref_targets()
+
+    @router.post("/monograph/xref/resolve")
+    def pm_xref_resolve(body: PmXrefIn):
+        return service.resolve_pm_xrefs(body.model_dump())
 
     app.include_router(router)
     return app

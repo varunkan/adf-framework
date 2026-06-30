@@ -56,3 +56,10 @@ class PmXmlGateIn(BaseModel):
     xml_pm_required: bool = False
     has_xml_pm: bool = False
     has_pdf_pm: bool = False
+
+
+class PmXrefIn(BaseModel):
+    sections: list[dict] = Field(default_factory=list)
+    refs: list = Field(default_factory=list)
+    xrefs: list[dict] = Field(default_factory=list)
+    present_targets: list[str] | None = None
