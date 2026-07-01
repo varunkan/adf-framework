@@ -19,7 +19,11 @@ def build():
         repo = SqliteSessionRepository(SqliteDb(settings.sqlite_path))
     bus = (RedisEventBus(settings.redis_url) if settings.bus == "redis"
            else InMemoryEventBus())
-    return build_app(JourneyService(repo, bus))
+    dossier = None
+    if settings.dossier_url:
+        from .dossier_client import HttpDossierClient
+        dossier = HttpDossierClient(settings.dossier_url)
+    return build_app(JourneyService(repo, bus, dossier=dossier))
 
 
 app = build()

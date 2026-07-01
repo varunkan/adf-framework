@@ -88,8 +88,16 @@ def mesh():
     f = _load("fees", ["app.service"])
     fees = f["app.service"].FeesService()   # stateless — no repo/bus
 
+    # the journey BFF composes the dossier service through its client port
+    j = _load("journey", ["app.service", "app.repository_sqlite",
+                          "app.dossier_client"])
+    journey = j["app.service"].JourneyService(
+        _mem(j["app.repository_sqlite"].SqliteSessionRepository), bus,
+        dossier=j["app.dossier_client"].InProcessDossierClient(dossier))
+
     return SimpleNamespace(bus=bus, validation=validation,
                            transmission=transmission, collaboration=collaboration,
                            readiness=readiness, governance=governance,
                            identity=identity, dossier=dossier,
-                           lifecycle=lifecycle, registry=registry, fees=fees)
+                           lifecycle=lifecycle, registry=registry, fees=fees,
+                           journey=journey)

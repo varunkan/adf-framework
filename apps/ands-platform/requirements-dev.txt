@@ -6,3 +6,4 @@ pydantic>=2.7
 pg8000>=1.31
 redis>=5.0
 pytest>=8.0
+python-multipart>=0.0.9

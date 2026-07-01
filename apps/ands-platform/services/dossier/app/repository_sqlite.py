@@ -52,6 +52,36 @@ CREATE TABLE IF NOT EXISTS binders (
     share_token TEXT,
     created_at  TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS documents (
+    doc_id       TEXT PRIMARY KEY,
+    dossier_id   TEXT NOT NULL,
+    section      TEXT NOT NULL,
+    filename     TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    checksum     TEXT NOT NULL,
+    size         INTEGER NOT NULL,
+    origin       TEXT NOT NULL,
+    lang         TEXT,
+    body         BLOB NOT NULL,
+    created_at   TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS section_state (
+    dossier_id  TEXT NOT NULL,
+    section     TEXT NOT NULL,
+    status      TEXT NOT NULL,
+    action      TEXT,
+    data        TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (dossier_id, section)
+);
+CREATE TABLE IF NOT EXISTS dossier_index (
+    dossier_id      TEXT PRIMARY KEY,
+    title           TEXT NOT NULL,
+    submission_type TEXT,
+    cs_be_only      INTEGER NOT NULL DEFAULT 1,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+);
 """
 
 # columns a caller may patch on a plan item
@@ -197,3 +227,82 @@ class SqliteDossierRepository:
         row = self.db.fetchone(
             "SELECT * FROM binders WHERE share_token = ?", (token,))
         return self._binder_row(row) if row else None
+
+    # -- documents (byte store backing) ------------------------------------
+    def put_document(self, rec: dict) -> dict:
+        self.db.execute(
+            "INSERT INTO documents (doc_id, dossier_id, section, filename, "
+            "content_type, checksum, size, origin, lang, body, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (rec["doc_id"], rec["dossier_id"], rec["section"], rec["filename"],
+             rec["content_type"], rec["checksum"], rec["size"], rec["origin"],
+             rec.get("lang"), rec["body"], utcnow_iso()))
+        return rec
+
+    def get_document(self, doc_id: str) -> dict | None:
+        row = self.db.fetchone(
+            "SELECT * FROM documents WHERE doc_id = ?", (doc_id,))
+        return dict(row) if row else None
+
+    def get_document_meta(self, doc_id: str) -> dict | None:
+        row = self.db.fetchone(
+            "SELECT doc_id, dossier_id, section, filename, content_type, "
+            "checksum, size, origin, lang, created_at FROM documents "
+            "WHERE doc_id = ?", (doc_id,))
+        return dict(row) if row else None
+
+    def delete_document(self, doc_id: str) -> None:
+        self.db.execute("DELETE FROM documents WHERE doc_id = ?", (doc_id,))
+
+    # -- per-section state -------------------------------------------------
+    def get_section_state(self, dossier_id: str, section: str) -> dict | None:
+        row = self.db.fetchone(
+            "SELECT data FROM section_state WHERE dossier_id = ? AND section = ?",
+            (dossier_id, section))
+        return json.loads(row["data"]) if row else None
+
+    def upsert_section_state(self, dossier_id: str, section: str,
+                             entry: dict) -> dict:
+        self.db.execute(
+            "INSERT INTO section_state (dossier_id, section, status, action, "
+            "data, updated_at) VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(dossier_id, section) DO UPDATE SET status=excluded.status,"
+            " action=excluded.action, data=excluded.data, "
+            "updated_at=excluded.updated_at",
+            (dossier_id, section, entry.get("status", ""), entry.get("action"),
+             json.dumps(entry), utcnow_iso()))
+        return entry
+
+    def list_section_state(self, dossier_id: str) -> dict:
+        rows = self.db.fetchall(
+            "SELECT section, data FROM section_state WHERE dossier_id = ?",
+            (dossier_id,))
+        return {r["section"]: json.loads(r["data"]) for r in rows}
+
+    # -- dossier index (home catalog) --------------------------------------
+    def create_dossier_index(self, rec: dict) -> dict:
+        now = utcnow_iso()
+        self.db.execute(
+            "INSERT INTO dossier_index (dossier_id, title, submission_type, "
+            "cs_be_only, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(dossier_id) DO UPDATE SET title=excluded.title, "
+            "submission_type=excluded.submission_type, "
+            "cs_be_only=excluded.cs_be_only, updated_at=excluded.updated_at",
+            (rec["dossier_id"], rec["title"], rec.get("submission_type"),
+             1 if rec.get("cs_be_only", True) else 0, now, now))
+        return self.get_dossier_index(rec["dossier_id"])
+
+    def _index_row(self, row) -> dict:
+        rec = dict(row)
+        rec["cs_be_only"] = bool(rec["cs_be_only"])
+        return rec
+
+    def get_dossier_index(self, dossier_id: str) -> dict | None:
+        row = self.db.fetchone(
+            "SELECT * FROM dossier_index WHERE dossier_id = ?", (dossier_id,))
+        return self._index_row(row) if row else None
+
+    def list_dossier_index(self) -> list[dict]:
+        rows = self.db.fetchall(
+            "SELECT * FROM dossier_index ORDER BY created_at DESC")
+        return [self._index_row(r) for r in rows]

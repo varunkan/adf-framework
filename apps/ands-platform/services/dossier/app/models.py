@@ -2,7 +2,26 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class CreateDossierIn(BaseModel):
+    dossier_id: str
+    title: str = ""
+    submission_type: str = "ANDS"
+    cs_be_only: bool = True
+
+
+class SequenceIn(BaseModel):
+    sequence: str = "0000"
+
+
+class GenerateIn(BaseModel):
+    model_config = ConfigDict(extra="allow")   # free-form generator inputs
+
+
+class MarkNaIn(BaseModel):
+    reason: str = ""
 
 
 class ContentPlanIn(BaseModel):

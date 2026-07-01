@@ -24,10 +24,11 @@ def _s(v) -> str:
 
 class JourneyService:
     def __init__(self, repo: SessionRepository, bus=None,
-                 *, source: str = "journey") -> None:
+                 *, source: str = "journey", dossier=None) -> None:
         self.repo = repo
         self.bus = bus
         self.source = source
+        self.dossier = dossier          # DossierClient port (optional)
 
     # -- emit ---------------------------------------------------------------
     def _emit(self, event_type: str, session: dict, **data) -> None:
@@ -40,11 +41,33 @@ class JourneyService:
             data=data))
 
     # -- views --------------------------------------------------------------
+    def _dossier_content(self, dossier_id: str) -> dict | None:
+        """The real per-module tower/gate from the dossier service (composition)."""
+        if self.dossier is None or not dossier_id:
+            return None
+        cs = self.dossier.content_state(dossier_id)
+        if not cs:
+            return None
+        gate = cs.get("gate") or {"complete": False, "missing": []}
+        tower = cs.get("tower") or []
+        req = sum(t.get("required_total", 0) for t in tower)
+        fil = sum(t.get("required_filled", 0) for t in tower)
+        return {"source": "dossier", "dossier_id": dossier_id, "slots": [],
+                "tower": tower, "gate": gate,
+                "progress": {"required_total": req, "required_filled": fil,
+                             "percent": round(fil * 100 / req) if req else 0,
+                             "complete": bool(gate.get("complete"))}}
+
     def _content(self, signals: dict) -> dict:
-        """The eCTD Module 1-5 slot view (drives drag-drop placement + tower)."""
+        """The eCTD content view: the real dossier state when a dossier exists +
+        the dossier service is reachable, else the pure flat content model."""
+        content = self._dossier_content(_s(signals.get("dossier_id")))
+        if content is not None:
+            return content
         slots = signals.get("content_slots") or content_slots.plan(
             cs_be_only=bool(signals.get("cs_be_only")))
         return {
+            "source": "slots",
             "slots": slots,
             "progress": content_slots.progress(slots),
             "gate": content_slots.checklist_gate(slots),
@@ -192,17 +215,22 @@ class JourneyService:
             signals["drug_product"] = product
             signals["sequence"] = _s(data.get("sequence")) or "0000"
             signals["submission_created"] = True
+            # Provision the real dossier so the Module builder is ready to fill.
+            if self.dossier is not None and _s(signals.get("dossier_id")):
+                self.dossier.ensure_dossier(
+                    _s(signals.get("dossier_id")), title=product,
+                    submission_type=_s(signals.get("submission_type")) or "ANDS",
+                    cs_be_only=bool(signals.get("cs_be_only", True)))
         elif step == "content":
-            # Gate authoritatively against the LIVE plan (derive it even when no
-            # doc has been placed yet) so 'content_done' can never stick true
-            # over an empty/incomplete eCTD.
-            slots = signals.get("content_slots") or content_slots.plan(
-                cs_be_only=bool(signals.get("cs_be_only")))
-            gate = content_slots.checklist_gate(slots)
-            if not gate["complete"]:
+            # Gate authoritatively against the LIVE plan so 'content_done' can
+            # never stick true over an empty/incomplete eCTD — from the real
+            # dossier when available, else the pure flat model.
+            gate = self._content(signals)["gate"]
+            if not gate.get("complete"):
                 raise ProblemError(
                     422, "required documents are still missing",
-                    detail="; ".join(m["title"] for m in gate["missing"]))
+                    detail="; ".join(m.get("title", "")
+                                     for m in (gate.get("missing") or [])[:6]))
             signals["content_done"] = True
         elif step == "validate":
             errors = data.get("errors", 0)

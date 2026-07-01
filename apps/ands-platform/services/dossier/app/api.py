@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, FastAPI, Query
+from fastapi import (APIRouter, FastAPI, File, Form, Query, Response,
+                     UploadFile)
 
 from ands_shared import create_app
 
 from . import ectd
-from .models import (AdminSequenceIn, BinderIn, ContentPlanIn, ItemAssignIn,
-                     ItemStatusIn, LeafIn, PmLeafIn, PmXmlBuildIn, PmXmlGateIn,
-                     PmXmlValidateIn, PmXrefIn)
+from .models import (AdminSequenceIn, BinderIn, ContentPlanIn, CreateDossierIn,
+                     GenerateIn, ItemAssignIn, ItemStatusIn, LeafIn, MarkNaIn,
+                     PmLeafIn, PmXmlBuildIn, PmXmlGateIn, PmXmlValidateIn,
+                     PmXrefIn, SequenceIn)
 from .service import DossierService
 
 
@@ -114,6 +116,60 @@ def build_app(service: DossierService) -> FastAPI:
     @router.post("/archive/{binder_id}/share", status_code=201)
     def share_binder(binder_id: str):
         return service.share_binder(binder_id)
+
+    # -- guided module builder: section tree + real documents -----------
+    @router.get("/section-tree")
+    def section_tree(cs_be_only: bool = True):
+        return service.get_section_tree(cs_be_only)
+
+    @router.get("/dossiers")
+    def list_dossiers():
+        return service.list_dossiers()
+
+    @router.post("/dossiers", status_code=201)
+    def create_dossier(body: CreateDossierIn):
+        return service.create_dossier(body.model_dump())
+
+    @router.get("/dossiers/{dossier_id}")
+    def get_dossier(dossier_id: str):
+        return service.get_dossier_full(dossier_id)
+
+    @router.get("/dossiers/{dossier_id}/content")
+    def dossier_content(dossier_id: str):
+        return service.content_state(dossier_id)
+
+    @router.get("/dossiers/{dossier_id}/sequences")
+    def list_sequences(dossier_id: str):
+        return service.list_sequences(dossier_id)
+
+    @router.post("/dossiers/{dossier_id}/sequences", status_code=201)
+    def create_sequence(dossier_id: str, body: SequenceIn):
+        return service.create_sequence(dossier_id, body.sequence)
+
+    @router.post("/ectd/{dossier_id}/section/{section}/upload")
+    async def upload_section(dossier_id: str, section: str,
+                             file: UploadFile = File(...),
+                             lang: str = Form("")):
+        body = await file.read()
+        return service.upload_document(
+            dossier_id, section, file.filename or "document",
+            file.content_type or "application/octet-stream", body, lang or None)
+
+    @router.post("/ectd/{dossier_id}/section/{section}/generate")
+    def generate_section(dossier_id: str, section: str, body: GenerateIn):
+        return service.generate_document(dossier_id, section, body.model_dump())
+
+    @router.post("/ectd/{dossier_id}/section/{section}/mark-na")
+    def mark_na_section(dossier_id: str, section: str, body: MarkNaIn):
+        return service.mark_na(dossier_id, section, body.reason)
+
+    @router.get("/documents/{doc_id}")
+    def download_document(doc_id: str):
+        doc = service.get_document(doc_id)
+        return Response(
+            content=doc["body"], media_type=doc["content_type"],
+            headers={"Content-Disposition":
+                     f'attachment; filename="{doc["filename"]}"'})
 
     app.include_router(router)
     return app

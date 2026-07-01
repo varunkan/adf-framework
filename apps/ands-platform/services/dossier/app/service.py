@@ -6,8 +6,9 @@ from ands_shared import EventEnvelope, EventType, ProblemError
 
 import secrets
 
-from . import (admin_sequence, archive, assembly, content_plan, monograph,
-               pm_xml, pm_xref)
+from . import (admin_sequence, archive, assembly, content_model, content_plan,
+               dossier_state, generators, monograph, pm_xml, pm_xref, section_tree)
+from .document_store import SqliteBlobStore
 from .ports import DossierRepository
 
 
@@ -17,10 +18,11 @@ def _s(v) -> str:
 
 class DossierService:
     def __init__(self, repo: DossierRepository, bus,
-                 *, source: str = "dossier") -> None:
+                 *, source: str = "dossier", store=None) -> None:
         self.repo = repo
         self.bus = bus
         self.source = source
+        self.store = store or SqliteBlobStore(repo)
 
     def register(self) -> "DossierService":
         # No upstream subscriptions yet; reserved for sequence/assembly events.
@@ -197,3 +199,177 @@ class DossierService:
             raise ProblemError(404, "share link not found or revoked")
         return {"dossier_id": rec["dossier_id"], "sequence": rec["sequence"],
                 "binder": rec["binder"], "read_only": True}
+
+    # -- guided module builder: section tree + real documents --------------
+    def _cs_be_only(self, dossier_id: str) -> bool:
+        idx = self.repo.get_dossier_index(_s(dossier_id))
+        return bool(idx["cs_be_only"]) if idx else True
+
+    def get_section_tree(self, cs_be_only: bool = True) -> dict:
+        return section_tree.section_tree(cs_be_only=bool(cs_be_only))
+
+    def _ctx_for(self, dossier_id: str) -> dict:
+        idx = self.repo.get_dossier_index(_s(dossier_id)) or {}
+        return {"dossier_id": _s(dossier_id), "title": idx.get("title"),
+                "drug_product": idx.get("title"),
+                "submission_type": idx.get("submission_type") or "ANDS",
+                "activity_type": idx.get("submission_type") or "ANDS"}
+
+    def _node(self, dossier_id: str, section: str) -> dict:
+        node = section_tree.node_for(
+            _s(section), cs_be_only=self._cs_be_only(dossier_id))
+        if not node:
+            raise ProblemError(404, "unknown eCTD section", detail=_s(section))
+        return node
+
+    def _place(self, dossier_id: str, node: dict, leaf_id: str, body) -> None:
+        model = self._dossier_model(dossier_id, create=True)
+        href = f"{node['folder']}/{leaf_id}.pdf"
+        assembly.set_leaf(model, "0000", {
+            "leaf_id": leaf_id, "heading": node["section"],
+            "title": node["title"], "href": href, "content": body})
+        self.repo.save_dossier(model)
+
+    def _write_entry(self, dossier_id, section, node, *, action, meta=None,
+                     lang=None, leaf_id=None, na_reason=None) -> dict:
+        entry = self.repo.get_section_state(_s(dossier_id), _s(section)) or {}
+        entry["action"] = action
+        if na_reason is not None:
+            entry["na_reason"] = na_reason
+        if node["bilingual"] and lang:
+            docs = dict(entry.get("documents") or {})
+            if meta:
+                docs[lang] = meta
+            entry["documents"] = docs
+            entry["languages"] = sorted(docs.keys())
+        elif meta is not None:
+            entry["doc_id"] = meta["doc_id"]
+            entry["document"] = meta
+            entry["languages"] = None
+            if leaf_id:
+                entry["leaf_id"] = leaf_id
+        entry["status"] = dossier_state.resolve_status(node, entry)
+        self.repo.upsert_section_state(_s(dossier_id), _s(section), entry)
+        return entry
+
+    def upload_document(self, dossier_id, section, filename, content_type,
+                        body, lang=None) -> dict:
+        node = self._node(dossier_id, section)
+        if "upload" not in node["affordances"]:
+            raise ProblemError(422, "this section is not uploadable",
+                               rule="section_not_uploadable", detail=_s(section))
+        lang = _s(lang) or None
+        if node["bilingual"] and lang not in ("en", "fr"):
+            raise ProblemError(422, "a bilingual section requires lang 'en' or "
+                               "'fr'", rule="lang_required")
+        try:
+            meta = self.store.put(_s(dossier_id), _s(section), filename,
+                                  content_type, body, origin="uploaded", lang=lang)
+        except ValueError as exc:
+            raise ProblemError(413, str(exc), rule="file_too_large")
+        leaf_id = node["leaf_id"] + (f"-{lang}" if node["bilingual"] and lang else "")
+        self._place(dossier_id, node, leaf_id, body)
+        self._write_entry(dossier_id, section, node, action="uploaded",
+                          meta=meta, lang=lang, leaf_id=leaf_id)
+        return self.content_state(dossier_id)
+
+    def generate_document(self, dossier_id, section, payload) -> dict:
+        node = self._node(dossier_id, section)
+        key = node.get("generator_key")
+        if "generate" not in node["affordances"] or not key:
+            raise ProblemError(422, "this section cannot be authored in-app",
+                               rule="section_not_generatable", detail=_s(section))
+        ctx = {**self._ctx_for(dossier_id), **(payload or {})}
+        try:
+            doc = generators.generate(key, ctx)
+        except KeyError:
+            raise ProblemError(422, "no generator for this section", detail=key)
+        meta = self.store.put(_s(dossier_id), _s(section), doc["filename"],
+                              doc["content_type"], doc["body"], origin="generated")
+        self._place(dossier_id, node, node["leaf_id"], doc["body"])
+        self._write_entry(dossier_id, section, node, action="generated",
+                          meta=meta, leaf_id=node["leaf_id"])
+        return self.content_state(dossier_id)
+
+    def mark_na(self, dossier_id, section, reason="") -> dict:
+        node = self._node(dossier_id, section)
+        if "mark_na" not in node["affordances"]:
+            raise ProblemError(422, "this section cannot be marked N/A",
+                               rule="section_not_na", detail=_s(section))
+        self._write_entry(dossier_id, section, node, action="na",
+                          na_reason=_s(reason))
+        return self.content_state(dossier_id)
+
+    def get_document(self, doc_id: str) -> dict:
+        doc = self.store.get(_s(doc_id))
+        if not doc:
+            raise ProblemError(404, "document not found", detail=_s(doc_id))
+        return doc
+
+    def content_state(self, dossier_id: str) -> dict:
+        dossier_id = _s(dossier_id)
+        cs_be_only = self._cs_be_only(dossier_id)
+        states = self.repo.list_section_state(dossier_id)
+        tree = section_tree.section_tree(cs_be_only=cs_be_only)
+        modules = []
+        for m in tree["modules"]:
+            modules.append({
+                "module": m["module"], "title": m["title"],
+                "nodes": dossier_state.annotate(m["nodes"], states),
+                "progress": dossier_state.module_progress(m["nodes"], states)})
+        model = self.repo.get_dossier(dossier_id)
+        return {
+            "dossier_id": dossier_id, "cs_be_only": cs_be_only,
+            "version": tree["version"], "modules": modules,
+            "gate": dossier_state.completeness_gate(cs_be_only=cs_be_only,
+                                                    states=states),
+            "tower": dossier_state.tower_view(cs_be_only=cs_be_only, states=states),
+            "files_view": assembly.build_files_view(model) if model else None}
+
+    # -- dossier + sequence management (home catalog) ----------------------
+    def create_dossier(self, data: dict) -> dict:
+        dossier_id = _s(data.get("dossier_id"))
+        if not dossier_id:
+            raise ProblemError(422, "dossier_id is required",
+                               rule="dossier_id_required")
+        rec = self.repo.create_dossier_index({
+            "dossier_id": dossier_id,
+            "title": _s(data.get("title")) or dossier_id,
+            "submission_type": _s(data.get("submission_type")).upper() or "ANDS",
+            "cs_be_only": bool(data.get("cs_be_only", True))})
+        model = self._dossier_model(dossier_id, create=True)
+        assembly.add_sequence(model, "0000")
+        self.repo.save_dossier(model)
+        return rec
+
+    def list_dossiers(self) -> dict:
+        out = []
+        for idx in self.repo.list_dossier_index():
+            states = self.repo.list_section_state(idx["dossier_id"])
+            out.append({**idx,
+                        "tower": dossier_state.tower_view(
+                            cs_be_only=idx["cs_be_only"], states=states),
+                        "gate": dossier_state.completeness_gate(
+                            cs_be_only=idx["cs_be_only"], states=states)})
+        return {"dossiers": out, "count": len(out)}
+
+    def get_dossier_full(self, dossier_id: str) -> dict:
+        dossier_id = _s(dossier_id)
+        idx = self.repo.get_dossier_index(dossier_id)
+        if not idx:
+            # tolerate a dossier that exists as an eCTD model but has no index yet
+            idx = {"dossier_id": dossier_id, "title": dossier_id,
+                   "submission_type": "ANDS", "cs_be_only": True}
+        return {"index": idx, "content": self.content_state(dossier_id)}
+
+    def list_sequences(self, dossier_id: str) -> dict:
+        model = self.repo.get_dossier(_s(dossier_id)) or \
+            assembly.new_dossier(_s(dossier_id))
+        return {"dossier_id": _s(dossier_id),
+                "sequences": [s["sequence"] for s in model["sequences"]]}
+
+    def create_sequence(self, dossier_id: str, sequence: str) -> dict:
+        model = self._dossier_model(dossier_id, create=True)
+        assembly.add_sequence(model, _s(sequence) or "0000")
+        self.repo.save_dossier(model)
+        return self.list_sequences(dossier_id)

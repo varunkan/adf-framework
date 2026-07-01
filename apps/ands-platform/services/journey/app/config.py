@@ -14,3 +14,6 @@ class Settings:
         self.bus = os.environ.get("ANDS_BUS", "memory")
         self.redis_url = os.environ.get("ANDS_REDIS_URL",
                                         "redis://localhost:6379/0")
+        # The dossier service (eCTD engine) the journey composes; empty → the
+        # journey falls back to its own flat content model.
+        self.dossier_url = os.environ.get("DOSSIER_URL", "")

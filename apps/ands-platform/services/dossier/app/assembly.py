@@ -131,6 +131,26 @@ def add_leaf(dossier: dict, sequence: str, leaf: dict) -> dict:
     return record
 
 
+def set_leaf(dossier: dict, sequence: str, leaf: dict) -> dict:
+    """Build-time upsert: idempotently place a leaf in a sequence (remove any
+    prior leaf with the same id, then add it fresh as ``new``). This is for
+    building the working sequence before transmission; cross-sequence
+    replace/append/delete lifecycle is handled separately (Phase 3)."""
+    leaf_id = _s(leaf.get("leaf_id"))
+    for s in dossier["sequences"]:
+        s["leaves"] = [lf for lf in s["leaves"] if lf["leaf_id"] != leaf_id]
+    payload = {k: v for k, v in leaf.items() if k != "operation"}
+    payload["operation"] = "new"
+    return add_leaf(dossier, sequence, payload)
+
+
+def add_sequence(dossier: dict, sequence: str) -> dict:
+    """Open a new (empty) sequence on the dossier if absent; return the dossier."""
+    if _get_sequence(dossier, sequence) is None:
+        dossier["sequences"].append({"sequence": _seq_key(sequence), "leaves": []})
+    return dossier
+
+
 def current_view(dossier: dict) -> dict:
     view = compute_current_view(leaves_in_order(dossier))
     keys = ("leaf_id", "title", "heading", "href", "operation", "sequence",
@@ -147,10 +167,20 @@ def build_files_view(dossier: dict) -> dict:
     for lf in view["live"]:
         by_heading.setdefault(lf["heading"], []).append(lf)
     nodes = []
+    seen = set()
     for entry in ectd.CA_MODULE1_PLACEMENT:
         nodes.append({"heading": entry["heading"], "title": entry["title"],
                       "folder": entry["folder"],
                       "leaves": by_heading.get(entry["heading"], [])})
+        seen.add(entry["heading"])
+    # any placed leaves at deeper M1 / Module 2-5 headings not in the M1 table
+    for heading in sorted(by_heading):
+        if heading in seen:
+            continue
+        leaves = by_heading[heading]
+        folder = leaves[0].get("href", "").rsplit("/", 1)[0] if leaves else ""
+        nodes.append({"heading": heading, "title": heading, "folder": folder,
+                      "leaves": leaves})
     return {"dossier_id": dossier["dossier_id"],
             "placement_version": ectd.PLACEMENT_TABLE_VERSION, "nodes": nodes,
             "live_leaf_count": len(view["live"])}
