@@ -79,13 +79,37 @@ export interface OutlineView {
   lifecycle_operations: { leaf_id: string; operation: string; sequence: string }[];
 }
 
+export interface FeesBlock {
+  review_fee: { fiscal_year: string; amount: number; currency: string; basis: string };
+  mitigation: { reduction: number; waived: boolean; payable: number; note: string };
+  right_to_sell: { amount: number; due_date: string; note: string };
+  fee_paid: boolean;
+  sme_granted: boolean;
+}
+
+export interface ValidationResult {
+  passed: boolean;
+  errors: { rule: string; message: string; leaf?: string }[];
+  warnings: { rule: string; message: string; leaf?: string }[];
+  checked: number;
+}
+
 export interface ContentState {
   dossier_id: string;
   cs_be_only: boolean;
   version: string;
   modules: ModuleView[];
-  gate: { complete: boolean; missing: { section: string; title: string; module: string }[] };
+  gate: {
+    complete: boolean;
+    missing: { section: string; title: string; module: string }[];
+    section_complete?: boolean;
+    fee_paid?: boolean;
+    validation_passed?: boolean;
+  };
   tower: ModuleTower[];
+  fees: FeesBlock;
+  validation: ValidationResult;
+  din: string | null;
   files_view: FilesView | null;
 }
 

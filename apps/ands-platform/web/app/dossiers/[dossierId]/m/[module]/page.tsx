@@ -4,6 +4,7 @@ import { useParams } from "next/navigation";
 import { useDossier } from "@/components/dossier/DossierContext";
 import { SectionTree } from "@/components/dossier/SectionTree";
 import { SectionPanel } from "@/components/dossier/SectionPanel";
+import { ValidationCard } from "@/components/dossier/ValidationCard";
 import { SubmissionTower } from "@/components/SubmissionTower";
 
 export default function ModuleWorkspace() {
@@ -69,11 +70,23 @@ export default function ModuleWorkspace() {
           </div>
           {!content.gate.complete && content.gate.missing.length > 0 && (
             <div className="mut" style={{ fontSize: 12, marginTop: 8 }}>
-              {content.gate.missing.length} required document(s) still needed across
-              all modules.
+              {content.gate.missing.length} item(s) still needed to file (documents,
+              fee, or validation).
             </div>
           )}
+          <div className="ready-flags" style={{ marginTop: 8, fontSize: 12 }}>
+            <span className={content.gate.section_complete ? "ok-flag" : "todo-flag"}>
+              {content.gate.section_complete ? "✓" : "○"} Documents
+            </span>{" · "}
+            <span className={content.gate.fee_paid ? "ok-flag" : "todo-flag"}>
+              {content.gate.fee_paid ? "✓" : "○"} Fee
+            </span>{" · "}
+            <span className={content.gate.validation_passed ? "ok-flag" : "todo-flag"}>
+              {content.gate.validation_passed ? "✓" : "○"} Valid eCTD
+            </span>
+          </div>
         </div>
+        <ValidationCard dossierId={content.dossier_id} structural={content.validation} />
       </aside>
     </div>
   );

@@ -4,6 +4,7 @@ import type {
   DossierFull,
   DossierListItem,
   OutlineView,
+  ValidationResult,
 } from "./dossierTypes";
 
 const BASE = "/api/dossier";
@@ -52,6 +53,15 @@ export const dossierApi = {
       `/ectd/${encodeURIComponent(id)}/section/${encodeURIComponent(section)}/mark-na`,
       { method: "POST", body: JSON.stringify({ reason }) }
     ),
+
+  setFees: (id: string, fee_paid: boolean, sme_granted: boolean) =>
+    j<ContentState>(`/dossiers/${encodeURIComponent(id)}/fees`, {
+      method: "POST",
+      body: JSON.stringify({ fee_paid, sme_granted }),
+    }),
+
+  validate: (id: string) =>
+    j<ValidationResult>(`/dossiers/${encodeURIComponent(id)}/validate`),
 
   outline: (id: string, sequence = "0000") =>
     j<OutlineView>(

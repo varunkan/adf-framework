@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { dossierApi } from "@/lib/dossierApi";
-import type { DocMeta, SectionNode } from "@/lib/dossierTypes";
+import type { DocMeta, FeesBlock, SectionNode } from "@/lib/dossierTypes";
 import { useDossier } from "./DossierContext";
 
 function fmtSize(n: number): string {
@@ -11,7 +11,7 @@ function fmtSize(n: number): string {
 }
 
 export function SectionPanel({ node }: { node: SectionNode }) {
-  const { dossierId, setContent } = useDossier();
+  const { dossierId, content, setContent } = useDossier();
   const affs = node.affordances;
   const [tab, setTab] = useState<string>(affs[0] || "upload");
   const [err, setErr] = useState("");
@@ -66,6 +66,15 @@ export function SectionPanel({ node }: { node: SectionNode }) {
         <div className="notice">
           This section is not applicable for a generic ANDS on the comparative-BE
           pathway — nothing to file here.
+        </div>
+      ) : node.section === "1.2.2" ? (
+        <FeesWidget fees={content?.fees} dossierId={dossierId}
+          onDone={setContent} />
+      ) : affs.length === 0 ? (
+        <div className="notice">
+          This section is generated automatically as part of the eCTD backbone
+          (index.xml / ca-regional.xml) — there is nothing to upload. Open the{" "}
+          <b>Application Viewer</b> to see it.
         </div>
       ) : (
         <>
@@ -273,6 +282,67 @@ function AuthorForm({
           {busy ? "Authoring…" : `Author ${node.title} →`}
         </button>
       </div>
+    </div>
+  );
+}
+
+function FeesWidget({
+  fees,
+  dossierId,
+  onDone,
+}: {
+  fees?: FeesBlock;
+  dossierId: string;
+  onDone: (c: any) => void;
+}) {
+  const [feePaid, setFeePaid] = useState(fees?.fee_paid || false);
+  const [sme, setSme] = useState(fees?.sme_granted || false);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    setFeePaid(fees?.fee_paid || false);
+    setSme(fees?.sme_granted || false);
+  }, [fees?.fee_paid, fees?.sme_granted]);
+
+  async function save(nextPaid: boolean, nextSme: boolean) {
+    setBusy(true);
+    try {
+      onDone(await dossierApi.setFees(dossierId, nextPaid, nextSme));
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (!fees) return <div className="mut">Loading fee…</div>;
+  const fee = fees.review_fee;
+  const m = fees.mitigation;
+  return (
+    <div className="fees-widget">
+      <div className="notice">
+        Current ANDS review fee ({fee.fiscal_year}):{" "}
+        <b>${fee.amount.toLocaleString()} {fee.currency}</b>
+        {m.waived ? (
+          <> — <b>waived</b> (first-ever submission).</>
+        ) : m.reduction ? (
+          <> — small-business payable <b>${m.payable.toLocaleString()}</b>{" "}
+            ({Math.round(m.reduction * 100)}% reduction).</>
+        ) : null}
+        <div className="mut" style={{ fontSize: 12, marginTop: 4 }}>{m.note}</div>
+      </div>
+      <div className="notice">
+        Right to Sell (annual): ${fees.right_to_sell.amount.toLocaleString()} —
+        due {fees.right_to_sell.due_date}.
+      </div>
+      <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <input type="checkbox" style={{ width: "auto" }} checked={sme}
+          disabled={busy}
+          onChange={(e) => { setSme(e.target.checked); save(feePaid, e.target.checked); }} />
+        <span>Small-business status is <b>granted</b> (before filing)</span>
+      </label>
+      <label style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6 }}>
+        <input type="checkbox" style={{ width: "auto" }} checked={feePaid}
+          disabled={busy}
+          onChange={(e) => { setFeePaid(e.target.checked); save(e.target.checked, sme); }} />
+        <span>Fee payment is arranged</span>
+      </label>
     </div>
   );
 }

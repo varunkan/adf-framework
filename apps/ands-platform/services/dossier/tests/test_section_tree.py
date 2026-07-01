@@ -57,6 +57,12 @@ def test_clinical_trial_info_1_7_is_na_for_ands():
     assert section_tree.node_for("1.7")["applicability"] == "na"
 
 
+def test_labelling_at_1_3_3_and_lasa_at_1_3_2():
+    assert section_tree.node_for("1.3.3")["title"] == "Labelling"
+    assert section_tree.node_for("1.3.3")["bilingual"] is True
+    assert "Look-alike" in section_tree.node_for("1.3.2")["title"]
+
+
 def test_qos_required_and_24_suppressed_on_cs_be():
     assert section_tree.node_for("2.3")["applicability"] == "required"
     assert section_tree.node_for("2.4")["applicability"] == "suppressed"

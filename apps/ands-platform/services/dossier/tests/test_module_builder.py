@@ -121,6 +121,18 @@ def test_ectd_validation_endpoint(client):
     assert any(e["rule"] == "pdf_header" for e in v["errors"])
 
 
+def test_generated_rep_form_leaf_has_xml_href(client):
+    # the REP application form is XML — its eCTD leaf must carry a .xml href
+    did = _dossier(client)
+    c = client.post(f"/api/dossier/ectd/{did}/section/1.2.1/generate",
+                    json={}).json()
+    leaves = [lf for nd in c["files_view"]["nodes"] for lf in nd["leaves"]]
+    rep = next(lf for lf in leaves if "application-form" in lf["leaf_id"])
+    assert rep["href"].endswith(".xml")
+    # a validation over the model still passes (well-formed backbone)
+    assert client.get(f"/api/dossier/dossiers/{did}/validate").json()["passed"]
+
+
 def test_din_format_validated(client):
     ok = client.post("/api/dossier/dossiers",
                      json={"dossier_id": "e900001", "din": "02345678"})

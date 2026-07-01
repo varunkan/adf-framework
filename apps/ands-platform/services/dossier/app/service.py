@@ -227,9 +227,17 @@ class DossierService:
             raise ProblemError(404, "unknown eCTD section", detail=_s(section))
         return node
 
-    def _place(self, dossier_id: str, node: dict, leaf_id: str, body) -> None:
+    @staticmethod
+    def _ext(filename: str, default: str = "pdf") -> str:
+        name = _s(filename)
+        return name.rsplit(".", 1)[-1].lower() if "." in name else default
+
+    def _place(self, dossier_id: str, node: dict, leaf_id: str, body,
+               ext: str = "pdf") -> None:
         model = self._dossier_model(dossier_id, create=True)
-        href = f"{node['folder']}/{leaf_id}.pdf"
+        # the leaf href must carry the stored file's real extension (a generated
+        # REP form is .xml, not .pdf) so the eCTD leaf points at the right bytes.
+        href = f"{node['folder']}/{leaf_id}.{_s(ext) or 'pdf'}"
         assembly.set_leaf(model, "0000", {
             "leaf_id": leaf_id, "heading": node["section"],
             "title": node["title"], "href": href, "content": body})
@@ -273,7 +281,7 @@ class DossierService:
         except ValueError as exc:
             raise ProblemError(413, str(exc), rule="file_too_large")
         leaf_id = node["leaf_id"] + (f"-{lang}" if node["bilingual"] and lang else "")
-        self._place(dossier_id, node, leaf_id, body)
+        self._place(dossier_id, node, leaf_id, body, self._ext(filename))
         self._write_entry(dossier_id, section, node, action="uploaded",
                           meta=meta, lang=lang, leaf_id=leaf_id)
         return self.content_state(dossier_id)
@@ -291,7 +299,8 @@ class DossierService:
             raise ProblemError(422, "no generator for this section", detail=key)
         meta = self.store.put(_s(dossier_id), _s(section), doc["filename"],
                               doc["content_type"], doc["body"], origin="generated")
-        self._place(dossier_id, node, node["leaf_id"], doc["body"])
+        self._place(dossier_id, node, node["leaf_id"], doc["body"],
+                    self._ext(doc["filename"]))
         self._write_entry(dossier_id, section, node, action="generated",
                           meta=meta, leaf_id=node["leaf_id"])
         return self.content_state(dossier_id)
