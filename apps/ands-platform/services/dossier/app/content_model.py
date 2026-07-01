@@ -32,7 +32,7 @@ _ANDS_MODULES = (
     {"module": "3", "title": "Quality (CMC)", "required": True,
      "cs_be_suppressed": False},
     {"module": "4", "title": "Nonclinical Study Reports", "required": False,
-     "cs_be_suppressed": False},
+     "cs_be_suppressed": False, "na": True},
     {"module": "5", "title": "Clinical Study Reports (BE reports)", "required": True,
      "cs_be_suppressed": False},
 )

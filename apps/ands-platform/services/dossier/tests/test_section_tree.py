@@ -10,8 +10,12 @@ def test_five_modules_present():
 
 
 def test_module1_full_depth_sections_present():
+    # numbering follows the HC "Organization and document placement for Canadian
+    # Module 1" table: 1.2.1 app form, 1.2.2 fees, 1.2.3 cert/attestation,
+    # 1.2.4 IP/patent; CS-BE under 1.6.
     secs = {n["section"] for n in section_tree.module_sections("1")}
-    for s in ("1.0", "1.2.1", "1.2.5", "1.2.6", "1.3.1", "1.3.2", "1.4.2"):
+    for s in ("1.0", "1.1", "1.2.1", "1.2.2", "1.2.3", "1.2.4", "1.3.1",
+              "1.3.2", "1.6"):
         assert s in secs, f"Module 1 missing {s}"
 
 
@@ -32,9 +36,25 @@ def test_product_monograph_is_bilingual_pdf_and_docx():
 
 def test_generators_wired_for_m1_authorables():
     keys = {section_tree.node_for(s)["generator_key"]
-            for s in ("1.0", "1.2.1", "1.2.5", "1.2.6", "1.4.2")}
+            for s in ("1.0", "1.2.1", "1.2.3", "1.2.4", "1.6")}
     assert keys == {"cover_letter", "rep_application_form", "patent_form_iv",
                     "ands_attestation", "cs_be"}
+
+
+def test_3_2_p_runs_to_p8_with_reference_standards_and_container_closure():
+    secs = {n["section"]: n for n in section_tree.module_sections("3")}
+    assert "3.2.P.8" in secs and secs["3.2.P.8"]["title"] == "Stability"
+    assert "Reference Standards" in secs["3.2.P.6"]["title"]
+    assert "Container Closure" in secs["3.2.P.7"]["title"]
+
+
+def test_toc_is_backbone_not_uploadable():
+    n = section_tree.node_for("1.1")
+    assert n["affordances"] == [] and "backbone" in n["guidance"].lower()
+
+
+def test_clinical_trial_info_1_7_is_na_for_ands():
+    assert section_tree.node_for("1.7")["applicability"] == "na"
 
 
 def test_qos_required_and_24_suppressed_on_cs_be():

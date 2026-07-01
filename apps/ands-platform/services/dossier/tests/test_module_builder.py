@@ -89,11 +89,45 @@ def test_generate_cover_letter(client):
 
 def test_mark_na(client):
     did = _dossier(client)
-    r = client.post(f"/api/dossier/ectd/{did}/section/1.2.2/mark-na",
-                    json={"reason": "no prior applications"})
+    # 1.2.5 Authorization & Regulatory Correspondence is optional (mark-N/A-able)
+    r = client.post(f"/api/dossier/ectd/{did}/section/1.2.5/mark-na",
+                    json={"reason": "no authorizations required"})
     node = next(n for m in r.json()["modules"] for n in m["nodes"]
-                if n["section"] == "1.2.2")
-    assert node["status"] == "na" and node["na_reason"] == "no prior applications"
+                if n["section"] == "1.2.5")
+    assert node["status"] == "na" and node["na_reason"] == "no authorizations required"
+
+
+def test_fees_block_and_gate_requires_fee_and_validation(client):
+    did = _dossier(client)
+    content = client.get(f"/api/dossier/dossiers/{did}/content").json()
+    # a live current-fiscal-year ANDS review fee is surfaced
+    assert content["fees"]["review_fee"]["amount"] > 0
+    assert content["gate"]["fee_paid"] is False
+    assert content["gate"]["complete"] is False       # fee not arranged
+    # confirming the fee flips the fee gate
+    c2 = client.post(f"/api/dossier/dossiers/{did}/fees",
+                     json={"fee_paid": True, "sme_granted": True}).json()
+    assert c2["gate"]["fee_paid"] is True
+    assert c2["fees"]["mitigation"]["reduction"]      # SME reduction present
+
+
+def test_ectd_validation_endpoint(client):
+    did = _dossier(client)
+    # a non-PDF file in a pdf slot is caught by the technical validator
+    client.post(f"/api/dossier/ectd/{did}/section/1.0/upload",
+                files={"file": ("cover.pdf", b"not a pdf", "application/pdf")})
+    v = client.get(f"/api/dossier/dossiers/{did}/validate").json()
+    assert v["passed"] is False
+    assert any(e["rule"] == "pdf_header" for e in v["errors"])
+
+
+def test_din_format_validated(client):
+    ok = client.post("/api/dossier/dossiers",
+                     json={"dossier_id": "e900001", "din": "02345678"})
+    assert ok.status_code == 201
+    bad = client.post("/api/dossier/dossiers",
+                      json={"dossier_id": "e900002", "din": "123"})
+    assert bad.status_code == 422
 
 
 def test_upload_to_unknown_section_404(client):

@@ -50,8 +50,10 @@ def test_journey_submission_provisions_dossier_and_content_gate_is_real(mesh):
     with pytest.raises(ProblemError):
         j.advance(sid, "content", {})            # required docs still missing
 
-    # author + upload every required document, then the gate passes
+    # author + upload every required document + arrange the fee, then the gate
+    # passes (the gate enforces content + fee-arranged + a clean eCTD validation)
     _fill_all_required(d, "e123456")
+    d.set_fee_status("e123456", fee_paid=True, sme_granted=False)
     assert d.content_state("e123456")["gate"]["complete"] is True
     out = j.advance(sid, "content", {})          # now advances
     assert out["signals"]["content_done"] is True

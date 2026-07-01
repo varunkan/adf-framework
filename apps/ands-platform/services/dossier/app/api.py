@@ -9,9 +9,9 @@ from ands_shared import create_app
 
 from . import ectd
 from .models import (AdminSequenceIn, BinderIn, ContentPlanIn, CreateDossierIn,
-                     GenerateIn, ItemAssignIn, ItemStatusIn, LeafIn, MarkNaIn,
-                     PmLeafIn, PmXmlBuildIn, PmXmlGateIn, PmXmlValidateIn,
-                     PmXrefIn, SequenceIn)
+                     FeeStatusIn, GenerateIn, ItemAssignIn, ItemStatusIn, LeafIn,
+                     MarkNaIn, PmLeafIn, PmXmlBuildIn, PmXmlGateIn,
+                     PmXmlValidateIn, PmXrefIn, SequenceIn)
 from .service import DossierService
 
 
@@ -137,6 +137,14 @@ def build_app(service: DossierService) -> FastAPI:
     @router.get("/dossiers/{dossier_id}/content")
     def dossier_content(dossier_id: str):
         return service.content_state(dossier_id)
+
+    @router.post("/dossiers/{dossier_id}/fees")
+    def set_fees(dossier_id: str, body: FeeStatusIn):
+        return service.set_fee_status(dossier_id, body.fee_paid, body.sme_granted)
+
+    @router.get("/dossiers/{dossier_id}/validate")
+    def validate_submission(dossier_id: str):
+        return service.validate_submission(dossier_id)
 
     @router.get("/dossiers/{dossier_id}/sequences")
     def list_sequences(dossier_id: str):

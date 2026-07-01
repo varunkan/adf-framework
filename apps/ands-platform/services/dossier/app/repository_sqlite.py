@@ -79,6 +79,9 @@ CREATE TABLE IF NOT EXISTS dossier_index (
     title           TEXT NOT NULL,
     submission_type TEXT,
     cs_be_only      INTEGER NOT NULL DEFAULT 1,
+    din             TEXT,
+    fee_paid        INTEGER NOT NULL DEFAULT 0,
+    sme_granted     INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
@@ -284,17 +287,29 @@ class SqliteDossierRepository:
         now = utcnow_iso()
         self.db.execute(
             "INSERT INTO dossier_index (dossier_id, title, submission_type, "
-            "cs_be_only, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?) "
+            "cs_be_only, din, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(dossier_id) DO UPDATE SET title=excluded.title, "
             "submission_type=excluded.submission_type, "
-            "cs_be_only=excluded.cs_be_only, updated_at=excluded.updated_at",
+            "cs_be_only=excluded.cs_be_only, din=excluded.din, "
+            "updated_at=excluded.updated_at",
             (rec["dossier_id"], rec["title"], rec.get("submission_type"),
-             1 if rec.get("cs_be_only", True) else 0, now, now))
+             1 if rec.get("cs_be_only", True) else 0, rec.get("din"), now, now))
         return self.get_dossier_index(rec["dossier_id"])
+
+    def set_fee_status(self, dossier_id: str, fee_paid: bool,
+                       sme_granted: bool) -> dict | None:
+        self.db.execute(
+            "UPDATE dossier_index SET fee_paid = ?, sme_granted = ?, "
+            "updated_at = ? WHERE dossier_id = ?",
+            (1 if fee_paid else 0, 1 if sme_granted else 0, utcnow_iso(),
+             dossier_id))
+        return self.get_dossier_index(dossier_id)
 
     def _index_row(self, row) -> dict:
         rec = dict(row)
         rec["cs_be_only"] = bool(rec["cs_be_only"])
+        rec["fee_paid"] = bool(rec.get("fee_paid"))
+        rec["sme_granted"] = bool(rec.get("sme_granted"))
         return rec
 
     def get_dossier_index(self, dossier_id: str) -> dict | None:

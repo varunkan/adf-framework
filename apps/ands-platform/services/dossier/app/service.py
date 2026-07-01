@@ -4,12 +4,17 @@ from __future__ import annotations
 
 from ands_shared import EventEnvelope, EventType, ProblemError
 
+import re
 import secrets
+from datetime import date
 
 from . import (admin_sequence, archive, assembly, content_model, content_plan,
-               dossier_state, generators, monograph, pm_xml, pm_xref, section_tree)
+               dossier_state, ectd_validation, fees, generators, monograph,
+               pm_xml, pm_xref, section_tree)
 from .document_store import SqliteBlobStore
 from .ports import DossierRepository
+
+_DIN_RE = re.compile(r"^\d{8}$")
 
 
 def _s(v) -> str:
@@ -306,8 +311,32 @@ class DossierService:
             raise ProblemError(404, "document not found", detail=_s(doc_id))
         return doc
 
+    def set_fee_status(self, dossier_id, fee_paid, sme_granted) -> dict:
+        if not self.repo.get_dossier_index(_s(dossier_id)):
+            raise ProblemError(404, "no such dossier", detail=_s(dossier_id))
+        self.repo.set_fee_status(_s(dossier_id), bool(fee_paid), bool(sme_granted))
+        return self.content_state(dossier_id)
+
+    def validate_submission(self, dossier_id: str) -> dict:
+        """Full eCTD technical validation — includes PDF conformance on the
+        stored bytes (heavier than the structural check in content_state)."""
+        model = self.repo.get_dossier(_s(dossier_id))
+        if not model:
+            return {"passed": True, "errors": [], "warnings": [], "checked": 0}
+        documents = {}
+        for state in self.repo.list_section_state(_s(dossier_id)).values():
+            for meta in ([state.get("document")]
+                         + list((state.get("documents") or {}).values())):
+                if not meta:
+                    continue
+                doc = self.store.get(meta["doc_id"])
+                if doc:
+                    documents[meta.get("filename") or meta["doc_id"]] = doc["body"]
+        return ectd_validation.validate(model, documents=documents)
+
     def content_state(self, dossier_id: str) -> dict:
         dossier_id = _s(dossier_id)
+        idx = self.repo.get_dossier_index(dossier_id) or {}
         cs_be_only = self._cs_be_only(dossier_id)
         states = self.repo.list_section_state(dossier_id)
         tree = section_tree.section_tree(cs_be_only=cs_be_only)
@@ -318,12 +347,44 @@ class DossierService:
                 "nodes": dossier_state.annotate(m["nodes"], states),
                 "progress": dossier_state.module_progress(m["nodes"], states)})
         model = self.repo.get_dossier(dossier_id)
+
+        section_gate = dossier_state.completeness_gate(cs_be_only=cs_be_only,
+                                                       states=states)
+        today = date.today().isoformat()
+        review_fee = fees.ands_review_fee(today)
+        fee_paid = bool(idx.get("fee_paid"))
+        sme_granted = bool(idx.get("sme_granted"))
+        fees_block = {
+            "review_fee": review_fee,
+            "mitigation": fees.small_business_mitigation(
+                review_fee["amount"], sme_granted=sme_granted,
+                first_ever_submission=False),
+            "right_to_sell": fees.right_to_sell(today, sme_granted=sme_granted),
+            "fee_paid": fee_paid, "sme_granted": sme_granted}
+        # structural eCTD validation (PDF-byte checks are in validate_submission)
+        validation = (ectd_validation.validate(model) if model
+                      else {"passed": True, "errors": [], "warnings": [],
+                            "checked": 0})
+        # combined "ready to file" gate: content + fee arranged + validation clean
+        missing = list(section_gate["missing"])
+        if not fee_paid:
+            missing.append({"section": "1.2.2", "module": "1",
+                            "title": "Fee payment / small-business status "
+                                     "(arrange before filing)"})
+        for e in validation.get("errors", []):
+            missing.append({"section": "validation", "module": "",
+                            "title": e.get("message", "eCTD validation error")})
+        gate = {"complete": (section_gate["complete"] and fee_paid
+                             and validation.get("passed", True)),
+                "missing": missing,
+                "section_complete": section_gate["complete"],
+                "fee_paid": fee_paid,
+                "validation_passed": validation.get("passed", True)}
         return {
             "dossier_id": dossier_id, "cs_be_only": cs_be_only,
-            "version": tree["version"], "modules": modules,
-            "gate": dossier_state.completeness_gate(cs_be_only=cs_be_only,
-                                                    states=states),
+            "version": tree["version"], "modules": modules, "gate": gate,
             "tower": dossier_state.tower_view(cs_be_only=cs_be_only, states=states),
+            "fees": fees_block, "validation": validation, "din": idx.get("din"),
             "files_view": assembly.build_files_view(model) if model else None}
 
     # -- dossier + sequence management (home catalog) ----------------------
@@ -332,11 +393,17 @@ class DossierService:
         if not dossier_id:
             raise ProblemError(422, "dossier_id is required",
                                rule="dossier_id_required")
+        din = _s(data.get("din"))
+        if din and not _DIN_RE.match(din):
+            raise ProblemError(422, "DIN must be exactly 8 digits (note: a DIN "
+                               "is assigned by Health Canada at NOC, not filed)",
+                               rule="din_invalid")
         rec = self.repo.create_dossier_index({
             "dossier_id": dossier_id,
             "title": _s(data.get("title")) or dossier_id,
             "submission_type": _s(data.get("submission_type")).upper() or "ANDS",
-            "cs_be_only": bool(data.get("cs_be_only", True))})
+            "cs_be_only": bool(data.get("cs_be_only", True)),
+            "din": din or None})
         model = self._dossier_model(dossier_id, create=True)
         assembly.add_sequence(model, "0000")
         self.repo.save_dossier(model)

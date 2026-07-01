@@ -10,6 +10,12 @@ class CreateDossierIn(BaseModel):
     title: str = ""
     submission_type: str = "ANDS"
     cs_be_only: bool = True
+    din: str = ""
+
+
+class FeeStatusIn(BaseModel):
+    fee_paid: bool = False
+    sme_granted: bool = False
 
 
 class SequenceIn(BaseModel):
