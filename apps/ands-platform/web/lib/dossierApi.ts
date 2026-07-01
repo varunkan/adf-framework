@@ -1,0 +1,102 @@
+// Client over the same-origin /api/dossier proxy → the dossier microservice.
+import type {
+  ContentState,
+  DossierFull,
+  DossierListItem,
+  OutlineView,
+} from "./dossierTypes";
+
+const BASE = "/api/dossier";
+
+async function j<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    headers: { "content-type": "application/json" },
+    cache: "no-store",
+    ...init,
+  });
+  if (!res.ok) {
+    let detail = `${res.status}`;
+    try {
+      const b = await res.json();
+      detail = b.detail || b.title || detail;
+    } catch {}
+    throw new Error(detail);
+  }
+  return res.json() as Promise<T>;
+}
+
+export const dossierApi = {
+  listDossiers: () =>
+    j<{ dossiers: DossierListItem[]; count: number }>("/dossiers"),
+
+  createDossier: (body: {
+    dossier_id: string;
+    title?: string;
+    submission_type?: string;
+    cs_be_only?: boolean;
+  }) => j<any>("/dossiers", { method: "POST", body: JSON.stringify(body) }),
+
+  getDossier: (id: string) => j<DossierFull>(`/dossiers/${encodeURIComponent(id)}`),
+
+  getContent: (id: string) =>
+    j<ContentState>(`/dossiers/${encodeURIComponent(id)}/content`),
+
+  generate: (id: string, section: string, payload: Record<string, any> = {}) =>
+    j<ContentState>(
+      `/ectd/${encodeURIComponent(id)}/section/${encodeURIComponent(section)}/generate`,
+      { method: "POST", body: JSON.stringify(payload) }
+    ),
+
+  markNa: (id: string, section: string, reason: string) =>
+    j<ContentState>(
+      `/ectd/${encodeURIComponent(id)}/section/${encodeURIComponent(section)}/mark-na`,
+      { method: "POST", body: JSON.stringify({ reason }) }
+    ),
+
+  outline: (id: string, sequence = "0000") =>
+    j<OutlineView>(
+      `/ectd/${encodeURIComponent(id)}/viewer/outline/${encodeURIComponent(sequence)}`
+    ),
+
+  documentUrl: (docId: string) => `${BASE}/documents/${encodeURIComponent(docId)}`,
+
+  // Multipart upload via XHR so we get real upload progress.
+  uploadDocument: (
+    id: string,
+    section: string,
+    file: File,
+    opts: { lang?: string; onProgress?: (pct: number) => void } = {}
+  ): Promise<ContentState> =>
+    new Promise((resolve, reject) => {
+      const form = new FormData();
+      form.append("file", file);
+      if (opts.lang) form.append("lang", opts.lang);
+      const xhr = new XMLHttpRequest();
+      xhr.open(
+        "POST",
+        `${BASE}/ectd/${encodeURIComponent(id)}/section/${encodeURIComponent(section)}/upload`
+      );
+      if (xhr.upload && opts.onProgress) {
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) opts.onProgress!(Math.round((e.loaded / e.total) * 100));
+        };
+      }
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve(JSON.parse(xhr.responseText));
+          } catch (e) {
+            reject(new Error("bad response"));
+          }
+        } else {
+          let detail = `${xhr.status}`;
+          try {
+            detail = JSON.parse(xhr.responseText).detail || detail;
+          } catch {}
+          reject(new Error(detail));
+        }
+      };
+      xhr.onerror = () => reject(new Error("network error"));
+      xhr.send(form);
+    }),
+};

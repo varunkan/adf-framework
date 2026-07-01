@@ -61,6 +61,16 @@ export const TERMS: Record<string, string> = {
   clock:
     "Health Canada's target review days count only THEIR time and pause while " +
     "they wait on you, so real elapsed time is longer.",
+  REP:
+    "Regulatory Enrolment Process — the mandatory web templates (since Oct 2020) " +
+    "that generate the application XML. Replaces the old HC/SC 3011 form.",
+  PMI:
+    "Patient Medication Information — plain-language medication info written at a " +
+    "Grade 6–8 reading level, bilingual.",
+  "Form IV":
+    "The Patent List under the Patented Medicines (Notice of Compliance) " +
+    "Regulations — an ANDS must address the patents/CSPs on the reference " +
+    "product's Patent Register.",
 };
 
 export const TERM_KEYS = Object.keys(TERMS).sort((a, b) => b.length - a.length);

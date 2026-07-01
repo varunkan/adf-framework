@@ -4,7 +4,6 @@ import { api } from "@/lib/api";
 import type { JourneyView, Stage } from "@/lib/types";
 import { Term } from "./Term";
 import { DrugIntake } from "./DrugIntake";
-import { ContentSlots } from "./ContentSlots";
 import { TrackView } from "./TrackView";
 
 type AdvanceFn = (step: string, data?: Record<string, any>) => Promise<void>;
@@ -126,11 +125,20 @@ export function StepCard({
             Module 3 your <Term k="CMC" />. A misplaced document bounces the whole
             package — drag each document onto its slot and watch the tower fill.
           </div>
-          <ContentSlots
-            sessionId={view.id}
-            content={view.content}
-            onUpdate={onView}
-          />
+          <div className="cta-row">
+            <a className="builder-link"
+              href={`/dossiers/${encodeURIComponent(view.journey.dossier_id)}/m/1`}>
+              Open the Module builder →
+            </a>
+            <span className="nexthint">
+              Build Modules 1–5 — upload or author every document with guidance
+            </span>
+          </div>
+          <div className="mut" style={{ fontSize: 13, marginTop: 10 }}>
+            {view.content.gate?.complete
+              ? "✓ All required documents are in — you can continue."
+              : `${view.content.gate?.missing?.length || 0} required document(s) still needed across the modules.`}
+          </div>
         </>
       )}
 
