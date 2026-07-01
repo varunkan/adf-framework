@@ -14,7 +14,7 @@ export function StepRail({
 }) {
   return (
     <nav className="rail" aria-label="Filing journey">
-      <h3>Your filing journey</h3>
+      <h2>Your filing journey</h2>
       <ol className="steps">
         {stages.map((s) => {
           const selectable = !s.locked;
@@ -27,6 +27,8 @@ export function StepRail({
             <li
               key={s.key}
               className={cls}
+              role={selectable ? "button" : undefined}
+              aria-disabled={s.locked ? true : undefined}
               aria-current={s.current ? "step" : undefined}
               tabIndex={selectable ? 0 : -1}
               onClick={() => selectable && onSelect(s.key)}

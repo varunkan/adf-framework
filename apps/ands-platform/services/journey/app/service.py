@@ -146,8 +146,11 @@ class JourneyService:
             slots = signals.get("content_slots")
             untouched = not slots or all(s.get("state") == "empty" for s in slots)
             if untouched:
-                signals["content_slots"] = content_slots.plan(
-                    cs_be_only=signals["cs_be_only"])
+                rebuilt = content_slots.plan(cs_be_only=signals["cs_be_only"])
+                signals["content_slots"] = rebuilt
+                # a rebuilt, empty plan must clear any stale completion flag
+                signals["content_done"] = content_slots.checklist_gate(
+                    rebuilt)["complete"]
 
     # -- dossier-id guidance ------------------------------------------------
     def assess_dossier_id(self, data: dict) -> dict:
@@ -190,13 +193,16 @@ class JourneyService:
             signals["sequence"] = _s(data.get("sequence")) or "0000"
             signals["submission_created"] = True
         elif step == "content":
-            slots = signals.get("content_slots")
-            if slots:
-                gate = content_slots.checklist_gate(slots)
-                if not gate["complete"]:
-                    raise ProblemError(
-                        422, "required documents are still missing",
-                        detail="; ".join(m["title"] for m in gate["missing"]))
+            # Gate authoritatively against the LIVE plan (derive it even when no
+            # doc has been placed yet) so 'content_done' can never stick true
+            # over an empty/incomplete eCTD.
+            slots = signals.get("content_slots") or content_slots.plan(
+                cs_be_only=bool(signals.get("cs_be_only")))
+            gate = content_slots.checklist_gate(slots)
+            if not gate["complete"]:
+                raise ProblemError(
+                    422, "required documents are still missing",
+                    detail="; ".join(m["title"] for m in gate["missing"]))
             signals["content_done"] = True
         elif step == "validate":
             errors = data.get("errors", 0)

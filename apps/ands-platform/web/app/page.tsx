@@ -106,6 +106,9 @@ export default function Page() {
         <Hero booting={booting} busy={busy} error={error} onStart={start} />
       ) : (
         <div className="stage">
+          <h1 className="sr-only">
+            Guided Health Canada ANDS filing — {view.title}
+          </h1>
           <StepRail
             stages={view.journey.stages}
             activeKey={activeStage?.key || ""}

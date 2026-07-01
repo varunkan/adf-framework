@@ -79,15 +79,28 @@ export function TrackView({ sessionId }: { sessionId: string }) {
         </div>
       )}
 
-      {summary?.timers.map((t) => (
-        <div key={`${t.notice.type}-${t.notice.date}`}
+      <div role="status" aria-live="polite">
+      {summary?.timers.map((t, i) => (
+        <div key={`${t.notice.type}-${t.notice.date}-${i}`}
           className={`timer ${t.overdue ? "overdue" : ""} ${t.paused ? "paused" : ""}`}>
           <div className="timer-head">
             <span className="timer-count">
-              {t.paused ? "⏸" : t.overdue ? Math.abs(t.days_remaining) : t.days_remaining}
+              {t.paused
+                ? "⏸"
+                : t.days_remaining == null
+                ? "?"
+                : t.overdue
+                ? Math.abs(t.days_remaining)
+                : t.days_remaining}
             </span>
             <span className="timer-unit">
-              {t.paused ? "paused" : t.overdue ? "days overdue" : "days left"}
+              {t.paused
+                ? "paused"
+                : t.days_remaining == null
+                ? "check date"
+                : t.overdue
+                ? "days overdue"
+                : "days left"}
             </span>
           </div>
           <div className="timer-body">
@@ -107,6 +120,7 @@ export function TrackView({ sessionId }: { sessionId: string }) {
           </div>
         </div>
       ))}
+      </div>
 
       {summary?.advisories.map((a) => (
         <div key={a.rule}

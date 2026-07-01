@@ -49,7 +49,7 @@ export function StepCard({
         <span aria-hidden>{stage.icon}</span>
         Step {stage.n} of 10 {stage.reg ? `· ${stage.reg}` : ""}
       </div>
-      <h1>{stage.label}</h1>
+      <h2 className="step-title">{stage.label}</h2>
       <p className="lede">{stage.purpose}</p>
 
       {/* per-step teaching + fields */}
@@ -211,14 +211,25 @@ export function StepCard({
       {/* one primary CTA + a Next: pointer */}
       {stage.cta && (
         <div className="cta-row">
-          <button onClick={() => go()} disabled={busy}>
+          <button
+            onClick={() => go()}
+            disabled={
+              busy || (stage.key === "content" && !view.content.gate.complete)
+            }
+          >
             {busy ? "Working…" : `${cta} →`}
           </button>
-          {stage.next_label && (
+          {stage.key === "content" && !view.content.gate.complete && (
             <span className="nexthint">
-              Next: <b>{stage.next_label}</b>
+              Place the required documents to continue
             </span>
           )}
+          {stage.next_label &&
+            !(stage.key === "content" && !view.content.gate.complete) && (
+              <span className="nexthint">
+                Next: <b>{stage.next_label}</b>
+              </span>
+            )}
         </div>
       )}
     </div>
@@ -306,12 +317,16 @@ function TransmitStep({ sig }: { sig: Record<string, any> }) {
         You get <b>three receipts, in order</b> — don&apos;t stop at the FDA ACK:
       </div>
       <div className="tiles" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
-        {chain.map((c, i) => (
-          <div key={c.k} className={`tile ${sent && i < 3 ? "pass" : "todo"}`} title={c.d}>
-            <span className="d" />
-            {c.k}
-          </div>
-        ))}
+        {chain.map((c, i) => {
+          const done = sent && i < 3;
+          return (
+            <div key={c.k} className={`tile ${done ? "pass" : "todo"}`} title={c.d}>
+              <span className="d" aria-hidden>{done ? "✓" : "○"}</span>
+              <span className="sr-only">{done ? "received" : "pending"}: </span>
+              {c.k}
+            </div>
+          );
+        })}
       </div>
     </>
   );

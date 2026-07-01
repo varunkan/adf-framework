@@ -75,10 +75,16 @@ _PHASES = {
                        "explanation": "The review is stopped pending your "
                                       "response; responding restarts a "
                                       "screening period."},
+    # NON is NOT terminal — the file stays open and a response is still due.
+    "non-issued": {"label": "Notice of Non-compliance — response required",
+                   "target_days": REVIEW_TARGET_DAYS_ANDS,
+                   "explanation": "The review finished but fell short. This is "
+                                  "NOT a closed file — you still have a response "
+                                  "window (a second review cycle)."},
     "decision": {"label": "Decision issued",
                  "target_days": None,
-                 "explanation": "Health Canada has reached a decision on this "
-                                "submission."},
+                 "explanation": "Health Canada has issued its final decision "
+                                "(an NOC) on this submission."},
 }
 
 
@@ -116,8 +122,10 @@ def phase(notices: list) -> dict:
     logged notice with none of the above) -> screening; nothing -> processing.
     """
     seen = {_ntype(n) for n in _sorted(notices)}
-    if "NOC" in seen or "NON" in seen:
-        key = "decision"
+    if "NOC" in seen:
+        key = "decision"                 # terminal approval (DIN issues)
+    elif "NON" in seen:
+        key = "non-issued"               # response still required (not closed)
     elif "NOD" in seen:
         key = "review-stopped"
     elif "SAL" in seen:
@@ -155,21 +163,31 @@ def _guidance_for(ntype: str) -> str:
     }.get(ntype, "Respond within the stated window.")
 
 
+def _superseded_by(notice: dict, notices: list[dict], types: tuple) -> bool:
+    """True if a notice of one of ``types`` was logged on/after this notice."""
+    ndate = _s(notice.get("date"))
+    return any(_ntype(o) in types and _s(o.get("date")) >= ndate
+               for o in notices)
+
+
 def _is_outstanding(notice: dict, notices: list[dict]) -> bool:
-    """Is this notice's response timer still live (not superseded)?"""
+    """Is this notice's response timer still live (not superseded)?
+
+    An SDN's screening window is closed by any later screening/review outcome
+    (SAL/NOD/NON/NOC); a NOD's window is closed by a later NON or the terminal
+    NOC; and a terminal NOC closes any still-running timer. This keeps the timer
+    set consistent with :func:`phase` even on out-of-order notice entry.
+    """
     ntype = _ntype(notice)
     if ntype not in _RESPONSE_WINDOWS:
         return False
-    ndate = _s(notice.get("date"))
-    # A later SAL accepts screening and clears the SDN's screening timer.
-    if ntype == "SDN":
-        for other in notices:
-            if _ntype(other) == "SAL" and _s(other.get("date")) >= ndate:
-                return False
-    # A terminal decision (NOC/NON) closes any still-running review timer.
-    for other in notices:
-        if _ntype(other) in ("NOC",) and _s(other.get("date")) >= ndate:
-            return False
+    if ntype == "SDN" and _superseded_by(notice, notices,
+                                         ("SAL", "NOD", "NON", "NOC")):
+        return False
+    if ntype == "NOD" and _superseded_by(notice, notices, ("NON", "NOC")):
+        return False
+    if ntype != "NOC" and _superseded_by(notice, notices, ("NOC",)):
+        return False
     return True
 
 
@@ -193,11 +211,16 @@ def timers(notices: list, as_of: str, *, paused=()) -> list[dict]:
         due = _add_days(_s(notice.get("date")), window)
         due_d = _d(due)
         is_paused = ntype in paused
+        # Fail CLOSED on a bad date: never present an unknown deadline as a
+        # fresh, not-overdue window — that would hide an overdue obligation.
         if today is not None and due_d is not None:
             days_remaining = (due_d - today).days
+            overdue = (not is_paused) and days_remaining < 0
+            unparseable = False
         else:
-            days_remaining = window
-        overdue = (not is_paused) and days_remaining < 0
+            days_remaining = None
+            overdue = False
+            unparseable = True
         out.append({
             "notice": dict(notice),
             "due_date": due,
@@ -205,6 +228,7 @@ def timers(notices: list, as_of: str, *, paused=()) -> list[dict]:
             "overdue": overdue,
             "paused": is_paused,
             "window_days": window,
+            "date_unparseable": unparseable,
             "label": _label_for(ntype, window),
             "guidance": _guidance_for(ntype),
         })

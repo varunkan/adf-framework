@@ -84,11 +84,35 @@ def test_nod_90_day_window_and_phase_stopped():
 
 
 # -- NON window exposed -------------------------------------------------------
-def test_non_default_90_day_window_and_decision_phase():
+def test_non_default_90_day_window_is_response_required_not_terminal():
     notices = [{"type": "NON", "date": "2026-05-01"}]
     t = tracking.timers(notices, as_of="2026-05-01")[0]
     assert t["window_days"] == 90
-    assert tracking.phase(notices)["phase"] == "decision"
+    # NON is NOT a closed file — it has its own response-required phase, distinct
+    # from the terminal NOC 'decision'.
+    ph = tracking.phase(notices)
+    assert ph["phase"] == "non-issued"
+    assert "not a closed file" in ph["explanation"].lower()
+
+
+def test_sdn_superseded_by_later_notice_clears_its_timer():
+    # An SDN's screening window is closed by any later screening/review outcome
+    # (review findings #2/#4) — no double screening timer.
+    for later in ("SAL", "NOD", "NON", "NOC"):
+        notices = [{"type": "SDN", "date": "2026-01-01"},
+                   {"type": later, "date": "2026-02-01"}]
+        types = [t["notice"]["type"]
+                 for t in tracking.timers(notices, as_of="2026-02-02")]
+        assert "SDN" not in types, f"SDN should be cleared by a later {later}"
+
+
+def test_unparseable_date_fails_closed():
+    # a garbage as_of must NOT present a fresh, not-overdue window (finding #5)
+    t = tracking.timers([{"type": "SDN", "date": "2026-01-01"}],
+                        as_of="not-a-date")[0]
+    assert t["days_remaining"] is None
+    assert t["date_unparseable"] is True
+    assert t["overdue"] is False
 
 
 # -- NOC terminal decision, no timer -----------------------------------------

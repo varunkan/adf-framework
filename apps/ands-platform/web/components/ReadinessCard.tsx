@@ -1,6 +1,13 @@
 "use client";
 import type { ReadinessCardData } from "@/lib/types";
 
+const MARK: Record<string, string> = { pass: "✓", current: "◉", todo: "○" };
+const WORD: Record<string, string> = {
+  pass: "complete",
+  current: "in progress",
+  todo: "to do",
+};
+
 // The persistent READY / BLOCKED card — plain-language blockers + Resume.
 export function ReadinessCard({
   data,
@@ -12,7 +19,7 @@ export function ReadinessCard({
   return (
     <div className="card glass ready-card">
       <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-        <h3>Readiness</h3>
+        <h2>Readiness</h2>
         <span className={`ready-status ${data.status}`} style={{ marginLeft: "auto" }}>
           {data.status === "READY" ? "● READY TO FILE" : "● BLOCKED"}
         </span>
@@ -27,7 +34,8 @@ export function ReadinessCard({
       <div className="tiles">
         {data.tiles.map((t) => (
           <div key={t.key} className={`tile ${t.state}`} title={t.reg || t.label}>
-            <span className="d" />
+            <span className="d" aria-hidden>{MARK[t.state] ?? "○"}</span>
+            <span className="sr-only">{WORD[t.state] ?? "to do"}: </span>
             {t.label}
           </div>
         ))}

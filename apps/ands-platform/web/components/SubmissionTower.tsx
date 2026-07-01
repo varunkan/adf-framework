@@ -43,7 +43,6 @@ const MODULE_STATE: Record<string, Tile["state"]> = {
   pass: "pass",
   partial: "current",
   todo: "todo",
-  na: "todo",
 };
 
 export function SubmissionTower({
@@ -61,15 +60,19 @@ export function SubmissionTower({
   }, []);
   const ready = status === "READY";
 
-  // In the content step the tower shows the literal eCTD Module 1-5 fill;
-  // elsewhere it shows overall journey progress.
+  // In the content step the tower shows the literal eCTD Module fill; elsewhere
+  // it shows overall journey progress. Modules that don't apply to a generic
+  // ANDS (e.g. Module 4 nonclinical) are 'na' and are excluded entirely — they
+  // are never outstanding work, so the tower is completable.
   const display: Tile[] = modules
-    ? modules.map((m) => ({
-        key: `m${m.module}`,
-        label: `Module ${m.module}`,
-        state: MODULE_STATE[m.state] ?? "todo",
-        reg: "",
-      }))
+    ? modules
+        .filter((m) => m.state !== "na")
+        .map((m) => ({
+          key: `m${m.module}`,
+          label: `Module ${m.module}`,
+          state: MODULE_STATE[m.state] ?? "todo",
+          reg: "",
+        }))
     : tiles;
   const passed = display.filter((t) => t.state === "pass").length;
 

@@ -132,10 +132,11 @@ export interface ContentView {
 export interface Timer {
   notice: { type: string; date: string };
   due_date: string;
-  days_remaining: number;
+  days_remaining: number | null;
   overdue: boolean;
   paused: boolean;
   window_days: number;
+  date_unparseable?: boolean;
   label: string;
   guidance: string;
 }

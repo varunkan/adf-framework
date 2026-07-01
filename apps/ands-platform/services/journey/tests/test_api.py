@@ -28,6 +28,18 @@ def test_intake_endpoint_steers_off_ands(client):
     assert "ands_not_for_new_indication" in rules
 
 
+def _place_required_docs(client, sid):
+    """Place every required + applicable eCTD slot (bilingual PM gets en+fr)."""
+    v = client.get(f"/api/journey/{sid}").json()
+    for s in v["content"]["slots"]:
+        if not (s["required"] and s["applicable"]):
+            continue
+        body = {"slot_key": s["key"], "doc": f"{s['key']}.pdf"}
+        if s["bilingual"]:
+            body["languages"] = ["en", "fr"]
+        client.post(f"/api/journey/{sid}/content/place", json=body)
+
+
 def test_full_walk_to_ready(client):
     sid = client.post("/api/journey/start", json={}).json()["id"]
 
@@ -39,6 +51,7 @@ def test_full_walk_to_ready(client):
     adv("company", company_id="12345")
     adv("dossier", dossier_id="e123456")
     adv("submission", applicant="Acme Pharma", drug_product="Drugazole 10mg")
+    _place_required_docs(client, sid)         # required before the content gate
     adv("content")
     adv("validate", errors=0)
     adv("fees")
@@ -152,6 +165,17 @@ def test_content_advance_blocked_until_required_filled(client):
     r = client.post(f"/api/journey/{sid}/advance",
                     json={"step": "content", "data": {}})
     assert r.status_code == 422   # slots present but required items still missing
+
+
+def test_content_advance_gates_even_with_nothing_placed(client):
+    # the content gate is authoritative from the live plan — content_done can
+    # never stick true over an empty eCTD (review finding #1).
+    sid = _start(client)
+    r = client.post(f"/api/journey/{sid}/advance",
+                    json={"step": "content", "data": {}})
+    assert r.status_code == 422
+    assert client.get(f"/api/journey/{sid}").json()["signals"].get("content_done") \
+        in (None, False)
 
 
 # -- post-filing tracking (deadline timers) ---------------------------------

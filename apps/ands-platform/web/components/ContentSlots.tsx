@@ -27,6 +27,7 @@ export function ContentSlots({
 }) {
   const [dragKey, setDragKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [announce, setAnnounce] = useState("");
   const slotsByKey = Object.fromEntries(content.slots.map((s) => [s.key, s]));
 
   async function place(slotKey: string, doc: string, lang?: string) {
@@ -41,6 +42,7 @@ export function ContentSlots({
     setBusy(true);
     try {
       onUpdate(await api.placeDoc(sessionId, slotKey, doc, languages));
+      setAnnounce(`${doc} placed in Module ${slot.module}`);
     } finally {
       setBusy(false);
     }
@@ -59,13 +61,13 @@ export function ContentSlots({
 
   return (
     <div className="content-slots">
-      <div className="slot-tray" role="list" aria-label="Documents to place">
+      <div className="sr-only" aria-live="polite">{announce}</div>
+      <div className="slot-tray" role="group" aria-label="Documents to place">
         {TRAY.map((t) => {
           const done = trayDone(t);
           return (
             <button
               key={t.label}
-              role="listitem"
               className={`doc-chip ${done ? "placed" : ""}`}
               draggable={!done}
               onDragStart={(e) => {
