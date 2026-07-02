@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS dossier_index (
     din             TEXT,
     company_id      TEXT,
     sponsor         TEXT,
+    drug_product    TEXT,
     fee_paid        INTEGER NOT NULL DEFAULT 0,
     sme_granted     INTEGER NOT NULL DEFAULT 0,
     tenant_id       TEXT,
@@ -106,6 +107,7 @@ class SqliteDossierRepository:
         # (distinct from the product title) — captured at dossier creation
         "ALTER TABLE dossier_index ADD COLUMN company_id TEXT",
         "ALTER TABLE dossier_index ADD COLUMN sponsor TEXT",
+        "ALTER TABLE dossier_index ADD COLUMN drug_product TEXT",
     )
 
     def __init__(self, db: SqliteDb | None = None) -> None:
@@ -308,8 +310,8 @@ class SqliteDossierRepository:
         now = utcnow_iso()
         self.db.execute(
             "INSERT INTO dossier_index (dossier_id, title, submission_type, "
-            "cs_be_only, din, company_id, sponsor, tenant_id, created_at, "
-            "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "cs_be_only, din, company_id, sponsor, drug_product, tenant_id, "
+            "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(dossier_id) DO UPDATE SET title=excluded.title, "
             "submission_type=excluded.submission_type, "
             "cs_be_only=excluded.cs_be_only, din=excluded.din, "
@@ -317,12 +319,15 @@ class SqliteDossierRepository:
             # the stored sponsor/company_id when the new rec leaves them NULL)
             "company_id=COALESCE(excluded.company_id, dossier_index.company_id), "
             "sponsor=COALESCE(excluded.sponsor, dossier_index.sponsor), "
+            "drug_product=COALESCE(excluded.drug_product, "
+            "dossier_index.drug_product), "
             # an upsert never re-homes a dossier to another tenant
             "tenant_id=COALESCE(dossier_index.tenant_id, excluded.tenant_id), "
             "updated_at=excluded.updated_at",
             (rec["dossier_id"], rec["title"], rec.get("submission_type"),
              1 if rec.get("cs_be_only", True) else 0, rec.get("din"),
              rec.get("company_id") or None, rec.get("sponsor") or None,
+             rec.get("drug_product") or None,
              rec.get("tenant_id") or None, now, now))
         return self.get_dossier_index(rec["dossier_id"])
 

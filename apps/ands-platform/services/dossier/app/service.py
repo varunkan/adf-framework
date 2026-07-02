@@ -230,7 +230,9 @@ class DossierService:
     def _ctx_for(self, dossier_id: str) -> dict:
         idx = self.repo.get_dossier_index(_s(dossier_id)) or {}
         return {"dossier_id": _s(dossier_id), "title": idx.get("title"),
-                "drug_product": idx.get("title"),
+                # the real product name (falls back to the title) — feeds the
+                # REP RT <PRODUCT_NAME>, ca-regional <product>, Form V, PMs
+                "drug_product": idx.get("drug_product") or idx.get("title"),
                 "submission_type": idx.get("submission_type") or "ANDS",
                 "activity_type": idx.get("submission_type") or "ANDS",
                 "din": idx.get("din"),
@@ -529,6 +531,9 @@ class DossierService:
             "submission_type": _s(data.get("submission_type")).upper() or "ANDS",
             "cs_be_only": bool(data.get("cs_be_only", True)),
             "din": din or None,
+            # the real product name — distinct from a display title
+            "drug_product": (_s(data.get("drug_product"))
+                             or _s(data.get("title")) or None),
             # REP identity — sponsor company (distinct from the product title)
             "company_id": _s(data.get("company_id")) or None,
             "sponsor": _s(data.get("sponsor")) or None,

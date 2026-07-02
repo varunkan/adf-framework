@@ -11,6 +11,7 @@ class CreateDossierIn(BaseModel):
     submission_type: str = "ANDS"
     cs_be_only: bool = True
     din: str = ""
+    drug_product: str = ""   # the real product name (distinct from a nickname title)
     # REP regulatory-transaction identity — the sponsor company (distinct from
     # the product/title). company_id is HC's assigned Company ID.
     company_id: str = ""
