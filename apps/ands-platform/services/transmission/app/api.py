@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, FastAPI, Query
+from fastapi import APIRouter, FastAPI, Header, Query
 
 from ands_shared import create_app
 
@@ -16,8 +16,9 @@ def build_app(service: TransmissionService) -> FastAPI:
     router = APIRouter(prefix="/api/transmission", tags=["transmission"])
 
     @router.post("/configure", status_code=201)
-    def configure(body: ConfigureIn):
-        return service.configure(body.model_dump())
+    def configure(body: ConfigureIn,
+                  x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        return service.configure(body.model_dump(), x_tenant_id or None)
 
     @router.post("/test-round-trip")
     def test_round_trip(body: TestRoundTripIn):
@@ -28,16 +29,19 @@ def build_app(service: TransmissionService) -> FastAPI:
         return service.route(size_gb)
 
     @router.post("/submit", status_code=201)
-    def submit(body: SubmitIn):
-        return service.submit(body.model_dump())
+    def submit(body: SubmitIn,
+               x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        return service.submit(body.model_dump(), x_tenant_id or None)
 
     @router.post("/ack")
-    def ack(body: AckIn):
-        return service.ack(body.model_dump())
+    def ack(body: AckIn,
+            x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        return service.ack(body.model_dump(), x_tenant_id or None)
 
     @router.get("/ledger/{dossier_id}")
-    def ledger(dossier_id: str):
-        return service.get(dossier_id)
+    def ledger(dossier_id: str,
+               x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        return service.get(dossier_id, x_tenant_id or None)
 
     app.include_router(router)
     return app

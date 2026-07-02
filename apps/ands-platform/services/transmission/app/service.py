@@ -31,22 +31,39 @@ class TransmissionService:
             return tx.TransmissionLedger(dossier_id)
         return None
 
-    def _save(self, ledger) -> dict:
-        return self.repo.save(ledger.to_dict())
+    def _save(self, ledger, tenant_id: str = "") -> dict:
+        return self.repo.save(ledger.to_dict(), _s(tenant_id))
+
+    def _tenant_guard(self, dossier_id: str, tenant_id: str) -> None:
+        """Enforce per-ledger tenant ownership on writes/reads against an
+        EXISTING ledger. When a tenant context is present (authenticated proxy
+        request), a ledger owned by a DIFFERENT tenant — or by no tenant at
+        all — is invisible (404, not 403, to avoid confirming existence).
+        Empty tenant_id => no scoping (in-process mesh / tests only)."""
+        if not _s(tenant_id):
+            return
+        raw = self.repo.get(_s(dossier_id))
+        if raw is None:
+            return   # genuinely absent — the caller's own 404 handles it
+        owner = _s(raw.get("_tenant_id"))
+        if owner != _s(tenant_id):
+            raise ProblemError(404, "no transmission ledger for dossier",
+                               detail=_s(dossier_id))
 
     # -- config -------------------------------------------------------------
-    def configure(self, data: dict) -> dict:
+    def configure(self, data: dict, tenant_id: str | None = None) -> dict:
         dossier_id = _s(data.get("dossier_id"))
         if not dossier_id:
             raise ProblemError(422, "dossier_id is required",
                                rule="dossier_id_required")
+        self._tenant_guard(dossier_id, _s(tenant_id))  # no cross-tenant config
         result = tx.configure_transmission(data)
         if not result["valid"]:
             raise ProblemError(422, "Invalid ESG configuration",
                                errors=result["errors"])
         ledger = self._load(dossier_id, create=True)
         ledger.set_config(result["config"])
-        self._save(ledger)
+        self._save(ledger, _s(tenant_id))
         return {"dossier_id": dossier_id, "config": ledger.config}
 
     def test_round_trip(self, data: dict) -> dict:
@@ -65,11 +82,12 @@ class TransmissionService:
         return tx.evaluate_size_routing(size_gb)
 
     # -- submit / ack -------------------------------------------------------
-    def submit(self, data: dict) -> dict:
+    def submit(self, data: dict, tenant_id: str | None = None) -> dict:
         dossier_id = _s(data.get("dossier_id"))
         if not dossier_id:
             raise ProblemError(422, "dossier_id is required",
                                rule="dossier_id_required")
+        self._tenant_guard(dossier_id, _s(tenant_id))  # no foreign-ledger submit
         ledger = self._load(dossier_id, create=True)
         try:
             record = ledger.submit(
@@ -79,7 +97,7 @@ class TransmissionService:
             raise ProblemError(409, str(exc), rule="production_blocked")
         except tx.TransmissionError as exc:
             raise ProblemError(409, str(exc), rule="transmission_error")
-        self._save(ledger)
+        self._save(ledger, _s(tenant_id))
         if record["state"] == tx.STATE_SENT:
             self.bus.publish(EventEnvelope.make(
                 EventType.TRANSMISSION_SENT, source=self.source,
@@ -88,8 +106,9 @@ class TransmissionService:
                       "message_id": record["message_id"]}))
         return record
 
-    def ack(self, data: dict) -> dict:
+    def ack(self, data: dict, tenant_id: str | None = None) -> dict:
         dossier_id = _s(data.get("dossier_id"))
+        self._tenant_guard(dossier_id, _s(tenant_id))   # no foreign-ledger ack
         ledger = self._load(dossier_id)
         if not ledger:
             raise ProblemError(404, "no transmission ledger for dossier",
@@ -110,7 +129,7 @@ class TransmissionService:
                                    rule="ack_kind_unknown")
         except tx.TransmissionError as exc:
             raise ProblemError(409, str(exc), rule="transmission_error")
-        self._save(ledger)
+        self._save(ledger, _s(tenant_id))
         if kind == "hc":
             self.bus.publish(EventEnvelope.make(
                 EventType.TRANSMISSION_HC_ACK, source=self.source,
@@ -119,9 +138,14 @@ class TransmissionService:
                       "recipients": data.get("notify") or []}))
         return txn
 
-    def get(self, dossier_id: str) -> dict:
+    def get(self, dossier_id: str, tenant_id: str | None = None) -> dict:
         ledger = self.repo.get(_s(dossier_id))
         if not ledger:
             raise ProblemError(404, "no transmission ledger for dossier",
                                detail=_s(dossier_id))
+        # tenant present + foreign/unowned ledger => 404 (never confirm)
+        if _s(tenant_id) and _s(ledger.get("_tenant_id")) != _s(tenant_id):
+            raise ProblemError(404, "no transmission ledger for dossier",
+                               detail=_s(dossier_id))
+        ledger.pop("_tenant_id", None)   # keep the public response shape
         return ledger
