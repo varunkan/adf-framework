@@ -22,28 +22,31 @@ class RegistryService:
     def register(self) -> "RegistryService":
         return self
 
-    def create(self, data: dict) -> dict:
+    def create(self, data: dict, tenant_id: str | None = None) -> dict:
         res = registry.new_registration(data)
         if not res["valid"]:
             raise ProblemError(422, "Invalid registration",
                                errors=res["errors"])
-        reg = self.repo.add(res["registration"])
+        reg_data = dict(res["registration"])
+        reg_data["tenant_id"] = _s(tenant_id) or None
+        reg = self.repo.add(reg_data)
         self._emit(reg, "created")
         return reg
 
-    def get(self, reg_id: str) -> dict:
+    def get(self, reg_id: str, tenant_id: str | None = None) -> dict:
         reg = self.repo.get(_s(reg_id))
-        if not reg:
+        if not reg or not self._tenant_ok(reg, tenant_id):
             raise ProblemError(404, "registration not found", detail=_s(reg_id))
         return reg
 
-    def list(self, **filters) -> dict:
-        regs = self.repo.list(**filters)
+    def list(self, *, tenant_id: str | None = None, **filters) -> dict:
+        regs = self.repo.list(tenant_id=_s(tenant_id), **filters)
         return {"registrations": regs, "count": len(regs)}
 
-    def set_status(self, reg_id: str, status: str) -> dict:
+    def set_status(self, reg_id: str, status: str,
+                   tenant_id: str | None = None) -> dict:
         reg = self.repo.get(_s(reg_id))
-        if not reg:
+        if not reg or not self._tenant_ok(reg, tenant_id):
             raise ProblemError(404, "registration not found", detail=_s(reg_id))
         check = registry.validate_status_transition(reg["status"], status)
         if not check["valid"]:
@@ -53,8 +56,19 @@ class RegistryService:
         self._emit(reg, "status_changed")
         return reg
 
-    def right_to_sell(self, reg_id: str, as_of: str) -> dict:
-        reg = self.get(reg_id)
+    @staticmethod
+    def _tenant_ok(reg: dict, tenant_id: str | None) -> bool:
+        """Per-row tenant ownership. When no tenant context is supplied
+        (in-process mesh / tests) access is unscoped. When it IS supplied a row
+        owned by a DIFFERENT tenant — or by no tenant at all — is invisible
+        (caller raises 404, not 403, to avoid confirming existence)."""
+        if not _s(tenant_id):
+            return True
+        return _s(reg.get("tenant_id")) == _s(tenant_id)
+
+    def right_to_sell(self, reg_id: str, as_of: str,
+                      tenant_id: str | None = None) -> dict:
+        reg = self.get(reg_id, tenant_id)
         try:
             return registry.right_to_sell_obligation(reg, as_of)
         except ValueError as exc:
