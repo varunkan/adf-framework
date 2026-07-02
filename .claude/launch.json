@@ -28,7 +28,7 @@
       "runtimeExecutable": "bash",
       "runtimeArgs": [
         "-lc",
-        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/web && JOURNEY_BFF_URL=http://127.0.0.1:8011 DOSSIER_BFF_URL=http://127.0.0.1:8010 exec npm run dev"
+        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/web && JOURNEY_BFF_URL=http://127.0.0.1:8011 DOSSIER_BFF_URL=http://127.0.0.1:8010 IDENTITY_BFF_URL=http://127.0.0.1:8014 GOVERNANCE_BFF_URL=http://127.0.0.1:8012 REGISTRY_BFF_URL=http://127.0.0.1:8016 LIFECYCLE_BFF_URL=http://127.0.0.1:8017 COLLAB_BFF_URL=http://127.0.0.1:8018 exec npm run dev"
       ],
       "port": 3000
     },
@@ -91,7 +91,7 @@
       "runtimeExecutable": "bash",
       "runtimeArgs": [
         "-lc",
-        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/dossier && PYTHONPATH=.:../../libs exec ../../.venv/bin/uvicorn app.main:app --port 8010"
+        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/dossier && PYTHONPATH=.:../../libs GOVERNANCE_URL=http://127.0.0.1:8012 exec ../../.venv/bin/uvicorn app.main:app --port 8010"
       ],
       "port": 8010
     },

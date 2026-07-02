@@ -12,6 +12,7 @@ from . import (admin_sequence, archive, assembly, content_model, content_plan,
                dossier_state, drafting, ectd_validation, export_pkg, fees,
                generators, llm_provider, monograph, pm_xml, pm_xref,
                section_tree)
+from . import audit_hook
 from .document_store import SqliteBlobStore
 from .ports import DossierRepository
 
@@ -313,6 +314,9 @@ class DossierService:
         self._place(dossier_id, node, leaf_id, body, self._ext(filename))
         self._write_entry(dossier_id, section, node, action="uploaded",
                           meta=meta, lang=lang, leaf_id=leaf_id)
+        audit_hook.record("dossier.document_uploaded", _s(dossier_id),
+                          {"section": _s(section), "filename": _s(filename),
+                           "lang": lang or ""})
         return self.content_state(dossier_id)
 
     def generate_document(self, dossier_id, section, payload) -> dict:
@@ -332,6 +336,10 @@ class DossierService:
                     self._ext(doc["filename"]))
         self._write_entry(dossier_id, section, node, action="generated",
                           meta=meta, leaf_id=node["leaf_id"])
+        audit_hook.record("dossier.document_generated", _s(dossier_id),
+                          {"section": _s(section),
+                           "generator": _s(node.get("generator_key")),
+                           "ai_draft": bool((payload or {}).get("llm_draft"))})
         return self.content_state(dossier_id)
 
     def prepare_draft_chat(self, dossier_id: str, section: str) -> tuple[dict, dict]:
@@ -365,6 +373,8 @@ class DossierService:
                                rule="section_not_na", detail=_s(section))
         self._write_entry(dossier_id, section, node, action="na",
                           na_reason=_s(reason))
+        audit_hook.record("dossier.section_marked_na", _s(dossier_id),
+                          {"section": _s(section), "reason": _s(reason)})
         return self.content_state(dossier_id)
 
     def export_sequence(self, dossier_id: str, sequence: str = "0000",
@@ -402,8 +412,13 @@ class DossierService:
         # REP RT XML travels inside every transaction (REP guidance)
         ctx = {**self._ctx_for(dossier_id), "sequence": _s(sequence) or "0000"}
         rt = generators.generate("rep_application_form", ctx)
-        return export_pkg.build_package(model, _s(sequence) or "0000",
-                                        resolve, rt["body"])
+        pkg = export_pkg.build_package(model, _s(sequence) or "0000",
+                                       resolve, rt["body"])
+        audit_hook.record("dossier.sequence_exported", _s(dossier_id),
+                          {"sequence": _s(sequence) or "0000",
+                           "files": len(pkg["files"]),
+                           "missing": len(pkg["missing"])})
+        return pkg
 
     def get_document(self, doc_id: str) -> dict:
         doc = self.store.get(_s(doc_id))
@@ -524,6 +539,7 @@ class DossierService:
         self._tenant_guard(dossier_id, tenant_id)
         if not self.repo.delete_dossier(_s(dossier_id)):
             raise ProblemError(404, "no such dossier", detail=_s(dossier_id))
+        audit_hook.record("dossier.deleted", _s(dossier_id), {})
         return {"deleted": _s(dossier_id)}
 
     def list_dossiers(self, tenant_id: str | None = None) -> dict:
