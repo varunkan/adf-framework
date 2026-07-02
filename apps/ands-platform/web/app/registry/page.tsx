@@ -79,6 +79,11 @@ export default function RegistryPage() {
           Every marketed-product registration — DIN, market status and the
           post-approval obligations that follow the Notice of Compliance.
         </p>
+        <p className="mut" style={{ fontSize: 12, maxWidth: "72ch" }}>
+          Every change on this page is captured in the dossier’s append-only
+          audit trail — actor and workspace stamped, sequence-numbered,
+          exportable for inspections (open a dossier → Audit).
+        </p>
 
         {creating && <RegisterForm onCreated={created} />}
 

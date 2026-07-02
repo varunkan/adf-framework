@@ -60,6 +60,11 @@ export default function CorrespondencePage() {
           DSTS lifecycle, and watch the PM(NOC) statutory clocks on each
           Form V allegation.
         </p>
+        <p className="mut" style={{ fontSize: 12, maxWidth: "72ch" }}>
+          Every change on this page is captured in the dossier’s append-only
+          audit trail — actor and workspace stamped, sequence-numbered,
+          exportable for inspections (open a dossier → Audit).
+        </p>
 
         <div className="card glass" style={{ padding: 16, maxWidth: 560 }}>
           <label htmlFor="corr-dossier">Dossier</label>

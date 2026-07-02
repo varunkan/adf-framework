@@ -69,7 +69,21 @@ export function RegisterForm({
         <div>
           <label>DIN (8 digits)</label>
           <input value={din} onChange={(e) => setDin(e.target.value)}
-            placeholder="02248808" inputMode="numeric" maxLength={8} />
+            placeholder="02248808" inputMode="numeric" maxLength={8}
+            aria-describedby="din-live" />
+          {/* live validation — a DIN only exists once Health Canada issues
+              it at NOC, so blank is CORRECT before then, and anything
+              non-blank must be exactly 8 digits */}
+          <div id="din-live" aria-live="polite"
+            style={{ fontSize: 12, marginTop: 4 }}
+            className={!din.trim() || /^\d{8}$/.test(din.trim()) ? "mut" : ""}>
+            {!din.trim()
+              ? "Issued by Health Canada at NOC — leave blank until then."
+              : /^\d{8}$/.test(din.trim())
+              ? "✓ Valid DIN format."
+              : `✗ A DIN is exactly 8 digits (${din.trim().length}/8${
+                  /\D/.test(din.trim()) ? ", digits only" : ""})`}
+          </div>
         </div>
         <div>
           <label>Country</label>

@@ -126,6 +126,11 @@ export default function PortfolioPage() {
           Every product dossier in your organisation — module progress, filing
           gate and fee status at a glance.
         </p>
+        <p className="mut" style={{ fontSize: 12, maxWidth: "72ch" }}>
+          Every change on this page is captured in the dossier’s append-only
+          audit trail — actor and workspace stamped, sequence-numbered,
+          exportable for inspections (open a dossier → Audit).
+        </p>
         {items.length > 0 && (
           <div className="affordance-bar">
             <button className="ghost" onClick={exportStatus}>

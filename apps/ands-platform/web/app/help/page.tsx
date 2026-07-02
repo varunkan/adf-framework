@@ -97,6 +97,48 @@ export default function HelpPage() {
             </div>
           </section>
         ))}
+        <section style={{ marginTop: 24 }}>
+          <h2 style={{ fontSize: 16 }}>How validation works here</h2>
+          <div className="card glass" style={{ padding: "12px 16px", fontSize: 13 }}>
+            Every finding carries a rule ID you can cite in review meetings:
+            <ul style={{ margin: "8px 0 0", paddingLeft: 20 }}>
+              <li><code>CA-E-1xxx</code> — leaf inventory integrity: every live
+                document needs an href and a well-formed MD5 checksum; duplicate
+                leaf IDs are errors.</li>
+              <li><code>CA-E-2xxx</code> — lifecycle legality: replace/append/
+                delete operations must reference a real prior leaf; new leaves
+                can&apos;t claim one.</li>
+              <li><code>CA-E-3xxx</code> — file/folder naming hygiene (lowercase,
+                no spaces, module folder placement).</li>
+              <li><code>CA-E-4xxx</code> — sequence numbering.</li>
+              <li>XML backbone (index + CA regional) and PDF conformance run in
+                the full technical check on the stored bytes.</li>
+              <li><code>CA-REP-0001</code> — filing is blocked while a dossier
+                still uses a placeholder ID instead of the REP-issued one.</li>
+            </ul>
+            On top of the technical layer, each authorable form has a
+            content review against Health Canada&apos;s required elements —
+            every finding cites its canada.ca source and proposes the edit.
+          </div>
+        </section>
+        <section style={{ marginTop: 18 }}>
+          <h2 style={{ fontSize: 16 }}>How AI drafting is controlled</h2>
+          <div className="card glass" style={{ padding: "12px 16px", fontSize: 13 }}>
+            <ul style={{ margin: 0, paddingLeft: 20 }}>
+              <li>Opt-in, per section — only sections marked <b>✦AI</b> offer it,
+                and the standard template author is always available instead.</li>
+              <li>Nothing is saved until you click <i>Use this draft</i>; the
+                assistant asks for missing facts rather than inventing them.</li>
+              <li>Every AI-assisted document is permanently labeled
+                (<i>AI-assisted — review before filing</i>) and recorded as such
+                in the append-only audit trail — provenance never disappears.</li>
+              <li>Drafts go through the same Health Canada content review and
+                eCTD validation as any other document, and the human review +
+                e-signature gate still stands between any document and
+                transmission.</li>
+            </ul>
+          </div>
+        </section>
         <p className="mut" style={{ fontSize: 12, marginTop: 20 }}>
           Tip: dashed-underlined terms across the app reveal plain-language
           definitions on hover — and every Health Canada content-review
