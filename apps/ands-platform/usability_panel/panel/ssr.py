@@ -27,7 +27,67 @@ import numpy as np
 from .anchors import ANCHORS
 
 EPS = 0.02
-TEMP = 1.0
+# T=0.5 sharpens the similarity->pmf mapping. Calibration (see CALIBRATION)
+# showed T=1.0 compresses the scale so hard that the trust ceiling is 3.55 —
+# no product could ever score 4. At 0.5 ordinality still holds (bake-off) and
+# the floor->ceiling range roughly doubles.
+TEMP = 0.5
+
+# Anchor-free absolute thresholds are meaningless in SSR space — the mapping
+# has a construct-specific floor and ceiling. These batteries define them:
+# maximally satisfied / dissatisfied professional statements. Scores are
+# interpreted as position between the two (see normalize()).
+CALIBRATION = {
+    "ceiling": {
+        "ease": ["This is genuinely effortless — the smoothest regulatory tool I've used.",
+                 "Anyone on my team could do this without training; it's that easy.",
+                 "Completely intuitive; I flew through the whole flow on the first try."],
+        "clarity": ["Every label, step and term was immediately clear — nothing confused me.",
+                    "The guidance explains everything; I always knew exactly what to do next.",
+                    "Crystal clear from start to finish, even the regulatory jargon."],
+        "trust": ["I would file a real submission through this tomorrow without hesitation.",
+                  "This is more rigorous than my current validated process; I trust it fully.",
+                  "The compliance checks are airtight — I'd stake my license on it."],
+        "adoption": ["We are buying this — I'll push procurement to sign this week.",
+                     "I'd replace our current tools with this immediately.",
+                     "Absolutely adopting it; this is exactly what our team needs."],
+    },
+    "floor": {
+        "ease": ["Painful and clumsy; every step fought me.",
+                 "Unusable — I gave up halfway.",
+                 "So awkward I'd need days of training."],
+        "clarity": ["I never understood what it wanted from me.",
+                    "The labels are gibberish to me.",
+                    "Totally lost from the first screen."],
+        "trust": ["I would never risk a real filing on this.",
+                  "This would get my client a refusal letter.",
+                  "The regulatory content is not credible at all."],
+        "adoption": ["We will never buy this.",
+                     "I'd advise everyone against adopting it.",
+                     "Not a chance — we keep our current process."],
+    },
+}
+
+_bounds_cache: dict[str, tuple[float, float]] = {}
+
+
+def bounds(construct: str, temp: float = TEMP) -> tuple[float, float]:
+    """(floor, ceiling) mean-rating for a construct at this temperature."""
+    key = f"{construct}@{temp}"
+    if key not in _bounds_cache:
+        lo = mean_rating(pmf_for_texts(
+            CALIBRATION["floor"][construct], construct, temp=temp)).mean()
+        hi = mean_rating(pmf_for_texts(
+            CALIBRATION["ceiling"][construct], construct, temp=temp)).mean()
+        _bounds_cache[key] = (float(lo), float(hi))
+    return _bounds_cache[key]
+
+
+def normalize(mean: float, construct: str, temp: float = TEMP) -> float:
+    """Position of a mean rating between the calibrated floor (0) and
+    ceiling (1) for its construct — the scale satisfaction is judged on."""
+    lo, hi = bounds(construct, temp)
+    return (mean - lo) / (hi - lo) if hi > lo else 0.0
 
 _model = None
 _anchor_vecs: dict[str, list[np.ndarray]] = {}

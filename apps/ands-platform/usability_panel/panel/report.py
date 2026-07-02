@@ -16,7 +16,14 @@ CONSTRUCTS = ["ease", "clarity", "trust", "adoption"]
 
 
 def score_responses(responses: list[dict]) -> list[dict]:
-    """SSR-map every construct answer; returns rows with pmf + mean."""
+    """SSR-map every construct answer; returns rows with pmf + mean.
+
+    Drops None entries (an elicitation that exhausted its rate-limit retries
+    returns None rather than raising) — coverage is asserted by the caller."""
+    dropped = sum(1 for r in responses if r is None)
+    if dropped:
+        print(f"  note: dropping {dropped} failed elicitation(s)")
+    responses = [r for r in responses if r]
     rows = []
     for construct in CONSTRUCTS:
         subset = [r for r in responses if construct in r["answers"]]
@@ -74,6 +81,7 @@ def worst_cells(cells: dict, k: int = 8) -> list[dict]:
 
 async def mine_themes(responses: list[dict]) -> dict[str, str]:
     """Qualitative theme mining per flow (paper App. E) via one LLM pass."""
+    responses = [r for r in responses if r]
     key = load_groq_key()
     out: dict[str, str] = {}
     flows = sorted({r["flow_key"] for r in responses})

@@ -1,4 +1,5 @@
 // Client over the same-origin /api/dossier proxy → the dossier microservice.
+import { friendlyError } from "./friendlyError";
 import type {
   ContentState,
   DossierFull,
@@ -23,7 +24,7 @@ async function j<T>(path: string, init?: RequestInit): Promise<T> {
       // problem+json: title is the human-readable part, detail the specifics
       detail = [b.title, b.detail].filter(Boolean).join(": ") || detail;
     } catch {}
-    throw new Error(detail);
+    throw new Error(friendlyError(res.status, detail));
   }
   return res.json() as Promise<T>;
 }
@@ -149,7 +150,7 @@ export const dossierApi = {
         const b = await res.json();
         detail = [b.title, b.detail].filter(Boolean).join(": ") || detail;
       } catch {}
-      throw new Error(detail);
+      throw new Error(friendlyError(res.status, detail));
     }
     const reader = res.body.getReader();
     const decoder = new TextDecoder();

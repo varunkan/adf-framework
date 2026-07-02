@@ -130,6 +130,26 @@ export function SequencePanel({ dossierId }: { dossierId: string }) {
               className="chip"
               href={dossierApi.exportUrl(dossierId, s.sequence)}
               title={`Download the eCTD package for sequence ${s.sequence}`}
+              onClick={async (e) => {
+                // don't hand over a package screening would bounce — check
+                // validation first and make an un-validated export explicit
+                e.preventDefault();
+                const href = dossierApi.exportUrl(dossierId, s.sequence);
+                try {
+                  const v = await dossierApi.validate(dossierId);
+                  if (
+                    v.passed ||
+                    window.confirm(
+                      `Validation has ${v.errors.length} unresolved error(s)` +
+                      (v.errors[0] ? ` (e.g. ${(v.errors[0] as any).rule_id ||
+                        v.errors[0].rule}: ${v.errors[0].message})` : "") +
+                      ".\n\nHealth Canada screening would reject this " +
+                      "package. Export anyway for internal review?")
+                  ) window.location.assign(href);
+                } catch {
+                  window.location.assign(href); // validator offline — export
+                }
+              }}
             >
               Export
             </a>

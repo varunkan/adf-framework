@@ -1,0 +1,16 @@
+reusing 192 cached responses from before_responses.json
+SSR-scoring...
+  note: dropping 15 failed elicitation(s)
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights:   0%|          | 0/199 [00:00<?, ?it/s]Loading weights: 100%|██████████| 199/199 [00:00<00:00, 7858.13it/s]
+mining themes...
+
+wrote /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/usability_panel/results/before_report.md
+  ai_draft         ease=3.106  clarity=2.814  trust=2.654
+  builder_forms    ease=3.107  clarity=2.842  trust=2.706
+  catalog          ease=2.997  clarity=2.732  trust=2.459
+  journey          ease=3.105  clarity=3.024  trust=2.686
+  onboarding       ease=2.99  clarity=2.672  trust=2.439
+  operations       ease=3.064  clarity=2.658  trust=2.592
+  overall          ease=3.16  clarity=2.928  trust=2.661  adoption=3.291
+  validate_export  ease=2.964  clarity=2.686  trust=2.64

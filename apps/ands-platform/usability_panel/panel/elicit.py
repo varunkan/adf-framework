@@ -70,15 +70,26 @@ async def _one(client: httpx.AsyncClient, key: str, persona: dict,
     ]
     body = {
         "model": MODEL, "messages": messages, "temperature": TEMPERATURE,
-        "top_p": 0.9, "max_tokens": 700,
+        "top_p": 0.9, "max_tokens": 500,   # 4 short answers + feedback fit;
+        # every completion token counts against the Groq daily budget
         "response_format": {"type": "json_object"},
     }
+    trace = os.environ.get("PANEL_TRACE", "")
+
+    def _t(msg: str) -> None:
+        if trace:
+            with open(trace, "a") as f:
+                f.write(f"{persona['id']}/{stimulus['flow_key']}#{sample_idx} "
+                        f"{msg}\n")
+
     async with sem:
         for attempt in range(MAX_ATTEMPTS):
             try:
+                _t(f"attempt {attempt} POST")
                 r = await client.post(
                     GROQ_URL, json=body,
                     headers={"Authorization": f"Bearer {key}"}, timeout=60)
+                _t(f"attempt {attempt} -> {r.status_code}")
                 if r.status_code == 429:
                     retry_after = float(r.headers.get("retry-after", 0) or 0)
                     await asyncio.sleep(max(retry_after, 2.0) + attempt)
@@ -93,7 +104,8 @@ async def _one(client: httpx.AsyncClient, key: str, persona: dict,
                     "persona_id": persona["id"], "flow_key": stimulus["flow_key"],
                     "sample": sample_idx, "answers": answers,
                 }
-            except Exception:
+            except Exception as exc:
+                _t(f"attempt {attempt} EXC {type(exc).__name__}: {exc}")
                 if attempt == MAX_ATTEMPTS - 1:
                     raise
                 await asyncio.sleep(2 * (attempt + 1))

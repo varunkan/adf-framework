@@ -131,8 +131,17 @@ export default function LoginPage() {
               autoComplete={mode === "login" ? "current-password" : "new-password"}
               onKeyDown={(e) => { if (e.key === "Enter" && mode !== "reset") go(); }} />
             {mode !== "login" && (
-              <div className="mut" style={{ fontSize: 12, marginTop: 4 }}>
-                {PW_RULE}
+              <div style={{ fontSize: 12, marginTop: 4 }}
+                className={!password ? "mut"
+                  : password.length >= 10 && /[a-zA-Z]/.test(password) &&
+                    /\d/.test(password) ? "mut" : ""}
+                aria-live="polite">
+                {!password ? PW_RULE
+                  : password.length >= 10 && /[a-zA-Z]/.test(password) &&
+                    /\d/.test(password)
+                  ? "✓ Meets the password rules."
+                  : `✗ ${PW_RULE}${password.length < 10
+                      ? ` (${10 - password.length} more characters)` : ""}`}
               </div>
             )}
           </div>

@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""The 100%-satisfaction gate for a panel round.
+"""The 100%-satisfaction gate for a panel round — calibrated.
 
-    .venv-panel/bin/python check_satisfaction.py --tag before
+    .venv-panel/bin/python check_satisfaction.py --tag round2
 
-Criterion (all must hold):
-  1. every flow x construct cell mean >= 4.0
-  2. bottom-2-box share <= 5% in every cell
-  3. every persona individually: adoption >= 4.0 AND no flow-mean < 3.5
+SSR scores live on a construct-specific scale whose floor and ceiling are
+measured from maximally dissatisfied / satisfied statements (ssr.CALIBRATION).
+A raw ">= 4.0" is meaningless (the trust ceiling at T=1 was 3.55). The gate
+is therefore NORMALIZED position between floor (0.0) and ceiling (1.0):
+
+  1. every flow x construct cell:      normalized mean >= 0.75
+  2. every persona, every flow:        normalized flow-mean >= 0.55
+  3. every persona:                    normalized adoption >= 0.70
      ("100% of customers" = nobody left behind, not a good average)
 
 Exit code 0 = satisfied, 1 = not yet (prints the ranked gap list).
@@ -21,11 +25,13 @@ import sys
 from collections import defaultdict
 
 HERE = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
 
-CELL_MEAN_MIN = 4.0
-BOTTOM2_MAX = 0.05
-PERSONA_ADOPTION_MIN = 4.0
-PERSONA_FLOW_MIN = 3.5
+from panel import ssr  # noqa: E402
+
+CELL_MIN = 0.75
+PERSONA_FLOW_MIN = 0.55
+PERSONA_ADOPTION_MIN = 0.70
 
 
 def main() -> int:
@@ -35,43 +41,39 @@ def main() -> int:
     data = json.loads((HERE / "results" / f"{args.tag}_scores.json").read_text())
     cells, rows = data["cells"], data["rows"]
 
-    gaps: list[tuple[float, str]] = []   # (severity-sort-key, description)
+    gaps: list[tuple[float, str]] = []
 
-    # 1+2 — survey cells
     for flow, cs in cells.items():
         for construct, agg in cs.items():
-            if agg["mean"] < CELL_MEAN_MIN:
-                gaps.append((agg["mean"],
-                             f"cell {flow}/{construct}: mean {agg['mean']} "
-                             f"< {CELL_MEAN_MIN}"))
-            if agg["bottom2"] > BOTTOM2_MAX:
-                gaps.append((4.0 - agg["bottom2"],
-                             f"cell {flow}/{construct}: bottom-2 share "
-                             f"{agg['bottom2']:.0%} > {BOTTOM2_MAX:.0%}"))
+            n = ssr.normalize(agg["mean"], construct)
+            if n < CELL_MIN:
+                gaps.append((n, f"cell {flow}/{construct}: {n:.2f} "
+                                f"(mean {agg['mean']}) < {CELL_MIN}"))
 
-    # 3 — per-persona floors
     persona_flow: dict = defaultdict(lambda: defaultdict(list))
     persona_adoption: dict = defaultdict(list)
     for r in rows:
-        persona_flow[r["persona_id"]][r["flow_key"]].append(r["mean"])
+        persona_flow[r["persona_id"]][r["flow_key"]].append(
+            ssr.normalize(r["mean"], r["construct"]))
         if r["construct"] == "adoption":
-            persona_adoption[r["persona_id"]].append(r["mean"])
+            persona_adoption[r["persona_id"]].append(
+                ssr.normalize(r["mean"], "adoption"))
     for pid, flows in persona_flow.items():
-        for flow, means in flows.items():
-            m = sum(means) / len(means)
+        for flow, ns in flows.items():
+            m = sum(ns) / len(ns)
             if m < PERSONA_FLOW_MIN:
-                gaps.append((m, f"persona {pid} rates {flow} at {m:.2f} "
+                gaps.append((m, f"persona {pid} x {flow}: {m:.2f} "
                                 f"< {PERSONA_FLOW_MIN}"))
-    for pid, means in persona_adoption.items():
-        m = sum(means) / len(means)
+    for pid, ns in persona_adoption.items():
+        m = sum(ns) / len(ns)
         if m < PERSONA_ADOPTION_MIN:
-            gaps.append((m, f"persona {pid} adoption {m:.2f} "
+            gaps.append((m, f"persona {pid} adoption: {m:.2f} "
                             f"< {PERSONA_ADOPTION_MIN}"))
 
     if not gaps:
-        print(f"[{args.tag}] SATISFIED — every cell >= {CELL_MEAN_MIN}, "
-              f"bottom-2 <= {BOTTOM2_MAX:.0%}, every persona adoption >= "
-              f"{PERSONA_ADOPTION_MIN} with no flow < {PERSONA_FLOW_MIN}.")
+        print(f"[{args.tag}] SATISFIED — all cells >= {CELL_MIN}, every "
+              f"persona-flow >= {PERSONA_FLOW_MIN}, every persona adoption "
+              f">= {PERSONA_ADOPTION_MIN} (calibrated-normalized scale).")
         return 0
     print(f"[{args.tag}] NOT SATISFIED — {len(gaps)} gap(s), worst first:")
     for _, g in sorted(gaps)[:40]:

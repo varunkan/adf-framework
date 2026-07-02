@@ -1,4 +1,5 @@
 // Thin client over the same-origin /api/journey proxy (-> the journey BFF).
+import { friendlyError } from "./friendlyError";
 import type {
   Catalog,
   IntakeAssessment,
@@ -29,7 +30,7 @@ async function j<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       /* ignore */
     }
-    throw new Error(detail);
+    throw new Error(friendlyError(res.status, detail));
   }
   return res.json() as Promise<T>;
 }

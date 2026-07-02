@@ -83,7 +83,16 @@ function TreeItem({
       </span>
       <span className="t-sec">{n.section}</span>
       <span className="t-title">{n.title}</span>
-      <span className={`t-badge ${n.applicability}`}>
+      {n.ai_draftable && (
+        <span className="t-badge optional" aria-label="AI drafting available"
+          title="This section supports interactive AI drafting — you review and approve before anything is saved">
+          ✦AI
+        </span>
+      )}
+      <span className={`t-badge ${n.applicability}`}
+        title={n.applicability === "required"
+          ? "Required: Health Canada expects this section in your submission type"
+          : "Optional: include when it applies to your product; otherwise Mark N/A with a reason"}>
         {n.applicability === "required" ? "req" : "opt"}
       </span>
       <span className="sr-only">

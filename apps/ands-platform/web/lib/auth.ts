@@ -3,6 +3,7 @@
 // proxies can resolve the tenant for scoping.
 
 // /auth/me returns a FLAT principal
+import { friendlyError } from "./friendlyError";
 export interface Principal {
   user_id: string;
   tenant_id: string;
@@ -30,7 +31,7 @@ async function j<T>(path: string, init?: RequestInit): Promise<T> {
       const b = await res.json();
       detail = [b.title, b.detail].filter(Boolean).join(": ") || detail;
     } catch {}
-    throw new Error(detail);
+    throw new Error(friendlyError(res.status, detail));
   }
   return res.json() as Promise<T>;
 }

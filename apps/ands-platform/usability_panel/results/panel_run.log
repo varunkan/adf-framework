@@ -1,0 +1,32 @@
+eliciting 192 responses (12 personas x 8 flows x 2)...
+  10/192
+  20/192
+  30/192
+  40/192
+  50/192
+  60/192
+  70/192
+  80/192
+  90/192
+  100/192
+  110/192
+  120/192
+  130/192
+  140/192
+  150/192
+  160/192
+  170/192
+  180/192
+  190/192
+  192/192
+SSR-scoring...
+Traceback (most recent call last):
+  File "/Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/usability_panel/run_panel.py", line 101, in <module>
+    main()
+    ~~~~^^
+  File "/Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/usability_panel/run_panel.py", line 84, in main
+    rows = report.score_responses(responses)
+  File "/Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/usability_panel/panel/report.py", line 22, in score_responses
+    subset = [r for r in responses if construct in r["answers"]]
+                                                   ~^^^^^^^^^^^
+TypeError: 'NoneType' object is not subscriptable

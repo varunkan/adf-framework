@@ -48,6 +48,7 @@ export default function CorrespondencePage() {
         </span>
         <span className="spacer" />
         <UserChip />
+        <Link className="chip" href="/help">Help</Link>
         <Link className="chip" href="/dossiers">Dossier manager</Link>
         <Link className="chip" href="/portfolio">Portfolio</Link>
         <Link className="chip" href="/">Guided journey →</Link>

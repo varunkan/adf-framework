@@ -87,6 +87,7 @@ export default function Page() {
         </span>
         <span className="spacer" />
         <UserChip />
+        <Link className="chip" href="/help">Help</Link>
         <Link className="chip" href="/dossiers">My dossiers</Link>
         <Link className="chip" href="/portfolio">Portfolio</Link>
         {view && (
