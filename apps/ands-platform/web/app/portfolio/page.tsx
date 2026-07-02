@@ -7,12 +7,13 @@ import Link from "next/link";
 import { dossierApi } from "@/lib/dossierApi";
 import type { DossierListItem } from "@/lib/dossierTypes";
 import { UserChip } from "@/components/UserChip";
-import { PortfolioRow, type FeeState } from "@/components/portfolio/PortfolioRow";
+import { PortfolioRow, type FeeState, type NoaClock } from "@/components/portfolio/PortfolioRow";
 import { SummaryCards } from "@/components/portfolio/SummaryCards";
 
 export default function PortfolioPage() {
   const [items, setItems] = useState<DossierListItem[]>([]);
   const [fees, setFees] = useState<Record<string, FeeState>>({});
+  const [noas, setNoas] = useState<Record<string, NoaClock>>({});
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
@@ -44,6 +45,26 @@ export default function PortfolioPage() {
             if (alive)
               setFees((m) => ({ ...m, [d.dossier_id]: { kind: "unknown" } }));
           }
+        });
+        // live PM(NOC) clocks — a served NOA / running stay is the deadline
+        // a regulatory PM most needs to see coming
+        dossiers.forEach(async (d) => {
+          try {
+            const r = await fetch(
+              `/api/lifecycle/noa?dossier_id=${encodeURIComponent(d.dossier_id)}`,
+              { cache: "no-store" });
+            if (!r.ok || !alive) return;
+            const { allegations: recs = [] } = await r.json();
+            let clock: NoaClock = { kind: "none" };
+            for (const n of recs) {
+              if (n.status === "served" && n.action_days_remaining > 0)
+                clock = { kind: "action", days: n.action_days_remaining };
+              else if (n.status === "stay_running" && n.stay_days_remaining > 0)
+                clock = { kind: "stay", days: n.stay_days_remaining };
+            }
+            if (clock.kind !== "none")
+              setNoas((m) => ({ ...m, [d.dossier_id]: clock }));
+          } catch { /* lifecycle offline — row simply shows no clock */ }
         });
       } catch (e) {
         if (alive) {
@@ -140,6 +161,7 @@ export default function PortfolioPage() {
                   <PortfolioRow
                     d={d}
                     fee={fees[d.dossier_id] ?? { kind: "loading" }}
+                    noa={noas[d.dossier_id]}
                   />
                 </li>
               ))}
