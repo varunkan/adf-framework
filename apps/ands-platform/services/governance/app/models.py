@@ -57,6 +57,7 @@ class AuditRecordIn(BaseModel):
     event_type: str = ""
     dossier_id: str = ""
     tenant_id: str = ""
+    actor: str = ""
     data: dict[str, Any] = Field(default_factory=dict)
 
 

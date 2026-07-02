@@ -249,13 +249,20 @@ function AuthorForm({
 
   // A few relevant inputs per generator; all optional (the doc also pulls from
   // the dossier's product/identity context).
+  const PATENT_FIELDS = [
+    { key: "crp_brand", label: "Canadian Reference Product (brand)" },
+    { key: "crp_din", label: "Reference product DIN" },
+    { key: "patents", label: "Patent / CSP numbers on the Register" },
+    { key: "patent_expiry", label: "Expiry (per patent)" },
+    { key: "allegation", label: "s.5 statement (e.g. not addressed / alleges non-infringement)" },
+  ];
   const EXTRA: Record<string, { key: string; label: string }[]> = {
-    patent_form_iv: [
-      { key: "crp_brand", label: "Reference product (brand)" },
-      { key: "patents", label: "Patent / CSP numbers" },
-    ],
+    // current generator key + legacy alias so stored dossiers keep working
+    patent_form_v: PATENT_FIELDS,
+    patent_form_iv: PATENT_FIELDS,
     cs_be: [
       { key: "crp_brand", label: "Canadian Reference Product" },
+      { key: "crp_din", label: "Reference product DIN" },
       { key: "auc_ci", label: "AUC 90% CI (e.g. 92–108%)" },
       { key: "cmax", label: "Cmax 90% CI / point estimate" },
     ],

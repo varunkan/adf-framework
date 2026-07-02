@@ -18,13 +18,24 @@ call it after domain actions, e.g. ``record("document.uploaded", dossier_id,
 
 from __future__ import annotations
 
+import contextvars
 import json
 import os
 import threading
 import urllib.request
 
 _TIMEOUT_SEC = 1.5
-_DEFAULT_URL = "http://127.0.0.1:8015"  # local governance uvicorn
+_DEFAULT_URL = "http://127.0.0.1:8012"  # local governance uvicorn
+
+# The acting user's email for the current request — set by an ASGI middleware
+# from X-User-Email so every recorded event carries who did it (a real e-sign
+# / Part-11 audit needs actor attribution). ContextVar = per-request safe.
+_actor: contextvars.ContextVar[str] = contextvars.ContextVar("audit_actor",
+                                                             default="")
+
+
+def set_actor(email: str) -> None:
+    _actor.set(str(email or ""))
 
 
 def _ingest_url() -> str:
@@ -51,6 +62,7 @@ def record(event_type: str, dossier_id: str, data: dict | None = None,
                    "event_type": str(event_type or ""),
                    "dossier_id": str(dossier_id or ""),
                    "tenant_id": str(tenant_id or ""),
+                   "actor": _actor.get(),
                    "data": dict(data or {})}
         threading.Thread(target=_post, args=(_ingest_url(), payload),
                          daemon=True).start()

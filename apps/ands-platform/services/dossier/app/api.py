@@ -22,6 +22,16 @@ def build_app(service: DossierService) -> FastAPI:
     app = create_app(title="dossier",
                      description="ANDS eCTD content plans (REQ-103) & "
                                  "bilingual Product Monograph (REQ-098)")
+
+    from . import audit_hook
+
+    @app.middleware("http")
+    async def _capture_actor(request, call_next):
+        # who is acting — from the web proxy's X-User-Email — so every audit
+        # event this request records carries actor attribution (Part-11).
+        audit_hook.set_actor(request.headers.get("x-user-email", ""))
+        return await call_next(request)
+
     router = APIRouter(prefix="/api/dossier", tags=["dossier"])
 
     @router.get("/placement")

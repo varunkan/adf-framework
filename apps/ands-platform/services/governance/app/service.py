@@ -41,12 +41,16 @@ class GovernanceService:
                   if not str(data.get(field) or "").strip()]
         if errors:
             raise ProblemError(422, "validation failed", errors=errors)
+        detail = dict(data.get("data") or {})
+        actor = str(data.get("actor") or "").strip()
+        if actor:
+            detail.setdefault("actor", actor)   # who did it (Part-11)
         event = EventEnvelope.make(
             str(data["event_type"]).strip(),
             source=str(data["source"]).strip(),
             tenant_id=str(data.get("tenant_id") or "").strip() or None,
             dossier_id=str(data["dossier_id"]).strip(),
-            data=dict(data.get("data") or {}))
+            data=detail)
         return self.record_event(event)
 
     def list_audit(self, *, category: str = "", dossier_id: str = "",

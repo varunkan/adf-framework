@@ -15,23 +15,9 @@ export function tenantName(): string {
   try { return localStorage.getItem(TENANT_NAME_KEY) || ""; } catch { return ""; }
 }
 
-const COOKIE = "ands_token";
-
-function setCookie(token: string) {
-  // 7-day session cookie, lax — same-origin app only
-  document.cookie = `${COOKIE}=${encodeURIComponent(token)}; path=/; ` +
-    `max-age=${7 * 24 * 3600}; samesite=lax`;
-}
-
-export function clearToken() {
-  document.cookie = `${COOKIE}=; path=/; max-age=0; samesite=lax`;
-}
-
-export function getToken(): string | null {
-  const m = document.cookie.match(new RegExp(`(?:^|; )${COOKIE}=([^;]*)`));
-  return m ? decodeURIComponent(m[1]) : null;
-}
-
+// The session token lives in an HttpOnly cookie set by the /api/identity proxy
+// on login/signup — page JS never sees it (XSS-safe). Only the non-sensitive
+// tenant name is kept client-side for the header chip.
 async function j<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api/identity${path}`, {
     headers: { "content-type": "application/json" },
@@ -56,10 +42,9 @@ export const auth = {
         method: "POST",
         body: JSON.stringify({ email, password, company_name: company }),
       });
-    setCookie(r.token);
+    // the proxy set the HttpOnly cookie; just remember the display name
     try {
-      localStorage.setItem(TENANT_NAME_KEY,
-        r.tenant?.name || company || "");
+      localStorage.setItem(TENANT_NAME_KEY, r.tenant?.name || company || "");
     } catch {}
     return r;
   },
@@ -68,13 +53,11 @@ export const auth = {
       method: "POST",
       body: JSON.stringify({ email, password }),
     });
-    setCookie(r.token);
     return r;
   },
   me: () => j<Principal>("/auth/me"),
   logout: async () => {
     try { await j("/auth/logout", { method: "POST" }); } catch {}
-    clearToken();
     try { localStorage.removeItem(TENANT_NAME_KEY); } catch {}
   },
 };

@@ -19,9 +19,10 @@ function when(at: string): string {
 }
 
 function compact(detail: Record<string, unknown>): string {
-  const parts = Object.entries(detail || {}).map(
-    ([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`
-  );
+  // actor is surfaced as its own chip, so drop it from the detail line
+  const parts = Object.entries(detail || {})
+    .filter(([k]) => k !== "actor")
+    .map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`);
   const s = parts.join(" · ");
   return s.length > 160 ? s.slice(0, 157) + "…" : s;
 }
@@ -89,6 +90,11 @@ export default function AuditPage() {
                 <span className="mut" style={{ fontSize: 12 }}>
                   #{e.seq} · {when(e.at)}
                 </span>
+                {typeof e.detail?.actor === "string" && e.detail.actor && (
+                  <span className="chip" style={{ fontSize: 11 }}>
+                    by {e.detail.actor as string}
+                  </span>
+                )}
                 {compact(e.detail) && (
                   <span
                     className="mut"
