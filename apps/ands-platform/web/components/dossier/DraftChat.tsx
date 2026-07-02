@@ -66,7 +66,9 @@ export function DraftChat({
       const c = await dossierApi.generate(dossierId, node.section, {
         llm_draft: lastAssistant.content,
       });
-      onDone(c, `${node.title} authored from AI draft`);
+      onDone(c, `${node.title} saved as an AI-assisted draft — provenance is ` +
+        "recorded in the audit trail. Use “Review vs Health Canada” under " +
+        "✦ Sample & edit to check the required elements before filing.");
     } catch (e) {
       onError(String(e));
     } finally {

@@ -355,8 +355,11 @@ class DossierService:
             doc = generators.generate(key, ctx)
         except KeyError:
             raise ProblemError(422, "no generator for this section", detail=key)
+        # provenance travels with the document: an AI-assisted draft is a
+        # different origin than a deterministic template fill
+        origin = "ai_draft" if (payload or {}).get("llm_draft") else "generated"
         meta = self.store.put(_s(dossier_id), _s(section), doc["filename"],
-                              doc["content_type"], doc["body"], origin="generated")
+                              doc["content_type"], doc["body"], origin=origin)
         self._place(dossier_id, node, node["leaf_id"], doc["body"],
                     self._ext(doc["filename"]))
         self._write_entry(dossier_id, section, node, action="generated",

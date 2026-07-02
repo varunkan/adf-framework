@@ -155,14 +155,27 @@ function AttachedDocs({ node }: { node: SectionNode }) {
       {docs.map(({ lang, meta }) => (
         <div key={meta.doc_id} className="attached-doc">
           <span className="ad-icon" aria-hidden>
-            {node.action === "generated" ? "✦" : "📄"}
+            {meta.origin === "ai_draft" ? "💬"
+              : node.action === "generated" ? "✦" : "📄"}
           </span>
           <span className="ad-name">
             {lang ? <b className="ad-lang">{lang.toUpperCase()}</b> : null} {meta.filename}
           </span>
           <span className="ad-meta mut">
             {fmtSize(meta.size)} · md5 {meta.checksum.slice(0, 8)}…
-            {node.action === "generated" ? " · authored" : ""}
+          </span>
+          {/* provenance travels with every document — who/what produced it */}
+          <span
+            className={`chip ${meta.origin === "ai_draft" ? "blocked" : "ready"}`}
+            style={{ fontSize: 11 }}
+            title={meta.origin === "ai_draft"
+              ? "Drafted interactively with the AI assistant under your direction. Recorded in the audit trail. Review against the Health Canada guidance before filing."
+              : meta.origin === "generated"
+              ? "Produced in-app from your entries by a deterministic Health Canada template."
+              : "Uploaded by your team — content is exactly what you provided."}>
+            {meta.origin === "ai_draft" ? "AI-assisted — review before filing"
+              : meta.origin === "generated" ? "authored in-app"
+              : "uploaded"}
           </span>
           <a className="ad-dl" href={dossierApi.documentUrl(meta.doc_id)}
             target="_blank" rel="noopener noreferrer">Download</a>

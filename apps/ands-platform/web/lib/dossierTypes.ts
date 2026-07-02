@@ -13,7 +13,7 @@ export interface DocMeta {
   content_type: string;
   checksum: string;
   size: number;
-  origin: "uploaded" | "generated";
+  origin: "uploaded" | "generated" | "ai_draft";
   lang?: string | null;
 }
 
