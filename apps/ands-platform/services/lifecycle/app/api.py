@@ -6,8 +6,8 @@ from fastapi import APIRouter, FastAPI, Query
 
 from ands_shared import create_app
 
-from .models import (CorrespondenceIn, DeadlineIn, NoticeIn, StartIn,
-                     TransitionIn)
+from .models import (CorrespondenceIn, DeadlineIn, NoaActionIn, NoaIn,
+                     NoaServeIn, NoticeIn, StartIn, TransitionIn)
 from .service import LifecycleService
 
 
@@ -52,6 +52,23 @@ def build_app(service: LifecycleService) -> FastAPI:
     @router.get("/correspondence")
     def list_correspondence(dossier_id: str = Query(...), kind: str = ""):
         return service.list_correspondence(dossier_id, kind)
+
+    # -- Form V / NOA register (PM(NOC) Regulations) --------------------
+    @router.post("/noa", status_code=201)
+    def create_noa(body: NoaIn):
+        return service.create_noa(body.model_dump())
+
+    @router.post("/noa/{noa_id}/serve")
+    def serve_noa(noa_id: str, body: NoaServeIn):
+        return service.serve_noa(noa_id, body.model_dump())
+
+    @router.post("/noa/{noa_id}/action")
+    def action_noa(noa_id: str, body: NoaActionIn):
+        return service.action_noa(noa_id, body.model_dump())
+
+    @router.get("/noa")
+    def list_noa(dossier_id: str = Query(...), as_of: str = ""):
+        return service.list_noa(dossier_id, as_of)
 
     app.include_router(router)
     return app

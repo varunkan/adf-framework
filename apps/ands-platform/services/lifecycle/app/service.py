@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ands_shared import EventEnvelope, EventType, ProblemError
 
-from . import correspondence, hc_calendar, lifecycle
+from . import correspondence, hc_calendar, lifecycle, noa
 from .ports import LifecycleRepository
 
 
@@ -158,3 +158,38 @@ class LifecycleService:
     def list_correspondence(self, dossier_id: str, kind: str = "") -> dict:
         items = self.repo.list_correspondence(_s(dossier_id), kind)
         return {"correspondence": items, "count": len(items)}
+
+    # -- Form V / NOA register (PM(NOC) Regulations) ------------------------
+    def create_noa(self, data: dict) -> dict:
+        res = noa.validate_allegation(data)
+        if not res["valid"]:
+            raise ProblemError(422, "Invalid Form V allegation",
+                               errors=res["errors"])
+        return self.repo.add_noa(res["record"])
+
+    def serve_noa(self, noa_id: str, data: dict) -> dict:
+        return self._noa_transition(
+            noa_id, lambda r: noa.serve(r, _s(data.get("served_date"))))
+
+    def action_noa(self, noa_id: str, data: dict) -> dict:
+        return self._noa_transition(
+            noa_id, lambda r: noa.commence_action(
+                r, _s(data.get("action_date")), _s(data.get("court_file"))))
+
+    def list_noa(self, dossier_id: str, as_of: str = "") -> dict:
+        items = [noa.with_clocks(r, _s(as_of))
+                 for r in self.repo.list_noa(_s(dossier_id))]
+        return {"allegations": items, "count": len(items)}
+
+    def _noa_transition(self, noa_id: str, apply) -> dict:
+        record = self.repo.get_noa(_s(noa_id))
+        if not record:
+            raise ProblemError(404, "no NOA record", detail=_s(noa_id))
+        try:
+            record = apply(record)
+        except noa.NoaError as exc:
+            raise ProblemError(409, str(exc), rule=exc.rule)
+        except ValueError as exc:
+            raise ProblemError(422, f"invalid NOA input: {exc}",
+                               rule="invalid_date")
+        return self.repo.save_noa(record)

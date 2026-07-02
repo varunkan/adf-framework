@@ -27,6 +27,13 @@ CREATE TABLE IF NOT EXISTS correspondence (
     reference   TEXT,
     created_at  TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS noa_allegations (
+    id         TEXT PRIMARY KEY,
+    dossier_id TEXT NOT NULL,
+    record     TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -76,3 +83,30 @@ class SqliteLifecycleRepository:
                 "SELECT * FROM correspondence WHERE dossier_id = ? "
                 "ORDER BY created_at", (dossier_id,))
         return [dict(r) for r in rows]
+
+    # -- Form V / NOA register (PM(NOC) Regulations) -------------------------
+    def add_noa(self, record: dict) -> dict:
+        record = dict(record, id=new_id())
+        now = utcnow_iso()
+        self.db.execute(
+            "INSERT INTO noa_allegations (id, dossier_id, record, created_at, "
+            "updated_at) VALUES (?, ?, ?, ?, ?)",
+            (record["id"], record["dossier_id"], json.dumps(record), now, now))
+        return record
+
+    def get_noa(self, noa_id: str) -> dict | None:
+        row = self.db.fetchone(
+            "SELECT record FROM noa_allegations WHERE id = ?", (noa_id,))
+        return json.loads(row["record"]) if row else None
+
+    def save_noa(self, record: dict) -> dict:
+        self.db.execute(
+            "UPDATE noa_allegations SET record = ?, updated_at = ? "
+            "WHERE id = ?", (json.dumps(record), utcnow_iso(), record["id"]))
+        return record
+
+    def list_noa(self, dossier_id: str) -> list[dict]:
+        rows = self.db.fetchall(
+            "SELECT record FROM noa_allegations WHERE dossier_id = ? "
+            "ORDER BY created_at", (dossier_id,))
+        return [json.loads(r["record"]) for r in rows]

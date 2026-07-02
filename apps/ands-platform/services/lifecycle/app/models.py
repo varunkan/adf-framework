@@ -43,3 +43,19 @@ class NoticeIn(BaseModel):
     date: str = ""
     subject: str = ""
     reference: str = ""
+
+
+class NoaIn(BaseModel):
+    dossier_id: str = ""
+    patent_number: str = ""
+    allegation: str = ""      # not_infringed|invalid|accept_expiry|no_claim
+    form_v_date: str = ""
+
+
+class NoaServeIn(BaseModel):
+    served_date: str = ""
+
+
+class NoaActionIn(BaseModel):
+    action_date: str = ""
+    court_file: str = ""
