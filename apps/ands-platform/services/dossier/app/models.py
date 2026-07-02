@@ -11,6 +11,10 @@ class CreateDossierIn(BaseModel):
     submission_type: str = "ANDS"
     cs_be_only: bool = True
     din: str = ""
+    # REP regulatory-transaction identity — the sponsor company (distinct from
+    # the product/title). company_id is HC's assigned Company ID.
+    company_id: str = ""
+    sponsor: str = ""
 
 
 class FeeStatusIn(BaseModel):

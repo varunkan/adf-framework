@@ -19,6 +19,80 @@ def test_generators_produce_bytes_with_context():
     assert b"e123456" in doc["body"] and b"Acme" in doc["body"]
 
 
+def test_rep_form_carries_sponsor_identity_not_product():
+    """The CRO rejected an earlier draft because the sponsor company fields
+    fell through to the product title (empty COMPANY_ID, product in the
+    sponsor name slot). company_id / sponsor / product must be distinct."""
+    doc = generators.generate("rep_application_form", {
+        "company_id": "61234",
+        "sponsor": "Northline Regulatory Partners",
+        "drug_product": "Apo-Zentrix 50 mg tablet",
+        "dossier_id": "e900001", "din": ""})
+    xml = doc["body"].decode("utf-8")
+    assert doc["content_type"] == "application/xml"
+    assert doc["filename"] == "rep-application-form.xml"
+    assert "<COMPANY_ID>61234</COMPANY_ID>" in xml
+    assert ("<COMPANY_NAME>Northline Regulatory Partners</COMPANY_NAME>"
+            in xml)
+    assert ("<PRODUCT_NAME>Apo-Zentrix 50 mg tablet</PRODUCT_NAME>" in xml)
+    assert "<DOSSIER_ID>e900001</DOSSIER_ID>" in xml
+    # DIN is empty until HC assigns it at NOC — but it still renders empty
+    assert "<DIN></DIN>" in xml
+    # the sponsor slot is NOT the product name (the original defect)
+    assert ("<COMPANY_NAME>Apo-Zentrix 50 mg tablet</COMPANY_NAME>"
+            not in xml)
+    # status stays an attribute only, never a required id element
+    assert 'status="draft"' in xml
+    # the REP CO/RT fields are present
+    for frag in ("<DOSSIER_TYPE>", "<ACTIVITY_TYPE>", "<SEQUENCE_NUMBER>",
+                 "<SEQUENCE_DESCRIPTION>"):
+        assert frag in xml
+
+
+def test_rep_form_company_falls_back_to_applicant_not_title():
+    # when a distinct 'sponsor' is absent, applicant/company are used — but
+    # never the product 'title'.
+    xml = generators.generate("rep_application_form", {
+        "applicant": "Acme Regulatory", "title": "Drugazole 10 mg",
+        "company_id": "50000"})["body"].decode("utf-8")
+    assert "<COMPANY_NAME>Acme Regulatory</COMPANY_NAME>" in xml
+    assert "<PRODUCT_NAME>Drugazole 10 mg</PRODUCT_NAME>" in xml
+    assert "<COMPANY_NAME>Drugazole 10 mg</COMPANY_NAME>" not in xml
+
+
+def test_rep_form_without_sponsor_leaves_company_empty_not_product():
+    # the whole bug: with only a title, the company name must be EMPTY, never
+    # the product title.
+    xml = generators.generate("rep_application_form",
+                              {"title": "Drugazole 10 mg"})["body"].decode()
+    assert "<COMPANY_NAME></COMPANY_NAME>" in xml
+    assert "<COMPANY_ID></COMPANY_ID>" in xml
+    assert "<PRODUCT_NAME>Drugazole 10 mg</PRODUCT_NAME>" in xml
+
+
+def test_cover_letter_sponsor_is_sponsor_not_product():
+    # the PDF renderer collapses runs of spaces, so the field padding is one
+    # space in the byte stream.
+    body = generators.generate("cover_letter", {
+        "sponsor": "Northline Regulatory Partners",
+        "company_id": "61234",
+        "drug_product": "Apo-Zentrix 50 mg tablet",
+        "dossier_id": "e900001"})["body"]
+    assert b"Sponsor: Northline Regulatory Partners" in body
+    assert b"Company ID: 61234" in body
+    assert b"Drug product: Apo-Zentrix 50 mg tablet" in body
+    # sponsor line must not carry the product name
+    assert b"Sponsor: Apo-Zentrix 50 mg tablet" not in body
+
+
+def test_cover_letter_sponsor_omitted_does_not_fall_to_product():
+    # with only a title (no sponsor/applicant/company), the sponsor field is
+    # the display sentinel, never the drug title.
+    body = generators.generate("cover_letter",
+                               {"title": "Drugazole 10 mg"})["body"]
+    assert b"Sponsor: Drugazole 10 mg" not in body
+
+
 def test_unknown_generator_raises():
     import pytest
     with pytest.raises(KeyError):

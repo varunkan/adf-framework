@@ -62,7 +62,9 @@ def _xesc(v: str) -> str:
 
 def cover_letter(ctx: dict) -> dict:
     body = (
-        f"Sponsor:        {_g(ctx, 'applicant', 'company', 'title')}\n"
+        # the sponsor is the SPONSOR (company), never the product/title —
+        # falling through to 'title' printed the drug name as the sponsor.
+        f"Sponsor:        {_g(ctx, 'sponsor', 'applicant', 'company')}\n"
         f"Company ID:     {_g(ctx, 'company_id')}\n"
         f"Dossier ID:     {_g(ctx, 'dossier_id')}\n"
         f"Drug product:   {_g(ctx, 'drug_product', 'product', 'title')}\n"
@@ -77,29 +79,44 @@ def cover_letter(ctx: dict) -> dict:
 
 
 def rep_application_form(ctx: dict) -> dict:
-    """The REP CO/RT/PI backbone as XML (replaces the old HC/SC 3011)."""
+    """The REP Regulatory Transaction backbone (CO / RT / PI) as XML.
+
+    The CRO rejected the earlier draft because the sponsor company fields fell
+    through to the product title: the company id was empty and the PRODUCT name
+    sat in the sponsor <name> slot. The three identities are now kept distinct:
+
+    - COMPANY_ID / COMPANY_NAME come from the sponsor (``company_id`` and
+      ``sponsor``/``applicant`` — NEVER the product ``title``);
+    - PRODUCT_NAME comes from ``drug_product``/``product``/``title``;
+    - DIN comes from ``din`` (empty until assigned by HC at NOC).
+
+    ``status="draft"`` stays a document attribute only — never a required id.
+    """
     # XML fields default to empty (never the '—' display sentinel).
-    company = _xesc(_g(ctx, 'applicant', 'company', 'title', default=''))
     company_id = _xesc(_g(ctx, 'company_id', default=''))
+    company_name = _xesc(_g(ctx, 'sponsor', 'applicant', 'company', default=''))
     dossier_id = _xesc(_g(ctx, 'dossier_id', default=''))
+    dossier_type = _xesc(_g(ctx, 'dossier_type', 'submission_type',
+                            'activity_type', default='ANDS'))
     activity = _xesc(_g(ctx, 'activity_type', 'submission_type', default='ANDS'))
     sequence = _xesc(_g(ctx, 'sequence', default='0000'))
+    seq_desc = _xesc(_g(ctx, 'sequence_description', 'purpose',
+                         default='Original submission'))
     product = _xesc(_g(ctx, 'drug_product', 'product', 'title', default=''))
     din = _xesc(_g(ctx, 'din', default=''))
     xml = (
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-        "<rep-application generated-by=\"ands-studio\" status=\"draft\">\n"
-        f"  <company id=\"{company_id}\"><name>{company}</name></company>\n"
-        "  <regulatory-transaction>\n"
-        f"    <dossier-id>{dossier_id}</dossier-id>\n"
-        f"    <activity-type>{activity}</activity-type>\n"
-        f"    <sequence>{sequence}</sequence>\n"
-        "  </regulatory-transaction>\n"
-        "  <product-information>\n"
-        f"    <product-name>{product}</product-name>\n"
-        f"    <din>{din}</din>\n"
-        "  </product-information>\n"
-        "</rep-application>\n")
+        "<REGULATORY_TRANSACTION generated-by=\"ands-studio\" status=\"draft\">\n"
+        f"  <COMPANY_ID>{company_id}</COMPANY_ID>\n"
+        f"  <COMPANY_NAME>{company_name}</COMPANY_NAME>\n"
+        f"  <DOSSIER_ID>{dossier_id}</DOSSIER_ID>\n"
+        f"  <DOSSIER_TYPE>{dossier_type}</DOSSIER_TYPE>\n"
+        f"  <ACTIVITY_TYPE>{activity}</ACTIVITY_TYPE>\n"
+        f"  <SEQUENCE_NUMBER>{sequence}</SEQUENCE_NUMBER>\n"
+        f"  <SEQUENCE_DESCRIPTION>{seq_desc}</SEQUENCE_DESCRIPTION>\n"
+        f"  <PRODUCT_NAME>{product}</PRODUCT_NAME>\n"
+        f"  <DIN>{din}</DIN>\n"
+        "</REGULATORY_TRANSACTION>\n")
     return {"title": "Drug Submission Application Form (REP)",
             "filename": "rep-application-form.xml",
             "content_type": "application/xml",
