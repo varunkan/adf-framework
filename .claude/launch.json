@@ -78,6 +78,15 @@
       "port": 8016
     },
     {
+      "name": "ands-lifecycle",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-lc",
+        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/lifecycle && PYTHONPATH=.:../../libs exec ../../.venv/bin/uvicorn app.main:app --port 8017"
+      ],
+      "port": 8017
+    },
+    {
       "name": "ands-dossier",
       "runtimeExecutable": "bash",
       "runtimeArgs": [
