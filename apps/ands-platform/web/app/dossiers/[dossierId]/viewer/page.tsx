@@ -34,7 +34,17 @@ export default function ViewerPage() {
           className={tab === "outline" ? "on" : ""} onClick={() => setTab("outline")}>
           Outline
         </button>
+        <span className="spacer" />
+        <a className="chip" href={`/api/dossier/ectd/${encodeURIComponent(dossierId)}/export/0000`}
+          download title="Download the transmissible eCTD package (sequence 0000) — upload it via CESG WebTrader">
+          ⬇ Export eCTD package
+        </a>
       </div>
+      <p className="mut" style={{ fontSize: 12 }}>
+        The export is the spec folder tree (index.xml, ca-regional.xml, REP RT
+        XML, every leaf at its href with checksums) zipped — what you upload
+        through the CESG/FDA-ESG WebTrader.
+      </p>
 
       {tab === "files" && (
         <div className="viewer-files card glass">

@@ -207,6 +207,18 @@ def build_app(service: DossierService) -> FastAPI:
     def mark_na_section(dossier_id: str, section: str, body: MarkNaIn):
         return service.mark_na(dossier_id, section, body.reason)
 
+    @router.get("/ectd/{dossier_id}/export/{sequence}")
+    def export_sequence(dossier_id: str, sequence: str,
+                        x_tenant_id: str = Header(default="",
+                                                  alias="X-Tenant-Id")):
+        pkg = service.export_sequence(dossier_id, sequence,
+                                      x_tenant_id or None)
+        return Response(
+            content=pkg["body"], media_type=pkg["content_type"],
+            headers={"Content-Disposition":
+                     f'attachment; filename="{pkg["filename"]}"',
+                     "X-Export-Missing": str(len(pkg["missing"]))})
+
     @router.get("/documents/{doc_id}")
     def download_document(doc_id: str):
         doc = service.get_document(doc_id)

@@ -1,25 +1,40 @@
-"""Minimal, dependency-free single-page PDF writer (pure, stdlib only).
+"""Dependency-free multi-page PDF writer (pure, stdlib only).
 
-So generated dossier documents are *real* PDFs (``application/pdf``) rather than
-``text/plain``. ``text_pdf`` emits a valid PDF-1.4 file: Catalog, Pages, one
-Letter page (612x792), a Helvetica Type1 font, and a content stream that draws
-the title (larger) followed by the body wrapped to ~90 chars/line at 14pt
-leading. Deterministic: no network, no wall-clock, no randomness — the same
-``(title, body)`` always yields byte-identical output.
+So generated dossier documents are *real* PDFs (``application/pdf``) rather
+than ``text/plain``. ``text_pdf`` emits a valid PDF-1.4 file: Catalog, Pages,
+Helvetica + Helvetica-Bold Type1 fonts, an outline (bookmark) to page 1, and
+one Letter page (612x792) per ~47 body lines. Every page carries a small grey
+running header (the title) and a grey footer (``Page N of M`` plus, when the
+caller passes one, a ``Generated: <date>`` stamp). Page 1 opens with the
+title in bold; the body wraps at a monospaced-safe width that fits Letter
+with 1in margins even at a Courier-like 0.6em advance. Deterministic: no
+network, no wall-clock, no randomness — the same ``(title, body,
+generated_on)`` always yields byte-identical output.
 """
 
 from __future__ import annotations
 
-_PAGE_WIDTH = 612
+_PAGE_WIDTH = 612                       # Letter, portrait
 _PAGE_HEIGHT = 792
-_LEFT_MARGIN = 72
-_TOP = 720
+_MARGIN = 72                            # 1in margins
+_USABLE = _PAGE_WIDTH - 2 * _MARGIN     # 468pt text width
+_CONTENT_TOP = _PAGE_HEIGHT - _MARGIN   # first baseline (720)
 _LEADING = 14
-_WRAP = 90
-_TITLE_SIZE = 18
 _BODY_SIZE = 11
-# how many body lines fit under the title before the bottom margin (~72pt)
-_MAX_BODY_LINES = int((_TOP - _TITLE_SIZE - 72) / _LEADING)
+_TITLE_SIZE = 18
+_TITLE_LEADING = 22
+_META_SIZE = 8                          # running header / footer
+_HEADER_Y = 750                         # inside the top margin band
+_FOOTER_Y = 40                          # inside the bottom margin band
+# Monospaced-safe wrapping: assume a Courier-like 0.6em advance so even
+# worst-case text stays inside the 468pt usable width at each size.
+_CHAR_EM = 0.6
+_WRAP = int(_USABLE / (_CHAR_EM * _BODY_SIZE))          # 70 chars
+_TITLE_WRAP = int(_USABLE / (_CHAR_EM * _TITLE_SIZE))   # 43 chars
+_HEADER_MAX = int(_USABLE / (_CHAR_EM * _META_SIZE))    # 97 chars
+# body lines per continuation page: baselines 720, 706, ... >= 72
+_LINES_PER_PAGE = (_CONTENT_TOP - _MARGIN) // _LEADING + 1
+_FIRST_PAGE_OBJ = 7                     # objs 1-6 are fixed (see text_pdf)
 
 
 def _s(v) -> str:
@@ -32,10 +47,15 @@ def _escape(text: str) -> str:
             .replace("(", "\\(").replace(")", "\\)"))
 
 
+def _latin1(text: str) -> bytes:
+    """The base-14 fonts encode Latin-1; anything else becomes '?'."""
+    return text.encode("latin-1", "replace")
+
+
 def _wrap(text: str, width: int = _WRAP) -> list[str]:
     """Wrap on whitespace to ``width`` chars, hard-splitting overlong words.
 
-    Empty input yields no lines; blank lines in the body are preserved.
+    Empty input yields one empty line; blank lines in the body are preserved.
     """
     lines: list[str] = []
     for raw in _s(text).replace("\r\n", "\n").replace("\r", "\n").split("\n"):
@@ -61,34 +81,99 @@ def _wrap(text: str, width: int = _WRAP) -> list[str]:
     return lines
 
 
-def _content_stream(title: str, body: str) -> bytes:
-    """The page content stream: title (larger), then wrapped body lines."""
-    body_lines = _wrap(body)[:_MAX_BODY_LINES]
-    parts = ["BT", f"1 0 0 1 {_LEFT_MARGIN} {_TOP} Tm", f"{_LEADING} TL"]
-    parts.append(f"/F1 {_TITLE_SIZE} Tf")
-    parts.append(f"({_escape(title)}) Tj")
-    parts.append("T*")
-    parts.append("T*")                          # gap under the title
+def _header_text(title: str) -> str:
+    """The running-header line: the title on one line, ellipsised to fit."""
+    text = " ".join(_s(title).split())
+    if len(text) > _HEADER_MAX:
+        text = text[:_HEADER_MAX - 3] + "..."
+    return text
+
+
+def _first_page_capacity(n_title_lines: int) -> int:
+    """Body lines that fit on page 1 under the bold title block + gap."""
+    y = _CONTENT_TOP - _TITLE_LEADING * n_title_lines - _LEADING
+    if y < _MARGIN:
+        return 0
+    return (y - _MARGIN) // _LEADING + 1
+
+
+def _paginate(lines: list[str], first_capacity: int) -> list[list[str]]:
+    """Split body lines into per-page chunks (always at least one page)."""
+    pages = [lines[:first_capacity]]
+    rest = lines[first_capacity:]
+    while rest:
+        pages.append(rest[:_LINES_PER_PAGE])
+        rest = rest[_LINES_PER_PAGE:]
+    return pages
+
+
+def _meta_text(x: int, y: int, text: str) -> list[str]:
+    """A small grey header/footer line at ``(x, y)``."""
+    return ["BT", f"/F1 {_META_SIZE} Tf", "0.5 g",
+            f"1 0 0 1 {x} {y} Tm", f"({_escape(text)}) Tj", "ET"]
+
+
+def _page_stream(title_lines: list[str], header: str, body_lines: list[str],
+                 page_no: int, total: int, generated_on: str) -> bytes:
+    """One page's content stream: header, footer, then title/body text."""
+    parts = _meta_text(_MARGIN, _HEADER_Y, header)
+    parts += _meta_text(_MARGIN, _FOOTER_Y, f"Page {page_no} of {total}")
+    if generated_on:
+        stamp = f"Generated: {generated_on}"
+        x = _PAGE_WIDTH - _MARGIN - int(len(stamp) * _CHAR_EM * _META_SIZE)
+        parts += _meta_text(max(x, _MARGIN), _FOOTER_Y, stamp)
+    parts += ["BT", "0 g", f"1 0 0 1 {_MARGIN} {_CONTENT_TOP} Tm"]
+    if page_no == 1:
+        parts.append(f"{_TITLE_LEADING} TL")
+        parts.append(f"/F2 {_TITLE_SIZE} Tf")   # bold title, page 1 only
+        for line in title_lines:
+            parts.append(f"({_escape(line)}) Tj")
+            parts.append("T*")
+        parts.append(f"{_LEADING} TL")
+        parts.append("T*")                      # gap under the title
+    else:
+        parts.append(f"{_LEADING} TL")
     parts.append(f"/F1 {_BODY_SIZE} Tf")
     for line in body_lines:
         parts.append(f"({_escape(line)}) Tj")
         parts.append("T*")
     parts.append("ET")
-    return ("\n".join(parts) + "\n").encode("latin-1", "replace")
+    return _latin1("\n".join(parts))
 
 
-def text_pdf(title: str, body: str) -> bytes:
-    """Render ``title`` + ``body`` as a valid single-page PDF-1.4 (bytes)."""
-    stream = _content_stream(title, body)
+def text_pdf(title: str, body: str, generated_on: str | None = None) -> bytes:
+    """Render ``title`` + ``body`` as a valid multi-page PDF-1.4 (bytes).
+
+    ``generated_on`` (e.g. an ISO date), when given, is stamped in every
+    page's footer; it is caller-supplied so output stays deterministic.
+    """
+    header = _header_text(title)
+    title_lines = _wrap(title, _TITLE_WRAP)
+    pages = _paginate(_wrap(body), _first_page_capacity(len(title_lines)))
+    total = len(pages)
+    stamp = _s(generated_on).strip()
+    streams = [_page_stream(title_lines, header, page, i, total, stamp)
+               for i, page in enumerate(pages, start=1)]
+
+    kids = " ".join(f"{_FIRST_PAGE_OBJ + 2 * i} 0 R" for i in range(total))
     objects = [
-        b"<< /Type /Catalog /Pages 2 0 R >>",
-        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        (b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %d %d] "
-         b"/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"
-         % (_PAGE_WIDTH, _PAGE_HEIGHT)),
-        b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"endstream",
+        b"<< /Type /Catalog /Pages 2 0 R /Outlines 5 0 R >>",
+        b"<< /Type /Pages /Kids [%s] /Count %d >>"
+        % (kids.encode("ascii"), total),
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
+        b"<< /Type /Outlines /First 6 0 R /Last 6 0 R /Count 1 >>",
+        b"<< /Title (%s) /Parent 5 0 R /Dest [%d 0 R /Fit] >>"
+        % (_latin1(_escape(header)), _FIRST_PAGE_OBJ),
     ]
+    for i, stream in enumerate(streams):
+        objects.append(
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %d %d] "
+            b"/Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> "
+            b"/Contents %d 0 R >>"
+            % (_PAGE_WIDTH, _PAGE_HEIGHT, _FIRST_PAGE_OBJ + 2 * i + 1))
+        objects.append(b"<< /Length %d >>\nstream\n" % len(stream)
+                       + stream + b"\nendstream")
 
     out = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")   # binary comment marker
     offsets: list[int] = []

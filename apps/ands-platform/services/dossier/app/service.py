@@ -9,8 +9,9 @@ import secrets
 from datetime import date
 
 from . import (admin_sequence, archive, assembly, content_model, content_plan,
-               dossier_state, drafting, ectd_validation, fees, generators,
-               llm_provider, monograph, pm_xml, pm_xref, section_tree)
+               dossier_state, drafting, ectd_validation, export_pkg, fees,
+               generators, llm_provider, monograph, pm_xml, pm_xref,
+               section_tree)
 from .document_store import SqliteBlobStore
 from .ports import DossierRepository
 
@@ -347,6 +348,38 @@ class DossierService:
         self._write_entry(dossier_id, section, node, action="na",
                           na_reason=_s(reason))
         return self.content_state(dossier_id)
+
+    def export_sequence(self, dossier_id: str, sequence: str = "0000",
+                        tenant_id: str | None = None) -> dict:
+        """The transmissible eCTD package for one sequence, as a zip."""
+        self._tenant_guard(dossier_id, tenant_id)
+        model = self.repo.get_dossier(_s(dossier_id))
+        if not model:
+            raise ProblemError(404, "no eCTD dossier", detail=_s(dossier_id))
+        # leaf_id -> stored bytes, via the per-section state (incl. bilingual)
+        doc_by_leaf: dict[str, str] = {}
+        for section, state in self.repo.list_section_state(_s(dossier_id)).items():
+            node = section_tree.node_for(section,
+                                         cs_be_only=self._cs_be_only(dossier_id))
+            base = (node or {}).get("leaf_id") or ""
+            if state.get("doc_id") and (state.get("leaf_id") or base):
+                doc_by_leaf[state.get("leaf_id") or base] = state["doc_id"]
+            for lang, meta in (state.get("documents") or {}).items():
+                if meta and base:
+                    doc_by_leaf[f"{base}-{lang}"] = meta["doc_id"]
+
+        def resolve(leaf_id: str):
+            doc_id = doc_by_leaf.get(leaf_id)
+            if not doc_id:
+                return None
+            doc = self.store.get(doc_id)
+            return doc["body"] if doc else None
+
+        # REP RT XML travels inside every transaction (REP guidance)
+        ctx = {**self._ctx_for(dossier_id), "sequence": _s(sequence) or "0000"}
+        rt = generators.generate("rep_application_form", ctx)
+        return export_pkg.build_package(model, _s(sequence) or "0000",
+                                        resolve, rt["body"])
 
     def get_document(self, doc_id: str) -> dict:
         doc = self.store.get(_s(doc_id))
