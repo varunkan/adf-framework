@@ -34,6 +34,13 @@ CREATE TABLE IF NOT EXISTS noa_allegations (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS shortage_records (
+    id         TEXT PRIMARY KEY,
+    dossier_id TEXT NOT NULL,
+    rtype      TEXT NOT NULL,
+    record     TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -110,3 +117,35 @@ class SqliteLifecycleRepository:
             "SELECT record FROM noa_allegations WHERE dossier_id = ? "
             "ORDER BY created_at", (dossier_id,))
         return [json.loads(r["record"]) for r in rows]
+
+    # -- drug shortage / discontinuation + DEL linkage -----------------------
+    _RT_SHORTAGE = "shortage_report"
+    _RT_DEL = "del_link"
+
+    def _add_shortage_record(self, rtype: str, record: dict) -> dict:
+        record = dict(record, id=new_id())
+        self.db.execute(
+            "INSERT INTO shortage_records (id, dossier_id, rtype, record, "
+            "created_at) VALUES (?, ?, ?, ?, ?)",
+            (record["id"], record["dossier_id"], rtype, json.dumps(record),
+             utcnow_iso()))
+        return record
+
+    def _list_shortage_records(self, rtype: str,
+                               dossier_id: str) -> list[dict]:
+        rows = self.db.fetchall(
+            "SELECT record FROM shortage_records WHERE dossier_id = ? "
+            "AND rtype = ? ORDER BY created_at", (dossier_id, rtype))
+        return [json.loads(r["record"]) for r in rows]
+
+    def add_shortage(self, record: dict) -> dict:
+        return self._add_shortage_record(self._RT_SHORTAGE, record)
+
+    def list_shortage(self, dossier_id: str) -> list[dict]:
+        return self._list_shortage_records(self._RT_SHORTAGE, dossier_id)
+
+    def add_del_link(self, record: dict) -> dict:
+        return self._add_shortage_record(self._RT_DEL, record)
+
+    def list_del_links(self, dossier_id: str) -> list[dict]:
+        return self._list_shortage_records(self._RT_DEL, dossier_id)

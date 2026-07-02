@@ -59,3 +59,21 @@ class NoaServeIn(BaseModel):
 class NoaActionIn(BaseModel):
     action_date: str = ""
     court_file: str = ""
+
+
+class ShortageIn(BaseModel):
+    dossier_id: str = ""
+    din: str = ""
+    kind: str = ""            # shortage | discontinuation
+    tier: int | None = None   # 1 | 2 | 3
+    reason: str = ""
+    anticipated_start: str = ""
+    anticipated_end: str = ""
+    became_aware: str = ""
+    reported_at: str = ""
+
+
+class DelLinkIn(BaseModel):
+    dossier_id: str = ""
+    del_number: str = ""
+    sites: list[str] = []

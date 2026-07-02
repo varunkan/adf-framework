@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ands_shared import EventEnvelope, EventType, ProblemError
 
-from . import correspondence, hc_calendar, lifecycle, noa
+from . import correspondence, hc_calendar, lifecycle, noa, shortage
 from .ports import LifecycleRepository
 
 
@@ -193,3 +193,27 @@ class LifecycleService:
             raise ProblemError(422, f"invalid NOA input: {exc}",
                                rule="invalid_date")
         return self.repo.save_noa(record)
+
+    # -- drug shortage / discontinuation + DEL linkage (C.01.014.8+) --------
+    def report_shortage(self, data: dict) -> dict:
+        res = shortage.validate_record(data)
+        if not res["valid"]:
+            raise ProblemError(422, "Invalid shortage report",
+                               errors=res["errors"])
+        return self.repo.add_shortage(res["record"])
+
+    def list_shortage(self, dossier_id: str, as_of: str = "") -> dict:
+        items = [shortage.with_status(r, _s(as_of))
+                 for r in self.repo.list_shortage(_s(dossier_id))]
+        return {"reports": items, "count": len(items)}
+
+    def link_del(self, data: dict) -> dict:
+        res = shortage.validate_del_link(data)
+        if not res["valid"]:
+            raise ProblemError(422, "Invalid DEL linkage",
+                               errors=res["errors"])
+        return self.repo.add_del_link(res["record"])
+
+    def list_del(self, dossier_id: str) -> dict:
+        items = self.repo.list_del_links(_s(dossier_id))
+        return {"links": items, "count": len(items)}

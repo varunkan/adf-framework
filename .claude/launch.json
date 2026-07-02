@@ -94,6 +94,15 @@
         "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/dossier && PYTHONPATH=.:../../libs exec ../../.venv/bin/uvicorn app.main:app --port 8010"
       ],
       "port": 8010
+    },
+    {
+      "name": "ands-collaboration",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-lc",
+        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/collaboration && PYTHONPATH=.:../../libs exec ../../.venv/bin/uvicorn app.main:app --port 8018"
+      ],
+      "port": 8018
     }
   ]
 }

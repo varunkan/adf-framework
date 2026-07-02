@@ -5,6 +5,7 @@ import { useDossier } from "@/components/dossier/DossierContext";
 import { SectionTree } from "@/components/dossier/SectionTree";
 import { SectionPanel } from "@/components/dossier/SectionPanel";
 import { ValidationCard } from "@/components/dossier/ValidationCard";
+import { CollabPane } from "@/components/dossier/CollabPane";
 import { SubmissionTower } from "@/components/SubmissionTower";
 
 export default function ModuleWorkspace() {
@@ -87,6 +88,7 @@ export default function ModuleWorkspace() {
           </div>
         </div>
         <ValidationCard dossierId={content.dossier_id} structural={content.validation} />
+        <CollabPane dossierId={content.dossier_id} />
       </aside>
     </div>
   );

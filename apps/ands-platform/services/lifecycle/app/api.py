@@ -6,8 +6,9 @@ from fastapi import APIRouter, FastAPI, Query
 
 from ands_shared import create_app
 
-from .models import (CorrespondenceIn, DeadlineIn, NoaActionIn, NoaIn,
-                     NoaServeIn, NoticeIn, StartIn, TransitionIn)
+from .models import (CorrespondenceIn, DeadlineIn, DelLinkIn, NoaActionIn,
+                     NoaIn, NoaServeIn, NoticeIn, ShortageIn, StartIn,
+                     TransitionIn)
 from .service import LifecycleService
 
 
@@ -69,6 +70,23 @@ def build_app(service: LifecycleService) -> FastAPI:
     @router.get("/noa")
     def list_noa(dossier_id: str = Query(...), as_of: str = ""):
         return service.list_noa(dossier_id, as_of)
+
+    # -- drug shortage / discontinuation + DEL linkage ------------------
+    @router.post("/shortage", status_code=201)
+    def report_shortage(body: ShortageIn):
+        return service.report_shortage(body.model_dump())
+
+    @router.get("/shortage")
+    def list_shortage(dossier_id: str = Query(...), as_of: str = ""):
+        return service.list_shortage(dossier_id, as_of)
+
+    @router.post("/del", status_code=201)
+    def link_del(body: DelLinkIn):
+        return service.link_del(body.model_dump())
+
+    @router.get("/del")
+    def list_del(dossier_id: str = Query(...)):
+        return service.list_del(dossier_id)
 
     app.include_router(router)
     return app
