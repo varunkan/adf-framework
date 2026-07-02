@@ -36,7 +36,9 @@ alongside its machine ``rule`` name, human ``message`` and offending subject
             2xxx lifecycle operation legality, replayed across sequences
             3xxx file/folder naming hygiene
             4xxx sequence numbering (four-digit, unique, contiguous from 0000)
-            5xxx index.xml backbone element structure (ICH eCTD)
+            5xxx index.xml backbone element structure (ICH eCTD); 55xx the
+                 transmissible per-sequence <ectd:ectd> backbone (operation
+                 attrs, modified-file back-pointers, dangling hrefs, DOCTYPE)
             6xxx ca-regional.xml element structure (CA Module 1 v2.2)
             7xxx document payload checks (PDF header / encryption)
 
@@ -102,9 +104,17 @@ RULE_IDS = {
     "index_root_unexpected": "CA-E-5002",
     "index_leaf_incomplete": "CA-E-5003",
     "index_admin_missing": "CA-E-5004",
+    # 5.5xxx — transmissible ICH eCTD 3.2.2 sequence backbone (per-sequence
+    # <ectd:ectd> index: operation attrs, lifecycle back-pointers, live hrefs)
+    "leaf_operation_missing": "CA-E-5501",
+    "leaf_modified_file_missing": "CA-E-5502",
+    "leaf_href_dangling": "CA-E-5503",
+    "index_doctype_missing": "CA-E-5504",
     # 6xxx — ca-regional.xml structure (CA Module 1 v2.2)
     "ca_root_unexpected": "CA-E-6001",
     "ca_dossier_id_missing": "CA-E-6002",
+    "ca_company_id_missing": "CA-E-6003",
+    "ca_product_missing": "CA-E-6004",
     # 7xxx — document payloads
     "pdf_header": "CA-E-7001",
     "pdf_encrypted": "CA-E-7002",
@@ -293,6 +303,105 @@ def validate_backbone_xml(index_xml: str, ca_regional_xml: str) -> list:
     return findings
 
 
+XLINK_HREF = f"{{{assembly.XLINK_NS}}}href"
+ECTD_ROOT = f"{{{assembly.ECTD_NS}}}ectd"
+CA_ROOT = f"{{{assembly.CA_NS}}}ectd-ca"
+LIFECYCLE_NEEDS_PRIOR = ("replace", "append", "delete")
+
+
+def _leaf_href(leaf) -> str:
+    """A leaf's href, whether emitted as xlink:href or a plain href attr."""
+    return _s(leaf.get(XLINK_HREF) or leaf.get("xlink:href") or leaf.get("href"))
+
+
+def _modified_file_href(leaf) -> str:
+    for child in leaf:
+        tag = child.tag.rsplit("}", 1)[-1]
+        if tag == "modified-file":
+            return _s(child.get(XLINK_HREF) or child.get("xlink:href")
+                      or child.get("href"))
+    return ""
+
+
+def validate_sequence_backbone(index_xml: str, ca_regional_xml: str,
+                               present_paths) -> list:
+    """Conformance findings for a transmissible ICH eCTD 3.2.2 sequence backbone.
+
+    This is the *real* per-sequence backbone (root ``<ectd:ectd>``) that
+    :func:`assembly.build_sequence_backbone` emits and ``export_pkg`` ships —
+    distinct from the viewer's lightweight ``<ectd-index>`` outline validated by
+    :func:`validate_backbone_xml`. It catches exactly what the CRO director
+    flagged:
+
+    - ``leaf_operation_missing`` — a ``<leaf>`` with no ``operation`` attribute;
+    - ``leaf_modified_file_missing`` — a replace/append/delete leaf with no
+      ``<modified-file>`` back-pointer at the prior leaf;
+    - ``leaf_href_dangling`` — a leaf whose ``xlink:href`` names a file that is
+      not present in the sequence (``present_paths`` = relative paths shipped);
+    - ``index_doctype_missing`` — index.xml carries no DOCTYPE (no ICH DTD ref).
+
+    ``present_paths`` is the set of leaf-file paths (relative to the sequence
+    folder, e.g. ``m1/ca/10-cover-letter/cl.pdf``) actually in the package.
+    """
+    findings: list = []
+    present = {_s(p) for p in (present_paths or set())}
+
+    if "<!DOCTYPE" not in (index_xml or ""):
+        findings.append(_err("index_doctype_missing",
+                             "index.xml has no DOCTYPE referencing the ICH "
+                             "eCTD DTD (util/dtd/ich-ectd-3-2.dtd)", None))
+
+    root = _parse_backbone(index_xml, "index.xml", findings)
+    if root is not None:
+        if root.tag not in (ECTD_ROOT, "ectd:ectd"):
+            findings.append(_err("index_root_unexpected",
+                                 f"index.xml root element '{root.tag}' is not "
+                                 "the ICH eCTD root '<ectd:ectd>'", None))
+        for leaf in root.iter():
+            if leaf.tag.rsplit("}", 1)[-1] != "leaf":
+                continue
+            leaf_id = _s(leaf.get("ID") or leaf.get("id")) or None
+            op = _s(leaf.get("operation"))
+            if not op:
+                findings.append(_err("leaf_operation_missing",
+                                     "a <leaf> in index.xml has no eCTD "
+                                     "'operation' attribute", leaf_id))
+            if op in LIFECYCLE_NEEDS_PRIOR and not _modified_file_href(leaf):
+                findings.append(_err("leaf_modified_file_missing",
+                                     f"a '{op}' <leaf> must carry a "
+                                     "<modified-file> back-pointer at the "
+                                     "prior leaf", leaf_id))
+            href = _leaf_href(leaf)
+            if op != "delete" and href and href not in present:
+                findings.append(_err("leaf_href_dangling",
+                                     f"leaf href '{href}' is referenced in "
+                                     "index.xml but no such file is in the "
+                                     "sequence", leaf_id))
+
+    ca = _parse_backbone(ca_regional_xml, "ca-regional.xml", findings)
+    if ca is not None:
+        if ca.tag not in (CA_ROOT, "ca:ectd-ca"):
+            findings.append(_err("ca_root_unexpected",
+                                 f"ca-regional.xml root '{ca.tag}' is not the "
+                                 "CA Module 1 v2.2 root '<ca:ectd-ca>'", None))
+        else:
+            text_of = lambda p: _s((ca.find(p).text if ca.find(p) is not None
+                                    else ""))
+            if not text_of("application-info/dossier-id"):
+                findings.append(_err("ca_dossier_id_missing",
+                                     "ca-regional.xml must identify the dossier "
+                                     "(<application-info><dossier-id>)", None))
+            if not text_of("application-info/company-id"):
+                findings.append(_err("ca_company_id_missing",
+                                     "ca-regional.xml must carry the company-id "
+                                     "(<application-info><company-id>)", None))
+            if not any(_s(p.text) for p in ca.findall("product")):
+                findings.append(_err("ca_product_missing",
+                                     "ca-regional.xml must name at least one "
+                                     "<product>", None))
+    return findings
+
+
 def _backbone_check(dossier: dict, errors: list) -> None:
     seqs = [s["sequence"] for s in dossier.get("sequences", [])]
     sequence = seqs[-1] if seqs else "0000"
@@ -305,6 +414,34 @@ def _backbone_check(dossier: dict, errors: list) -> None:
                            f"backbone build failed: {exc}", None))
         return
     errors.extend(validate_backbone_xml(index_xml, ca_xml))
+
+
+def _sequence_backbone_check(dossier: dict, errors: list) -> None:
+    """Conformance of the *transmissible* per-sequence backbone for every
+    sequence: each sequence's own leaves are what it ships, so the only way a
+    href dangles here is a modelling defect (a leaf with no href / bad
+    operation). Every replace/append/delete must carry its modified-file
+    back-pointer and ca-regional must be a real CA M1 v2.2 file (company +
+    product)."""
+    for s in dossier.get("sequences", []):
+        seq = _s(s.get("sequence"))
+        try:
+            bb = assembly.build_sequence_backbone(dossier, seq)
+        except (KeyError, TypeError, ValueError) as exc:
+            errors.append(_err("backbone_malformed",
+                               f"sequence backbone build failed: {exc}", None))
+            continue
+        present = {_s(lf.get("href"))
+                   for lf in assembly.sequence_leaves(dossier, seq)
+                   if _s(lf.get("operation")) != "delete" and _s(lf.get("href"))}
+        for f in validate_sequence_backbone(
+                bb["index_xml"], bb["ca_regional_xml"], present):
+            # a product name is only known once the export supplies it (or a
+            # 1.3.1 monograph is placed); an in-progress dossier without one is
+            # not yet a transmission defect, so it does not block the gate.
+            if f["rule"] == "ca_product_missing":
+                continue
+            errors.append(f)
 
 
 def _document_check(documents: dict, errors: list) -> None:
@@ -344,6 +481,7 @@ def validate(dossier: dict, *, documents: dict | None = None) -> dict:
     _live_leaf_check(dossier, errors)
     _href_naming_check(dossier, errors, warnings)
     _backbone_check(dossier, errors)
+    _sequence_backbone_check(dossier, errors)
     if documents:
         _document_check(documents, errors)
 

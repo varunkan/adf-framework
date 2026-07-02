@@ -331,3 +331,128 @@ def test_pdf_findings_carry_rule_ids():
     ids = {e["rule"]: e["rule_id"] for e in res["errors"]}
     assert ids["pdf_header"] == "CA-E-7001"
     assert ids["pdf_encrypted"] == "CA-E-7002"
+
+
+# ---------------------------------------------------------------------------
+# Transmissible ICH eCTD 3.2.2 sequence backbone conformance (55xx / 6xxx)
+# ---------------------------------------------------------------------------
+
+# a conformant CA M1 v2.2 regional payload for the sequence-backbone checks
+GOOD_CA_SEQ = (
+    '<ca:ectd-ca xmlns:ca="http://www.hc-sc.gc.ca/dhpd/ectd/ca">'
+    '<application-info><dossier-id>e1</dossier-id>'
+    '<company-id>c1</company-id></application-info>'
+    '<product>Drugazole</product></ca:ectd-ca>')
+
+
+def _seq_index(leaves_xml):
+    return ('<?xml version="1.0"?>'
+            '<!DOCTYPE ectd:ectd SYSTEM "util/dtd/ich-ectd-3-2.dtd">'
+            '<ectd:ectd xmlns:ectd="http://www.ich.org/ectd" '
+            'xmlns:xlink="http://www.w3c.org/1999/xlink">'
+            + leaves_xml + '</ectd:ectd>')
+
+
+def test_sequence_backbone_clean_pair_has_no_findings():
+    d = _clean_dossier()
+    bb = assembly.build_sequence_backbone(d, "0000")
+    present = {lf["href"] for lf in assembly.sequence_leaves(d, "0000")}
+    findings = ectd_validation.validate_sequence_backbone(
+        bb["index_xml"], bb["ca_regional_xml"], present)
+    assert findings == []
+
+
+def test_dangling_href_flagged():
+    index = _seq_index(
+        '<leaf ID="pm" operation="new" '
+        'xlink:href="m1/ca/13-product-info/131-pm/pm.pdf"/>')
+    findings = ectd_validation.validate_sequence_backbone(
+        index, GOOD_CA_SEQ, present_paths=set())   # no file present
+    err = next(f for f in findings if f["rule"] == "leaf_href_dangling")
+    assert err["rule_id"] == "CA-E-5503"
+    assert err["leaf"] == "pm"
+
+
+def test_replace_without_modified_file_flagged():
+    index = _seq_index(
+        '<leaf ID="cl2" operation="replace" '
+        'xlink:href="m1/ca/10-cover-letter/cl2.pdf"/>')
+    findings = ectd_validation.validate_sequence_backbone(
+        index, GOOD_CA_SEQ, {"m1/ca/10-cover-letter/cl2.pdf"})
+    err = next(f for f in findings
+               if f["rule"] == "leaf_modified_file_missing")
+    assert err["rule_id"] == "CA-E-5502"
+    assert err["leaf"] == "cl2"
+
+
+def test_missing_operation_attribute_flagged():
+    index = _seq_index(
+        '<leaf ID="pm" xlink:href="m1/ca/pm.pdf"/>')
+    findings = ectd_validation.validate_sequence_backbone(
+        index, GOOD_CA_SEQ, {"m1/ca/pm.pdf"})
+    err = next(f for f in findings if f["rule"] == "leaf_operation_missing")
+    assert err["rule_id"] == "CA-E-5501"
+
+
+def test_missing_doctype_flagged():
+    index = ('<ectd:ectd xmlns:ectd="http://www.ich.org/ectd"'
+             ' xmlns:xlink="http://www.w3c.org/1999/xlink"/>')
+    findings = ectd_validation.validate_sequence_backbone(
+        index, GOOD_CA_SEQ, set())
+    err = next(f for f in findings if f["rule"] == "index_doctype_missing")
+    assert err["rule_id"] == "CA-E-5504"
+
+
+def test_delete_leaf_href_is_not_dangling():
+    # a delete carries no file, so its href must NOT be flagged as dangling
+    index = _seq_index(
+        '<leaf ID="x" operation="delete" xlink:href="m1/ca/gone.pdf">'
+        '<modified-file xlink:href="../0000/m1/ca/gone.pdf"/></leaf>')
+    findings = ectd_validation.validate_sequence_backbone(
+        index, GOOD_CA_SEQ, set())
+    assert not any(f["rule"] == "leaf_href_dangling" for f in findings)
+
+
+def test_ca_regional_missing_company_and_product_flagged():
+    index = _seq_index("")
+    bad_ca = ('<ca:ectd-ca xmlns:ca="http://www.hc-sc.gc.ca/dhpd/ectd/ca">'
+              '<application-info><dossier-id>e1</dossier-id>'
+              '</application-info></ca:ectd-ca>')
+    findings = ectd_validation.validate_sequence_backbone(index, bad_ca, set())
+    ids = {f["rule"]: f["rule_id"] for f in findings}
+    assert ids["ca_company_id_missing"] == "CA-E-6003"
+    assert ids["ca_product_missing"] == "CA-E-6004"
+
+
+def test_ca_regional_wrong_root_flagged():
+    findings = ectd_validation.validate_sequence_backbone(
+        _seq_index(""), "<ca-regional><dossier-id/></ca-regional>", set())
+    err = next(f for f in findings if f["rule"] == "ca_root_unexpected")
+    assert err["rule_id"] == "CA-E-6001"
+
+
+def test_validate_flags_bad_sequence_backbone_via_model():
+    # inject a replace leaf with no modified_leaf pointer straight into the model
+    d = _clean_dossier()
+    src = d["sequences"][0]["leaves"][0]
+    d["sequences"].append({"sequence": "0001", "leaves": [
+        {**src, "leaf_id": "pm2", "operation": "replace",
+         "modified_leaf": None, "sequence": "0001",
+         "href": "m1/ca/13-product-info/131-pm/pm2.pdf"}]})
+    res = ectd_validation.validate(d)
+    assert res["passed"] is False
+    assert "leaf_modified_file_missing" in {e["rule"] for e in res["errors"]}
+
+
+def test_validate_clean_replace_lifecycle_backbone_conformant():
+    d = _clean_dossier()
+    assembly.add_leaf(d, "0001", {"leaf_id": "pm2", "operation": "replace",
+                                  "modified_leaf": "pm", "heading": "1.3.1",
+                                  "title": "PM v2"})
+    res = ectd_validation.validate(d)
+    # the real per-sequence backbone check adds no errors for a valid lifecycle
+    seq_rules = {"leaf_operation_missing", "leaf_modified_file_missing",
+                 "leaf_href_dangling", "ca_company_id_missing",
+                 "ca_product_missing"}
+    assert not (seq_rules & {e["rule"] for e in res["errors"]})
+    assert res["passed"] is True
