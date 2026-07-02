@@ -10,8 +10,8 @@ from datetime import date
 
 from . import (admin_sequence, archive, assembly, content_model, content_plan,
                dossier_state, drafting, ectd_validation, export_pkg, fees,
-               generators, llm_provider, monograph, pm_xml, pm_xref,
-               section_tree)
+               form_review, form_samples, generators, llm_provider, monograph,
+               pm_xml, pm_xref, section_tree)
 from . import audit_hook
 from .document_store import SqliteBlobStore
 from .ports import DossierRepository
@@ -447,6 +447,36 @@ class DossierService:
                            "files": len(pkg["files"]),
                            "missing": len(pkg["missing"])})
         return pkg
+
+    def form_sample(self, dossier_id: str, section: str,
+                    tenant_id: str | None = None) -> dict:
+        """Realistic, editable pre-fill for an authorable section's form."""
+        self._tenant_guard(dossier_id, tenant_id)
+        node = self._node(dossier_id, section)
+        key = node.get("generator_key")
+        if "generate" not in node["affordances"] or not key:
+            raise ProblemError(422, "this section is not authorable",
+                               rule="section_not_generatable", detail=_s(section))
+        ctx = self._ctx_for(dossier_id)
+        return {"section": _s(section), "generator_key": key,
+                **form_samples.sample_fields(key, ctx)}
+
+    def form_review(self, dossier_id: str, section: str, fields: dict,
+                    tenant_id: str | None = None) -> dict:
+        """HC content review of a form's fields — required elements, canada.ca
+        links, suggested edits (the 'review mechanism' before filing)."""
+        self._tenant_guard(dossier_id, tenant_id)
+        node = self._node(dossier_id, section)
+        key = node.get("generator_key")
+        if not key:
+            raise ProblemError(422, "this section has no authorable form",
+                               rule="section_not_generatable", detail=_s(section))
+        merged = {**self._ctx_for(dossier_id), **(fields or {})}
+        result = form_review.review(key, merged)
+        result["section"] = _s(section)
+        result["generator_key"] = key
+        result["guidance_url"] = node.get("source_url")
+        return result
 
     def get_document(self, doc_id: str, tenant_id: str | None = None) -> dict:
         # a document belongs to its dossier — enforce ownership before serving

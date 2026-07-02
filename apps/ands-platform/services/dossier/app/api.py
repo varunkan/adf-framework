@@ -237,6 +237,15 @@ def build_app(service: DossierService) -> FastAPI:
                                  headers={"Cache-Control": "no-cache",
                                           "X-Accel-Buffering": "no"})
 
+    @router.get("/ectd/{dossier_id}/section/{section}/sample")
+    def form_sample(dossier_id: str, section: str, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        return service.form_sample(dossier_id, section, x_tenant_id or None)
+
+    @router.post("/ectd/{dossier_id}/section/{section}/review")
+    def form_review(dossier_id: str, section: str, body: GenerateIn, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        return service.form_review(dossier_id, section, body.model_dump(),
+                                   x_tenant_id or None)
+
     @router.post("/ectd/{dossier_id}/section/{section}/mark-na")
     def mark_na_section(dossier_id: str, section: str, body: MarkNaIn, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
         service.assert_access(dossier_id, x_tenant_id or None)

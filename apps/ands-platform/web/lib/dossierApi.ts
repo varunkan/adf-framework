@@ -55,6 +55,21 @@ export const dossierApi = {
       { method: "POST", body: JSON.stringify(payload) }
     ),
 
+  // realistic, editable pre-fill for an authorable form
+  formSample: (id: string, section: string) =>
+    j<{ section: string; generator_key: string;
+        fields: Record<string, string>; sample_keys: string[] }>(
+      `/ectd/${encodeURIComponent(id)}/section/${encodeURIComponent(section)}/sample`),
+
+  // Health Canada content review of the form's fields
+  formReview: (id: string, section: string, fields: Record<string, any>) =>
+    j<{ section: string; generator_key: string; passed: boolean;
+        error_count: number; warning_count: number; guidance_url: string;
+        findings: { severity: string; rule: string; message: string;
+                    hc_url: string; suggested_edit: string }[] }>(
+      `/ectd/${encodeURIComponent(id)}/section/${encodeURIComponent(section)}/review`,
+      { method: "POST", body: JSON.stringify(fields) }),
+
   markNa: (id: string, section: string, reason: string) =>
     j<ContentState>(
       `/ectd/${encodeURIComponent(id)}/section/${encodeURIComponent(section)}/mark-na`,

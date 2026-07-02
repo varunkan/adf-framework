@@ -230,6 +230,54 @@ function Dropzone({
   );
 }
 
+// human labels for the sample/editable fields (any extra keys fall back to a
+// prettified key name)
+const FIELD_LABELS: Record<string, string> = {
+  drug_product: "Drug product", dossier_id: "Dossier ID",
+  company_id: "Health Canada Company ID", sponsor: "Sponsor company",
+  din: "DIN (assigned at NOC)", sequence: "Sequence", activity_type: "Activity type",
+  contact_name: "Regulatory contact", contact_email: "Contact email",
+  sequence_description: "Sequence description", dossier_type: "Dossier type",
+  crp_brand: "Canadian Reference Product (brand)", crp_din: "Reference product DIN",
+  patents: "Patent / CSP numbers on the Register", patent_expiry: "Expiry (per patent)",
+  allegation: "s.5 statement (per patent)", signer: "Authorised signer",
+  signer_title: "Signer title", dosage_form: "Dosage form", strength: "Strength",
+  study_design: "BE study design", auc_ci: "AUC 90% CI",
+  cmax: "Cmax 90% CI / point estimate", ruleset: "BE ruleset",
+  manufacturer: "Manufacturer", shelf_life: "Proposed shelf life", storage: "Storage",
+};
+const prettyLabel = (k: string) =>
+  FIELD_LABELS[k] || k.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+
+function ReviewPanel({ review }: { review: any }) {
+  if (!review) return null;
+  const f = review.findings || [];
+  return (
+    <div className={`notice ${review.passed ? "ok" : "bad"}`} style={{ marginTop: 10 }}>
+      <b>Health Canada review:</b>{" "}
+      {review.passed
+        ? "no blocking content gaps."
+        : `${review.error_count} to fix, ${review.warning_count} to check.`}
+      {f.length > 0 && (
+        <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+          {f.map((x: any, i: number) => (
+            <li key={i} style={{ marginBottom: 6, fontSize: 12 }}>
+              <b>{x.severity === "error" ? "✗" : "⚠"} {x.message}</b>
+              <div className="mut">↳ {x.suggested_edit}{" "}
+                {x.hc_url && (
+                  <a href={x.hc_url} target="_blank" rel="noopener noreferrer">
+                    HC guidance ↗
+                  </a>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function AuthorForm({
   node,
   dossierId,
@@ -243,43 +291,86 @@ function AuthorForm({
 }) {
   const [busy, setBusy] = useState(false);
   const [fields, setFields] = useState<Record<string, string>>({});
+  const [order, setOrder] = useState<string[]>([]);
+  const [sampleKeys, setSampleKeys] = useState<Set<string>>(new Set());
+  const [review, setReview] = useState<any>(null);
   const set = (k: string, v: string) => setFields((f) => ({ ...f, [k]: v }));
   const aiDraftable = !!node.ai_draftable;
   const [mode, setMode] = useState<"ai" | "template">(aiDraftable ? "ai" : "template");
 
-  // A few relevant inputs per generator; all optional (the doc also pulls from
-  // the dossier's product/identity context).
-  const PATENT_FIELDS = [
-    { key: "crp_brand", label: "Canadian Reference Product (brand)" },
-    { key: "crp_din", label: "Reference product DIN" },
-    { key: "patents", label: "Patent / CSP numbers on the Register" },
-    { key: "patent_expiry", label: "Expiry (per patent)" },
-    { key: "allegation", label: "s.5 statement (e.g. not addressed / alleges non-infringement)" },
-  ];
-  const EXTRA: Record<string, { key: string; label: string }[]> = {
-    // current generator key + legacy alias so stored dossiers keep working
-    patent_form_v: PATENT_FIELDS,
-    patent_form_iv: PATENT_FIELDS,
-    cs_be: [
-      { key: "crp_brand", label: "Canadian Reference Product" },
-      { key: "crp_din", label: "Reference product DIN" },
-      { key: "auc_ci", label: "AUC 90% CI (e.g. 92–108%)" },
-      { key: "cmax", label: "Cmax 90% CI / point estimate" },
-    ],
-  };
-  const extra = EXTRA[node.generator_key || ""] || [];
+  // pull the realistic, editable sample (real dossier facts + worked example)
+  useEffect(() => {
+    let live = true;
+    setReview(null);
+    dossierApi.formSample(dossierId, node.section).then((s) => {
+      if (!live) return;
+      setFields(s.fields || {});
+      setOrder(Object.keys(s.fields || {}));
+      setSampleKeys(new Set(s.sample_keys || []));
+    }).catch(() => {});
+    return () => { live = false; };
+  }, [dossierId, node.section]);
+
+  async function runReview(): Promise<boolean> {
+    try {
+      const r = await dossierApi.formReview(dossierId, node.section, fields);
+      setReview(r);
+      return r.passed;
+    } catch (e) {
+      onError(String(e));
+      return false;
+    }
+  }
 
   async function go() {
     setBusy(true);
     try {
       const c = await dossierApi.generate(dossierId, node.section, fields);
       onDone(c, `${node.title} authored`);
+      await runReview();   // surface HC content review right after authoring
     } catch (e) {
       onError(String(e));
     } finally {
       setBusy(false);
     }
   }
+
+  const formBody = (
+    <>
+      <p className="mut" style={{ fontSize: 13 }}>
+        Pre-filled with a realistic sample from your dossier — <b>edit every
+        field</b> to your product, then author. Fields marked <i>sample</i> are
+        worked examples to replace.
+      </p>
+      {order.map((k) => {
+        const multiline = k === "allegation" || k === "study_design";
+        return (
+          <div key={k}>
+            <label>
+              {prettyLabel(k)}{" "}
+              {sampleKeys.has(k) && <span className="applic optional">sample</span>}
+            </label>
+            {multiline ? (
+              <textarea rows={2} value={fields[k] || ""}
+                onChange={(e) => set(k, e.target.value)} />
+            ) : (
+              <input value={fields[k] || ""}
+                onChange={(e) => set(k, e.target.value)} />
+            )}
+          </div>
+        );
+      })}
+      <div className="cta-row">
+        <button onClick={go} disabled={busy}>
+          {busy ? "Authoring…" : `Author ${node.title} →`}
+        </button>
+        <button className="ghost" onClick={runReview} disabled={busy}>
+          Review vs Health Canada
+        </button>
+      </div>
+      <ReviewPanel review={review} />
+    </>
+  );
 
   if (aiDraftable) {
     return (
@@ -290,54 +381,18 @@ function AuthorForm({
             onClick={() => setMode("ai")}>💬 Draft with AI</button>
           <button role="tab" aria-selected={mode === "template"}
             className={mode === "template" ? "on" : ""}
-            onClick={() => setMode("template")}>✦ Quick template</button>
+            onClick={() => setMode("template")}>✦ Sample &amp; edit</button>
         </div>
         {mode === "ai" ? (
           <DraftChat node={node} dossierId={dossierId} onDone={onDone} onError={onError} />
         ) : (
-          <>
-            <p className="mut" style={{ fontSize: 13 }}>
-              Generate a boilerplate draft from your dossier details. Missing
-              fields show as "—" — review and finalise before filing.
-            </p>
-            {extra.map((f) => (
-              <div key={f.key}>
-                <label>{f.label}</label>
-                <input value={fields[f.key] || ""}
-                  onChange={(e) => set(f.key, e.target.value)} />
-              </div>
-            ))}
-            <div className="cta-row">
-              <button onClick={go} disabled={busy}>
-                {busy ? "Authoring…" : `Author ${node.title} →`}
-              </button>
-            </div>
-          </>
+          formBody
         )}
       </div>
     );
   }
 
-  return (
-    <div className="author-form">
-      <p className="mut" style={{ fontSize: 13 }}>
-        Generate a draft of this document from your dossier details. Review and
-        finalise it before signing/filing.
-      </p>
-      {extra.map((f) => (
-        <div key={f.key}>
-          <label>{f.label}</label>
-          <input value={fields[f.key] || ""}
-            onChange={(e) => set(f.key, e.target.value)} />
-        </div>
-      ))}
-      <div className="cta-row">
-        <button onClick={go} disabled={busy}>
-          {busy ? "Authoring…" : `Author ${node.title} →`}
-        </button>
-      </div>
-    </div>
-  );
+  return <div className="author-form">{formBody}</div>;
 }
 
 function PmXmlPanel({ dossierId }: { dossierId: string; title?: string }) {
