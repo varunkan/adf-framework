@@ -19,7 +19,8 @@ async function j<T>(path: string, init?: RequestInit): Promise<T> {
     let detail = `${res.status}`;
     try {
       const b = await res.json();
-      detail = b.detail || b.title || detail;
+      // problem+json: title is the human-readable part, detail the specifics
+      detail = [b.title, b.detail].filter(Boolean).join(": ") || detail;
     } catch {}
     throw new Error(detail);
   }
@@ -90,7 +91,7 @@ export const dossierApi = {
       let detail = `${res.status}`;
       try {
         const b = await res.json();
-        detail = b.detail || b.title || detail;
+        detail = [b.title, b.detail].filter(Boolean).join(": ") || detail;
       } catch {}
       throw new Error(detail);
     }

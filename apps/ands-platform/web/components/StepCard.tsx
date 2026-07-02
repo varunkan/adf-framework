@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { dossierApi } from "@/lib/dossierApi";
 import type { JourneyView, Stage } from "@/lib/types";
 import { Term } from "./Term";
 import { DrugIntake } from "./DrugIntake";
@@ -127,7 +128,21 @@ export function StepCard({
           </div>
           <div className="cta-row">
             <a className="builder-link"
-              href={`/dossiers/${encodeURIComponent(view.journey.dossier_id)}/m/1`}>
+              href={`/dossiers/${encodeURIComponent(view.journey.dossier_id)}/m/1`}
+              onClick={async (e) => {
+                // register the dossier (idempotent) so the module builder and
+                // Application Viewer have a real record + sequence 0000
+                e.preventDefault();
+                const did = view.journey.dossier_id;
+                try {
+                  await dossierApi.createDossier({
+                    dossier_id: did,
+                    title: sig.drug_product || form.drug_product || did,
+                    cs_be_only: true,
+                  });
+                } catch { /* self-heal in DossierProvider covers failures */ }
+                window.location.href = `/dossiers/${encodeURIComponent(did)}/m/1`;
+              }}>
               Open the Module builder →
             </a>
             <span className="nexthint">

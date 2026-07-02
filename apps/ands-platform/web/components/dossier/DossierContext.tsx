@@ -29,7 +29,19 @@ export function DossierProvider({
 
   const refresh = useCallback(async () => {
     try {
-      const full = await dossierApi.getDossier(dossierId);
+      let full = await dossierApi.getDossier(dossierId);
+      // Self-heal: a journey deep-link (or hand-typed URL) can land here before
+      // the dossier is registered. The API tolerates that with a fallback index
+      // (no created_at), but the eCTD model/sequence won't exist and the
+      // Application Viewer 404s. Register idempotently, then re-fetch.
+      if (!full.index?.created_at) {
+        await dossierApi.createDossier({
+          dossier_id: dossierId,
+          title: full.index?.title || dossierId,
+          cs_be_only: full.index?.cs_be_only ?? true,
+        });
+        full = await dossierApi.getDossier(dossierId);
+      }
       setIndex(full.index);
       setContent(full.content);
     } catch (e) {

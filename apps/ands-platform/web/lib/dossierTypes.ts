@@ -119,6 +119,9 @@ export interface DossierIndex {
   title: string;
   submission_type: string;
   cs_be_only: boolean;
+  // present only when the dossier is actually registered (a real DB row);
+  // absent on the tolerant fallback the API returns for unregistered ids
+  created_at?: string;
 }
 
 export interface DossierListItem extends DossierIndex {
