@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { dossierApi } from "@/lib/dossierApi";
 import type { DocMeta, FeesBlock, SectionNode } from "@/lib/dossierTypes";
+import { DraftChat } from "./DraftChat";
 import { useDossier } from "./DossierContext";
 
 function fmtSize(n: number): string {
@@ -236,6 +237,8 @@ function AuthorForm({
   const [busy, setBusy] = useState(false);
   const [fields, setFields] = useState<Record<string, string>>({});
   const set = (k: string, v: string) => setFields((f) => ({ ...f, [k]: v }));
+  const aiDraftable = !!node.ai_draftable;
+  const [mode, setMode] = useState<"ai" | "template">(aiDraftable ? "ai" : "template");
 
   // A few relevant inputs per generator; all optional (the doc also pulls from
   // the dossier's product/identity context).
@@ -262,6 +265,43 @@ function AuthorForm({
     } finally {
       setBusy(false);
     }
+  }
+
+  if (aiDraftable) {
+    return (
+      <div className="author-form">
+        <div className="affordance-bar" role="tablist" aria-label="Drafting mode">
+          <button role="tab" aria-selected={mode === "ai"}
+            className={mode === "ai" ? "on" : ""}
+            onClick={() => setMode("ai")}>💬 Draft with AI</button>
+          <button role="tab" aria-selected={mode === "template"}
+            className={mode === "template" ? "on" : ""}
+            onClick={() => setMode("template")}>✦ Quick template</button>
+        </div>
+        {mode === "ai" ? (
+          <DraftChat node={node} dossierId={dossierId} onDone={onDone} onError={onError} />
+        ) : (
+          <>
+            <p className="mut" style={{ fontSize: 13 }}>
+              Generate a boilerplate draft from your dossier details. Missing
+              fields show as "—" — review and finalise before filing.
+            </p>
+            {extra.map((f) => (
+              <div key={f.key}>
+                <label>{f.label}</label>
+                <input value={fields[f.key] || ""}
+                  onChange={(e) => set(f.key, e.target.value)} />
+              </div>
+            ))}
+            <div className="cta-row">
+              <button onClick={go} disabled={busy}>
+                {busy ? "Authoring…" : `Author ${node.title} →`}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    );
   }
 
   return (

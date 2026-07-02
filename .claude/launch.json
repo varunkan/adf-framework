@@ -2,6 +2,14 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "ands-app",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "/tmp/ands-view/server.py"
+      ],
+      "port": 8099
+    },
+    {
       "name": "adf-dashboard",
       "runtimeExecutable": "python3",
       "runtimeArgs": [
@@ -14,6 +22,33 @@
         "/Users/varunkumar/ai_pos_system/adf-framework/tools/orchestration_dashboard/build/web"
       ],
       "port": 3850
+    },
+    {
+      "name": "ands-web",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-lc",
+        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/web && JOURNEY_BFF_URL=http://127.0.0.1:8011 DOSSIER_BFF_URL=http://127.0.0.1:8010 exec npm run dev"
+      ],
+      "port": 3000
+    },
+    {
+      "name": "ands-journey",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-lc",
+        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/journey && PYTHONPATH=.:../../libs exec ../../.venv/bin/uvicorn app.main:app --port 8011"
+      ],
+      "port": 8011
+    },
+    {
+      "name": "ands-dossier",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-lc",
+        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/dossier && PYTHONPATH=.:../../libs exec ../../.venv/bin/uvicorn app.main:app --port 8010"
+      ],
+      "port": 8010
     }
   ]
 }

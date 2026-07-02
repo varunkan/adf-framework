@@ -200,8 +200,28 @@ GENERATORS = {
     "cs_be": cs_be,
 }
 
+# Prose-PDF documents the interactive (LLM chat) drafting flow can author.
+# The REP form is structured XML — free-text drafting would corrupt it, so it
+# stays deterministic-only. Values are the (title, filename stem) for the PDF
+# built from a finalised chat draft.
+LLM_DRAFTABLE = {
+    "cover_letter": ("Health Canada — Cover Letter", "cover-letter"),
+    "patent_form_iv": ("Patent List — Form IV", "patent-form-iv"),
+    "ands_attestation": ("ANDS Sponsor Attestation", "ands-attestation"),
+    "qos_ce_scaffold": ("Quality Overall Summary (QOS-CE(BE))", "qos-ce-be"),
+    "cs_be": ("Comprehensive Summary — Bioequivalence (CS-BE)", "cs-be"),
+}
+
 
 def generate(generator_key: str, ctx: dict) -> dict:
-    """Produce the document for a generator key. Raises KeyError if unknown."""
-    fn = GENERATORS[_s(generator_key)]
+    """Produce the document for a generator key. Raises KeyError if unknown.
+
+    A finalised interactive (LLM chat) draft in ``ctx['llm_draft']`` takes
+    priority over the deterministic template for LLM-draftable documents."""
+    key = _s(generator_key)
+    fn = GENERATORS[key]
+    llm_draft = _s((ctx or {}).get("llm_draft"))
+    if llm_draft and key in LLM_DRAFTABLE:
+        title, stem = LLM_DRAFTABLE[key]
+        return _pdf(title, llm_draft, stem)
     return fn(ctx or {})

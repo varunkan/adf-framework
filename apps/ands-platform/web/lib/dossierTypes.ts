@@ -27,6 +27,7 @@ export interface SectionNode {
   applicability: Applicability;
   affordances: Affordance[];
   generator_key: string | null;
+  ai_draftable?: boolean;
   formats: string[];
   bilingual: boolean;
   purpose: string;

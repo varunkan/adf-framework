@@ -70,6 +70,51 @@ export const dossierApi = {
 
   documentUrl: (docId: string) => `${BASE}/documents/${encodeURIComponent(docId)}`,
 
+  // Interactive (LLM chat) drafting — streams { delta } / { error } chunks
+  // parsed out of the upstream SSE response.
+  streamDraftChat: async function* (
+    id: string,
+    section: string,
+    messages: { role: string; content: string }[]
+  ): AsyncGenerator<{ delta?: string; error?: string }> {
+    const res = await fetch(
+      `${BASE}/ectd/${encodeURIComponent(id)}/section/${encodeURIComponent(section)}/draft-chat`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ messages }),
+        cache: "no-store",
+      }
+    );
+    if (!res.ok || !res.body) {
+      let detail = `${res.status}`;
+      try {
+        const b = await res.json();
+        detail = b.detail || b.title || detail;
+      } catch {}
+      throw new Error(detail);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const events = buf.split("\n\n");
+      buf = events.pop() || "";
+      for (const evt of events) {
+        const line = evt.split("\n").find((l) => l.startsWith("data: "));
+        if (!line) continue;
+        const raw = line.slice(6);
+        if (raw === "[DONE]") return;
+        try {
+          yield JSON.parse(raw);
+        } catch {}
+      }
+    }
+  },
+
   // Multipart upload via XHR so we get real upload progress.
   uploadDocument: (
     id: string,

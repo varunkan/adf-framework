@@ -26,6 +26,15 @@ class GenerateIn(BaseModel):
     model_config = ConfigDict(extra="allow")   # free-form generator inputs
 
 
+class ChatMessageIn(BaseModel):
+    role: str
+    content: str
+
+
+class DraftChatIn(BaseModel):
+    messages: list[ChatMessageIn] = Field(default_factory=list)
+
+
 class MarkNaIn(BaseModel):
     reason: str = ""
 

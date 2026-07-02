@@ -15,6 +15,7 @@ Modules 2.4–2.7 and never needs Module 4; Modules 1, 2.3, 3 and 5.3.1 are requ
 from __future__ import annotations
 
 from . import ectd
+from .generators import LLM_DRAFTABLE
 
 SECTION_TREE_VERSION = "2024-04-23"   # HC Module-1 placement + CTD structure
 
@@ -294,6 +295,7 @@ def _build_node(module: str, node: dict, cs_be_only: bool) -> dict:
         "applicability": _applicability(node, module, cs_be_only),
         "affordances": list(node.get("aff", [])),
         "generator_key": node.get("gen"),
+        "ai_draftable": node.get("gen") in LLM_DRAFTABLE,
         "formats": list(node.get("fmt", [])),
         "bilingual": bool(node.get("bi")),
         "purpose": node.get("p", ""),

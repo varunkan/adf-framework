@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi import (APIRouter, FastAPI, File, Form, Query, Response,
                      UploadFile)
+from fastapi.responses import StreamingResponse
 
 from ands_shared import create_app
 
-from . import ectd
+from . import ectd, llm_provider
 from .models import (AdminSequenceIn, BinderIn, ContentPlanIn, CreateDossierIn,
-                     FeeStatusIn, GenerateIn, ItemAssignIn, ItemStatusIn, LeafIn,
-                     MarkNaIn, PmLeafIn, PmXmlBuildIn, PmXmlGateIn,
-                     PmXmlValidateIn, PmXrefIn, SequenceIn)
+                     DraftChatIn, FeeStatusIn, GenerateIn, ItemAssignIn,
+                     ItemStatusIn, LeafIn, MarkNaIn, PmLeafIn, PmXmlBuildIn,
+                     PmXmlGateIn, PmXmlValidateIn, PmXrefIn, SequenceIn)
 from .service import DossierService
 
 
@@ -166,6 +169,28 @@ def build_app(service: DossierService) -> FastAPI:
     @router.post("/ectd/{dossier_id}/section/{section}/generate")
     def generate_section(dossier_id: str, section: str, body: GenerateIn):
         return service.generate_document(dossier_id, section, body.model_dump())
+
+    # -- interactive (LLM chat) drafting --------------------------------
+    @router.post("/ectd/{dossier_id}/section/{section}/draft-chat")
+    async def draft_chat(dossier_id: str, section: str, body: DraftChatIn):
+        # validated eagerly: bad section / missing GROQ_API_KEY -> clean
+        # JSON error, not a broken stream
+        node, ctx = service.prepare_draft_chat(dossier_id, section)
+        messages = [m.model_dump() for m in body.messages]
+
+        async def gen():
+            try:
+                async for delta in service.stream_draft_chat(node, ctx, messages):
+                    yield f"data: {json.dumps({'delta': delta})}\n\n"
+                yield "data: [DONE]\n\n"
+            except llm_provider.LlmNotConfigured as exc:
+                yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+            except Exception as exc:  # upstream/network errors mid-stream
+                yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+
+        return StreamingResponse(gen(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache",
+                                          "X-Accel-Buffering": "no"})
 
     @router.post("/ectd/{dossier_id}/section/{section}/mark-na")
     def mark_na_section(dossier_id: str, section: str, body: MarkNaIn):

@@ -9,8 +9,8 @@ import secrets
 from datetime import date
 
 from . import (admin_sequence, archive, assembly, content_model, content_plan,
-               dossier_state, ectd_validation, fees, generators, monograph,
-               pm_xml, pm_xref, section_tree)
+               dossier_state, drafting, ectd_validation, fees, generators,
+               llm_provider, monograph, pm_xml, pm_xref, section_tree)
 from .document_store import SqliteBlobStore
 from .ports import DossierRepository
 
@@ -218,7 +218,8 @@ class DossierService:
         return {"dossier_id": _s(dossier_id), "title": idx.get("title"),
                 "drug_product": idx.get("title"),
                 "submission_type": idx.get("submission_type") or "ANDS",
-                "activity_type": idx.get("submission_type") or "ANDS"}
+                "activity_type": idx.get("submission_type") or "ANDS",
+                "din": idx.get("din")}
 
     def _node(self, dossier_id: str, section: str) -> dict:
         node = section_tree.node_for(
@@ -304,6 +305,30 @@ class DossierService:
         self._write_entry(dossier_id, section, node, action="generated",
                           meta=meta, leaf_id=node["leaf_id"])
         return self.content_state(dossier_id)
+
+    def prepare_draft_chat(self, dossier_id: str, section: str) -> tuple[dict, dict]:
+        """Validate eagerly (raises ProblemError) before any streaming starts,
+        so a bad section/unconfigured LLM comes back as a clean JSON error
+        instead of failing mid-stream."""
+        node = self._node(dossier_id, section)
+        key = node.get("generator_key")
+        if "generate" not in node["affordances"] or not key:
+            raise ProblemError(422, "this section cannot be authored in-app",
+                               rule="section_not_generatable", detail=_s(section))
+        if key not in generators.LLM_DRAFTABLE:
+            raise ProblemError(422, "this document is a structured form — "
+                               "AI chat drafting only applies to prose "
+                               "documents", rule="section_not_ai_draftable",
+                               detail=_s(section))
+        if not llm_provider.is_configured():
+            raise ProblemError(503, "AI drafting is not configured "
+                               "(GROQ_API_KEY unset)", rule="llm_not_configured")
+        return node, self._ctx_for(dossier_id)
+
+    def stream_draft_chat(self, node: dict, ctx: dict, messages: list[dict]):
+        system = drafting.system_prompt(node, ctx)
+        return llm_provider.stream_chat([{"role": "system", "content": system},
+                                         *messages])
 
     def mark_na(self, dossier_id, section, reason="") -> dict:
         node = self._node(dossier_id, section)

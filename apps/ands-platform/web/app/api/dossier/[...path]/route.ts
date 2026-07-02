@@ -29,10 +29,22 @@ async function forward(req: NextRequest, path: string[]) {
 
   try {
     const upstream = await fetch(url, init);
+    const upstreamCt = upstream.headers.get("content-type") || "";
+    // SSE (interactive-drafting chat) — pipe the stream through live instead
+    // of buffering, so the client sees tokens as they arrive.
+    if (upstreamCt.includes("text/event-stream") && upstream.body) {
+      return new NextResponse(upstream.body, {
+        status: upstream.status,
+        headers: {
+          "content-type": upstreamCt,
+          "cache-control": "no-cache",
+          connection: "keep-alive",
+        },
+      });
+    }
     const buf = Buffer.from(await upstream.arrayBuffer());
     const respHeaders: Record<string, string> = {
-      "content-type":
-        upstream.headers.get("content-type") || "application/json",
+      "content-type": upstreamCt || "application/json",
     };
     const cd = upstream.headers.get("content-disposition");
     if (cd) respHeaders["content-disposition"] = cd;
