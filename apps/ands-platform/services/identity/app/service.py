@@ -81,10 +81,22 @@ class IdentityService:
         return {"tenant": tenant, "user": user, "token": token}
 
     def login(self, data: dict) -> dict:
-        tenant_id = _s(data.get("tenant_id"))   # "" = platform/owner
-        row = self.repo.get_by_email_raw(tenant_id, _email(data.get("email")))
+        tenant_id = _s(data.get("tenant_id"))
+        email = _email(data.get("email"))
+        password = _s(data.get("password"))
+        if tenant_id:
+            row = self.repo.get_by_email_raw(tenant_id, email)
+        else:
+            # normal sign-in: users don't know tenant ids — find the account
+            # by email across ALL scopes (platform owner included; password
+            # disambiguates — a same-email/same-password collision across
+            # tenants is not supported)
+            row = next(
+                (r for r in self.repo.find_by_email_raw(email)
+                 if security.verify_password(password, r["pw_salt"],
+                                             r["pw_hash"])), None)
         if not row or not security.verify_password(
-                _s(data.get("password")), row["pw_salt"], row["pw_hash"]):
+                password, row["pw_salt"], row["pw_hash"]):
             raise ProblemError(401, "invalid credentials",
                                rule="auth_failed")
         if row.get("mfa_enabled"):

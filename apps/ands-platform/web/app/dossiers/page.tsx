@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { dossierApi } from "@/lib/dossierApi";
 import type { DossierListItem } from "@/lib/dossierTypes";
 import { Term } from "@/components/Term";
+import { UserChip } from "@/components/UserChip";
 
 export default function DossiersHome() {
   const router = useRouter();
@@ -67,6 +68,7 @@ export default function DossiersHome() {
           ANDS&nbsp;Studio <small>· dossier manager</small>
         </span>
         <span className="spacer" />
+        <UserChip />
         <Link className="chip" href="/">Guided journey →</Link>
       </header>
       <main className="dossier-home">

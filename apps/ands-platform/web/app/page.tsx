@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, session } from "@/lib/api";
+import { UserChip } from "@/components/UserChip";
 import type { JourneyView } from "@/lib/types";
 import { StepRail } from "@/components/StepRail";
 import { StepCard } from "@/components/StepCard";
@@ -84,6 +85,7 @@ export default function Page() {
           ANDS&nbsp;Studio <small>· file a drug like a story</small>
         </span>
         <span className="spacer" />
+        <UserChip />
         {view && (
           <>
             <span className={`chip ${view.readiness.status === "READY" ? "ready" : "blocked"}`}>

@@ -386,3 +386,9 @@ button:disabled{opacity:.45;cursor:not-allowed;transform:none}
   transition:opacity .15s ease,color .15s ease,border-color .15s ease}
 .dossier-tile:hover .tile-delete,.tile-delete:focus-visible{opacity:1}
 .tile-delete:hover{color:#ff7a7a;border-color:#ff7a7a55;background:#ff7a7a11}
+
+/* ── auth: login page + user chip ─────────────────────────────────── */
+.login-page{min-height:100vh;display:grid;place-items:center;padding:24px}
+.login-card{width:min(420px,92vw);display:flex;flex-direction:column;gap:10px;padding:26px}
+.user-chip{display:inline-flex;align-items:center;gap:8px;font-size:13px}
+.uc-out{padding:4px 10px;font-size:12px}

@@ -431,7 +431,7 @@ class DossierService:
             "files_view": assembly.build_files_view(model) if model else None}
 
     # -- dossier + sequence management (home catalog) ----------------------
-    def create_dossier(self, data: dict) -> dict:
+    def create_dossier(self, data: dict, tenant_id: str | None = None) -> dict:
         dossier_id = _s(data.get("dossier_id"))
         if not dossier_id:
             raise ProblemError(422, "dossier_id is required",
@@ -441,25 +441,37 @@ class DossierService:
             raise ProblemError(422, "DIN must be exactly 8 digits (note: a DIN "
                                "is assigned by Health Canada at NOC, not filed)",
                                rule="din_invalid")
+        self._tenant_guard(dossier_id, tenant_id)   # no cross-tenant upsert
         rec = self.repo.create_dossier_index({
             "dossier_id": dossier_id,
             "title": _s(data.get("title")) or dossier_id,
             "submission_type": _s(data.get("submission_type")).upper() or "ANDS",
             "cs_be_only": bool(data.get("cs_be_only", True)),
-            "din": din or None})
+            "din": din or None,
+            "tenant_id": _s(tenant_id) or None})
         model = self._dossier_model(dossier_id, create=True)
         assembly.add_sequence(model, "0000")
         self.repo.save_dossier(model)
         return rec
 
-    def delete_dossier(self, dossier_id: str) -> dict:
+    def _tenant_guard(self, dossier_id: str, tenant_id: str | None) -> None:
+        """A dossier owned by another tenant is invisible (404, not 403)."""
+        if not tenant_id:
+            return
+        idx = self.repo.get_dossier_index(_s(dossier_id))
+        owner = _s((idx or {}).get("tenant_id"))
+        if owner and owner != _s(tenant_id):
+            raise ProblemError(404, "no such dossier", detail=_s(dossier_id))
+
+    def delete_dossier(self, dossier_id: str, tenant_id: str | None = None) -> dict:
+        self._tenant_guard(dossier_id, tenant_id)
         if not self.repo.delete_dossier(_s(dossier_id)):
             raise ProblemError(404, "no such dossier", detail=_s(dossier_id))
         return {"deleted": _s(dossier_id)}
 
-    def list_dossiers(self) -> dict:
+    def list_dossiers(self, tenant_id: str | None = None) -> dict:
         out = []
-        for idx in self.repo.list_dossier_index():
+        for idx in self.repo.list_dossier_index(_s(tenant_id) or None):
             states = self.repo.list_section_state(idx["dossier_id"])
             out.append({**idx,
                         "tower": dossier_state.tower_view(
@@ -468,8 +480,10 @@ class DossierService:
                             cs_be_only=idx["cs_be_only"], states=states)})
         return {"dossiers": out, "count": len(out)}
 
-    def get_dossier_full(self, dossier_id: str) -> dict:
+    def get_dossier_full(self, dossier_id: str,
+                         tenant_id: str | None = None) -> dict:
         dossier_id = _s(dossier_id)
+        self._tenant_guard(dossier_id, tenant_id)
         idx = self.repo.get_dossier_index(dossier_id)
         if not idx:
             # tolerate a dossier that exists as an eCTD model but has no index yet

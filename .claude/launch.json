@@ -42,6 +42,15 @@
       "port": 8011
     },
     {
+      "name": "ands-identity",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-lc",
+        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/identity && PYTHONPATH=.:../../libs ANDS_OWNER_EMAIL=owner@ands.local ANDS_OWNER_PASSWORD=ands-owner-dev exec ../../.venv/bin/uvicorn app.main:app --port 8014"
+      ],
+      "port": 8014
+    },
+    {
       "name": "ands-governance",
       "runtimeExecutable": "bash",
       "runtimeArgs": [

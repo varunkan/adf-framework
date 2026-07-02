@@ -76,6 +76,11 @@ class SqliteIdentityRepository:
             (tenant_id, email))
         return dict(row) if row else None
 
+    def find_by_email_raw(self, email) -> list[dict]:
+        rows = self.db.fetchall(
+            "SELECT * FROM users WHERE email = ?", (email,))
+        return [dict(r) for r in rows]
+
     def get_user_raw(self, user_id) -> dict | None:
         row = self.db.fetchone("SELECT * FROM users WHERE id = ?", (user_id,))
         return dict(row) if row else None

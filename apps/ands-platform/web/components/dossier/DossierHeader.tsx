@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { UserChip } from "@/components/UserChip";
 import { useParams } from "next/navigation";
 import { useDossier } from "./DossierContext";
 
@@ -36,6 +37,7 @@ export function DossierHeader() {
         })}
       </nav>
       <span className="spacer" />
+      <UserChip />
       <Link className="chip" href={`/dossiers/${encodeURIComponent(dossierId)}/viewer`}>
         Application Viewer
       </Link>

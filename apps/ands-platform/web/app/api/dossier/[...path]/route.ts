@@ -3,6 +3,7 @@
 // multipart file uploads survive; it also forwards content-type/disposition on
 // responses so document downloads work.
 import { NextRequest, NextResponse } from "next/server";
+import { resolveTenant } from "@/lib/serverAuth";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,12 @@ async function forward(req: NextRequest, path: string[]) {
   const headers: Record<string, string> = {};
   const ct = req.headers.get("content-type");
   if (ct) headers["content-type"] = ct;
+  // tenant scoping: the session cookie resolves to the client workspace
+  const session = await resolveTenant(req);
+  if (session) {
+    headers["x-tenant-id"] = session.tenantId;
+    headers["authorization"] = `Bearer ${session.token}`;
+  }
 
   const init: RequestInit & { duplex?: string } = {
     method: req.method,

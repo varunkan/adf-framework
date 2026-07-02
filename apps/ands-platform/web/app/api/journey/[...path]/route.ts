@@ -2,6 +2,7 @@
 // forwards to the journey BFF. Keeps the BFF URL server-only and sidesteps CORS
 // in dev. In production the gateway (/api/journey/*) plays this role.
 import { NextRequest, NextResponse } from "next/server";
+import { resolveTenant } from "@/lib/serverAuth";
 
 export const dynamic = "force-dynamic";
 
@@ -11,9 +12,15 @@ async function forward(req: NextRequest, path: string[]) {
   const suffix = path.join("/");
   const qs = req.nextUrl.search || "";
   const url = `${BFF}/api/journey/${suffix}${qs}`;
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  const session = await resolveTenant(req);
+  if (session) {
+    headers["x-tenant-id"] = session.tenantId;
+    headers["authorization"] = `Bearer ${session.token}`;
+  }
   const init: RequestInit = {
     method: req.method,
-    headers: { "content-type": "application/json" },
+    headers,
     cache: "no-store",
   };
   if (req.method !== "GET" && req.method !== "HEAD") {

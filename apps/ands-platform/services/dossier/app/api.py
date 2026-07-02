@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from fastapi import (APIRouter, FastAPI, File, Form, Query, Response,
+from fastapi import (APIRouter, FastAPI, File, Form, Header, Query, Response,
                      UploadFile)
 from fastapi.responses import StreamingResponse
 
@@ -126,20 +126,27 @@ def build_app(service: DossierService) -> FastAPI:
         return service.get_section_tree(cs_be_only)
 
     @router.get("/dossiers")
-    def list_dossiers():
-        return service.list_dossiers()
+    def list_dossiers(x_tenant_id: str = Header(default="",
+                                                alias="X-Tenant-Id")):
+        return service.list_dossiers(x_tenant_id or None)
 
     @router.post("/dossiers", status_code=201)
-    def create_dossier(body: CreateDossierIn):
-        return service.create_dossier(body.model_dump())
+    def create_dossier(body: CreateDossierIn,
+                       x_tenant_id: str = Header(default="",
+                                                 alias="X-Tenant-Id")):
+        return service.create_dossier(body.model_dump(), x_tenant_id or None)
 
     @router.get("/dossiers/{dossier_id}")
-    def get_dossier(dossier_id: str):
-        return service.get_dossier_full(dossier_id)
+    def get_dossier(dossier_id: str,
+                    x_tenant_id: str = Header(default="",
+                                              alias="X-Tenant-Id")):
+        return service.get_dossier_full(dossier_id, x_tenant_id or None)
 
     @router.delete("/dossiers/{dossier_id}")
-    def delete_dossier(dossier_id: str):
-        return service.delete_dossier(dossier_id)
+    def delete_dossier(dossier_id: str,
+                       x_tenant_id: str = Header(default="",
+                                                 alias="X-Tenant-Id")):
+        return service.delete_dossier(dossier_id, x_tenant_id or None)
 
     @router.get("/dossiers/{dossier_id}/content")
     def dossier_content(dossier_id: str):
