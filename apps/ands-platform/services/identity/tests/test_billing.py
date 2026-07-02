@@ -29,7 +29,7 @@ def test_owner_sets_billing_and_tenant_reads_it(ctx):
     tok = owner_token(ctx)
     tenant = ctx.client.post("/api/identity/owner/tenants",
                              json={"name": "T", "admin_email": "t@t.io",
-                                   "admin_password": "pw12345"},
+                                   "admin_password": "pw12345-2026"},
                              headers=auth(tok)).json()["tenant"]
     # owner moves the tenant to canceled
     r = ctx.client.post("/api/identity/owner/billing",
@@ -46,7 +46,7 @@ def test_set_billing_invalid_status_422(ctx):
     tok = owner_token(ctx)
     tenant = ctx.client.post("/api/identity/owner/tenants",
                              json={"name": "T", "admin_email": "t@t.io",
-                                   "admin_password": "pw12345"},
+                                   "admin_password": "pw12345-2026"},
                              headers=auth(tok)).json()["tenant"]
     r = ctx.client.post("/api/identity/owner/billing",
                         json={"tenant_id": tenant["id"],

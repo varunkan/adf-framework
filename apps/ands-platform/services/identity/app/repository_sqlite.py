@@ -33,6 +33,9 @@ CREATE TABLE IF NOT EXISTS plans (
 CREATE TABLE IF NOT EXISTS overrides (
     tenant_id TEXT NOT NULL, feature TEXT NOT NULL, enabled INTEGER NOT NULL,
     PRIMARY KEY (tenant_id, feature));
+CREATE TABLE IF NOT EXISTS reset_codes (
+    email TEXT PRIMARY KEY, code_salt TEXT NOT NULL, code_hash TEXT NOT NULL,
+    expires_at TEXT NOT NULL);
 """
 
 _PUBLIC_USER = ("id", "tenant_id", "email", "role", "name", "created_at")
@@ -85,6 +88,27 @@ class SqliteIdentityRepository:
         row = self.db.fetchone("SELECT * FROM users WHERE id = ?", (user_id,))
         return dict(row) if row else None
 
+    def update_password(self, user_id, pw_salt, pw_hash) -> None:
+        self.db.execute(
+            "UPDATE users SET pw_salt = ?, pw_hash = ? WHERE id = ?",
+            (pw_salt, pw_hash, user_id))
+
+    # -- password reset codes -------------------------------------------------
+    def save_reset_code(self, email, code_salt, code_hash, expires_at) -> None:
+        self.db.execute(
+            "INSERT INTO reset_codes (email, code_salt, code_hash, expires_at) "
+            "VALUES (?, ?, ?, ?) ON CONFLICT(email) DO UPDATE SET "
+            "code_salt = excluded.code_salt, code_hash = excluded.code_hash, "
+            "expires_at = excluded.expires_at", (email, code_salt, code_hash,
+                                                 expires_at))
+
+    def get_reset_code(self, email) -> dict | None:
+        return self.db.fetchone(
+            "SELECT * FROM reset_codes WHERE email = ?", (email,))
+
+    def delete_reset_code(self, email) -> None:
+        self.db.execute("DELETE FROM reset_codes WHERE email = ?", (email,))
+
     def set_mfa(self, user_id, secret, enabled) -> None:
         self.db.execute(
             "UPDATE users SET mfa_secret = ?, mfa_enabled = ? WHERE id = ?",
@@ -111,6 +135,9 @@ class SqliteIdentityRepository:
 
     def delete_session(self, token) -> None:
         self.db.execute("DELETE FROM sessions WHERE token = ?", (token,))
+
+    def delete_sessions_for_user(self, user_id) -> None:
+        self.db.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
 
     def delete_sessions_for_tenant(self, tenant_id) -> None:
         self.db.execute("DELETE FROM sessions WHERE tenant_id = ?", (tenant_id,))

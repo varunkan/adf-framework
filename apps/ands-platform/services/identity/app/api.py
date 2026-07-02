@@ -9,7 +9,7 @@ from ands_shared import ProblemError, create_app
 from . import rbac
 from .models import (AssignPlanIn, AuthorizeIn, BillingIn, CreatePlanIn,
                      LoginIn, MfaVerifyIn, OverrideIn, ProvisionTenantIn,
-                     SignupIn)
+                     ResetCompleteIn, ResetRequestIn, SignupIn)
 from .service import IdentityService
 
 
@@ -40,6 +40,14 @@ def build_app(service: IdentityService) -> FastAPI:
     @router.get("/auth/me")
     def me(authorization: str = Header(default="")):
         return service.me(_bearer(authorization))
+
+    @router.post("/auth/reset/request")
+    def reset_request(body: ResetRequestIn):
+        return service.request_reset(body.model_dump())
+
+    @router.post("/auth/reset/complete")
+    def reset_complete(body: ResetCompleteIn):
+        return service.complete_reset(body.model_dump())
 
     # -- MFA (SAAS-NFR-003) --------------------------------------------
     @router.post("/auth/mfa/enroll")

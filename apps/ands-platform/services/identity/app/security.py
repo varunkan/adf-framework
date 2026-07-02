@@ -43,6 +43,12 @@ def new_session_token() -> str:
     return secrets.token_urlsafe(32)
 
 
+def new_reset_code() -> str:
+    """8-digit one-time password-reset code (easy to type, 10^8 space,
+    single-use with a 15-minute expiry enforced by the service)."""
+    return f"{secrets.randbelow(10**8):08d}"
+
+
 # -- TOTP MFA (RFC 6238, stdlib only) ----------------------------------------
 def new_totp_secret() -> str:
     """A base32 TOTP shared secret (no padding, for authenticator apps)."""

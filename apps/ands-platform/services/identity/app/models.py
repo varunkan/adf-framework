@@ -23,6 +23,16 @@ class MfaVerifyIn(BaseModel):
     code: str = ""
 
 
+class ResetRequestIn(BaseModel):
+    email: str = ""
+
+
+class ResetCompleteIn(BaseModel):
+    email: str = ""
+    code: str = ""
+    new_password: str = ""
+
+
 class ProvisionTenantIn(BaseModel):
     name: str = ""
     plan_id: str = ""

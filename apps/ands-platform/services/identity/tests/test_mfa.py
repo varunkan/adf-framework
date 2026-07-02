@@ -17,7 +17,7 @@ def test_totp_roundtrip_and_skew_window():
 
 def _signup_token(client, email="ra@acme.io"):
     return client.post("/api/identity/auth/signup",
-                       json={"email": email, "password": "pw12345",
+                       json={"email": email, "password": "pw12345-2026",
                              "company_name": "Acme"}).json()
 
 
@@ -45,12 +45,12 @@ def test_login_requires_mfa_once_enabled(client):
                 headers=auth(body["token"]))
     # login without a code is now rejected
     no_code = client.post("/api/identity/auth/login",
-                          json={"email": "ra@acme.io", "password": "pw12345",
+                          json={"email": "ra@acme.io", "password": "pw12345-2026",
                                 "tenant_id": tenant_id})
     assert no_code.status_code == 401 and no_code.json()["rule"] == "mfa_required"
     # login with a valid code succeeds
     ok = client.post("/api/identity/auth/login",
-                     json={"email": "ra@acme.io", "password": "pw12345",
+                     json={"email": "ra@acme.io", "password": "pw12345-2026",
                            "tenant_id": tenant_id,
                            "mfa_code": security.totp_code(enrol["secret"])})
     assert ok.status_code == 200 and ok.json()["token"]

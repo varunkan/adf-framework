@@ -56,6 +56,15 @@ export const auth = {
     return r;
   },
   me: () => j<Principal>("/auth/me"),
+  resetRequest: (email: string) =>
+    j<{ ok: boolean; message: string; reset_code?: string; delivery?: string }>(
+      "/auth/reset/request",
+      { method: "POST", body: JSON.stringify({ email }) }),
+  resetComplete: (email: string, code: string, newPassword: string) =>
+    j<{ ok: boolean; accounts_updated: number }>(
+      "/auth/reset/complete",
+      { method: "POST",
+        body: JSON.stringify({ email, code, new_password: newPassword }) }),
   logout: async () => {
     try { await j("/auth/logout", { method: "POST" }); } catch {}
     try { localStorage.removeItem(TENANT_NAME_KEY); } catch {}

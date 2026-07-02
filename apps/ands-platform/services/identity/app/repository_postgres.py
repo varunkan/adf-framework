@@ -30,6 +30,9 @@ CREATE TABLE IF NOT EXISTS plans (
 CREATE TABLE IF NOT EXISTS overrides (
     tenant_id TEXT NOT NULL, feature TEXT NOT NULL, enabled INTEGER NOT NULL,
     PRIMARY KEY (tenant_id, feature));
+CREATE TABLE IF NOT EXISTS reset_codes (
+    email TEXT PRIMARY KEY, code_salt TEXT NOT NULL, code_hash TEXT NOT NULL,
+    expires_at TEXT NOT NULL);
 """
 
 _PUBLIC_USER = ("id", "tenant_id", "email", "role", "name", "created_at")
@@ -104,6 +107,25 @@ class PostgresIdentityRepository:
         self._exec("UPDATE users SET mfa_secret = %s, mfa_enabled = %s "
                    "WHERE id = %s", (secret, 1 if enabled else 0, user_id))
 
+    def update_password(self, user_id, pw_salt, pw_hash):
+        self._exec("UPDATE users SET pw_salt = %s, pw_hash = %s WHERE id = %s",
+                   (pw_salt, pw_hash, user_id))
+
+    # password reset codes
+    def save_reset_code(self, email, code_salt, code_hash, expires_at):
+        self._exec(
+            "INSERT INTO reset_codes (email, code_salt, code_hash, expires_at) "
+            "VALUES (%s,%s,%s,%s) ON CONFLICT (email) DO UPDATE SET "
+            "code_salt = EXCLUDED.code_salt, code_hash = EXCLUDED.code_hash, "
+            "expires_at = EXCLUDED.expires_at",
+            (email, code_salt, code_hash, expires_at))
+
+    def get_reset_code(self, email):
+        return self._one("SELECT * FROM reset_codes WHERE email = %s", (email,))
+
+    def delete_reset_code(self, email):
+        self._exec("DELETE FROM reset_codes WHERE email = %s", (email,))
+
     def list_users(self, tenant_id):
         return [self._public(r) for r in self._all(
             "SELECT * FROM users WHERE tenant_id = %s ORDER BY created_at",
@@ -122,6 +144,9 @@ class PostgresIdentityRepository:
 
     def delete_session(self, token):
         self._exec("DELETE FROM sessions WHERE token = %s", (token,))
+
+    def delete_sessions_for_user(self, user_id):
+        self._exec("DELETE FROM sessions WHERE user_id = %s", (user_id,))
 
     def delete_sessions_for_tenant(self, tenant_id):
         self._exec("DELETE FROM sessions WHERE tenant_id = %s", (tenant_id,))

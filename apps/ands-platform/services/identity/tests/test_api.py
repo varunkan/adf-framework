@@ -8,7 +8,7 @@ from tests.conftest import auth, owner_token
 # -- self-serve auth ---------------------------------------------------------
 def test_signup_creates_tenant_admin_and_session(client):
     r = client.post("/api/identity/auth/signup",
-                    json={"email": "ra@acme.io", "password": "pw12345",
+                    json={"email": "ra@acme.io", "password": "pw12345-2026",
                           "company_name": "Acme Generics"})
     assert r.status_code == 201
     body = r.json()
@@ -21,17 +21,17 @@ def test_signup_creates_tenant_admin_and_session(client):
 
 
 def test_signup_publishes_tenant_provisioned(ctx):
-    ctx.service.signup({"email": "ra@acme.io", "password": "pw12345",
+    ctx.service.signup({"email": "ra@acme.io", "password": "pw12345-2026",
                         "company_name": "Acme"})
     assert len(ctx.bus.events_of(EventType.TENANT_PROVISIONED)) == 1
 
 
 def test_login_wrong_password_401(client):
     client.post("/api/identity/auth/signup",
-                json={"email": "ra@acme.io", "password": "pw12345",
+                json={"email": "ra@acme.io", "password": "pw12345-2026",
                       "company_name": "Acme"})
     tid = client.post("/api/identity/auth/signup",
-                      json={"email": "x@b.io", "password": "pw12345",
+                      json={"email": "x@b.io", "password": "pw12345-2026",
                             "company_name": "B"}).json()["tenant"]["id"]
     r = client.post("/api/identity/auth/login",
                     json={"email": "x@b.io", "password": "nope",
@@ -45,7 +45,7 @@ def test_me_without_token_401(client):
 
 def test_logout_invalidates_session(client):
     token = client.post("/api/identity/auth/signup",
-                        json={"email": "ra@acme.io", "password": "pw12345",
+                        json={"email": "ra@acme.io", "password": "pw12345-2026",
                               "company_name": "Acme"}).json()["token"]
     client.post("/api/identity/auth/logout", headers=auth(token))
     assert client.get("/api/identity/auth/me",
@@ -55,7 +55,7 @@ def test_logout_invalidates_session(client):
 # -- entitlements ------------------------------------------------------------
 def test_new_tenant_has_all_features(client):
     body = client.post("/api/identity/auth/signup",
-                       json={"email": "ra@acme.io", "password": "pw12345",
+                       json={"email": "ra@acme.io", "password": "pw12345-2026",
                              "company_name": "Acme"}).json()
     ent = client.get("/api/identity/entitlements",
                      params={"tenant_id": body["tenant"]["id"]},
@@ -66,10 +66,10 @@ def test_new_tenant_has_all_features(client):
 
 def test_entitlements_cross_tenant_denied(client):
     a = client.post("/api/identity/auth/signup",
-                    json={"email": "a@a.io", "password": "pw12345",
+                    json={"email": "a@a.io", "password": "pw12345-2026",
                           "company_name": "A"}).json()
     b = client.post("/api/identity/auth/signup",
-                    json={"email": "b@b.io", "password": "pw12345",
+                    json={"email": "b@b.io", "password": "pw12345-2026",
                           "company_name": "B"}).json()
     r = client.get("/api/identity/entitlements",
                    params={"tenant_id": a["tenant"]["id"]},
@@ -83,7 +83,7 @@ def test_owner_provisions_tenant_and_lists(ctx):
     r = ctx.client.post("/api/identity/owner/tenants",
                         json={"name": "BigPharma",
                               "admin_email": "admin@big.io",
-                              "admin_password": "pw12345"},
+                              "admin_password": "pw12345-2026"},
                         headers=auth(tok))
     assert r.status_code == 201
     tenants = ctx.client.get("/api/identity/owner/tenants",
@@ -94,7 +94,7 @@ def test_owner_provisions_tenant_and_lists(ctx):
 def test_owner_endpoints_forbidden_without_owner(client):
     # a tenant-admin token must not reach the owner console
     tok = client.post("/api/identity/auth/signup",
-                      json={"email": "ra@acme.io", "password": "pw12345",
+                      json={"email": "ra@acme.io", "password": "pw12345-2026",
                             "company_name": "Acme"}).json()["token"]
     r = client.get("/api/identity/owner/tenants", headers=auth(tok))
     assert r.status_code == 403
@@ -110,7 +110,7 @@ def test_owner_creates_plan_assigns_and_overrides(ctx):
     assert plan["id"] == "starter"
     tenant = ctx.client.post("/api/identity/owner/tenants",
                              json={"name": "T", "admin_email": "t@t.io",
-                                   "admin_password": "pw12345"},
+                                   "admin_password": "pw12345-2026"},
                              headers=auth(tok)).json()["tenant"]
     ctx.client.post("/api/identity/owner/tenants/assign-plan",
                     json={"tenant_id": tenant["id"], "plan_id": "starter"},

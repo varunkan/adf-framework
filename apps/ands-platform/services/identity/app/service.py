@@ -24,6 +24,18 @@ def _email(v) -> str:
     return _s(v).lower()
 
 
+PASSWORD_POLICY = ("Password must be at least 10 characters and include "
+                   "both letters and numbers.")
+RESET_CODE_TTL = timedelta(minutes=15)
+
+
+def _check_password_policy(password: str) -> None:
+    pw = password or ""
+    if (len(pw) < 10 or not any(c.isalpha() for c in pw)
+            or not any(c.isdigit() for c in pw)):
+        raise ProblemError(422, PASSWORD_POLICY, rule="password_policy")
+
+
 class IdentityService:
     def __init__(self, repo: IdentityRepository, bus,
                  *, source: str = "identity") -> None:
@@ -65,6 +77,7 @@ class IdentityService:
     def signup(self, data: dict) -> dict:
         """Self-serve: create a tenant (trial, all-features) + its admin user +
         a session (REQ-077)."""
+        _check_password_policy(_s(data.get("password")))
         company = _s(data.get("company_name")) or "New tenant"
         tenant_id = new_id()
         tenant = self.repo.create_tenant(
@@ -161,6 +174,46 @@ class IdentityService:
     def logout(self, token: str) -> dict:
         self.repo.delete_session(_s(token))
         return {"ok": True}
+
+    # -- password reset -------------------------------------------------------
+    # No SMTP in this deployment: the code is returned in the response, and the
+    # UI labels it as delivered on-screen in this environment (would be email
+    # in production). Codes are one-time, hashed at rest, 15-minute expiry.
+    def request_reset(self, data: dict) -> dict:
+        email = _email(data.get("email"))
+        generic = {"ok": True,
+                   "message": "If that account exists, a reset code has been "
+                              "issued. Codes expire in 15 minutes."}
+        if not email or not self.repo.find_by_email_raw(email):
+            return generic  # never reveal whether an account exists
+        code = security.new_reset_code()
+        salt, code_hash = security.hash_password(code)
+        expires = (datetime.now(timezone.utc) + RESET_CODE_TTL).isoformat()
+        self.repo.save_reset_code(email, salt, code_hash, expires)
+        return {**generic, "delivery": "on-screen (no email in this "
+                "environment)", "reset_code": code}
+
+    def complete_reset(self, data: dict) -> dict:
+        email = _email(data.get("email"))
+        code = _s(data.get("code"))
+        bad = ProblemError(422, "invalid or expired reset code",
+                           rule="reset_code_invalid")
+        row = self.repo.get_reset_code(email)
+        if not row or not code:
+            raise bad
+        if datetime.fromisoformat(row["expires_at"]) < datetime.now(timezone.utc):
+            self.repo.delete_reset_code(email)
+            raise bad
+        if not security.verify_password(code, row["code_salt"], row["code_hash"]):
+            raise bad
+        _check_password_policy(_s(data.get("new_password")))
+        users = self.repo.find_by_email_raw(email)
+        salt, pw_hash = security.hash_password(_s(data.get("new_password")))
+        for u in users:  # same email across workspaces = same person
+            self.repo.update_password(u["id"], salt, pw_hash)
+            self.repo.delete_sessions_for_user(u["id"])
+        self.repo.delete_reset_code(email)  # one-time use
+        return {"ok": True, "accounts_updated": len(users)}
 
     # -- owner control plane ------------------------------------------------
     def _require_owner(self, token: str) -> dict:
