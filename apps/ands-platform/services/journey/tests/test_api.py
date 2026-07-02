@@ -214,3 +214,73 @@ def test_noc_moves_to_decision(client):
     tv = client.get(f"/api/journey/{sid}/track",
                     params={"as_of": "2026-09-02"}).json()
     assert tv["phase"]["phase"] == "decision" and tv["timers"] == []
+
+
+# -- tenant isolation (CRO reg-director rejection) --------------------------
+# Every guided session carries dossier_id, product, applicant + company_id, so
+# a session started by tenant A must be invisible + 404 to tenant B. When the
+# X-Tenant-Id header is absent (in-process mesh / existing tests) the store
+# stays UNSCOPED so cross-service integration keeps working.
+_A = {"X-Tenant-Id": "tenant-a"}
+_B = {"X-Tenant-Id": "tenant-b"}
+
+
+def test_session_started_by_a_is_invisible_and_404s_to_b(client):
+    # A starts a guided session (the tenant comes from the header).
+    sid = client.post("/api/journey/start",
+                      json={"title": "Acme secret"}, headers=_A).json()["id"]
+
+    # B's list never sees A's session; A's list does.
+    b_list = client.get("/api/journey/sessions", headers=_B).json()
+    assert all(s["id"] != sid for s in b_list["sessions"])
+    a_list = client.get("/api/journey/sessions", headers=_A).json()
+    assert any(s["id"] == sid for s in a_list["sessions"])
+
+    # B cannot read A's session (404, never 403 — don't confirm existence).
+    assert client.get(f"/api/journey/{sid}", headers=_B).status_code == 404
+    assert client.get(f"/api/journey/{sid}", headers=_A).status_code == 200
+
+    # B cannot advance / track / place on A's session either.
+    assert client.post(f"/api/journey/{sid}/advance",
+                       json={"step": "orient", "data": {}},
+                       headers=_B).status_code == 404
+    assert client.post(f"/api/journey/{sid}/track/notice",
+                       json={"type": "SDN", "date": "2026-06-01"},
+                       headers=_B).status_code == 404
+    assert client.post(f"/api/journey/{sid}/content/place",
+                       json={"slot_key": "m1_cover_letter", "doc": "c.pdf"},
+                       headers=_B).status_code == 404
+    assert client.post("/api/journey/intake",
+                       json={"session_id": sid, "drug_product": "spy"},
+                       headers=_B).status_code == 404
+
+
+def test_no_header_stays_unscoped(client):
+    # The in-process mesh passes no header — every session stays visible.
+    a = client.post("/api/journey/start", json={}, headers=_A).json()["id"]
+    b = client.post("/api/journey/start", json={}, headers=_B).json()["id"]
+    ids = {s["id"] for s in client.get("/api/journey/sessions").json()["sessions"]}
+    assert {a, b} <= ids
+    # and an unscoped get reaches either tenant's session.
+    assert client.get(f"/api/journey/{a}").status_code == 200
+    assert client.get(f"/api/journey/{b}").status_code == 200
+
+
+def test_header_wins_over_body_tenant(client):
+    # The authenticated header is authoritative — a spoofed body tenant_id
+    # cannot re-home the session to another workspace.
+    sid = client.post("/api/journey/start",
+                      json={"tenant_id": "tenant-b"}, headers=_A).json()["id"]
+    assert client.get(f"/api/journey/{sid}", headers=_B).status_code == 404
+    assert client.get(f"/api/journey/{sid}", headers=_A).status_code == 200
+
+
+def test_unowned_session_claimed_by_first_advancing_tenant(client):
+    # A session started with no header is unowned; the first advance that
+    # carries a tenant stamps ownership, and thereafter another tenant 404s.
+    sid = client.post("/api/journey/start", json={}).json()["id"]
+    assert client.post(f"/api/journey/{sid}/advance",
+                       json={"step": "orient", "data": {}},
+                       headers=_A).status_code == 200
+    assert client.get(f"/api/journey/{sid}", headers=_B).status_code == 404
+    assert client.get(f"/api/journey/{sid}", headers=_A).status_code == 200

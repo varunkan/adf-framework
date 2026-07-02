@@ -92,11 +92,25 @@ class JourneyService:
             "signals": signals,
         }
 
-    def _load(self, session_id: str) -> dict:
+    def _load(self, session_id: str, tenant_id: str | None = None) -> dict:
         session = self.repo.get(_s(session_id))
         if session is None:
             raise ProblemError(404, "no such guided session", detail=session_id)
+        self._tenant_guard(session, tenant_id)
         return session
+
+    def _tenant_guard(self, session: dict, tenant_id: str | None) -> None:
+        """Enforce per-session tenant ownership. When a tenant context is
+        supplied (the X-Tenant-Id header from the web proxy), a session owned by
+        a DIFFERENT tenant — or by no tenant at all — is invisible: raise 404
+        (not 403, to avoid confirming existence). When absent (the in-process
+        mesh / tests) access stays UNSCOPED."""
+        if not tenant_id:
+            return
+        owner = _s(session.get("tenant_id"))
+        if owner != _s(tenant_id):
+            raise ProblemError(404, "no such guided session",
+                               detail=session.get("id", ""))
 
     # -- catalog (static, for the UI to render the whole spine) -------------
     def catalog(self) -> dict:
@@ -108,14 +122,18 @@ class JourneyService:
         }
 
     # -- lifecycle ----------------------------------------------------------
-    def start(self, data: dict) -> dict:
+    def start(self, data: dict, tenant_id: str | None = None) -> dict:
         data = data or {}
         session_id = new_id()
         signals: dict = {"oriented": False}
+        # The authenticated header is authoritative — it stamps ownership so a
+        # spoofed body tenant_id can never re-home the session. Absent (mesh)
+        # the session is unowned and stays unscoped.
+        owner = _s(tenant_id) or _s(data.get("tenant_id"))
         session = {
             "id": session_id,
             "title": _s(data.get("title")),
-            "tenant_id": _s(data.get("tenant_id")),
+            "tenant_id": owner,
             "signals": signals,
             "intake": None,
         }
@@ -127,11 +145,11 @@ class JourneyService:
         self._emit("journey.started", session)
         return self._view(session)
 
-    def get(self, session_id: str) -> dict:
-        return self._view(self._load(session_id))
+    def get(self, session_id: str, tenant_id: str | None = None) -> dict:
+        return self._view(self._load(session_id, tenant_id))
 
-    def list_sessions(self) -> dict:
-        sessions = self.repo.all()
+    def list_sessions(self, tenant_id: str | None = None) -> dict:
+        sessions = self.repo.all(_s(tenant_id) or None)
         return {"sessions": [{
             "id": sid,
             "title": s.get("title") or "New submission",
@@ -139,10 +157,11 @@ class JourneyService:
         } for sid, s in sessions.items()], "count": len(sessions)}
 
     # -- 'tell me about your drug' (decision support) -----------------------
-    def intake(self, answers: dict, session_id: str = "") -> dict:
+    def intake(self, answers: dict, session_id: str = "",
+               tenant_id: str | None = None) -> dict:
         assessment = drug_intake.assess(answers or {})
         if _s(session_id):
-            session = self._load(session_id)
+            session = self._load(session_id, tenant_id)
             session["intake"] = assessment
             self._apply_intake(session, answers or {})
             self.repo.update(session["id"], session)
@@ -198,7 +217,19 @@ class JourneyService:
     # -- advance the journey (perform a step's primary action) --------------
     def advance(self, session_id: str, step: str, data: dict,
                 tenant_id: str | None = None) -> dict:
-        session = self._load(session_id)
+        # advance may CLAIM an unowned session for the first advancing tenant
+        # (per the contract: persist tenant_id on first advance if missing), so
+        # we load raw and only 404 on a FOREIGN owner — not on an unowned row.
+        session = self.repo.get(_s(session_id))
+        if session is None:
+            raise ProblemError(404, "no such guided session", detail=session_id)
+        owner = _s(session.get("tenant_id"))
+        if _s(tenant_id):
+            if owner and owner != _s(tenant_id):
+                raise ProblemError(404, "no such guided session",
+                                   detail=session_id)
+            if not owner:
+                session["tenant_id"] = _s(tenant_id)   # first advance claims it
         step = _s(step)
         if step not in _STEP_KEYS:
             raise ProblemError(422, "unknown journey step", detail=step)
@@ -367,8 +398,8 @@ class JourneyService:
 
     # -- content slots (drag-drop document placement onto Module 1-5) -------
     def place_document(self, session_id: str, slot_key: str, doc,
-                       languages=None) -> dict:
-        session = self._load(session_id)
+                       languages=None, tenant_id: str | None = None) -> dict:
+        session = self._load(session_id, tenant_id)
         signals = session.setdefault("signals", {})
         slots = signals.get("content_slots") or content_slots.plan(
             cs_be_only=bool(signals.get("cs_be_only")))
@@ -386,8 +417,9 @@ class JourneyService:
     def _tracking(self, signals: dict) -> dict:
         return signals.setdefault("tracking", {"notices": [], "paused": []})
 
-    def log_notice(self, session_id: str, notice: dict) -> dict:
-        session = self._load(session_id)
+    def log_notice(self, session_id: str, notice: dict,
+                   tenant_id: str | None = None) -> dict:
+        session = self._load(session_id, tenant_id)
         tr = self._tracking(session.setdefault("signals", {}))
         tr["notices"].append({"type": _s((notice or {}).get("type")),
                               "date": _s((notice or {}).get("date"))})
@@ -396,8 +428,9 @@ class JourneyService:
                    notice_type=_s((notice or {}).get("type")))
         return self._view(session)
 
-    def set_pause(self, session_id: str, ntype: str, paused: bool = True) -> dict:
-        session = self._load(session_id)
+    def set_pause(self, session_id: str, ntype: str, paused: bool = True,
+                  tenant_id: str | None = None) -> dict:
+        session = self._load(session_id, tenant_id)
         tr = self._tracking(session.setdefault("signals", {}))
         current = set(tr.get("paused") or [])
         current.add(_s(ntype)) if paused else current.discard(_s(ntype))
@@ -405,8 +438,9 @@ class JourneyService:
         self.repo.update(session["id"], session)
         return tr
 
-    def track_view(self, session_id: str, as_of: str) -> dict:
-        session = self._load(session_id)
+    def track_view(self, session_id: str, as_of: str,
+                   tenant_id: str | None = None) -> dict:
+        session = self._load(session_id, tenant_id)
         tr = (session.get("signals") or {}).get("tracking") \
             or {"notices": [], "paused": []}
         return tracking.summarize(tr.get("notices") or [], _s(as_of),
