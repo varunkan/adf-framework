@@ -1,5 +1,6 @@
 """eCTD technical validator (REQ-107) — over an assembled dossier model."""
 
+import re
 import xml.etree.ElementTree as ET
 
 from app import assembly, ectd_validation
@@ -135,3 +136,198 @@ def test_non_pdf_named_documents_are_ignored():
         d, documents={"index.xml": b"<root/>"})
     assert res["passed"] is True
     assert "pdf_header" not in {e["rule"] for e in res["errors"]}
+
+
+# ---------------------------------------------------------------------------
+# HC v5.3-style rule ids (CA-E-nnnn / CA-W-nnnn) + ported backbone checks
+# ---------------------------------------------------------------------------
+
+RULE_ID_RE = re.compile(r"CA-[EW]-\d{4}")
+
+# a structurally sound ca-regional payload for backbone-level tests
+GOOD_CA = "<ca-regional><dossier-id>e123456</dossier-id></ca-regional>"
+
+
+def test_every_finding_carries_a_stable_rule_id():
+    d = _clean_dossier()
+    d["sequences"][0]["leaves"][0]["href"] = "Bad Folder/File.PDF"
+    d["sequences"][0]["leaves"][0]["checksum"] = ""
+    res = ectd_validation.validate(
+        d, documents={"x.pdf": b"nope /Encrypt"})
+    findings = res["errors"] + res["warnings"]
+    assert findings
+    for f in findings:
+        assert RULE_ID_RE.fullmatch(f["rule_id"]), f
+    # severity is encoded in the id: errors are E, warnings are W
+    assert all(e["rule_id"].startswith("CA-E-") for e in res["errors"])
+    assert all(w["rule_id"].startswith("CA-W-") for w in res["warnings"])
+
+
+def test_inventory_rule_ids_pinned():
+    d = _clean_dossier()
+    d["sequences"][0]["leaves"][0]["href"] = ""
+    d["sequences"][0]["leaves"][0]["checksum"] = ""
+    dup = dict(d["sequences"][0]["leaves"][0])
+    d["sequences"][0]["leaves"].append(dup)
+    res = ectd_validation.validate(d)
+    by_rule = {e["rule"]: e["rule_id"] for e in res["errors"]}
+    assert by_rule["href_required"] == "CA-E-1001"
+    assert by_rule["checksum_required"] == "CA-E-1002"
+    assert by_rule["duplicate_leaf_id"] == "CA-E-1003"
+
+
+def test_checksum_not_md5_hex_fails():
+    d = _clean_dossier()
+    d["sequences"][0]["leaves"][0]["checksum"] = "not-a-digest"
+    res = ectd_validation.validate(d)
+    assert res["passed"] is False
+    err = next(e for e in res["errors"] if e["rule"] == "checksum_not_md5")
+    assert err["rule_id"] == "CA-E-1004"
+    assert err["leaf"] == "pm"
+
+
+def test_new_operation_with_prior_reference_fails():
+    d = _clean_dossier()
+    src = d["sequences"][0]["leaves"][0]
+    d["sequences"].append({"sequence": "0001", "leaves": [
+        {**src, "leaf_id": "pm2", "operation": "new",
+         "modified_leaf": "pm", "sequence": "0001"}]})
+    res = ectd_validation.validate(d)
+    assert res["passed"] is False
+    err = next(e for e in res["errors"] if e["rule"] == "new_has_prior")
+    assert err["rule_id"] == "CA-E-2005"
+    assert err["leaf"] == "pm2"
+
+
+def test_lifecycle_rule_ids_pinned():
+    d = _clean_dossier()
+    src = d["sequences"][0]["leaves"][0]
+    d["sequences"].append({"sequence": "0001", "leaves": [
+        {**src, "leaf_id": "pm2", "operation": "replace",
+         "modified_leaf": "ghost", "sequence": "0001"}]})
+    res = ectd_validation.validate(d)
+    err = next(e for e in res["errors"] if e["rule"] == "prior_leaf_unknown")
+    assert err["rule_id"] == "CA-E-2004"
+
+
+def test_href_naming_rule_ids_pinned():
+    d = _clean_dossier()
+    d["sequences"][0]["leaves"][0]["href"] = "M1/CA/Cover Letter.pdf"
+    res = ectd_validation.validate(d)
+    ids = {f["rule"]: f["rule_id"]
+           for f in res["errors"] + res["warnings"]}
+    assert ids["href_not_lowercase"] == "CA-E-3001"
+    assert ids["href_has_space"] == "CA-E-3002"
+    assert ids["href_module_folder"] == "CA-W-3003"
+
+
+def test_non_numeric_sequence_fails():
+    d = _clean_dossier()
+    d["sequences"].append({"sequence": "00ab", "leaves": []})
+    res = ectd_validation.validate(d)
+    assert res["passed"] is False
+    err = next(e for e in res["errors"]
+               if e["rule"] == "sequence_not_numeric")
+    assert err["rule_id"] == "CA-E-4001"
+    assert err["leaf"] == "00ab"
+
+
+def test_sequence_wrong_width_fails():
+    d = _clean_dossier()
+    d["sequences"].append({"sequence": "00000", "leaves": []})
+    res = ectd_validation.validate(d)
+    assert res["passed"] is False
+    err = next(e for e in res["errors"]
+               if e["rule"] == "sequence_wrong_width")
+    assert err["rule_id"] == "CA-E-4002"
+
+
+def test_duplicate_sequence_number_fails():
+    d = _clean_dossier()
+    d["sequences"].append({"sequence": "0000", "leaves": []})
+    res = ectd_validation.validate(d)
+    assert res["passed"] is False
+    err = next(e for e in res["errors"]
+               if e["rule"] == "sequence_duplicate")
+    assert err["rule_id"] == "CA-E-4003"
+    assert err["leaf"] == "0000"
+
+
+def test_sequence_gap_is_a_warning_only():
+    d = _clean_dossier()
+    assembly.add_leaf(d, "0002", {"leaf_id": "cl", "operation": "new",
+                                  "heading": "1.0", "title": "Cover"})
+    res = ectd_validation.validate(d)
+    warn = next(w for w in res["warnings"]
+                if w["rule"] == "sequence_not_contiguous")
+    assert warn["rule_id"] == "CA-W-4004"
+    assert res["passed"] is True
+
+
+def test_first_sequence_not_0000_warns():
+    d = assembly.new_dossier("e777777")
+    assembly.add_leaf(d, "0001", {"leaf_id": "pm", "operation": "new",
+                                  "heading": "1.3.1", "title": "PM"})
+    res = ectd_validation.validate(d)
+    warn = next(w for w in res["warnings"]
+                if w["rule"] == "sequence_start_not_0000")
+    assert warn["rule_id"] == "CA-W-4005"
+    assert res["passed"] is True
+
+
+def test_backbone_xml_clean_pair_has_no_findings():
+    d = _clean_dossier()
+    backbone = assembly.build_outline_view(d, "0000")["backbone"]
+    findings = ectd_validation.validate_backbone_xml(
+        backbone["index.xml"], backbone["ca-regional.xml"])
+    assert findings == []
+
+
+def test_backbone_xml_index_root_is_pinned():
+    findings = ectd_validation.validate_backbone_xml("<wrong/>", GOOD_CA)
+    err = next(f for f in findings if f["rule"] == "index_root_unexpected")
+    assert err["rule_id"] == "CA-E-5002"
+
+
+def test_backbone_xml_incomplete_leaf_flagged():
+    index = ('<ectd-index dossier-id="e123456" sequence="0000">'
+             '<leaf id="pm" href="m1/ca/pm.pdf"/></ectd-index>')
+    findings = ectd_validation.validate_backbone_xml(index, GOOD_CA)
+    err = next(f for f in findings if f["rule"] == "index_leaf_incomplete")
+    assert err["rule_id"] == "CA-E-5003"
+    assert err["leaf"] == "pm"
+
+
+def test_backbone_xml_missing_admin_attrs_flagged():
+    findings = ectd_validation.validate_backbone_xml("<ectd-index/>", GOOD_CA)
+    admin = [f for f in findings if f["rule"] == "index_admin_missing"]
+    # both the dossier-id and the sequence identification are required
+    assert len(admin) == 2
+    assert all(f["rule_id"] == "CA-E-5004" for f in admin)
+
+
+def test_backbone_xml_ca_regional_structure():
+    index = '<ectd-index dossier-id="e123456" sequence="0000"/>'
+    bad_root = ectd_validation.validate_backbone_xml(index, "<hcsc/>")
+    assert any(f["rule"] == "ca_root_unexpected" and
+               f["rule_id"] == "CA-E-6001" for f in bad_root)
+    no_id = ectd_validation.validate_backbone_xml(index, "<ca-regional/>")
+    assert any(f["rule"] == "ca_dossier_id_missing" and
+               f["rule_id"] == "CA-E-6002" for f in no_id)
+
+
+def test_backbone_xml_malformed_is_flagged_per_document():
+    findings = ectd_validation.validate_backbone_xml("<oops", "<ca-regional")
+    mal = [f for f in findings if f["rule"] == "backbone_malformed"]
+    assert len(mal) == 2
+    assert all(f["rule_id"] == "CA-E-5001" for f in mal)
+
+
+def test_pdf_findings_carry_rule_ids():
+    d = _clean_dossier()
+    res = ectd_validation.validate(
+        d, documents={"a.pdf": b"not a pdf",
+                      "b.pdf": b"%PDF-1.7 body /Encrypt 5 0 R"})
+    ids = {e["rule"]: e["rule_id"] for e in res["errors"]}
+    assert ids["pdf_header"] == "CA-E-7001"
+    assert ids["pdf_encrypted"] == "CA-E-7002"
