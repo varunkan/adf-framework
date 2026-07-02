@@ -147,7 +147,8 @@ export const dossierApi = {
         } else {
           let detail = `${xhr.status}`;
           try {
-            detail = JSON.parse(xhr.responseText).detail || detail;
+            const b = JSON.parse(xhr.responseText);
+            detail = [b.title, b.detail].filter(Boolean).join(": ") || detail;
           } catch {}
           reject(new Error(detail));
         }

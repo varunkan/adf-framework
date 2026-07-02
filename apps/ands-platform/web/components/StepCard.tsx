@@ -34,7 +34,15 @@ export function StepCard({
   async function go(data?: Record<string, any>) {
     setLocalErr("");
     try {
-      await onAdvance(stage.key, data ?? form);
+      // What the inputs DISPLAY must be what we submit: the submission step's
+      // drug-product field pre-fills from journey signals, so an untouched
+      // field still has a visible value the user expects to count.
+      const sig = view.signals || {};
+      const seeded =
+        stage.key === "submission" && sig.drug_product
+          ? { drug_product: sig.drug_product, ...form }
+          : form;
+      await onAdvance(stage.key, data ?? seeded);
     } catch (e) {
       setLocalErr(String(e));
     }

@@ -154,3 +154,17 @@ def test_generate_on_upload_only_section_422(client):
     # 5.3.1 is upload-only (no generator)
     r = client.post(f"/api/dossier/ectd/{did}/section/5.3.1/generate", json={})
     assert r.status_code == 422
+
+
+def test_upload_rejects_extension_not_in_section_formats(client):
+    """The dropzone accept= filter is client-side only — the service must
+    enforce the section's declared formats (HC requires PDF leaves)."""
+    did = _dossier(client)
+    r = client.post(f"/api/dossier/ectd/{did}/section/1.5/upload",
+                    files={"file": ("notes.txt", b"plain text", "text/plain")})
+    assert r.status_code == 422
+    assert r.json()["rule"] == "file_format_invalid"
+    # a PDF is still accepted
+    r = client.post(f"/api/dossier/ectd/{did}/section/1.5/upload",
+                    files={"file": ("ok.pdf", b"%PDF-1.4 x", "application/pdf")})
+    assert r.status_code == 200

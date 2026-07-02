@@ -276,6 +276,15 @@ class DossierService:
         if node["bilingual"] and lang not in ("en", "fr"):
             raise ProblemError(422, "a bilingual section requires lang 'en' or "
                                "'fr'", rule="lang_required")
+        # the dropzone's accept= only filters the file picker — drag-drop and
+        # direct API calls bypass it, so the accepted formats are enforced here
+        fmts = [str(f).lower() for f in (node.get("formats") or [])]
+        ext = self._ext(filename, default="")
+        if fmts and ext not in fmts:
+            raise ProblemError(
+                422, "this file type isn't accepted for this section",
+                rule="file_format_invalid",
+                detail=f"section {_s(section)} accepts: {', '.join(fmts)}")
         try:
             meta = self.store.put(_s(dossier_id), _s(section), filename,
                                   content_type, body, origin="uploaded", lang=lang)

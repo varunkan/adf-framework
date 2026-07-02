@@ -68,9 +68,6 @@ export function SectionPanel({ node }: { node: SectionNode }) {
           This section is not applicable for a generic ANDS on the comparative-BE
           pathway — nothing to file here.
         </div>
-      ) : node.section === "1.2.2" ? (
-        <FeesWidget fees={content?.fees} dossierId={dossierId}
-          onDone={setContent} />
       ) : affs.length === 0 ? (
         <div className="notice">
           This section is generated automatically as part of the eCTD backbone
@@ -79,6 +76,13 @@ export function SectionPanel({ node }: { node: SectionNode }) {
         </div>
       ) : (
         <>
+          {/* 1.2.2 carries BOTH the fee status flags and the uploaded fee
+              form document — the gate needs the document, so the widget
+              renders above the normal upload affordances, not instead. */}
+          {node.section === "1.2.2" && (
+            <FeesWidget fees={content?.fees} dossierId={dossierId}
+              onDone={setContent} />
+          )}
           <AttachedDocs node={node} />
 
           <div className="affordance-bar" role="tablist" aria-label="Actions">
@@ -362,8 +366,10 @@ function FeesWidget({
         {m.waived ? (
           <> — <b>waived</b> (first-ever submission).</>
         ) : m.reduction ? (
-          <> — small-business payable <b>${m.payable.toLocaleString()}</b>{" "}
-            ({Math.round(m.reduction * 100)}% reduction).</>
+          // m.reduction is a DOLLAR amount (see fees.small_business_mitigation)
+          <> — small-business payable{" "}
+            <b>${m.payable.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>{" "}
+            ({Math.round((m.reduction / fee.amount) * 100)}% reduction).</>
         ) : null}
         <div className="mut" style={{ fontSize: 12, marginTop: 4 }}>{m.note}</div>
       </div>

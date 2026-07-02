@@ -18,7 +18,14 @@ async function j<T>(path: string, init?: RequestInit): Promise<T> {
     let detail = `${res.status}`;
     try {
       const body = await res.json();
-      detail = body.detail || body.title || detail;
+      // problem+json: title is the human-readable part; append detail only
+      // when it adds information (it's often just a step/field keyword)
+      const title = body.title || "";
+      const extra = body.detail && body.detail !== title ? body.detail : "";
+      detail =
+        title && extra && !title.includes(extra)
+          ? `${title}: ${extra}`
+          : title || extra || detail;
     } catch {
       /* ignore */
     }
