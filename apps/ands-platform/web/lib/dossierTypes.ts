@@ -90,8 +90,8 @@ export interface FeesBlock {
 
 export interface ValidationResult {
   passed: boolean;
-  errors: { rule: string; message: string; leaf?: string }[];
-  warnings: { rule: string; message: string; leaf?: string }[];
+  errors: { rule: string; rule_id?: string; message: string; leaf?: string }[];
+  warnings: { rule: string; rule_id?: string; message: string; leaf?: string }[];
   checked: number;
 }
 
