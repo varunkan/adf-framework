@@ -60,6 +60,32 @@ export default function PortfolioPage() {
   const ready = items.filter((d) => d.gate?.complete).length;
   const blocked = items.length - ready;
 
+  // client-facing status export — PMs report to sponsors in spreadsheets
+  function exportStatus() {
+    const esc = (s: unknown) => `"${String(s ?? "").replace(/"/g, '""')}"`;
+    const rows = [
+      ["dossier_id", "product", "submission_type", "modules_passed",
+       "modules_applicable", "filing_gate", "fee_status"],
+      ...items.map((d) => {
+        const passed = d.tower.filter((t) => t.state === "pass").length;
+        const applic = d.tower.filter((t) => t.state !== "na").length;
+        const fee = fees[d.dossier_id];
+        return [d.dossier_id, d.title, d.submission_type, passed, applic,
+                d.gate?.complete ? "READY" : "in progress",
+                fee?.kind === "due"
+                  ? `due ${(fee as any).amount} ${(fee as any).currency}`
+                  : fee?.kind || ""];
+      }),
+    ];
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob(
+      [rows.map((r) => r.map(esc).join(",")).join("\n")],
+      { type: "text/csv" }));
+    a.download = "portfolio-status.csv";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
   return (
     <>
       <header className="topbar">
@@ -78,6 +104,13 @@ export default function PortfolioPage() {
           Every product dossier in your organisation — module progress, filing
           gate and fee status at a glance.
         </p>
+        {items.length > 0 && (
+          <div className="affordance-bar">
+            <button className="ghost" onClick={exportStatus}>
+              Export client status report (CSV)
+            </button>
+          </div>
+        )}
 
         {err && <div className="notice bad">{err}</div>}
 
