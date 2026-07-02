@@ -32,10 +32,19 @@ _DEFAULT_URL = "http://127.0.0.1:8012"  # local governance uvicorn
 # / Part-11 audit needs actor attribution). ContextVar = per-request safe.
 _actor: contextvars.ContextVar[str] = contextvars.ContextVar("audit_actor",
                                                              default="")
+# The acting TENANT for the current request — also set by the middleware from
+# X-Tenant-Id. Without it every event is written unowned (tenant_id='') and the
+# tenant-scoped audit read then hides it, leaving the Part-11 trail blank.
+_tenant: contextvars.ContextVar[str] = contextvars.ContextVar("audit_tenant",
+                                                              default="")
 
 
 def set_actor(email: str) -> None:
     _actor.set(str(email or ""))
+
+
+def set_tenant(tenant_id: str) -> None:
+    _tenant.set(str(tenant_id or ""))
 
 
 def _ingest_url() -> str:
@@ -65,7 +74,9 @@ def record(event_type: str, dossier_id: str, data: dict | None = None,
         payload = {"source": source,
                    "event_type": str(event_type or ""),
                    "dossier_id": str(dossier_id or ""),
-                   "tenant_id": str(tenant_id or ""),
+                   # tenant from the explicit arg, else the request contextvar,
+                   # so the event is owned and visible to the tenant's audit read
+                   "tenant_id": str(tenant_id or "") or _tenant.get(),
                    "actor": _actor.get(),
                    "data": dict(data or {})}
         threading.Thread(target=_post, args=(_ingest_url(), payload),

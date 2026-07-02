@@ -115,3 +115,25 @@ def test_cross_tenant_binder_leak_and_tamper_404(client):
     # owner keeps full access
     assert client.get(f"/api/dossier/archive/{binder_id}",
                       headers={"X-Tenant-Id": "tenant-a"}).status_code == 200
+
+
+def test_audit_hook_stamps_tenant_from_request(monkeypatch):
+    """Regression: audit events must carry the request's tenant so the
+    tenant-scoped audit read isn't permanently blank (round-4 finding)."""
+    from app import audit_hook
+    captured = {}
+    monkeypatch.setattr(audit_hook, "_post",
+                        lambda url, payload: captured.update(payload))
+    audit_hook.set_tenant("tenant-a")
+    audit_hook.set_actor("ra@a.example")
+    # fire synchronously by calling _post via a stubbed thread-less path
+    import threading
+    real = threading.Thread
+    monkeypatch.setattr(threading, "Thread",
+                        lambda target, args, daemon: type("T", (), {
+                            "start": lambda self: target(*args)})())
+    audit_hook.record("dossier.document_generated", "e111111",
+                      {"section": "1.0"})
+    assert captured["tenant_id"] == "tenant-a"
+    assert captured["actor"] == "ra@a.example"
+    audit_hook.set_tenant(""); audit_hook.set_actor("")

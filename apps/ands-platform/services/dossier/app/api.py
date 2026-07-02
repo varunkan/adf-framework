@@ -27,9 +27,12 @@ def build_app(service: DossierService) -> FastAPI:
 
     @app.middleware("http")
     async def _capture_actor(request, call_next):
-        # who is acting — from the web proxy's X-User-Email — so every audit
-        # event this request records carries actor attribution (Part-11).
+        # who + which tenant is acting — from the web proxy's X-User-Email /
+        # X-Tenant-Id — so every audit event this request records carries actor
+        # attribution AND is owned by the tenant (else the tenant-scoped audit
+        # read hides it and the Part-11 trail is blank).
         audit_hook.set_actor(request.headers.get("x-user-email", ""))
+        audit_hook.set_tenant(request.headers.get("x-tenant-id", ""))
         return await call_next(request)
 
     router = APIRouter(prefix="/api/dossier", tags=["dossier"])
