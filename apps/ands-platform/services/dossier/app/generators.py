@@ -106,27 +106,50 @@ def rep_application_form(ctx: dict) -> dict:
             "body": xml.encode("utf-8")}
 
 
-def patent_form_iv(ctx: dict) -> dict:
+def patent_form_v(ctx: dict) -> dict:
+    """The generic's s.5 declaration (Form V) under the PM(NOC) Regulations.
+
+    Form IV (Patent List) is the innovator's instrument; the generic FILES
+    Form V declaring, per patent/CSP on the Patent Register for the Canadian
+    Reference Product, ONE s.5 statement — and SERVES a Notice of Allegation
+    (NOA) when it alleges invalidity or non-infringement.
+    """
     patents = _g(ctx, 'patents', default="")
     if patents and patents != "—":
-        register = (
-            "Patents / Certificates of Supplementary Protection on the Patent "
-            "Register for the reference product that this ANDS addresses:\n"
+        declaration = (
+            "Under section 5 of the Patented Medicines (Notice of "
+            "Compliance)\n"
+            "Regulations the sponsor declares, in respect of EACH patent/CSP "
+            "on the\n"
+            "Patent Register for the Canadian Reference Product, ONE of the\n"
+            "following statements:\n"
+            "  - not addressed: no claim within the scope of s.5(1) is "
+            "engaged;\n"
+            "  - accepts expiry: no NOC is sought before the patent/CSP "
+            "expires;\n"
+            "  - alleges invalidity: the patent/CSP is invalid or void;\n"
+            "  - alleges non-infringement: no claim of the patent/CSP would "
+            "be infringed.\n\n"
             f"  Patent/CSP number(s): {patents}\n"
             f"  Expiry:               {_g(ctx, 'patent_expiry', default='[expiry date per patent]')}\n"
-            f"  Allegation (s.5):     {_g(ctx, 'allegation', default='[per patent: not infringed / invalid / accept expiry / no claim]')}\n")
+            f"  s.5 statement:        {_g(ctx, 'allegation', default='[one per patent: not addressed / accepts expiry / alleges invalidity / alleges non-infringement]')}\n\n"
+            "Where the statement alleges invalidity or non-infringement, "
+            "the sponsor\n"
+            "serves a Notice of Allegation (NOA) on the innovator under "
+            "s.5(3).\n")
     else:
-        register = ("The Patent Register contains no patents/CSPs for the "
-                    "Canadian Reference Product relevant to this submission "
-                    "(no s.5 allegation is required).\n")
+        declaration = (
+            "The Patent Register contains no patents/CSPs for the Canadian\n"
+            "Reference Product relevant to this submission; no s.5 statement\n"
+            "is required and no Notice of Allegation need be served.\n")
     body = (
         f"  Drug product:               {_g(ctx, 'drug_product', 'product', 'title')}\n"
         f"  Canadian Reference Product: {_g(ctx, 'crp_brand', 'reference_product')}\n"
         f"  Reference DIN:              {_g(ctx, 'crp_din')}\n\n"
-        + register +
-        "\nUnder the Patented Medicines (Notice of Compliance) Regulations the "
-        "sponsor certifies the above is complete and accurate.\n")
-    return _pdf("Patent List — Form IV", body, "patent-form-iv")
+        + declaration +
+        "\nThe sponsor declares the above is complete and accurate.\n")
+    return _pdf("Form V — Declaration Re: Patent List (PM(NOC) Regulations)",
+                body, "form-v-declaration")
 
 
 def ands_attestation(ctx: dict) -> dict:
@@ -194,7 +217,10 @@ def cs_be(ctx: dict) -> dict:
 GENERATORS = {
     "cover_letter": cover_letter,
     "rep_application_form": rep_application_form,
-    "patent_form_iv": patent_form_iv,
+    "patent_form_v": patent_form_v,
+    # Legacy alias: section states stored before the Form IV -> Form V
+    # correction keep resolving (the section tree now emits patent_form_v).
+    "patent_form_iv": patent_form_v,
     "ands_attestation": ands_attestation,
     "qos_ce_scaffold": qos_ce_scaffold,
     "cs_be": cs_be,
@@ -204,9 +230,12 @@ GENERATORS = {
 # The REP form is structured XML — free-text drafting would corrupt it, so it
 # stays deterministic-only. Values are the (title, filename stem) for the PDF
 # built from a finalised chat draft.
+_FORM_V = ("Form V — Declaration Re: Patent List (PM(NOC) Regulations)",
+           "form-v-declaration")
 LLM_DRAFTABLE = {
     "cover_letter": ("Health Canada — Cover Letter", "cover-letter"),
-    "patent_form_iv": ("Patent List — Form IV", "patent-form-iv"),
+    "patent_form_v": _FORM_V,
+    "patent_form_iv": _FORM_V,        # legacy alias (stored section states)
     "ands_attestation": ("ANDS Sponsor Attestation", "ands-attestation"),
     "qos_ce_scaffold": ("Quality Overall Summary (QOS-CE(BE))", "qos-ce-be"),
     "cs_be": ("Comprehensive Summary — Bioequivalence (CS-BE)", "cs-be"),

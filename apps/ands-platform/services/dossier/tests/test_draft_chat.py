@@ -42,7 +42,7 @@ def test_section_tree_flags_prose_generators_as_ai_draftable():
     by_section = {n["section"]: n for n in section_tree.all_nodes()}
     assert by_section["1.0"]["ai_draftable"] is True          # cover letter
     assert by_section["1.2.3"]["ai_draftable"] is True        # attestation
-    assert by_section["1.2.4"]["ai_draftable"] is True        # Form IV
+    assert by_section["1.2.4"]["ai_draftable"] is True        # Form V
     assert by_section["1.6"]["ai_draftable"] is True          # CS-BE
     assert by_section["2.3"]["ai_draftable"] is True          # QOS
     assert by_section["1.2.1"]["ai_draftable"] is False       # REP form (XML)

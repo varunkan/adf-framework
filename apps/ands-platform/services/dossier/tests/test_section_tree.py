@@ -37,8 +37,23 @@ def test_product_monograph_is_bilingual_pdf_and_docx():
 def test_generators_wired_for_m1_authorables():
     keys = {section_tree.node_for(s)["generator_key"]
             for s in ("1.0", "1.2.1", "1.2.3", "1.2.4", "1.6")}
-    assert keys == {"cover_letter", "rep_application_form", "patent_form_iv",
+    assert keys == {"cover_letter", "rep_application_form", "patent_form_v",
                     "ands_attestation", "cs_be"}
+
+
+def test_1_2_4_is_the_generics_form_v_declaration():
+    # The generic FILES Form V (the s.5 declaration) — Form IV (Patent List)
+    # is the innovator's instrument, not the generic's.
+    n = section_tree.node_for("1.2.4")
+    assert n["title"] == "Intellectual Property — Form V Declaration (PM(NOC))"
+    assert n["generator_key"] == "patent_form_v"
+    g = n["guidance"]
+    assert "Form V" in g and "Form IV" not in g
+    assert "files form v" in g.lower()          # the generic FILES Form V
+    assert "serve" in g.lower() and "NOA" in g  # ... and SERVES an NOA
+    # node id / leaf id / folder stay stable across the rename
+    assert n["id"] == "1-2-4" and n["leaf_id"] == "m1-2-4"
+    assert n["folder"] == "m1/ca/1-2-4"
 
 
 def test_3_2_p_runs_to_p8_with_reference_standards_and_container_closure():

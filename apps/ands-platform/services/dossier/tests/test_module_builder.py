@@ -25,6 +25,43 @@ def test_unknown_generator_raises():
         generators.generate("nope", {})
 
 
+def test_form_v_declares_one_s5_statement_per_patent():
+    doc = generators.generate("patent_form_v",
+                              {"drug_product": "Drugazole 10 mg",
+                               "crp_brand": "Refazole", "crp_din": "02345678",
+                               "patents": "CA 2,222,333",
+                               "patent_expiry": "2031-05-04",
+                               "allegation": "alleges non-infringement"})
+    assert doc["title"] == ("Form V — Declaration Re: Patent List "
+                            "(PM(NOC) Regulations)")
+    assert doc["filename"] == "form-v-declaration.pdf"
+    assert doc["content_type"] == "application/pdf"
+    body = doc["body"]
+    assert b"declares" in body and b"s.5 statement" in body
+    for frag in (b"CA 2,222,333", b"2031-05-04", b"alleges non-infringement",
+                 b"Drugazole 10 mg", b"Refazole", b"02345678"):
+        assert frag in body
+    # the four s.5 statement options are spelled out
+    for frag in (b"not addressed", b"accepts expiry", b"alleges invalidity",
+                 b"alleges non-infringement"):
+        assert frag in body
+
+
+def test_form_v_without_patents_needs_no_s5_statement():
+    body = generators.generate("patent_form_v", {})["body"]
+    assert b"no patents/CSPs" in body and b"no s.5 statement" in body
+
+
+def test_patent_form_iv_alias_still_produces_the_form_v_declaration():
+    # Stored section states created before the Form IV -> Form V correction
+    # keep resolving; both keys emit the identical Form V document.
+    ctx = {"patents": "CA 2,222,333"}
+    assert (generators.generate("patent_form_iv", ctx)
+            == generators.generate("patent_form_v", ctx))
+    assert (generators.LLM_DRAFTABLE["patent_form_iv"]
+            == generators.LLM_DRAFTABLE["patent_form_v"])
+
+
 # -- section tree + dossiers ------------------------------------------------
 def test_section_tree_endpoint(client):
     body = client.get("/api/dossier/section-tree").json()

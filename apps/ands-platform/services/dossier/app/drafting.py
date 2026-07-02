@@ -9,19 +9,24 @@ from __future__ import annotations
 
 # Per-document drafting guidance, keyed by generator_key. Keeps the model on
 # the structure Health Canada expects for each document type.
+_FORM_V_HINT = (
+    "Cover the Patented Medicines (Notice of Compliance) Regulations "
+    "Form V declaration content: the drug product, the Canadian Reference "
+    "Product and its DIN, and — for EACH patent/CSP on the Patent Register "
+    "with its expiry — ONE section-5 statement (not addressed / accepts "
+    "expiry / alleges invalidity / alleges non-infringement), or an "
+    "explicit statement that the Patent Register lists no relevant "
+    "patents. Note that where the declaration alleges invalidity or "
+    "non-infringement, the sponsor must also serve a Notice of Allegation "
+    "(NOA) on the innovator.")
 _HINTS = {
     "cover_letter": (
         "Structure: sponsor letterhead block, date, addressee (Health Canada "
         "Therapeutic Products Directorate), Re: line naming the activity type "
         "and product, body identifying the dossier ID / sequence / reference "
         "product, the regulatory contact, and a signature block."),
-    "patent_form_iv": (
-        "Cover the Patented Medicines (Notice of Compliance) Regulations "
-        "Form IV content: the drug product, the Canadian Reference Product "
-        "and its DIN, each patent/CSP on the Patent Register with its expiry, "
-        "and the section-5 allegation per patent (not infringed / invalid / "
-        "accept expiry / no claim) — or an explicit statement that the Patent "
-        "Register lists no relevant patents."),
+    "patent_form_v": _FORM_V_HINT,
+    "patent_form_iv": _FORM_V_HINT,   # legacy alias (stored section states)
     "ands_attestation": (
         "The attestation must state that the submission is accurate, complete "
         "and not misleading, and confirm: pharmaceutical equivalence to the "
