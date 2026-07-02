@@ -46,6 +46,12 @@ export const dossierApi = {
       method: "DELETE",
     }),
 
+  // placeholder ID -> real Health Canada Dossier ID (issued via REP)
+  renameDossier: (id: string, newId: string) =>
+    j<{ renamed: string; dossier_id: string }>(
+      `/dossiers/${encodeURIComponent(id)}/rename`,
+      { method: "POST", body: JSON.stringify({ new_id: newId }) }),
+
   getContent: (id: string) =>
     j<ContentState>(`/dossiers/${encodeURIComponent(id)}/content`),
 

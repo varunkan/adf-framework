@@ -168,6 +168,14 @@ def build_app(service: DossierService) -> FastAPI:
                                                  alias="X-Tenant-Id")):
         return service.delete_dossier(dossier_id, x_tenant_id or None)
 
+    @router.post("/dossiers/{dossier_id}/rename")
+    def rename_dossier(dossier_id: str, body: dict,
+                       x_tenant_id: str = Header(default="",
+                                                 alias="X-Tenant-Id")):
+        return service.rename_dossier(dossier_id,
+                                      str(body.get("new_id", "")),
+                                      x_tenant_id or None)
+
     @router.get("/dossiers/{dossier_id}/content")
     def dossier_content(dossier_id: str, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
         service.assert_access(dossier_id, x_tenant_id or None)

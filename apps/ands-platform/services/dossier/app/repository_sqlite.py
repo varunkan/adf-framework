@@ -370,6 +370,32 @@ class SqliteDossierRepository:
                 "SELECT * FROM dossier_index ORDER BY created_at DESC")
         return [self._index_row(r) for r in rows]
 
+    def rename_dossier(self, old_id: str, new_id: str) -> bool:
+        """Re-key a dossier (placeholder -> real HC Dossier ID). Rewrites the
+        embedded id inside JSON payloads (eCTD model paths, binders, section
+        state) as well as the key columns. Caller verified new_id is free."""
+        if not self.db.fetchone(
+                "SELECT 1 FROM dossier_index WHERE dossier_id = ?", (old_id,)):
+            return False
+        # JSON payloads embed the id in eCTD folder paths/hrefs — rewrite them.
+        for table, key_col, payload in (("dossiers", "dossier_id", "model"),
+                                        ("binders", "id", "binder"),
+                                        ("section_state", "rowid", "data")):
+            rows = self.db.fetchall(
+                f"SELECT {key_col} AS k, {payload} AS p FROM {table} "
+                "WHERE dossier_id = ?", (old_id,))
+            for r in rows:
+                self.db.execute(
+                    f"UPDATE {table} SET {payload} = ? WHERE {key_col} = ?",
+                    (str(r["p"]).replace(old_id, new_id), r["k"]))
+        for table in ("dossier_index", "dossiers", "section_state", "documents",
+                      "binders", "pm_leaves", "content_plans",
+                      "content_plan_items"):
+            self.db.execute(
+                f"UPDATE {table} SET dossier_id = ? WHERE dossier_id = ?",
+                (new_id, old_id))
+        return True
+
     def delete_dossier(self, dossier_id: str) -> bool:
         existed = bool(
             self.db.fetchone("SELECT 1 FROM dossier_index WHERE dossier_id = ?",

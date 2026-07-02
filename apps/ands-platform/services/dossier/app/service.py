@@ -17,6 +17,9 @@ from .document_store import SqliteBlobStore
 from .ports import DossierRepository
 
 _DIN_RE = re.compile(r"^\d{8}$")
+# HC Dossier ID: one letter + 6-7 digits. A 'd' prefix is our placeholder
+# convention for "real ID not issued yet" — validation blocks filing on it.
+_ID_RE = re.compile(r"^[a-z]\d{6,7}$")
 # a lifecycle placement suffixes the working sequence onto the base leaf id
 _SEQ_SUFFIX_RE = re.compile(r"^(?P<base>.+)-\d{4}$")
 
@@ -512,7 +515,16 @@ class DossierService:
                 doc = self.store.get(meta["doc_id"])
                 if doc:
                     documents[meta.get("filename") or meta["doc_id"]] = doc["body"]
-        return ectd_validation.validate(model, documents=documents)
+        result = ectd_validation.validate(model, documents=documents)
+        if _s(dossier_id).startswith("d"):
+            result["errors"].insert(0, {
+                "rule": "placeholder_dossier_id", "rule_id": "CA-REP-0001",
+                "message": "This dossier still uses a placeholder ID "
+                           f"({_s(dossier_id)}). File a Dossier ID Request "
+                           "through REP, then set the real Health Canada ID "
+                           "(Rename) before filing.", "leaf": None})
+            result["passed"] = False
+        return result
 
     def content_state(self, dossier_id: str) -> dict:
         dossier_id = _s(dossier_id)
@@ -623,6 +635,27 @@ class DossierService:
             raise ProblemError(404, "no such dossier", detail=_s(dossier_id))
         audit_hook.record("dossier.deleted", _s(dossier_id), {})
         return {"deleted": _s(dossier_id)}
+
+    def rename_dossier(self, dossier_id: str, new_id: str,
+                       tenant_id: str | None = None) -> dict:
+        """Re-key a dossier — the 'placeholder to real HC Dossier ID' path.
+        Users can start work before Health Canada issues their ID (REP
+        Dossier ID Request) and set the real one here later."""
+        old, new = _s(dossier_id), _s(new_id).lower()
+        self._tenant_guard(old, tenant_id)
+        if not _ID_RE.match(new):
+            raise ProblemError(422, "Dossier ID must be one letter + 6-7 "
+                               "digits (e.g. e123456)", rule="dossier_id_format")
+        if new == old:
+            raise ProblemError(422, "new ID is identical",
+                               rule="dossier_id_same")
+        if self.repo.get_dossier_index(new):
+            raise ProblemError(409, f"a dossier with ID {new} already exists",
+                               rule="dossier_id_taken")
+        if not self.repo.rename_dossier(old, new):
+            raise ProblemError(404, "no such dossier", detail=old)
+        audit_hook.record("dossier.renamed", new, {"previous_id": old})
+        return {"renamed": old, "dossier_id": new}
 
     def list_dossiers(self, tenant_id: str | None = None) -> dict:
         out = []

@@ -44,6 +44,29 @@ export default function DossiersHome() {
     }
   }
 
+  function usePlaceholder() {
+    // 'd' prefix = draft: work starts now, the real HC ID replaces it later
+    setDid("d" + String(Math.floor(100000 + Math.random() * 900000)));
+    setErr("");
+  }
+
+  async function setRealId(e: React.MouseEvent, oldId: string) {
+    e.preventDefault();
+    e.stopPropagation();
+    const newId = window.prompt(
+      "Enter the Dossier ID issued by Health Canada (one letter + 6–7 " +
+      "digits, e.g. e123456).\nAll documents, sequences and history move " +
+      "with it.", "");
+    if (!newId) return;
+    setErr("");
+    try {
+      await dossierApi.renameDossier(oldId, newId.trim().toLowerCase());
+      await load();
+    } catch (er) {
+      setErr(String(er));
+    }
+  }
+
   async function create() {
     if (!/^[a-z]\d{6,7}$/.test(did.trim())) {
       setErr("Dossier ID must be one letter + 6–7 digits (e.g. e123456)");
@@ -102,6 +125,16 @@ export default function DossiersHome() {
                   placeholder="Drugazole 10 mg tablet" />
               </div>
             </div>
+            <p className="mut" style={{ fontSize: 12, margin: "6px 0 0" }}>
+              Health Canada issues your Dossier ID when you file a Dossier ID
+              Request through REP (via your CESG account).{" "}
+              <button className="ghost" style={{ fontSize: 12, padding: "0 4px" }}
+                onClick={usePlaceholder}>
+                No ID yet? Start with a placeholder →
+              </button>{" "}
+              You can set the real ID any time; validation reminds you before
+              filing.
+            </p>
             <div className="cta-row">
               <button onClick={create} disabled={busy}>
                 {busy ? "Creating…" : "Create & open →"}
@@ -126,7 +159,16 @@ export default function DossiersHome() {
               return (
                 <Link key={d.dossier_id} href={`/dossiers/${encodeURIComponent(d.dossier_id)}/m/1`}
                   className="card glass dossier-tile">
-                  <div className="d-id">{d.dossier_id}</div>
+                  <div className="d-id">
+                    {d.dossier_id}
+                    {d.dossier_id.startsWith("d") && (
+                      <button className="chip blocked" title="Placeholder ID — set the real Health Canada Dossier ID"
+                        style={{ marginLeft: 8, fontSize: 11 }}
+                        onClick={(e) => setRealId(e, d.dossier_id)}>
+                        draft ID — set real ✎
+                      </button>
+                    )}
+                  </div>
                   <div className="d-title">{d.title}</div>
                   <div className="d-meta mut">{d.submission_type} · CS-BE</div>
                   <div className="progress"><i style={{
