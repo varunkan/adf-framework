@@ -44,17 +44,43 @@ CREATE TABLE IF NOT EXISTS shortage_records (
 """
 
 
+def _public(row) -> dict:
+    """Strip the internal tenant_id column so response shapes stay identical."""
+    rec = dict(row)
+    rec.pop("tenant_id", None)
+    return rec
+
+
 class SqliteLifecycleRepository:
+    _MIGRATIONS = (
+        # pre-tenancy databases lack the column; ALTER is a no-op error then.
+        # every client-data table is partitioned by the injecting tenant so a
+        # tenant can neither list nor mutate another tenant's rows (CRO
+        # isolation guarantee — same contract as the dossier service).
+        "ALTER TABLE lifecycles ADD COLUMN tenant_id TEXT",
+        "ALTER TABLE correspondence ADD COLUMN tenant_id TEXT",
+        "ALTER TABLE noa_allegations ADD COLUMN tenant_id TEXT",
+        "ALTER TABLE shortage_records ADD COLUMN tenant_id TEXT",
+    )
+
     def __init__(self, db: SqliteDb | None = None) -> None:
         self.db = db or SqliteDb(":memory:")
         self.db.executescript(_SCHEMA)
+        for mig in self._MIGRATIONS:
+            try:
+                self.db.execute(mig)
+            except Exception:
+                pass   # column already exists (fresh schema or re-run)
 
-    def save(self, state: dict) -> dict:
+    def save(self, state: dict, tenant_id: str | None = None) -> dict:
         self.db.execute(
-            "INSERT INTO lifecycles (dossier_id, state, updated_at) "
-            "VALUES (?, ?, ?) ON CONFLICT(dossier_id) DO UPDATE SET "
-            "state=excluded.state, updated_at=excluded.updated_at",
-            (state["dossier_id"], json.dumps(state), utcnow_iso()))
+            "INSERT INTO lifecycles (dossier_id, state, tenant_id, updated_at) "
+            "VALUES (?, ?, ?, ?) ON CONFLICT(dossier_id) DO UPDATE SET "
+            "state=excluded.state, updated_at=excluded.updated_at, "
+            # a save never re-homes a lifecycle to another tenant
+            "tenant_id=COALESCE(lifecycles.tenant_id, excluded.tenant_id)",
+            (state["dossier_id"], json.dumps(state), tenant_id or None,
+             utcnow_iso()))
         return state
 
     def get(self, dossier_id: str) -> dict | None:
@@ -62,43 +88,54 @@ class SqliteLifecycleRepository:
             "SELECT state FROM lifecycles WHERE dossier_id = ?", (dossier_id,))
         return json.loads(row["state"]) if row else None
 
+    def get_tenant(self, dossier_id: str) -> str | None:
+        row = self.db.fetchone(
+            "SELECT tenant_id FROM lifecycles WHERE dossier_id = ?",
+            (dossier_id,))
+        return (row["tenant_id"] if row else None) or None
+
     def list(self) -> list[dict]:
         rows = self.db.fetchall(
             "SELECT state FROM lifecycles ORDER BY updated_at")
         return [json.loads(r["state"]) for r in rows]
 
     # -- HC correspondence (REQ-112) ---------------------------------------
-    def add_correspondence(self, record: dict) -> dict:
+    def add_correspondence(self, record: dict,
+                           tenant_id: str | None = None) -> dict:
         cid = new_id()
         self.db.execute(
             "INSERT INTO correspondence (id, dossier_id, kind, kind_label, "
-            "subject, body, direction, received_at, reference, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "subject, body, direction, received_at, reference, tenant_id, "
+            "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (cid, record["dossier_id"], record["kind"], record["kind_label"],
              record["subject"], record.get("body"), record["direction"],
-             record.get("received_at"), record.get("reference"), utcnow_iso()))
-        return dict(self.db.fetchone(
+             record.get("received_at"), record.get("reference"),
+             tenant_id or None, utcnow_iso()))
+        return _public(self.db.fetchone(
             "SELECT * FROM correspondence WHERE id = ?", (cid,)))
 
-    def list_correspondence(self, dossier_id: str, kind: str = "") -> list[dict]:
+    def list_correspondence(self, dossier_id: str, kind: str = "",
+                            tenant_id: str | None = None) -> list[dict]:
+        sql = "SELECT * FROM correspondence WHERE dossier_id = ?"
+        params: list = [dossier_id]
         if str(kind or "").strip():
-            rows = self.db.fetchall(
-                "SELECT * FROM correspondence WHERE dossier_id = ? AND kind = ? "
-                "ORDER BY created_at", (dossier_id, kind))
-        else:
-            rows = self.db.fetchall(
-                "SELECT * FROM correspondence WHERE dossier_id = ? "
-                "ORDER BY created_at", (dossier_id,))
-        return [dict(r) for r in rows]
+            sql += " AND kind = ?"
+            params.append(kind)
+        if tenant_id:   # strict: a tenant sees ONLY its own correspondence
+            sql += " AND tenant_id = ?"
+            params.append(tenant_id)
+        rows = self.db.fetchall(sql + " ORDER BY created_at", tuple(params))
+        return [_public(r) for r in rows]
 
     # -- Form V / NOA register (PM(NOC) Regulations) -------------------------
-    def add_noa(self, record: dict) -> dict:
+    def add_noa(self, record: dict, tenant_id: str | None = None) -> dict:
         record = dict(record, id=new_id())
         now = utcnow_iso()
         self.db.execute(
-            "INSERT INTO noa_allegations (id, dossier_id, record, created_at, "
-            "updated_at) VALUES (?, ?, ?, ?, ?)",
-            (record["id"], record["dossier_id"], json.dumps(record), now, now))
+            "INSERT INTO noa_allegations (id, dossier_id, record, tenant_id, "
+            "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (record["id"], record["dossier_id"], json.dumps(record),
+             tenant_id or None, now, now))
         return record
 
     def get_noa(self, noa_id: str) -> dict | None:
@@ -106,46 +143,63 @@ class SqliteLifecycleRepository:
             "SELECT record FROM noa_allegations WHERE id = ?", (noa_id,))
         return json.loads(row["record"]) if row else None
 
+    def get_noa_tenant(self, noa_id: str) -> str | None:
+        row = self.db.fetchone(
+            "SELECT tenant_id FROM noa_allegations WHERE id = ?", (noa_id,))
+        return (row["tenant_id"] if row else None) or None
+
     def save_noa(self, record: dict) -> dict:
         self.db.execute(
             "UPDATE noa_allegations SET record = ?, updated_at = ? "
             "WHERE id = ?", (json.dumps(record), utcnow_iso(), record["id"]))
         return record
 
-    def list_noa(self, dossier_id: str) -> list[dict]:
-        rows = self.db.fetchall(
-            "SELECT record FROM noa_allegations WHERE dossier_id = ? "
-            "ORDER BY created_at", (dossier_id,))
+    def list_noa(self, dossier_id: str,
+                 tenant_id: str | None = None) -> list[dict]:
+        sql = "SELECT record FROM noa_allegations WHERE dossier_id = ?"
+        params: list = [dossier_id]
+        if tenant_id:   # strict: a tenant sees ONLY its own allegations
+            sql += " AND tenant_id = ?"
+            params.append(tenant_id)
+        rows = self.db.fetchall(sql + " ORDER BY created_at", tuple(params))
         return [json.loads(r["record"]) for r in rows]
 
     # -- drug shortage / discontinuation + DEL linkage -----------------------
     _RT_SHORTAGE = "shortage_report"
     _RT_DEL = "del_link"
 
-    def _add_shortage_record(self, rtype: str, record: dict) -> dict:
+    def _add_shortage_record(self, rtype: str, record: dict,
+                             tenant_id: str | None = None) -> dict:
         record = dict(record, id=new_id())
         self.db.execute(
             "INSERT INTO shortage_records (id, dossier_id, rtype, record, "
-            "created_at) VALUES (?, ?, ?, ?, ?)",
+            "tenant_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
             (record["id"], record["dossier_id"], rtype, json.dumps(record),
-             utcnow_iso()))
+             tenant_id or None, utcnow_iso()))
         return record
 
-    def _list_shortage_records(self, rtype: str,
-                               dossier_id: str) -> list[dict]:
-        rows = self.db.fetchall(
-            "SELECT record FROM shortage_records WHERE dossier_id = ? "
-            "AND rtype = ? ORDER BY created_at", (dossier_id, rtype))
+    def _list_shortage_records(self, rtype: str, dossier_id: str,
+                               tenant_id: str | None = None) -> list[dict]:
+        sql = ("SELECT record FROM shortage_records WHERE dossier_id = ? "
+               "AND rtype = ?")
+        params: list = [dossier_id, rtype]
+        if tenant_id:   # strict: a tenant sees ONLY its own reports/links
+            sql += " AND tenant_id = ?"
+            params.append(tenant_id)
+        rows = self.db.fetchall(sql + " ORDER BY created_at", tuple(params))
         return [json.loads(r["record"]) for r in rows]
 
-    def add_shortage(self, record: dict) -> dict:
-        return self._add_shortage_record(self._RT_SHORTAGE, record)
+    def add_shortage(self, record: dict, tenant_id: str | None = None) -> dict:
+        return self._add_shortage_record(self._RT_SHORTAGE, record, tenant_id)
 
-    def list_shortage(self, dossier_id: str) -> list[dict]:
-        return self._list_shortage_records(self._RT_SHORTAGE, dossier_id)
+    def list_shortage(self, dossier_id: str,
+                      tenant_id: str | None = None) -> list[dict]:
+        return self._list_shortage_records(self._RT_SHORTAGE, dossier_id,
+                                           tenant_id)
 
-    def add_del_link(self, record: dict) -> dict:
-        return self._add_shortage_record(self._RT_DEL, record)
+    def add_del_link(self, record: dict, tenant_id: str | None = None) -> dict:
+        return self._add_shortage_record(self._RT_DEL, record, tenant_id)
 
-    def list_del_links(self, dossier_id: str) -> list[dict]:
-        return self._list_shortage_records(self._RT_DEL, dossier_id)
+    def list_del_links(self, dossier_id: str,
+                       tenant_id: str | None = None) -> list[dict]:
+        return self._list_shortage_records(self._RT_DEL, dossier_id, tenant_id)

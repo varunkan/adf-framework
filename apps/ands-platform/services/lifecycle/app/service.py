@@ -40,8 +40,20 @@ class LifecycleService:
     def register(self) -> "LifecycleService":
         return self
 
+    def _tenant_guard(self, owner: str | None, tenant_id: str | None,
+                      detail: str) -> None:
+        """Enforce per-row tenant ownership on a mutate/read path. When a
+        tenant context is present (every authenticated request via the web
+        proxy carries one), a row owned by a DIFFERENT tenant — or by no
+        tenant at all — is invisible (404, not 403, to avoid confirming
+        existence). tenant_id empty = no scoping (in-process mesh / tests)."""
+        if not tenant_id:
+            return
+        if _s(owner) != _s(tenant_id):
+            raise ProblemError(404, "no such record", detail=_s(detail))
+
     # -- lifecycle ----------------------------------------------------------
-    def start_lifecycle(self, data: dict) -> dict:
+    def start_lifecycle(self, data: dict, tenant_id: str | None = None) -> dict:
         dossier_id = _s(data.get("dossier_id"))
         received = _s(data.get("received_date"))
         if not dossier_id or not received:
@@ -55,7 +67,7 @@ class LifecycleService:
                                     received, fee_paid=data.get("fee_paid"))
         except ValueError as exc:
             raise ProblemError(422, str(exc), rule="invalid_start")
-        self.repo.save(state)
+        self.repo.save(state, tenant_id)
         self._emit(state, "started")
         return state
 
@@ -148,43 +160,55 @@ class LifecycleService:
                 "response": _RESPONSE_SHORTCUTS.get(notice, {})}
 
     # -- HC correspondence hub (REQ-112) -----------------------------------
-    def log_correspondence(self, data: dict) -> dict:
+    def log_correspondence(self, data: dict,
+                           tenant_id: str | None = None) -> dict:
         res = correspondence.validate_correspondence(data)
         if not res["valid"]:
             raise ProblemError(422, "Invalid correspondence",
                                errors=res["errors"])
-        return self.repo.add_correspondence(res["record"])
+        return self.repo.add_correspondence(res["record"], tenant_id)
 
-    def list_correspondence(self, dossier_id: str, kind: str = "") -> dict:
-        items = self.repo.list_correspondence(_s(dossier_id), kind)
+    def list_correspondence(self, dossier_id: str, kind: str = "",
+                            tenant_id: str | None = None) -> dict:
+        items = self.repo.list_correspondence(_s(dossier_id), kind, tenant_id)
         return {"correspondence": items, "count": len(items)}
 
     # -- Form V / NOA register (PM(NOC) Regulations) ------------------------
-    def create_noa(self, data: dict) -> dict:
+    def create_noa(self, data: dict, tenant_id: str | None = None) -> dict:
         res = noa.validate_allegation(data)
         if not res["valid"]:
             raise ProblemError(422, "Invalid Form V allegation",
                                errors=res["errors"])
-        return self.repo.add_noa(res["record"])
+        return self.repo.add_noa(res["record"], tenant_id)
 
-    def serve_noa(self, noa_id: str, data: dict) -> dict:
+    def serve_noa(self, noa_id: str, data: dict,
+                  tenant_id: str | None = None) -> dict:
         return self._noa_transition(
-            noa_id, lambda r: noa.serve(r, _s(data.get("served_date"))))
+            noa_id, lambda r: noa.serve(r, _s(data.get("served_date"))),
+            tenant_id)
 
-    def action_noa(self, noa_id: str, data: dict) -> dict:
+    def action_noa(self, noa_id: str, data: dict,
+                   tenant_id: str | None = None) -> dict:
         return self._noa_transition(
             noa_id, lambda r: noa.commence_action(
-                r, _s(data.get("action_date")), _s(data.get("court_file"))))
+                r, _s(data.get("action_date")), _s(data.get("court_file"))),
+            tenant_id)
 
-    def list_noa(self, dossier_id: str, as_of: str = "") -> dict:
+    def list_noa(self, dossier_id: str, as_of: str = "",
+                 tenant_id: str | None = None) -> dict:
         items = [noa.with_clocks(r, _s(as_of))
-                 for r in self.repo.list_noa(_s(dossier_id))]
+                 for r in self.repo.list_noa(_s(dossier_id), tenant_id)]
         return {"allegations": items, "count": len(items)}
 
-    def _noa_transition(self, noa_id: str, apply) -> dict:
+    def _noa_transition(self, noa_id: str, apply,
+                        tenant_id: str | None = None) -> dict:
         record = self.repo.get_noa(_s(noa_id))
         if not record:
             raise ProblemError(404, "no NOA record", detail=_s(noa_id))
+        # a caller may not mutate an NOA it does not own — guessing the id of
+        # another tenant's NOA yields a 404, never a 403
+        self._tenant_guard(self.repo.get_noa_tenant(_s(noa_id)), tenant_id,
+                           noa_id)
         try:
             record = apply(record)
         except noa.NoaError as exc:
@@ -195,25 +219,28 @@ class LifecycleService:
         return self.repo.save_noa(record)
 
     # -- drug shortage / discontinuation + DEL linkage (C.01.014.8+) --------
-    def report_shortage(self, data: dict) -> dict:
+    def report_shortage(self, data: dict,
+                        tenant_id: str | None = None) -> dict:
         res = shortage.validate_record(data)
         if not res["valid"]:
             raise ProblemError(422, "Invalid shortage report",
                                errors=res["errors"])
-        return self.repo.add_shortage(res["record"])
+        return self.repo.add_shortage(res["record"], tenant_id)
 
-    def list_shortage(self, dossier_id: str, as_of: str = "") -> dict:
+    def list_shortage(self, dossier_id: str, as_of: str = "",
+                      tenant_id: str | None = None) -> dict:
         items = [shortage.with_status(r, _s(as_of))
-                 for r in self.repo.list_shortage(_s(dossier_id))]
+                 for r in self.repo.list_shortage(_s(dossier_id), tenant_id)]
         return {"reports": items, "count": len(items)}
 
-    def link_del(self, data: dict) -> dict:
+    def link_del(self, data: dict, tenant_id: str | None = None) -> dict:
         res = shortage.validate_del_link(data)
         if not res["valid"]:
             raise ProblemError(422, "Invalid DEL linkage",
                                errors=res["errors"])
-        return self.repo.add_del_link(res["record"])
+        return self.repo.add_del_link(res["record"], tenant_id)
 
-    def list_del(self, dossier_id: str) -> dict:
-        items = self.repo.list_del_links(_s(dossier_id))
+    def list_del(self, dossier_id: str,
+                 tenant_id: str | None = None) -> dict:
+        items = self.repo.list_del_links(_s(dossier_id), tenant_id)
         return {"links": items, "count": len(items)}
