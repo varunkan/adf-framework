@@ -168,6 +168,12 @@ def build_app(service: DossierService) -> FastAPI:
                                                  alias="X-Tenant-Id")):
         return service.delete_dossier(dossier_id, x_tenant_id or None)
 
+    @router.get("/validation/rules")
+    def validation_rules():
+        # static catalogue — the depth surface regulatory ops evaluate on
+        from . import ectd_validation
+        return ectd_validation.rule_catalog()
+
     @router.post("/dossiers/{dossier_id}/rename")
     def rename_dossier(dossier_id: str, body: dict,
                        x_tenant_id: str = Header(default="",

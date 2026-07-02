@@ -4,8 +4,12 @@
 // "add a 'Regulatory Reference' section with links to Health Canada's
 // guidance documents" (operations). Same sources the in-app Health Canada
 // content review cites.
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { UserChip } from "@/components/UserChip";
+
+type Rule = { rule: string; rule_id: string; family: string;
+  severity: string; description: string };
 
 const APPS =
   "https://www.canada.ca/en/health-canada/services/drugs-health-products/drug-products/applications-submissions";
@@ -59,6 +63,15 @@ const SECTIONS: { title: string; items: { label: string; href: string; note: str
 ];
 
 export default function HelpPage() {
+  const [rules, setRules] = useState<Rule[] | null>(null);
+  useEffect(() => {
+    fetch("/api/dossier/validation/rules", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b) => setRules(b?.rules || []))
+      .catch(() => setRules([]));
+  }, []);
+  const families: Record<string, Rule[]> = {};
+  for (const r of rules || []) (families[r.family] ||= []).push(r);
   return (
     <>
       <header className="topbar">
@@ -119,6 +132,33 @@ export default function HelpPage() {
             On top of the technical layer, each authorable form has a
             content review against Health Canada&apos;s required elements —
             every finding cites its canada.ca source and proposes the edit.
+          </div>
+          {/* the live catalogue itself — pulled from the validation engine,
+              not hand-maintained copy, so it can never drift from reality */}
+          <div className="card glass" style={{ padding: "12px 16px",
+            fontSize: 13, marginTop: 10 }}>
+            <b>The complete rule catalogue
+              {rules ? ` (${rules.length} rules, live from the engine)` : ""}</b>
+            {rules === null ? (
+              <div className="mut" style={{ marginTop: 6 }}>Loading…</div>
+            ) : (
+              Object.entries(families).map(([fam, rs]) => (
+                <details key={fam} style={{ marginTop: 8 }}>
+                  <summary style={{ cursor: "pointer" }}>
+                    {fam} — {rs.length} rule{rs.length === 1 ? "" : "s"}
+                  </summary>
+                  <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                    {rs.map((r) => (
+                      <li key={r.rule_id} style={{ margin: "3px 0" }}>
+                        <code>{r.rule_id}</code>
+                        {r.severity === "warning" ? " (warning)" : ""} —{" "}
+                        {r.description}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ))
+            )}
           </div>
         </section>
         <section style={{ marginTop: 18 }}>

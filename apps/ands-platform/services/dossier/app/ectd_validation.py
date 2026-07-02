@@ -123,6 +123,73 @@ RULE_IDS = {
 # to assembly.validate_leaf_operation before this table learns its id)
 UNMAPPED_RULE_ID = "CA-E-0000"
 
+# Human-readable catalogue — regulatory operations people evaluate a tool by
+# its rule coverage, so the full registry is a first-class, queryable surface.
+_FAMILIES = {
+    "1": "Leaf inventory integrity",
+    "2": "Lifecycle operation legality",
+    "3": "File & folder naming hygiene",
+    "4": "Sequence numbering",
+    "5": "index.xml backbone structure",
+    "55": "Transmissible ICH eCTD 3.2.2 sequence backbone",
+    "6": "ca-regional.xml structure (CA Module 1 v2.2)",
+    "7": "Document payload conformance",
+}
+_RULE_DESCRIPTIONS = {
+    "href_required": "Every live leaf must reference a file (href).",
+    "checksum_required": "Every live leaf must carry an MD5 checksum.",
+    "duplicate_leaf_id": "Leaf IDs must be unique across the submission.",
+    "checksum_not_md5": "Checksums must be well-formed 32-hex-digit MD5.",
+    "leaf_id_required": "Every lifecycle operation needs a leaf ID.",
+    "operation_invalid": "Operation must be one of new/replace/append/delete.",
+    "prior_leaf_required": "replace/append/delete must name the prior leaf they modify.",
+    "prior_leaf_unknown": "The referenced prior leaf must exist in an earlier sequence.",
+    "new_has_prior": "A 'new' leaf cannot reference a prior leaf.",
+    "href_not_lowercase": "File and folder names must be lowercase.",
+    "href_has_space": "File and folder names must not contain spaces.",
+    "href_module_folder": "Leaves should live under their module's folder (warning).",
+    "sequence_not_numeric": "Sequence names must be numeric.",
+    "sequence_wrong_width": "Sequence names must be exactly four digits (e.g. 0000).",
+    "sequence_duplicate": "Sequence numbers must not repeat.",
+    "sequence_not_contiguous": "Sequences should be contiguous (warning).",
+    "sequence_start_not_0000": "The dossier should start at sequence 0000 (warning).",
+    "backbone_malformed": "index.xml must be well-formed XML.",
+    "index_root_unexpected": "index.xml root element must match the eCTD DTD.",
+    "index_leaf_incomplete": "Every index.xml leaf needs ID, href, checksum and title.",
+    "index_admin_missing": "The administrative section must be present in index.xml.",
+    "leaf_operation_missing": "Each sequence-backbone leaf must declare its operation.",
+    "leaf_modified_file_missing": "replace/append/delete must point at the modified file.",
+    "leaf_href_dangling": "Backbone hrefs must resolve to files shipped in the sequence.",
+    "index_doctype_missing": "The sequence index must declare the eCTD DOCTYPE.",
+    "ca_root_unexpected": "ca-regional.xml root must match the CA Module 1 v2.2 schema.",
+    "ca_dossier_id_missing": "ca-regional.xml must carry the dossier identifier.",
+    "ca_company_id_missing": "ca-regional.xml must carry the company identifier.",
+    "ca_product_missing": "ca-regional.xml must identify the drug product.",
+    "pdf_header": "Documents claiming PDF must actually be PDFs (%PDF header).",
+    "pdf_encrypted": "PDFs must not be encrypted or password-protected.",
+}
+
+
+def rule_catalog() -> dict:
+    """The queryable registry of every technical validation rule."""
+    rules = []
+    for rule, rule_id in RULE_IDS.items():
+        digits = rule_id.split("-")[2]
+        family = _FAMILIES["55" if digits.startswith("55") else digits[0]]
+        rules.append({
+            "rule": rule, "rule_id": rule_id, "family": family,
+            "severity": "warning" if "-W-" in rule_id else "error",
+            "description": _RULE_DESCRIPTIONS.get(rule, ""),
+        })
+    rules.append({
+        "rule": "placeholder_dossier_id", "rule_id": "CA-REP-0001",
+        "family": "REP identity",
+        "severity": "error",
+        "description": "Filing is blocked while the dossier uses a placeholder "
+                       "ID instead of the Health Canada-issued one (REP).",
+    })
+    return {"count": len(rules), "rules": rules}
+
 
 def _s(v) -> str:
     return str(v if v is not None else "").strip()
