@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, Header
 from fastapi.responses import PlainTextResponse
 
 from ands_shared import create_app
@@ -52,13 +52,16 @@ def build_app(service: GovernanceService) -> FastAPI:
         return service.record_external(body.model_dump())
 
     @router.get("/audit")
-    def audit(category: str = "", dossier_id: str = "", limit: int = 0):
+    def audit(category: str = "", dossier_id: str = "", limit: int = 0,
+              x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
         return service.list_audit(category=category, dossier_id=dossier_id,
-                                  limit=limit, newest_first=True)
+                                  tenant_id=x_tenant_id, limit=limit,
+                                  newest_first=True)
 
     @router.get("/audit/export", response_class=PlainTextResponse)
-    def audit_export():
-        return service.export_audit()
+    def audit_export(x_tenant_id: str = Header(default="",
+                                               alias="X-Tenant-Id")):
+        return service.export_audit(tenant_id=x_tenant_id)
 
     # -- tenant data export & portability (SAAS-REQ-004) ---------------
     @router.post("/export")

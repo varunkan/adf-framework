@@ -54,16 +54,21 @@ class GovernanceService:
         return self.record_event(event)
 
     def list_audit(self, *, category: str = "", dossier_id: str = "",
-                   limit: int = 0, newest_first: bool = False) -> dict:
-        events = self.repo.list(category=category, dossier_id=dossier_id)
+                   tenant_id: str = "", limit: int = 0,
+                   newest_first: bool = False) -> dict:
+        # tenant_id present (authenticated proxy request) => only that tenant's
+        # rows; unowned/foreign rows invisible. Empty => unscoped (mesh/tests).
+        events = self.repo.list(category=category, dossier_id=dossier_id,
+                                tenant_id=tenant_id)
         if newest_first:
             events = list(reversed(events))
         if limit and limit > 0:
             events = events[:limit]
         return {"events": events, "count": len(events)}
 
-    def export_audit(self) -> str:
-        events = self.repo.list()
+    def export_audit(self, *, tenant_id: str = "") -> str:
+        # same tenant partition as list_audit: present => scoped, empty => all.
+        events = self.repo.list(tenant_id=tenant_id)
         lines = ["ANDS PLATFORM — AUDIT TRAIL (regulatory inspection export)",
                  f"Generated: {datetime.now(timezone.utc).isoformat()}",
                  f"Events: {len(events)}", "=" * 72]

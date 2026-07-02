@@ -61,3 +61,55 @@ def test_list_audit_newest_first_with_limit(ctx):
     out = ctx.service.list_audit(dossier_id="e9", limit=2, newest_first=True)
     assert out["count"] == 2
     assert [e["action"] for e in out["events"]] == ["evt.4", "evt.3"]
+
+
+# -- cross-tenant isolation (CRO regulatory: no data leakage across tenants) --
+
+def _seed_two_tenants(ctx):
+    """One audited event per tenant, plus one unowned (no tenant) event."""
+    ctx.bus.publish(EventEnvelope.make("a.evt", source="s", dossier_id="da",
+                                       tenant_id="tenant-a"))
+    ctx.bus.publish(EventEnvelope.make("b.evt", source="s", dossier_id="db",
+                                       tenant_id="tenant-b"))
+    ctx.bus.publish(EventEnvelope.make("u.evt", source="s", dossier_id="du"))
+
+
+def test_audit_list_isolates_tenants(ctx):
+    _seed_two_tenants(ctx)
+    a = ctx.service.list_audit(tenant_id="tenant-a")
+    assert a["count"] == 1 and a["events"][0]["action"] == "a.evt"
+    # tenant B never sees tenant A's row (nor the unowned one)
+    b = ctx.service.list_audit(tenant_id="tenant-b")
+    assert b["count"] == 1 and b["events"][0]["action"] == "b.evt"
+    # no tenant context (in-process mesh / tests) stays UNSCOPED
+    assert ctx.service.list_audit()["count"] == 3
+
+
+def test_audit_export_isolates_tenants(ctx):
+    _seed_two_tenants(ctx)
+    a = ctx.service.export_audit(tenant_id="tenant-a")
+    assert "a.evt" in a and "b.evt" not in a and "u.evt" not in a
+    # unscoped export still contains everything
+    allx = ctx.service.export_audit()
+    assert "a.evt" in allx and "b.evt" in allx and "u.evt" in allx
+
+
+def test_audit_endpoint_scopes_by_tenant_header(ctx):
+    _seed_two_tenants(ctx)
+    r = ctx.client.get("/api/governance/audit",
+                       headers={"X-Tenant-Id": "tenant-a"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["count"] == 1 and body["events"][0]["action"] == "a.evt"
+    # tenant B's row is invisible to tenant A
+    assert all(e["tenant_id"] == "tenant-a" for e in body["events"])
+    # no header -> unscoped (existing tests / mesh)
+    assert ctx.client.get("/api/governance/audit").json()["count"] == 3
+
+
+def test_audit_export_endpoint_scopes_by_tenant_header(ctx):
+    _seed_two_tenants(ctx)
+    r = ctx.client.get("/api/governance/audit/export",
+                       headers={"X-Tenant-Id": "tenant-b"})
+    assert r.status_code == 200
+    assert "b.evt" in r.text and "a.evt" not in r.text and "u.evt" not in r.text
