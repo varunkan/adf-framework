@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS dossier_index (
     fee_paid        INTEGER NOT NULL DEFAULT 0,
     sme_granted     INTEGER NOT NULL DEFAULT 0,
     tenant_id       TEXT,
+    active_sequence TEXT NOT NULL DEFAULT '0000',
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
@@ -96,6 +97,9 @@ class SqliteDossierRepository:
     _MIGRATIONS = (
         # pre-tenancy databases lack the column; ALTER is a no-op error then
         "ALTER TABLE dossier_index ADD COLUMN tenant_id TEXT",
+        # pre-lifecycle databases lack the working-sequence pointer
+        "ALTER TABLE dossier_index ADD COLUMN active_sequence TEXT "
+        "NOT NULL DEFAULT '0000'",
     )
 
     def __init__(self, db: SqliteDb | None = None) -> None:
@@ -320,11 +324,17 @@ class SqliteDossierRepository:
              dossier_id))
         return self.get_dossier_index(dossier_id)
 
+    def set_active_sequence(self, dossier_id: str, sequence: str) -> None:
+        self.db.execute(
+            "UPDATE dossier_index SET active_sequence = ?, updated_at = ? "
+            "WHERE dossier_id = ?", (sequence, utcnow_iso(), dossier_id))
+
     def _index_row(self, row) -> dict:
         rec = dict(row)
         rec["cs_be_only"] = bool(rec["cs_be_only"])
         rec["fee_paid"] = bool(rec.get("fee_paid"))
         rec["sme_granted"] = bool(rec.get("sme_granted"))
+        rec["active_sequence"] = rec.get("active_sequence") or "0000"
         return rec
 
     def get_dossier_index(self, dossier_id: str) -> dict | None:

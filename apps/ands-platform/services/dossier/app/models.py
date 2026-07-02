@@ -20,6 +20,9 @@ class FeeStatusIn(BaseModel):
 
 class SequenceIn(BaseModel):
     sequence: str = "0000"
+    # regulatory activity this transaction belongs to (validated in service)
+    purpose: str = "initial"   # initial|response|supplement|annual-notification
+    note: str = ""
 
 
 class GenerateIn(BaseModel):

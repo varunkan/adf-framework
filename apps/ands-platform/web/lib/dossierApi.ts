@@ -4,6 +4,7 @@ import type {
   DossierFull,
   DossierListItem,
   OutlineView,
+  SequenceList,
   ValidationResult,
 } from "./dossierTypes";
 
@@ -75,6 +76,28 @@ export const dossierApi = {
     ),
 
   documentUrl: (docId: string) => `${BASE}/documents/${encodeURIComponent(docId)}`,
+
+  // Working sequences (0001+) — the regulatory-response lifecycle.
+  listSequences: (id: string) =>
+    j<SequenceList>(`/dossiers/${encodeURIComponent(id)}/sequences`),
+
+  createSequence: (
+    id: string,
+    body: { sequence: string; purpose?: string; note?: string }
+  ) =>
+    j<SequenceList>(`/dossiers/${encodeURIComponent(id)}/sequences`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  activateSequence: (id: string, sequence: string) =>
+    j<SequenceList>(
+      `/dossiers/${encodeURIComponent(id)}/sequences/${encodeURIComponent(sequence)}/activate`,
+      { method: "POST" }
+    ),
+
+  exportUrl: (id: string, sequence: string) =>
+    `${BASE}/ectd/${encodeURIComponent(id)}/export/${encodeURIComponent(sequence)}`,
 
   buildPmXml: (body: { dossier_id: string; lang: string; product_name: string;
                        din?: string; sections: { code: string; title: string;

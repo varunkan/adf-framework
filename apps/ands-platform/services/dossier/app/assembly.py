@@ -144,17 +144,60 @@ def set_leaf(dossier: dict, sequence: str, leaf: dict) -> dict:
     return add_leaf(dossier, sequence, payload)
 
 
-def add_sequence(dossier: dict, sequence: str) -> dict:
-    """Open a new (empty) sequence on the dossier if absent; return the dossier."""
-    if _get_sequence(dossier, sequence) is None:
-        dossier["sequences"].append({"sequence": _seq_key(sequence), "leaves": []})
+def set_leaf_lifecycle(dossier: dict, sequence: str, leaf: dict) -> dict:
+    """Lifecycle-aware build-time placement for working sequences 0001+.
+
+    Within the target sequence this keeps ``set_leaf``'s idempotent upsert
+    semantics (re-placing the same document just refreshes it). When the
+    document is already live from an EARLIER sequence, the placement is
+    recorded as a ``replace`` operation whose ``modified_leaf`` points at
+    that prior leaf — the lifecycle a response/supplement transaction must
+    carry. The replacement leaf id is suffixed with the sequence number so
+    leaf ids stay unique across the dossier."""
+    seq_key = _seq_key(sequence)
+    base = _s(leaf.get("leaf_id"))
+    seq = _get_sequence(dossier, seq_key)
+    if seq is not None:   # drop any working copy from the TARGET sequence only
+        seq["leaves"] = [lf for lf in seq["leaves"]
+                         if (lf.get("base_id") or lf["leaf_id"]) != base]
+    prior = next(
+        (lf for lf in compute_current_view(leaves_in_order(dossier))["live"]
+         if (lf.get("base_id") or lf["leaf_id"]) == base
+         and lf["sequence"] != seq_key), None)
+    payload = {k: v for k, v in leaf.items() if k != "operation"}
+    if prior is None:
+        payload["operation"] = "new"
+        payload["modified_leaf"] = None
+    else:
+        payload["operation"] = "replace"
+        payload["modified_leaf"] = prior["leaf_id"]
+        payload["leaf_id"] = f"{base}-{seq_key}"
+    record = add_leaf(dossier, seq_key, payload)
+    record["base_id"] = base
+    return record
+
+
+def add_sequence(dossier: dict, sequence: str, *, purpose: str = "",
+                 note: str = "") -> dict:
+    """Open a new (empty) sequence on the dossier if absent; return the dossier.
+
+    ``purpose``/``note`` (regulatory activity metadata) are recorded on the
+    sequence dict when given; existing callers passing neither are unchanged."""
+    seq = _get_sequence(dossier, sequence)
+    if seq is None:
+        seq = {"sequence": _seq_key(sequence), "leaves": []}
+        dossier["sequences"].append(seq)
+    if purpose:
+        seq["purpose"] = _s(purpose)
+    if note:
+        seq["note"] = _s(note)
     return dossier
 
 
 def current_view(dossier: dict) -> dict:
     view = compute_current_view(leaves_in_order(dossier))
     keys = ("leaf_id", "title", "heading", "href", "operation", "sequence",
-            "checksum")
+            "checksum", "modified_leaf")
     return {"live": [{k: lf.get(k, "") for k in keys} for lf in view["live"]],
             "history": [{k: lf.get(k, "") for k in keys}
                         for lf in view["history"]]}

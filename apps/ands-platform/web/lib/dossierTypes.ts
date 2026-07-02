@@ -114,6 +114,27 @@ export interface ContentState {
   files_view: FilesView | null;
 }
 
+// working sequences (0001+) + regulatory-response lifecycle
+export type SequencePurpose =
+  | "initial"
+  | "response"
+  | "supplement"
+  | "annual-notification";
+
+export interface SequenceInfo {
+  sequence: string;
+  purpose: SequencePurpose | string;
+  note: string;
+  leaf_count: number;
+  active: boolean;
+}
+
+export interface SequenceList {
+  dossier_id: string;
+  active_sequence: string;
+  sequences: SequenceInfo[];
+}
+
 export interface DossierIndex {
   dossier_id: string;
   title: string;

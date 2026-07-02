@@ -166,7 +166,12 @@ def build_app(service: DossierService) -> FastAPI:
 
     @router.post("/dossiers/{dossier_id}/sequences", status_code=201)
     def create_sequence(dossier_id: str, body: SequenceIn):
-        return service.create_sequence(dossier_id, body.sequence)
+        return service.create_sequence(dossier_id, body.sequence,
+                                       body.purpose, body.note)
+
+    @router.post("/dossiers/{dossier_id}/sequences/{sequence}/activate")
+    def activate_sequence(dossier_id: str, sequence: str):
+        return service.activate_sequence(dossier_id, sequence)
 
     @router.post("/ectd/{dossier_id}/section/{section}/upload")
     async def upload_section(dossier_id: str, section: str,

@@ -16,10 +16,22 @@ from .document_store import SqliteBlobStore
 from .ports import DossierRepository
 
 _DIN_RE = re.compile(r"^\d{8}$")
+# a lifecycle placement suffixes the working sequence onto the base leaf id
+_SEQ_SUFFIX_RE = re.compile(r"^(?P<base>.+)-\d{4}$")
+
+# regulatory activities a working sequence can belong to
+SEQUENCE_PURPOSES = ("initial", "response", "supplement",
+                     "annual-notification")
 
 
 def _s(v) -> str:
     return str(v or "").strip()
+
+
+def _seq4(v) -> str:
+    """Normalize a sequence number the way assembly stores it (zero-filled)."""
+    s = _s(v)
+    return s.zfill(4) if s.isdigit() else s
 
 
 class DossierService:
@@ -234,13 +246,19 @@ class DossierService:
         name = _s(filename)
         return name.rsplit(".", 1)[-1].lower() if "." in name else default
 
+    def _active_sequence(self, dossier_id: str) -> str:
+        idx = self.repo.get_dossier_index(_s(dossier_id)) or {}
+        return _s(idx.get("active_sequence")) or "0000"
+
     def _place(self, dossier_id: str, node: dict, leaf_id: str, body,
                ext: str = "pdf") -> None:
         model = self._dossier_model(dossier_id, create=True)
         # the leaf href must carry the stored file's real extension (a generated
         # REP form is .xml, not .pdf) so the eCTD leaf points at the right bytes.
         href = f"{node['folder']}/{leaf_id}.{_s(ext) or 'pdf'}"
-        assembly.set_leaf(model, "0000", {
+        # placements target the ACTIVE working sequence; when the document is
+        # already live from an earlier sequence this records a replace op
+        assembly.set_leaf_lifecycle(model, self._active_sequence(dossier_id), {
             "leaf_id": leaf_id, "heading": node["section"],
             "title": node["title"], "href": href, "content": body})
         self.repo.save_dossier(model)
@@ -370,6 +388,12 @@ class DossierService:
 
         def resolve(leaf_id: str):
             doc_id = doc_by_leaf.get(leaf_id)
+            if not doc_id:
+                # a lifecycle placement (working sequence 0001+) suffixes the
+                # sequence onto the base leaf id; the section state still
+                # carries the LATEST document under the base id
+                m = _SEQ_SUFFIX_RE.match(_s(leaf_id))
+                doc_id = doc_by_leaf.get(m.group("base")) if m else None
             if not doc_id:
                 return None
             doc = self.store.get(doc_id)
@@ -527,11 +551,36 @@ class DossierService:
     def list_sequences(self, dossier_id: str) -> dict:
         model = self.repo.get_dossier(_s(dossier_id)) or \
             assembly.new_dossier(_s(dossier_id))
-        return {"dossier_id": _s(dossier_id),
-                "sequences": [s["sequence"] for s in model["sequences"]]}
+        active = self._active_sequence(dossier_id)
+        return {"dossier_id": _s(dossier_id), "active_sequence": active,
+                "sequences": [{"sequence": s["sequence"],
+                               "purpose": s.get("purpose") or "initial",
+                               "note": s.get("note") or "",
+                               "leaf_count": len(s["leaves"]),
+                               "active": s["sequence"] == active}
+                              for s in model["sequences"]]}
 
-    def create_sequence(self, dossier_id: str, sequence: str) -> dict:
+    def create_sequence(self, dossier_id: str, sequence: str,
+                        purpose: str = "", note: str = "") -> dict:
+        purpose = _s(purpose)
+        if purpose and purpose not in SEQUENCE_PURPOSES:
+            raise ProblemError(422, "purpose must be one of "
+                               + ", ".join(SEQUENCE_PURPOSES),
+                               rule="sequence_purpose_invalid")
         model = self._dossier_model(dossier_id, create=True)
-        assembly.add_sequence(model, _s(sequence) or "0000")
+        seq = _s(sequence) or "0000"
+        assembly.add_sequence(model, seq, purpose=purpose, note=_s(note))
         self.repo.save_dossier(model)
+        # the newly opened sequence becomes the ACTIVE working sequence
+        self.repo.set_active_sequence(_s(dossier_id), _seq4(seq))
+        return self.list_sequences(dossier_id)
+
+    def activate_sequence(self, dossier_id: str, sequence: str) -> dict:
+        model = self.repo.get_dossier(_s(dossier_id))
+        key = _seq4(sequence)
+        known = {s["sequence"] for s in (model or {}).get("sequences", [])}
+        if key not in known:
+            raise ProblemError(404, "no such sequence on this dossier",
+                               detail=key)
+        self.repo.set_active_sequence(_s(dossier_id), key)
         return self.list_sequences(dossier_id)
