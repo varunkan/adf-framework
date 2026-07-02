@@ -89,6 +89,27 @@ def create_app(*, title: str, version: str = "0.1.0", description: str = "",
                                     time.perf_counter() - start)
             metrics.inc_in_flight(-1)
 
+    # Internal mesh auth: when ANDS_INTERNAL_TOKEN is set, a backend trusts the
+    # X-Tenant-Id header ONLY from a caller that presents the shared token
+    # (the web proxy + the service-to-service clients). A direct call with a
+    # forged X-Tenant-Id but no token is rejected — so tenancy can't be spoofed
+    # by anything that reaches a backend port directly (SSRF, on-host, escape).
+    # Unset (tests / in-process mesh) => no-op, fully unscoped as before.
+    _internal_token = os.environ.get("ANDS_INTERNAL_TOKEN", "").strip()
+    if _internal_token:
+        @app.middleware("http")
+        async def _internal_gate(request: Request, call_next):  # noqa: ANN202
+            if request.url.path in _EXEMPT_PATHS:
+                return await call_next(request)
+            if request.headers.get("X-Internal-Auth") != _internal_token:
+                return JSONResponse(
+                    status_code=401, media_type=PROBLEM_TYPE,
+                    content={"type": "about:blank",
+                             "title": "internal authentication required",
+                             "status": 401,
+                             "detail": "requests must arrive via the gateway"})
+            return await call_next(request)
+
     @app.get("/health", tags=["meta"])
     async def health():  # noqa: ANN202
         return {"status": "ok", "service": title, "version": version}

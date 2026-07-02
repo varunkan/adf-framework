@@ -40,12 +40,14 @@ def build_app(service: DossierService) -> FastAPI:
 
     # -- content plans (REQ-103) ----------------------------------------
     @router.post("/content-plans", status_code=201)
-    def create_plan(body: ContentPlanIn):
-        return {"plan": service.create_content_plan(body.model_dump())}
+    def create_plan(body: ContentPlanIn, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        return {"plan": service.create_content_plan(body.model_dump(),
+                                                    x_tenant_id or None)}
 
     @router.get("/content-plans")
-    def get_plan(dossier_id: str = Query(...)):
-        return {"plan": service.get_content_plan(dossier_id)}
+    def get_plan(dossier_id: str = Query(...), x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        return {"plan": service.get_content_plan(dossier_id,
+                                                 x_tenant_id or None)}
 
     @router.post("/content-plans/item/assign")
     def assign_item(body: ItemAssignIn):
@@ -58,17 +60,19 @@ def build_app(service: DossierService) -> FastAPI:
 
     # -- bilingual product monograph (REQ-098) --------------------------
     @router.post("/monograph/leaves", status_code=201)
-    def register_pm_leaf(body: PmLeafIn):
-        return {"leaf": service.register_pm_leaf(body.model_dump())}
+    def register_pm_leaf(body: PmLeafIn, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        return {"leaf": service.register_pm_leaf(body.model_dump(),
+                                                 x_tenant_id or None)}
 
     @router.get("/monograph/status")
-    def monograph_status(dossier_id: str = Query(...)):
-        return service.monograph_status(dossier_id)
+    def monograph_status(dossier_id: str = Query(...), x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        return service.monograph_status(dossier_id, x_tenant_id or None)
 
     # -- administrative / corrective sequences (REQ-092) ----------------
     @router.post("/admin-sequence", status_code=201)
-    def admin_sequence(body: AdminSequenceIn):
-        return service.build_admin_sequence(body.model_dump())
+    def admin_sequence(body: AdminSequenceIn, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        return service.build_admin_sequence(body.model_dump(),
+                                            x_tenant_id or None)
 
     # -- XML Product Monograph (REQ-099) --------------------------------
     @router.post("/monograph/xml/build")
@@ -94,8 +98,8 @@ def build_app(service: DossierService) -> FastAPI:
 
     # -- eCTD assembly + Application Viewer (REQ-107) ------------------
     @router.post("/ectd/leaf", status_code=201)
-    def add_leaf(body: LeafIn):
-        return service.add_leaf(body.model_dump())
+    def add_leaf(body: LeafIn, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        return service.add_leaf(body.model_dump(), x_tenant_id or None)
 
     @router.get("/ectd/{dossier_id}/current-view")
     def current_view(dossier_id: str, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
@@ -114,24 +118,24 @@ def build_app(service: DossierService) -> FastAPI:
 
     # -- submission archive / binder (REQ-110) ------------------------
     @router.post("/archive", status_code=201)
-    def create_binder(body: BinderIn):
-        return service.create_binder(body.model_dump())
+    def create_binder(body: BinderIn, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        return service.create_binder(body.model_dump(), x_tenant_id or None)
 
     @router.get("/archive")
-    def list_binders(dossier_id: str = Query(...)):
-        return service.list_binders(dossier_id)
+    def list_binders(dossier_id: str = Query(...), x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        return service.list_binders(dossier_id, x_tenant_id or None)
 
     @router.get("/archive/share/{token}")
     def shared_binder(token: str):
         return service.get_shared_binder(token)
 
     @router.get("/archive/{binder_id}")
-    def get_binder(binder_id: str):
-        return service.get_binder(binder_id)
+    def get_binder(binder_id: str, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        return service.get_binder(binder_id, x_tenant_id or None)
 
     @router.post("/archive/{binder_id}/share", status_code=201)
-    def share_binder(binder_id: str):
-        return service.share_binder(binder_id)
+    def share_binder(binder_id: str, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        return service.share_binder(binder_id, x_tenant_id or None)
 
     # -- guided module builder: section tree + real documents -----------
     @router.get("/section-tree")
@@ -248,8 +252,8 @@ def build_app(service: DossierService) -> FastAPI:
                      "X-Export-Missing": str(len(pkg["missing"]))})
 
     @router.get("/documents/{doc_id}")
-    def download_document(doc_id: str):
-        doc = service.get_document(doc_id)
+    def download_document(doc_id: str, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        doc = service.get_document(doc_id, x_tenant_id or None)
         return Response(
             content=doc["body"], media_type=doc["content_type"],
             headers={"Content-Disposition":

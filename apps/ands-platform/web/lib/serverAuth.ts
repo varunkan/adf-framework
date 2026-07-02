@@ -10,6 +10,14 @@ import { NextRequest, NextResponse } from "next/server";
 const IDENTITY = process.env.IDENTITY_BFF_URL || "http://127.0.0.1:8014";
 const TTL_MS = 30_000;
 
+/** Shared secret proving a request came through this proxy (not a direct hit
+ *  on a backend port). Sent on every server→service call; the services gate on
+ *  it when ANDS_INTERNAL_TOKEN is set. Server-only env — never sent to the browser. */
+export const INTERNAL_TOKEN = process.env.ANDS_INTERNAL_TOKEN || "";
+export function internalHeader(): Record<string, string> {
+  return INTERNAL_TOKEN ? { "x-internal-auth": INTERNAL_TOKEN } : {};
+}
+
 export interface Session {
   tenantId: string;
   token: string;
@@ -27,7 +35,7 @@ export async function resolveTenant(req: NextRequest): Promise<Session | null> {
     return { tenantId: hit.tenantId, token, email: hit.email };
   try {
     const r = await fetch(`${IDENTITY}/api/identity/auth/me`, {
-      headers: { authorization: `Bearer ${token}` },
+      headers: { authorization: `Bearer ${token}`, ...internalHeader() },
       cache: "no-store",
     });
     if (!r.ok) {
@@ -74,6 +82,7 @@ export function tenantHeaders(s: Session): Record<string, string> {
     "x-tenant-id": s.tenantId,
     "x-user-email": s.email,
     authorization: `Bearer ${s.token}`,
+    ...internalHeader(),
   };
 }
 
@@ -116,7 +125,8 @@ export async function ownsDossier(s: Session, dossierId: string): Promise<boolea
   try {
     const r = await fetch(
       `${DOSSIER}/api/dossier/dossiers/${encodeURIComponent(dossierId)}`,
-      { headers: { "x-tenant-id": s.tenantId }, cache: "no-store" }
+      { headers: { "x-tenant-id": s.tenantId, ...internalHeader() },
+        cache: "no-store" }
     );
     return r.ok;
   } catch {

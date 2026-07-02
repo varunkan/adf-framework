@@ -28,7 +28,7 @@
       "runtimeExecutable": "bash",
       "runtimeArgs": [
         "-lc",
-        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/web && JOURNEY_BFF_URL=http://127.0.0.1:8011 DOSSIER_BFF_URL=http://127.0.0.1:8010 IDENTITY_BFF_URL=http://127.0.0.1:8014 GOVERNANCE_BFF_URL=http://127.0.0.1:8012 REGISTRY_BFF_URL=http://127.0.0.1:8016 LIFECYCLE_BFF_URL=http://127.0.0.1:8017 COLLAB_BFF_URL=http://127.0.0.1:8018 exec npm run dev"
+        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/web && JOURNEY_BFF_URL=http://127.0.0.1:8011 DOSSIER_BFF_URL=http://127.0.0.1:8010 IDENTITY_BFF_URL=http://127.0.0.1:8014 GOVERNANCE_BFF_URL=http://127.0.0.1:8012 REGISTRY_BFF_URL=http://127.0.0.1:8016 LIFECYCLE_BFF_URL=http://127.0.0.1:8017 COLLAB_BFF_URL=http://127.0.0.1:8018 ANDS_INTERNAL_TOKEN=ands-mesh-dev-7f3a91 exec npm run dev"
       ],
       "port": 3000
     },
@@ -37,7 +37,7 @@
       "runtimeExecutable": "bash",
       "runtimeArgs": [
         "-lc",
-        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/journey && PYTHONPATH=.:../../libs DOSSIER_URL=http://127.0.0.1:8010 GOVERNANCE_URL=http://127.0.0.1:8012 TRANSMISSION_URL=http://127.0.0.1:8013 exec ../../.venv/bin/uvicorn app.main:app --port 8011"
+        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/journey && ANDS_INTERNAL_TOKEN=ands-mesh-dev-7f3a91 PYTHONPATH=.:../../libs DOSSIER_URL=http://127.0.0.1:8010 GOVERNANCE_URL=http://127.0.0.1:8012 TRANSMISSION_URL=http://127.0.0.1:8013 exec ../../.venv/bin/uvicorn app.main:app --port 8011"
       ],
       "port": 8011
     },
@@ -46,7 +46,7 @@
       "runtimeExecutable": "bash",
       "runtimeArgs": [
         "-lc",
-        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/identity && PYTHONPATH=.:../../libs ANDS_OWNER_EMAIL=owner@ands.local ANDS_OWNER_PASSWORD=ands-owner-dev exec ../../.venv/bin/uvicorn app.main:app --port 8014"
+        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/identity && ANDS_INTERNAL_TOKEN=ands-mesh-dev-7f3a91 PYTHONPATH=.:../../libs ANDS_OWNER_EMAIL=owner@ands.local ANDS_OWNER_PASSWORD=ands-owner-dev exec ../../.venv/bin/uvicorn app.main:app --port 8014"
       ],
       "port": 8014
     },
@@ -55,7 +55,7 @@
       "runtimeExecutable": "bash",
       "runtimeArgs": [
         "-lc",
-        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/governance && PYTHONPATH=.:../../libs exec ../../.venv/bin/uvicorn app.main:app --port 8012"
+        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/governance && ANDS_INTERNAL_TOKEN=ands-mesh-dev-7f3a91 PYTHONPATH=.:../../libs exec ../../.venv/bin/uvicorn app.main:app --port 8012"
       ],
       "port": 8012
     },
@@ -64,7 +64,7 @@
       "runtimeExecutable": "bash",
       "runtimeArgs": [
         "-lc",
-        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/transmission && PYTHONPATH=.:../../libs exec ../../.venv/bin/uvicorn app.main:app --port 8013"
+        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/transmission && ANDS_INTERNAL_TOKEN=ands-mesh-dev-7f3a91 PYTHONPATH=.:../../libs exec ../../.venv/bin/uvicorn app.main:app --port 8013"
       ],
       "port": 8013
     },
@@ -73,7 +73,7 @@
       "runtimeExecutable": "bash",
       "runtimeArgs": [
         "-lc",
-        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/registry && PYTHONPATH=.:../../libs exec ../../.venv/bin/uvicorn app.main:app --port 8016"
+        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/registry && ANDS_INTERNAL_TOKEN=ands-mesh-dev-7f3a91 PYTHONPATH=.:../../libs exec ../../.venv/bin/uvicorn app.main:app --port 8016"
       ],
       "port": 8016
     },
@@ -82,7 +82,7 @@
       "runtimeExecutable": "bash",
       "runtimeArgs": [
         "-lc",
-        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/lifecycle && PYTHONPATH=.:../../libs exec ../../.venv/bin/uvicorn app.main:app --port 8017"
+        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/lifecycle && ANDS_INTERNAL_TOKEN=ands-mesh-dev-7f3a91 PYTHONPATH=.:../../libs exec ../../.venv/bin/uvicorn app.main:app --port 8017"
       ],
       "port": 8017
     },
@@ -91,7 +91,7 @@
       "runtimeExecutable": "bash",
       "runtimeArgs": [
         "-lc",
-        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/dossier && PYTHONPATH=.:../../libs GOVERNANCE_URL=http://127.0.0.1:8012 exec ../../.venv/bin/uvicorn app.main:app --port 8010"
+        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/dossier && ANDS_INTERNAL_TOKEN=ands-mesh-dev-7f3a91 PYTHONPATH=.:../../libs GOVERNANCE_URL=http://127.0.0.1:8012 exec ../../.venv/bin/uvicorn app.main:app --port 8010"
       ],
       "port": 8010
     },
@@ -100,7 +100,7 @@
       "runtimeExecutable": "bash",
       "runtimeArgs": [
         "-lc",
-        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/collaboration && PYTHONPATH=.:../../libs exec ../../.venv/bin/uvicorn app.main:app --port 8018"
+        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/collaboration && ANDS_INTERNAL_TOKEN=ands-mesh-dev-7f3a91 PYTHONPATH=.:../../libs exec ../../.venv/bin/uvicorn app.main:app --port 8018"
       ],
       "port": 8018
     }

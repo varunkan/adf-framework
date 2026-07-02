@@ -79,3 +79,39 @@ def test_no_header_remains_unscoped(client):
     _mk(client, "e111111", "tenant-a")
     allv = client.get("/api/dossier/dossiers").json()
     assert allv["count"] == 1
+
+
+def test_cross_tenant_document_download_404(client):
+    # a doc_id is disclosed in the owner's content response; a rival tenant
+    # must not be able to fetch the bytes directly
+    did = _mk(client, "e111111", "tenant-a")["dossier_id"] if False else "e111111"
+    client.post("/api/dossier/dossiers", json={"dossier_id": "e111111",
+                "title": "A drug"}, headers={"X-Tenant-Id": "tenant-a"})
+    r = client.post("/api/dossier/ectd/e111111/section/1.0/generate", json={},
+                    headers={"X-Tenant-Id": "tenant-a"})
+    doc_id = next(n for m in r.json()["modules"] for n in m["nodes"]
+                  if n["section"] == "1.0")["document"]["doc_id"]
+    assert client.get(f"/api/dossier/documents/{doc_id}",
+                      headers={"X-Tenant-Id": "tenant-a"}).status_code == 200
+    assert client.get(f"/api/dossier/documents/{doc_id}",
+                      headers={"X-Tenant-Id": "tenant-b"}).status_code == 404
+
+
+def test_cross_tenant_binder_leak_and_tamper_404(client):
+    client.post("/api/dossier/dossiers", json={"dossier_id": "e111111",
+                "title": "A drug"}, headers={"X-Tenant-Id": "tenant-a"})
+    b = client.post("/api/dossier/archive",
+                    json={"dossier_id": "e111111", "sequence": "0000"},
+                    headers={"X-Tenant-Id": "tenant-a"})
+    assert b.status_code == 201
+    binder_id = b.json()["id"]
+    hb = {"X-Tenant-Id": "tenant-b"}
+    assert client.get("/api/dossier/archive?dossier_id=e111111",
+                      headers=hb).status_code == 404          # enumerate
+    assert client.get(f"/api/dossier/archive/{binder_id}",
+                      headers=hb).status_code == 404          # read
+    assert client.post(f"/api/dossier/archive/{binder_id}/share",
+                       headers=hb).status_code == 404         # tamper (write)
+    # owner keeps full access
+    assert client.get(f"/api/dossier/archive/{binder_id}",
+                      headers={"X-Tenant-Id": "tenant-a"}).status_code == 200

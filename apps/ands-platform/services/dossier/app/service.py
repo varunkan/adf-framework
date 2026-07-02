@@ -48,11 +48,13 @@ class DossierService:
         return self
 
     # -- content plans (REQ-103) -------------------------------------------
-    def create_content_plan(self, data: dict) -> dict:
+    def create_content_plan(self, data: dict,
+                            tenant_id: str | None = None) -> dict:
         dossier_id = _s(data.get("dossier_id"))
         if not dossier_id:
             raise ProblemError(422, "dossier_id is required",
                                rule="dossier_id_required")
+        self._tenant_guard(dossier_id, tenant_id)
         try:
             items = content_plan.build_plan_items(
                 data.get("submission_type"),
@@ -63,7 +65,9 @@ class DossierService:
             dossier_id, _s(data.get("submission_type")).upper(), items)
         return self._with_progress(plan)
 
-    def get_content_plan(self, dossier_id: str) -> dict:
+    def get_content_plan(self, dossier_id: str,
+                         tenant_id: str | None = None) -> dict:
+        self._tenant_guard(_s(dossier_id), tenant_id)
         plan = self.repo.get_plan_by_dossier(_s(dossier_id))
         if not plan:
             raise ProblemError(404, "No content plan for dossier",
@@ -104,7 +108,9 @@ class DossierService:
         return plan
 
     # -- bilingual product monograph (REQ-098) -----------------------------
-    def register_pm_leaf(self, data: dict) -> dict:
+    def register_pm_leaf(self, data: dict,
+                         tenant_id: str | None = None) -> dict:
+        self._tenant_guard(_s(data.get("dossier_id")), tenant_id)
         res = monograph.normalize_pm_leaf(data)
         if not res["valid"]:
             raise ProblemError(422, "Invalid Product Monograph leaf",
@@ -112,14 +118,18 @@ class DossierService:
         return self.repo.upsert_pm_leaf(res["leaf"])
 
     # -- administrative / corrective sequences (REQ-092) -------------------
-    def build_admin_sequence(self, data: dict) -> dict:
+    def build_admin_sequence(self, data: dict,
+                             tenant_id: str | None = None) -> dict:
+        self._tenant_guard(_s(data.get("dossier_id")), tenant_id)
         result = admin_sequence.build_admin_sequence(data)
         if "errors" in result:
             raise ProblemError(422, "Invalid administrative sequence",
                                errors=result["errors"])
         return result
 
-    def monograph_status(self, dossier_id: str) -> dict:
+    def monograph_status(self, dossier_id: str,
+                         tenant_id: str | None = None) -> dict:
+        self._tenant_guard(_s(dossier_id), tenant_id)
         leaves = self.repo.list_pm_leaves(_s(dossier_id))
         result = monograph.validate_bilingual_monograph(leaves)
         if result["blocking"]:
@@ -160,12 +170,13 @@ class DossierService:
             return assembly.new_dossier(dossier_id)
         raise ProblemError(404, "no eCTD dossier", detail=_s(dossier_id))
 
-    def add_leaf(self, data: dict) -> dict:
+    def add_leaf(self, data: dict, tenant_id: str | None = None) -> dict:
         dossier_id = _s(data.get("dossier_id"))
         sequence = _s(data.get("sequence")) or "0000"
         if not dossier_id:
             raise ProblemError(422, "dossier_id is required",
                                rule="dossier_id_required")
+        self._tenant_guard(dossier_id, tenant_id)
         model = self._dossier_model(dossier_id, create=True)
         try:
             record = assembly.add_leaf(model, sequence, data.get("leaf") or data)
@@ -185,8 +196,9 @@ class DossierService:
                                            sequence)
 
     # -- submission archive / binder (REQ-110) -----------------------------
-    def create_binder(self, data: dict) -> dict:
+    def create_binder(self, data: dict, tenant_id: str | None = None) -> dict:
         dossier_id = _s(data.get("dossier_id"))
+        self._tenant_guard(dossier_id, tenant_id)
         sequence = _s(data.get("sequence")) or "0000"
         model = self._dossier_model(dossier_id)   # 404 if no eCTD dossier
         binder = archive.build_binder(
@@ -195,18 +207,23 @@ class DossierService:
             transmission=data.get("transmission"))
         return self.repo.save_binder(dossier_id, sequence, binder)
 
-    def get_binder(self, binder_id: str) -> dict:
+    def get_binder(self, binder_id: str, tenant_id: str | None = None) -> dict:
         rec = self.repo.get_binder(_s(binder_id))
         if not rec:
             raise ProblemError(404, "binder not found", detail=_s(binder_id))
+        # a binder belongs to its dossier — 404 across tenants
+        self._tenant_guard(_s(rec.get("dossier_id")), tenant_id)
         return rec
 
-    def list_binders(self, dossier_id: str) -> dict:
+    def list_binders(self, dossier_id: str,
+                     tenant_id: str | None = None) -> dict:
+        self._tenant_guard(dossier_id, tenant_id)
         binders = self.repo.list_binders(_s(dossier_id))
         return {"binders": binders, "count": len(binders)}
 
-    def share_binder(self, binder_id: str) -> dict:
-        rec = self.get_binder(binder_id)
+    def share_binder(self, binder_id: str,
+                     tenant_id: str | None = None) -> dict:
+        rec = self.get_binder(binder_id, tenant_id)   # guards ownership
         token = rec.get("share_token") or secrets.token_urlsafe(24)
         self.repo.set_share_token(binder_id, token)
         return {"binder_id": binder_id, "share_token": token,
@@ -431,7 +448,14 @@ class DossierService:
                            "missing": len(pkg["missing"])})
         return pkg
 
-    def get_document(self, doc_id: str) -> dict:
+    def get_document(self, doc_id: str, tenant_id: str | None = None) -> dict:
+        # a document belongs to its dossier — enforce ownership before serving
+        # bytes (the doc_id is disclosed in the owner's content response, so a
+        # rival tenant could otherwise fetch it directly).
+        meta = self.repo.get_document_meta(_s(doc_id))
+        if not meta:
+            raise ProblemError(404, "document not found", detail=_s(doc_id))
+        self._tenant_guard(_s(meta.get("dossier_id")), tenant_id)
         doc = self.store.get(_s(doc_id))
         if not doc:
             raise ProblemError(404, "document not found", detail=_s(doc_id))

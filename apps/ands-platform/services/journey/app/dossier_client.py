@@ -28,8 +28,11 @@ class DossierClient(Protocol):
 
 class HttpDossierClient:
     def __init__(self, base_url: str) -> None:
-        import httpx
-        self._c = httpx.Client(base_url=base_url.rstrip("/"), timeout=5.0)
+        import httpx, os
+        tok = os.environ.get("ANDS_INTERNAL_TOKEN", "").strip()
+        headers = {"X-Internal-Auth": tok} if tok else {}
+        self._c = httpx.Client(base_url=base_url.rstrip("/"), timeout=5.0,
+                               headers=headers)
 
     def ensure_dossier(self, dossier_id, *, title="", submission_type="ANDS",
                        cs_be_only=True, tenant_id=None, company_id="",

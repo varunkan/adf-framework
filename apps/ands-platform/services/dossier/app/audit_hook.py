@@ -45,9 +45,13 @@ def _ingest_url() -> str:
 
 def _post(url: str, payload: dict) -> None:
     try:
+        hdrs = {"Content-Type": "application/json"}
+        tok = os.environ.get("ANDS_INTERNAL_TOKEN", "").strip()
+        if tok:
+            hdrs["X-Internal-Auth"] = tok
         req = urllib.request.Request(
             url, data=json.dumps(payload, default=str).encode("utf-8"),
-            headers={"Content-Type": "application/json"}, method="POST")
+            headers=hdrs, method="POST")
         with urllib.request.urlopen(req, timeout=_TIMEOUT_SEC):
             pass
     except Exception:

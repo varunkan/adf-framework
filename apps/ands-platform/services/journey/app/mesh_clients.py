@@ -34,8 +34,11 @@ class TransmissionClient(Protocol):
 
 class HttpGovernanceClient:
     def __init__(self, base_url: str) -> None:
-        import httpx
-        self._c = httpx.Client(base_url=base_url.rstrip("/"), timeout=5.0)
+        import httpx, os
+        tok = os.environ.get("ANDS_INTERNAL_TOKEN", "").strip()
+        h = {"X-Internal-Auth": tok} if tok else {}
+        self._c = httpx.Client(base_url=base_url.rstrip("/"), timeout=5.0,
+                               headers=h)
 
     def qa_review(self, *, reviewer, comment="") -> dict | None:
         try:
@@ -64,8 +67,11 @@ class HttpGovernanceClient:
 
 class HttpTransmissionClient:
     def __init__(self, base_url: str) -> None:
-        import httpx
-        self._c = httpx.Client(base_url=base_url.rstrip("/"), timeout=8.0)
+        import httpx, os
+        tok = os.environ.get("ANDS_INTERNAL_TOKEN", "").strip()
+        h = {"X-Internal-Auth": tok} if tok else {}
+        self._c = httpx.Client(base_url=base_url.rstrip("/"), timeout=8.0,
+                               headers=h)
 
     def transmit(self, dossier_id, sequence, *, size_gb=1.0) -> dict | None:
         """Run the full happy chain through the real state machine:

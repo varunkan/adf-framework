@@ -24,6 +24,9 @@ async function forward(req: NextRequest, path: string[]) {
       ? `Bearer ${req.cookies.get(COOKIE)!.value}`
       : "");
   if (auth) headers["authorization"] = auth;
+  // prove the request came through this proxy (identity gates on it too)
+  if (process.env.ANDS_INTERNAL_TOKEN)
+    headers["x-internal-auth"] = process.env.ANDS_INTERNAL_TOKEN;
 
   const init: RequestInit = { method: req.method, headers, cache: "no-store" };
   if (req.method !== "GET" && req.method !== "HEAD") {
