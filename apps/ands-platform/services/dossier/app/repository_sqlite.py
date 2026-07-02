@@ -321,3 +321,19 @@ class SqliteDossierRepository:
         rows = self.db.fetchall(
             "SELECT * FROM dossier_index ORDER BY created_at DESC")
         return [self._index_row(r) for r in rows]
+
+    def delete_dossier(self, dossier_id: str) -> bool:
+        existed = bool(
+            self.db.fetchone("SELECT 1 FROM dossier_index WHERE dossier_id = ?",
+                             (dossier_id,))
+            or self.db.fetchone("SELECT 1 FROM dossiers WHERE dossier_id = ?",
+                                (dossier_id,)))
+        for table in ("dossier_index", "dossiers", "section_state", "documents",
+                      "binders", "pm_leaves", "content_plans"):
+            self.db.execute(f"DELETE FROM {table} WHERE dossier_id = ?",
+                            (dossier_id,))
+        # plan items key off plan_id, not dossier_id — clear orphans
+        self.db.execute(
+            "DELETE FROM content_plan_items WHERE plan_id NOT IN "
+            "(SELECT id FROM content_plans)")
+        return existed

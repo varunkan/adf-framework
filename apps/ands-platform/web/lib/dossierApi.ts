@@ -40,6 +40,11 @@ export const dossierApi = {
 
   getDossier: (id: string) => j<DossierFull>(`/dossiers/${encodeURIComponent(id)}`),
 
+  deleteDossier: (id: string) =>
+    j<{ deleted: string }>(`/dossiers/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+
   getContent: (id: string) =>
     j<ContentState>(`/dossiers/${encodeURIComponent(id)}/content`),
 

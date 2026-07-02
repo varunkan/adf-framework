@@ -37,9 +37,27 @@
       "runtimeExecutable": "bash",
       "runtimeArgs": [
         "-lc",
-        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/journey && PYTHONPATH=.:../../libs DOSSIER_URL=http://127.0.0.1:8010 exec ../../.venv/bin/uvicorn app.main:app --port 8011"
+        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/journey && PYTHONPATH=.:../../libs DOSSIER_URL=http://127.0.0.1:8010 GOVERNANCE_URL=http://127.0.0.1:8012 TRANSMISSION_URL=http://127.0.0.1:8013 exec ../../.venv/bin/uvicorn app.main:app --port 8011"
       ],
       "port": 8011
+    },
+    {
+      "name": "ands-governance",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-lc",
+        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/governance && PYTHONPATH=.:../../libs exec ../../.venv/bin/uvicorn app.main:app --port 8012"
+      ],
+      "port": 8012
+    },
+    {
+      "name": "ands-transmission",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-lc",
+        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/transmission && PYTHONPATH=.:../../libs exec ../../.venv/bin/uvicorn app.main:app --port 8013"
+      ],
+      "port": 8013
     },
     {
       "name": "ands-dossier",

@@ -19,6 +19,9 @@ class DossierClient(Protocol):
                        submission_type: str = "ANDS",
                        cs_be_only: bool = True) -> None: ...
     def content_state(self, dossier_id: str) -> dict | None: ...
+    def validate(self, dossier_id: str) -> dict | None: ...
+    def set_fees(self, dossier_id: str, fee_paid: bool,
+                 sme_granted: bool) -> dict | None: ...
 
 
 class HttpDossierClient:
@@ -44,6 +47,26 @@ class HttpDossierClient:
             pass
         return None
 
+    def validate(self, dossier_id) -> dict | None:
+        """Full technical eCTD validation (PDF conformance on stored bytes)."""
+        try:
+            r = self._c.get(f"/api/dossier/dossiers/{dossier_id}/validate")
+            if r.status_code == 200:
+                return r.json()
+        except Exception:
+            pass
+        return None
+
+    def set_fees(self, dossier_id, fee_paid, sme_granted) -> dict | None:
+        try:
+            r = self._c.post(f"/api/dossier/dossiers/{dossier_id}/fees", json={
+                "fee_paid": bool(fee_paid), "sme_granted": bool(sme_granted)})
+            if r.status_code == 200:
+                return r.json()
+        except Exception:
+            pass
+        return None
+
 
 class InProcessDossierClient:
     """Wraps a live ``DossierService`` — for the integration mesh + unit tests."""
@@ -63,5 +86,17 @@ class InProcessDossierClient:
     def content_state(self, dossier_id) -> dict | None:
         try:
             return self.service.content_state(dossier_id)
+        except Exception:
+            return None
+
+    def validate(self, dossier_id) -> dict | None:
+        try:
+            return self.service.validate_submission(dossier_id)
+        except Exception:
+            return None
+
+    def set_fees(self, dossier_id, fee_paid, sme_granted) -> dict | None:
+        try:
+            return self.service.set_fee_status(dossier_id, fee_paid, sme_granted)
         except Exception:
             return None

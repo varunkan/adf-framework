@@ -29,6 +29,20 @@ export default function DossiersHome() {
     load();
   }, [load]);
 
+  async function remove(e: React.MouseEvent, dossierId: string) {
+    e.preventDefault();  // the tile is a Link — don't navigate
+    e.stopPropagation();
+    if (!window.confirm(
+      `Delete dossier ${dossierId} and all of its documents? This cannot be undone.`)) return;
+    setErr("");
+    try {
+      await dossierApi.deleteDossier(dossierId);
+      await load();
+    } catch (er) {
+      setErr(String(er));
+    }
+  }
+
   async function create() {
     if (!/^[a-z]\d{6,7}$/.test(did.trim())) {
       setErr("Dossier ID must be one letter + 6–7 digits (e.g. e123456)");
@@ -115,6 +129,9 @@ export default function DossiersHome() {
                   <span className={`chip ${d.gate?.complete ? "ready" : "blocked"}`}>
                     {d.gate?.complete ? "Ready to file" : `${passed}/${applic} modules`}
                   </span>
+                  <button className="tile-delete" title={`Delete ${d.dossier_id}`}
+                    aria-label={`Delete dossier ${d.dossier_id}`}
+                    onClick={(e) => remove(e, d.dossier_id)}>✕</button>
                 </Link>
               );
             })}

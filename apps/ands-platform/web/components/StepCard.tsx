@@ -169,16 +169,19 @@ export function StepCard({
         <>
           <div className="teach">
             Health Canada re-validates everything on receipt, so we check first.
-            Zero errors is the gate (warnings are allowed). If anything&apos;s
-            wrong, you get a plain-language list of how to fix it.
+            Continuing runs the <b>full technical validation</b> on your
+            assembled dossier — eCTD backbone, leaf checksums, and PDF
+            conformance on the real bytes. Zero errors is the gate (warnings
+            are allowed); anything wrong comes back as a plain-language list.
           </div>
-          <label>Validation errors found (simulated for this walk)</label>
-          <input
-            type="number"
-            min={0}
-            value={form.errors ?? 0}
-            onChange={(e) => set("errors", Number(e.target.value))}
-          />
+          {sig.validation?.ran && (
+            <div className={`notice ${sig.validation.errors ? "bad" : "ok"}`}>
+              {sig.validation.errors
+                ? `✗ ${sig.validation.errors} error(s) to fix`
+                : `✓ Validation passed — ${sig.validation.checked ?? 0} document(s) checked, ${sig.validation.warnings ?? 0} warning(s).`}
+              {sig.validation.real === false ? " (simulated)" : ""}
+            </div>
+          )}
         </>
       )}
 
@@ -211,21 +214,40 @@ export function StepCard({
       )}
 
       {stage.key === "review" && (
-        <div className="teach">
-          Before it leaves your organization, the submission is routed for
-          internal approval. An ANDS also needs the Sponsor Attestation
-          Checklist — note it&apos;s requested from Health Canada by email, not
-          on the public forms page, so don&apos;t discover it missing at
-          screening.
-        </div>
+        <>
+          <div className="teach">
+            Before it leaves your organization, the submission is routed for
+            internal approval. An ANDS also needs the Sponsor Attestation
+            Checklist — note it&apos;s requested from Health Canada by email, not
+            on the public forms page, so don&apos;t discover it missing at
+            screening.
+          </div>
+          {sig.reviews?.approved && (
+            <div className="notice ok">
+              ✓ QA review recorded{sig.reviews.real
+                ? " in the governance audit trail" : ""} — reviewer:{" "}
+              {sig.reviews.reviewer || "sponsor QA"}.
+            </div>
+          )}
+        </>
       )}
 
       {stage.key === "sign" && (
-        <div className="teach">
-          An authorized person applies the regulated e-signature behind a QA
-          gate, recorded with a tamper-evident audit trail (who signed, when).
-          Signing unlocks transmission.
-        </div>
+        <>
+          <div className="teach">
+            An authorized person applies the regulated e-signature behind a QA
+            gate, recorded with a tamper-evident audit trail (who signed, when).
+            Signing unlocks transmission.
+          </div>
+          {sig.esign?.signed && (
+            <div className="notice ok">
+              ✓ Signed by {sig.esign.signer || "authorized signer"}
+              {sig.esign.manifest_id
+                ? ` — tamper-evident manifest ${String(sig.esign.manifest_id).slice(0, 10)}… over ${sig.esign.artifact_count} artifact(s).`
+                : "."}
+            </div>
+          )}
+        </>
       )}
 
       {stage.key === "transmit" && <TransmitStep sig={sig} />}
@@ -329,11 +351,16 @@ function DossierStep({
 }
 
 function TransmitStep({ sig }: { sig: Record<string, any> }) {
+  const tx = sig.transmission || {};
   const sent = !!sig.transmission;
+  // real transmission records per-ack flags; the simulation implies all three
   const chain = [
-    { k: "FDA MDN", d: "FDA gateway received your message" },
-    { k: "FDA ACK", d: "FDA gateway accepted it" },
-    { k: "HC ACK (Core ID)", d: "Health Canada actually has it — this is the proof" },
+    { k: "FDA MDN", d: "FDA gateway received your message",
+      done: tx.real ? !!tx.mdn_received : sent },
+    { k: "FDA ACK", d: "FDA gateway accepted it",
+      done: tx.real ? !!tx.fda_ack_received : sent },
+    { k: "HC ACK (Core ID)", d: "Health Canada actually has it — this is the proof",
+      done: tx.real ? !!tx.hc_ack_received : sent },
   ];
   return (
     <>
@@ -348,17 +375,20 @@ function TransmitStep({ sig }: { sig: Record<string, any> }) {
         You get <b>three receipts, in order</b> — don&apos;t stop at the FDA ACK:
       </div>
       <div className="tiles" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
-        {chain.map((c, i) => {
-          const done = sent && i < 3;
-          return (
-            <div key={c.k} className={`tile ${done ? "pass" : "todo"}`} title={c.d}>
-              <span className="d" aria-hidden>{done ? "✓" : "○"}</span>
-              <span className="sr-only">{done ? "received" : "pending"}: </span>
-              {c.k}
-            </div>
-          );
-        })}
+        {chain.map((c) => (
+          <div key={c.k} className={`tile ${c.done ? "pass" : "todo"}`} title={c.d}>
+            <span className="d" aria-hidden>{c.done ? "✓" : "○"}</span>
+            <span className="sr-only">{c.done ? "received" : "pending"}: </span>
+            {c.k}
+          </div>
+        ))}
       </div>
+      {tx.real && tx.core_id && (
+        <div className="notice ok">
+          ✓ Transmitted for real through the transmission service — state{" "}
+          <b>{tx.state}</b>, Core ID <b>{tx.core_id}</b>.
+        </div>
+      )}
     </>
   );
 }

@@ -23,7 +23,17 @@ def build():
     if settings.dossier_url:
         from .dossier_client import HttpDossierClient
         dossier = HttpDossierClient(settings.dossier_url)
-    return build_app(JourneyService(repo, bus, dossier=dossier))
+    governance = None
+    if settings.governance_url:
+        from .mesh_clients import HttpGovernanceClient
+        governance = HttpGovernanceClient(settings.governance_url)
+    transmission = None
+    if settings.transmission_url:
+        from .mesh_clients import HttpTransmissionClient
+        transmission = HttpTransmissionClient(settings.transmission_url)
+    return build_app(JourneyService(repo, bus, dossier=dossier,
+                                    governance=governance,
+                                    transmission=transmission))
 
 
 app = build()

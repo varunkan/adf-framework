@@ -377,3 +377,12 @@ button:disabled{opacity:.45;cursor:not-allowed;transform:none}
   :root{--prism-blur:0px}
   header.topbar,.glass,.card{backdrop-filter:none!important}
 }
+
+/* ── dossier tile delete affordance ───────────────────────────────── */
+.dossier-tile{position:relative}
+.tile-delete{position:absolute;top:10px;right:10px;width:26px;height:26px;
+  padding:0;line-height:1;border-radius:50%;background:transparent;
+  border:1px solid transparent;color:var(--mut,#8a93a6);opacity:0;
+  transition:opacity .15s ease,color .15s ease,border-color .15s ease}
+.dossier-tile:hover .tile-delete,.tile-delete:focus-visible{opacity:1}
+.tile-delete:hover{color:#ff7a7a;border-color:#ff7a7a55;background:#ff7a7a11}

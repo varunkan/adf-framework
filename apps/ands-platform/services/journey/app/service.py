@@ -24,11 +24,14 @@ def _s(v) -> str:
 
 class JourneyService:
     def __init__(self, repo: SessionRepository, bus=None,
-                 *, source: str = "journey", dossier=None) -> None:
+                 *, source: str = "journey", dossier=None,
+                 governance=None, transmission=None) -> None:
         self.repo = repo
         self.bus = bus
         self.source = source
         self.dossier = dossier          # DossierClient port (optional)
+        self.governance = governance    # GovernanceClient port (optional)
+        self.transmission = transmission  # TransmissionClient port (optional)
 
     # -- emit ---------------------------------------------------------------
     def _emit(self, event_type: str, session: dict, **data) -> None:
@@ -179,6 +182,19 @@ class JourneyService:
     def assess_dossier_id(self, data: dict) -> dict:
         return dossier_id.assess(data or {})
 
+    def _sign_artifacts(self, signals: dict) -> list[dict]:
+        """Checksummed eCTD leaves from the real dossier — what gets signed."""
+        did = _s(signals.get("dossier_id"))
+        if self.dossier is None or not did:
+            return []
+        content = self.dossier.content_state(did) or {}
+        files = content.get("files_view") or {}
+        return [{"id": _s(leaf.get("leaf_id")) or _s(leaf.get("href")),
+                 "kind": "leaf", "checksum": _s(leaf.get("checksum"))}
+                for node in (files.get("nodes") or [])
+                for leaf in (node.get("leaves") or [])
+                if _s(leaf.get("checksum"))]
+
     # -- advance the journey (perform a step's primary action) --------------
     def advance(self, session_id: str, step: str, data: dict) -> dict:
         session = self._load(session_id)
@@ -233,24 +249,107 @@ class JourneyService:
                                      for m in (gate.get("missing") or [])[:6]))
             signals["content_done"] = True
         elif step == "validate":
-            errors = data.get("errors", 0)
-            try:
-                errors = int(errors)
-            except (TypeError, ValueError):
-                errors = 0
-            signals["validation"] = {"ran": True, "errors": errors,
-                                     "warnings": int(data.get("warnings", 0) or 0)}
-            if errors:
-                raise ProblemError(422, "validation still has errors",
-                                   detail=f"{errors} error(s) must be fixed")
+            did = _s(signals.get("dossier_id"))
+            report = (self.dossier.validate(did)
+                      if self.dossier is not None and did else None)
+            if report is not None:
+                # REAL eCTD technical validation (PDF conformance included)
+                errs = report.get("errors") or []
+                signals["validation"] = {
+                    "ran": True, "errors": len(errs),
+                    "warnings": len(report.get("warnings") or []),
+                    "checked": report.get("checked", 0), "real": True}
+                if errs:
+                    raise ProblemError(
+                        422, "validation found errors",
+                        detail="; ".join(_s(e.get("message"))[:90]
+                                         for e in errs[:5]))
+            else:
+                # no dossier service — guided simulation input
+                errors = data.get("errors", 0)
+                try:
+                    errors = int(errors)
+                except (TypeError, ValueError):
+                    errors = 0
+                signals["validation"] = {
+                    "ran": True, "errors": errors,
+                    "warnings": int(data.get("warnings", 0) or 0),
+                    "real": False}
+                if errors:
+                    raise ProblemError(422, "validation still has errors",
+                                       detail=f"{errors} error(s) must be fixed")
         elif step == "fees":
-            signals["fees"] = {"paid": True}
+            did = _s(signals.get("dossier_id"))
+            sme = bool(data.get("sb_granted"))
+            synced = (self.dossier.set_fees(did, True, sme)
+                      if self.dossier is not None and did else None)
+            if synced is not None:
+                # the dossier index is the single source of truth for fee state
+                fb = synced.get("fees") or {}
+                signals["fees"] = {
+                    "paid": bool(fb.get("fee_paid")),
+                    "sme_granted": bool(fb.get("sme_granted")),
+                    "fiscal_year": (fb.get("review_fee") or {}).get("fiscal_year"),
+                    "amount": (fb.get("review_fee") or {}).get("amount"),
+                    "payable": (fb.get("mitigation") or {}).get("payable"),
+                    "real": True}
+            else:
+                signals["fees"] = {"paid": True, "sme_granted": sme,
+                                   "real": False}
         elif step == "review":
-            signals["reviews"] = {"approved": True}
+            reviewer = (_s(data.get("reviewer"))
+                        or _s(signals.get("applicant")) or "sponsor-qa")
+            rec = (self.governance.qa_review(
+                       reviewer=reviewer, comment=_s(data.get("comment")))
+                   if self.governance is not None else None)
+            if rec is not None and not rec.get("valid"):
+                raise ProblemError(
+                    422, "QA review was not accepted",
+                    detail="; ".join(_s(e.get("rule") if isinstance(e, dict)
+                                        else e) for e in rec.get("errors", [])[:4]))
+            signals["reviews"] = {"approved": True, "reviewer": reviewer,
+                                  "review": (rec or {}).get("review"),
+                                  "real": rec is not None}
         elif step == "sign":
-            signals["esign"] = {"signed": True}
+            signer = (_s(data.get("signer"))
+                      or _s(signals.get("applicant")) or "authorized-signer")
+            manifest = None
+            if self.governance is not None:
+                artifacts = self._sign_artifacts(signals)
+                res = (self.governance.sign(signer=signer, artifacts=artifacts)
+                       if artifacts else None)
+                if res is not None and not res.get("valid"):
+                    raise ProblemError(
+                        422, "e-signature was rejected",
+                        detail="; ".join(_s(e.get("rule") if isinstance(e, dict)
+                                            else e)
+                                         for e in res.get("errors", [])[:4]))
+                manifest = (res or {}).get("manifest")
+            signals["esign"] = {"signed": True, "signer": signer,
+                                "manifest_id": (manifest or {}).get("manifest_id"),
+                                "artifact_count": len((manifest or {})
+                                                      .get("artifacts") or []),
+                                "real": manifest is not None}
+            if manifest:
+                signals["esign_manifest"] = manifest
         elif step == "transmit":
-            signals["transmission"] = {"state": _s(data.get("state")) or "SUBMITTED"}
+            did = _s(signals.get("dossier_id"))
+            seq = _s(signals.get("sequence")) or "0000"
+            txn = (self.transmission.transmit(did, seq)
+                   if self.transmission is not None and did else None)
+            if txn is not None:
+                signals["transmission"] = {
+                    "state": _s(txn.get("state")) or "SENT",
+                    "message_id": txn.get("message_id"),
+                    "core_id": txn.get("core_id"),
+                    "mdn_received": bool(txn.get("mdn_received")),
+                    "fda_ack_received": bool(txn.get("fda_ack_received")),
+                    "hc_ack_received": bool(txn.get("hc_ack_received")),
+                    "real": True}
+            else:
+                signals["transmission"] = {
+                    "state": _s(data.get("state")) or "SUBMITTED",
+                    "real": False}
         # 'track' is ongoing — nothing to write.
 
         self.repo.update(session["id"], session)

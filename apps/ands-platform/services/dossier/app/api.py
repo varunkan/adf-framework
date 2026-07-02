@@ -137,6 +137,10 @@ def build_app(service: DossierService) -> FastAPI:
     def get_dossier(dossier_id: str):
         return service.get_dossier_full(dossier_id)
 
+    @router.delete("/dossiers/{dossier_id}")
+    def delete_dossier(dossier_id: str):
+        return service.delete_dossier(dossier_id)
+
     @router.get("/dossiers/{dossier_id}/content")
     def dossier_content(dossier_id: str):
         return service.content_state(dossier_id)

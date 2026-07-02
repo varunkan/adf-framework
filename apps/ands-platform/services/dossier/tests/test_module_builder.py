@@ -168,3 +168,16 @@ def test_upload_rejects_extension_not_in_section_formats(client):
     r = client.post(f"/api/dossier/ectd/{did}/section/1.5/upload",
                     files={"file": ("ok.pdf", b"%PDF-1.4 x", "application/pdf")})
     assert r.status_code == 200
+
+
+def test_delete_dossier_cascades_and_404s_after(client):
+    did = _dossier(client)
+    client.post(f"/api/dossier/ectd/{did}/section/1.0/generate", json={})
+    doc_id = next(n for m in client.get(f"/api/dossier/dossiers/{did}").json()
+                  ["content"]["modules"] for n in m["nodes"]
+                  if n["section"] == "1.0")["document"]["doc_id"]
+    r = client.delete(f"/api/dossier/dossiers/{did}")
+    assert r.status_code == 200 and r.json()["deleted"] == did
+    assert client.get("/api/dossier/dossiers").json()["count"] == 0
+    assert client.get(f"/api/dossier/documents/{doc_id}").status_code == 404
+    assert client.delete(f"/api/dossier/dossiers/{did}").status_code == 404

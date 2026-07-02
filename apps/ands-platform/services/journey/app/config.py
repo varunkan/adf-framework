@@ -17,3 +17,7 @@ class Settings:
         # The dossier service (eCTD engine) the journey composes; empty → the
         # journey falls back to its own flat content model.
         self.dossier_url = os.environ.get("DOSSIER_URL", "")
+        # Governance (QA review + e-signature) and transmission (FDA-ESG/CESG)
+        # services; empty -> those stages run as the guided simulation.
+        self.governance_url = os.environ.get("GOVERNANCE_URL", "")
+        self.transmission_url = os.environ.get("TRANSMISSION_URL", "")

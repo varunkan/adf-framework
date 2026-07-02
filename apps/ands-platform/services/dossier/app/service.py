@@ -452,6 +452,11 @@ class DossierService:
         self.repo.save_dossier(model)
         return rec
 
+    def delete_dossier(self, dossier_id: str) -> dict:
+        if not self.repo.delete_dossier(_s(dossier_id)):
+            raise ProblemError(404, "no such dossier", detail=_s(dossier_id))
+        return {"deleted": _s(dossier_id)}
+
     def list_dossiers(self) -> dict:
         out = []
         for idx in self.repo.list_dossier_index():
