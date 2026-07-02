@@ -69,6 +69,7 @@ export default function DossiersHome() {
         </span>
         <span className="spacer" />
         <UserChip />
+        <Link className="chip" href="/registry">Registry</Link>
         <Link className="chip" href="/">Guided journey →</Link>
       </header>
       <main className="dossier-home">
