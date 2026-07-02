@@ -50,6 +50,16 @@ class HcRecordIn(BaseModel):
     at: str = ""
 
 
+class AuditRecordIn(BaseModel):
+    """HTTP ingest payload — services without a shared bus post events here."""
+
+    source: str = ""
+    event_type: str = ""
+    dossier_id: str = ""
+    tenant_id: str = ""
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
 class ExportIn(BaseModel):
     tenant_id: str = ""
     attachments: dict = Field(default_factory=dict)

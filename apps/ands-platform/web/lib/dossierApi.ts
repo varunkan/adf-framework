@@ -76,6 +76,13 @@ export const dossierApi = {
 
   documentUrl: (docId: string) => `${BASE}/documents/${encodeURIComponent(docId)}`,
 
+  buildPmXml: (body: { dossier_id: string; lang: string; product_name: string;
+                       din?: string; sections: { code: string; title: string;
+                       text: string }[] }) =>
+    j<{ xml: string; validation: { valid: boolean; blocking: boolean;
+        findings: { rule: string; severity: string; message: string }[] } }>(
+      "/monograph/xml/build", { method: "POST", body: JSON.stringify(body) }),
+
   // Interactive (LLM chat) drafting — streams { delta } / { error } chunks
   // parsed out of the upstream SSE response.
   streamDraftChat: async function* (

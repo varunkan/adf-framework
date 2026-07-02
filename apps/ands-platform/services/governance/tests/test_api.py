@@ -39,6 +39,34 @@ def test_audit_endpoint_lists_events(ctx):
     assert r.json()["count"] == 1
 
 
+def test_audit_record_endpoint_ingests_event(ctx):
+    r = ctx.client.post("/api/governance/audit/record", json={
+        "source": "dossier", "event_type": "document.uploaded",
+        "dossier_id": "e7", "data": {"leaf": "l1"}})
+    assert r.status_code == 200
+    assert r.json()["action"] == "document.uploaded"
+    listed = ctx.client.get("/api/governance/audit",
+                            params={"dossier_id": "e7"}).json()
+    assert listed["count"] == 1
+    assert listed["events"][0]["category"] == "dossier"
+
+
+def test_audit_record_endpoint_422_on_missing_fields(client):
+    r = client.post("/api/governance/audit/record", json={"source": "dossier"})
+    assert r.status_code == 422
+
+
+def test_audit_endpoint_newest_first_and_limit(ctx):
+    for i in range(4):
+        ctx.bus.publish(EventEnvelope.make(f"evt.{i}", source="s",
+                                           dossier_id="e8"))
+    r = ctx.client.get("/api/governance/audit",
+                       params={"dossier_id": "e8", "limit": 2})
+    body = r.json()
+    assert body["count"] == 2
+    assert [e["action"] for e in body["events"]] == ["evt.3", "evt.2"]
+
+
 def test_audit_export_is_text(ctx):
     ctx.bus.publish(EventEnvelope.make("validation.failed", source="validation",
                                        dossier_id="e1"))

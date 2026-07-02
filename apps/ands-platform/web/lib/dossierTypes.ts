@@ -122,6 +122,8 @@ export interface DossierIndex {
   // present only when the dossier is actually registered (a real DB row);
   // absent on the tolerant fallback the API returns for unregistered ids
   created_at?: string;
+  din?: string | null;
+  tenant_id?: string | null;
 }
 
 export interface DossierListItem extends DossierIndex {

@@ -83,6 +83,9 @@ export function SectionPanel({ node }: { node: SectionNode }) {
             <FeesWidget fees={content?.fees} dossierId={dossierId}
               onDone={setContent} />
           )}
+          {node.section === "1.3.1" && (
+            <PmXmlPanel dossierId={dossierId} title={content?.dossier_id || ""} />
+          )}
           <AttachedDocs node={node} />
 
           <div className="affordance-bar" role="tablist" aria-label="Actions">
@@ -327,6 +330,66 @@ function AuthorForm({
         </button>
       </div>
     </div>
+  );
+}
+
+function PmXmlPanel({ dossierId }: { dossierId: string; title?: string }) {
+  const { index } = useDossier();
+  const [lang, setLang] = useState<"en" | "fr">("en");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ xml: string; validation: any } | null>(null);
+
+  async function build() {
+    setBusy(true);
+    try {
+      setResult(await dossierApi.buildPmXml({
+        dossier_id: dossierId, lang,
+        product_name: index?.title || dossierId, din: index?.din || "",
+        sections: [
+          { code: "indications", title: "Indications",
+            text: "See the attached Product Monograph." },
+          { code: "contraindications", title: "Contraindications",
+            text: "See the attached Product Monograph." },
+          { code: "dosage", title: "Dosage and Administration",
+            text: "See the attached Product Monograph." },
+        ],
+      }));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const findings = result?.validation?.findings || [];
+  return (
+    <details className="teach" style={{ marginTop: 8 }}>
+      <summary><b>XML Product Monograph</b> — build &amp; validate (HC mandate
+        is phasing in for generics)</summary>
+      <div className="cta-row" style={{ marginTop: 8 }}>
+        <select value={lang} onChange={(e) => setLang(e.target.value as any)}
+          style={{ width: "auto" }} aria-label="XML PM language">
+          <option value="en">EN</option>
+          <option value="fr">FR</option>
+        </select>
+        <button onClick={build} disabled={busy}>
+          {busy ? "Building…" : "Build & validate XML PM"}
+        </button>
+        {result && (
+          <a className="chip" download={`pm-${lang}.xml`}
+            href={`data:application/xml;charset=utf-8,${encodeURIComponent(result.xml)}`}>
+            ⬇ pm-{lang}.xml
+          </a>
+        )}
+      </div>
+      {result && (
+        <div className={`notice ${result.validation?.valid ? "ok" : "bad"}`}
+          style={{ marginTop: 8 }}>
+          {result.validation?.valid
+            ? "✓ XML PM validates against the stylesheet package."
+            : `✗ ${findings.length} finding(s): ` + findings.slice(0, 3)
+                .map((f: any) => f.rule).join(", ")}
+        </div>
+      )}
+    </details>
   );
 }
 

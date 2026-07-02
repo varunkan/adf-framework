@@ -30,8 +30,32 @@ class GovernanceService:
             "action": event.type, "dossier_id": event.dossier_id or "",
             "tenant_id": event.tenant_id or "", "detail": event.data})
 
-    def list_audit(self, *, category: str = "", dossier_id: str = "") -> dict:
+    def record_external(self, data: dict) -> dict:
+        """HTTP ingest path (POST /audit/record) for services that run on a
+        per-process bus locally and therefore never reach the ``"*"``
+        subscription. Builds a normal :class:`EventEnvelope` and funnels it
+        through :meth:`record_event` — the SAME append-only path the bus
+        handler uses — so sequencing and immutability are preserved."""
+        errors = [f"{field} is required"
+                  for field in ("source", "event_type", "dossier_id")
+                  if not str(data.get(field) or "").strip()]
+        if errors:
+            raise ProblemError(422, "validation failed", errors=errors)
+        event = EventEnvelope.make(
+            str(data["event_type"]).strip(),
+            source=str(data["source"]).strip(),
+            tenant_id=str(data.get("tenant_id") or "").strip() or None,
+            dossier_id=str(data["dossier_id"]).strip(),
+            data=dict(data.get("data") or {}))
+        return self.record_event(event)
+
+    def list_audit(self, *, category: str = "", dossier_id: str = "",
+                   limit: int = 0, newest_first: bool = False) -> dict:
         events = self.repo.list(category=category, dossier_id=dossier_id)
+        if newest_first:
+            events = list(reversed(events))
+        if limit and limit > 0:
+            events = events[:limit]
         return {"events": events, "count": len(events)}
 
     def export_audit(self) -> str:

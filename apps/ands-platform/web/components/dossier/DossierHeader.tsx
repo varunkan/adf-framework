@@ -41,6 +41,8 @@ export function DossierHeader() {
       <Link className="chip" href={`/dossiers/${encodeURIComponent(dossierId)}/viewer`}>
         Application Viewer
       </Link>
+      <Link className="chip" href={`/dossiers/${encodeURIComponent(dossierId)}/audit`}>Audit</Link>
+      <Link className="chip" href="/portfolio">Portfolio</Link>
       <Link className="chip" href="/">Journey</Link>
     </header>
   );

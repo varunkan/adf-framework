@@ -392,3 +392,11 @@ button:disabled{opacity:.45;cursor:not-allowed;transform:none}
 .login-card{width:min(420px,92vw);display:flex;flex-direction:column;gap:10px;padding:26px}
 .user-chip{display:inline-flex;align-items:center;gap:8px;font-size:13px}
 .uc-out{padding:4px 10px;font-size:12px}
+
+/* ── topbar crowding: keep the user chip on one line, ellipsize ──── */
+header.topbar{flex-wrap:nowrap;gap:10px}
+.user-chip{flex:0 1 auto;min-width:0;white-space:nowrap}
+.user-chip .uc-id{overflow:hidden;text-overflow:ellipsis;max-width:26vw;display:inline-block;vertical-align:middle}
+.user-chip .uc-out{white-space:nowrap}
+header.topbar .brand small{white-space:nowrap}
+@media (max-width:900px){.user-chip .uc-id small{display:none}}

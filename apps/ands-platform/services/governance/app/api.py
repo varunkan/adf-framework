@@ -7,8 +7,8 @@ from fastapi.responses import PlainTextResponse
 
 from ands_shared import create_app
 
-from .models import (DeletionIn, ExportIn, GateIn, HcRecordIn, HcRequestIn,
-                     LegalHoldIn, QaReviewIn, SignIn, VerifyIn)
+from .models import (AuditRecordIn, DeletionIn, ExportIn, GateIn, HcRecordIn,
+                     HcRequestIn, LegalHoldIn, QaReviewIn, SignIn, VerifyIn)
 from .service import GovernanceService
 
 
@@ -47,9 +47,14 @@ def build_app(service: GovernanceService) -> FastAPI:
         return service.record_hc_acceptance(body.model_dump())
 
     # -- audit ----------------------------------------------------------
+    @router.post("/audit/record")
+    def audit_record(body: AuditRecordIn):
+        return service.record_external(body.model_dump())
+
     @router.get("/audit")
-    def audit(category: str = "", dossier_id: str = ""):
-        return service.list_audit(category=category, dossier_id=dossier_id)
+    def audit(category: str = "", dossier_id: str = "", limit: int = 0):
+        return service.list_audit(category=category, dossier_id=dossier_id,
+                                  limit=limit, newest_first=True)
 
     @router.get("/audit/export", response_class=PlainTextResponse)
     def audit_export():
