@@ -233,7 +233,10 @@ class DossierService:
                 "drug_product": idx.get("title"),
                 "submission_type": idx.get("submission_type") or "ANDS",
                 "activity_type": idx.get("submission_type") or "ANDS",
-                "din": idx.get("din")}
+                "din": idx.get("din"),
+                # REP identity: sponsor company (distinct from the product)
+                "company_id": idx.get("company_id"),
+                "sponsor": idx.get("sponsor")}
 
     def _node(self, dossier_id: str, section: str) -> dict:
         node = section_tree.node_for(
@@ -412,8 +415,14 @@ class DossierService:
         # REP RT XML travels inside every transaction (REP guidance)
         ctx = {**self._ctx_for(dossier_id), "sequence": _s(sequence) or "0000"}
         rt = generators.generate("rep_application_form", ctx)
+        # give the CA-regional backbone the real product + company identity
+        extra = {"product_names": [_s(ctx.get("drug_product"))]
+                 if _s(ctx.get("drug_product")) else [],
+                 "company_id": _s(ctx.get("company_id")),
+                 "sponsor": _s(ctx.get("sponsor"))}
         pkg = export_pkg.build_package(model, _s(sequence) or "0000",
-                                       resolve, rt["body"])
+                                       resolve, rt["body"],
+                                       ca_regional_extra=extra)
         audit_hook.record("dossier.sequence_exported", _s(dossier_id),
                           {"sequence": _s(sequence) or "0000",
                            "files": len(pkg["files"]),
@@ -520,6 +529,9 @@ class DossierService:
             "submission_type": _s(data.get("submission_type")).upper() or "ANDS",
             "cs_be_only": bool(data.get("cs_be_only", True)),
             "din": din or None,
+            # REP identity — sponsor company (distinct from the product title)
+            "company_id": _s(data.get("company_id")) or None,
+            "sponsor": _s(data.get("sponsor")) or None,
             "tenant_id": _s(tenant_id) or None})
         model = self._dossier_model(dossier_id, create=True)
         assembly.add_sequence(model, "0000")

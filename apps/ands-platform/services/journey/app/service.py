@@ -240,7 +240,12 @@ class JourneyService:
                     _s(signals.get("dossier_id")), title=product,
                     submission_type=_s(signals.get("submission_type")) or "ANDS",
                     cs_be_only=bool(signals.get("cs_be_only", True)),
-                    tenant_id=tenant_id)
+                    tenant_id=tenant_id,
+                    # REP identity captured earlier in the journey: the sponsor
+                    # company (applicant) + HC Company ID — so the REP RT XML
+                    # and ca-regional carry the real sponsor, not the product
+                    company_id=_s(signals.get("company_id")),
+                    sponsor=applicant)
         elif step == "content":
             # Gate authoritatively against the LIVE plan so 'content_done' can
             # never stick true over an empty/incomplete eCTD — from the real
