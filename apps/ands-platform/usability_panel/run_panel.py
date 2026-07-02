@@ -61,10 +61,19 @@ def main() -> None:
               f"({len(PERSONAS)} personas x {len(stimuli)} flows x {args.samples})...")
 
         def prog(done: int, all_: int) -> None:
-            if done % 20 == 0 or done == all_:
-                print(f"  {done}/{all_}")
+            if done % 10 == 0 or done == all_:
+                print(f"  {done}/{all_}", flush=True)
 
-        responses = asyncio.run(elicit_all(PERSONAS, stimuli, args.samples, prog))
+        ckpt = results_dir / f"{args.tag}_checkpoint.json"
+        prior = json.loads(ckpt.read_text()) if ckpt.exists() else []
+        if prior:
+            prior = [r for r in prior if any(
+                r["flow_key"] == s["flow_key"] for s in stimuli)]
+            print(f"resuming from checkpoint: {len(prior)} already done")
+        responses = asyncio.run(elicit_all(
+            PERSONAS, stimuli, args.samples, prog,
+            checkpoint_path=ckpt, done=prior))
+        ckpt.unlink(missing_ok=True)
         # merge into cache so partial runs (--flows) accumulate
         cache = json.loads(raw_path.read_text()) if raw_path.exists() else []
         keep = [r for r in cache

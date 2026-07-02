@@ -21,7 +21,10 @@ from .personas import persona_system_prompt
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 TEMPERATURE = 0.8          # diversity across samples (paper varies T_LLM)
-MAX_CONCURRENCY = 6
+# free tier = 12k tokens/min; each call ~1.5-2k tokens -> ~6-8 calls/min.
+# Low concurrency + patient Retry-After-aware backoff beats a 429 storm.
+MAX_CONCURRENCY = 3
+MAX_ATTEMPTS = 14
 
 
 def load_groq_key() -> str:
@@ -71,13 +74,14 @@ async def _one(client: httpx.AsyncClient, key: str, persona: dict,
         "response_format": {"type": "json_object"},
     }
     async with sem:
-        for attempt in range(5):
+        for attempt in range(MAX_ATTEMPTS):
             try:
                 r = await client.post(
                     GROQ_URL, json=body,
                     headers={"Authorization": f"Bearer {key}"}, timeout=60)
                 if r.status_code == 429:
-                    await asyncio.sleep(3 * (attempt + 1))
+                    retry_after = float(r.headers.get("retry-after", 0) or 0)
+                    await asyncio.sleep(max(retry_after, 2.0) + attempt)
                     continue
                 r.raise_for_status()
                 content = r.json()["choices"][0]["message"]["content"]
@@ -90,18 +94,25 @@ async def _one(client: httpx.AsyncClient, key: str, persona: dict,
                     "sample": sample_idx, "answers": answers,
                 }
             except Exception:
-                if attempt == 4:
+                if attempt == MAX_ATTEMPTS - 1:
                     raise
                 await asyncio.sleep(2 * (attempt + 1))
 
 
 async def elicit_all(personas: list[dict], stimuli: list[dict],
                      n_samples: int = 2,
-                     on_progress=None) -> list[dict]:
-    """All (persona x stimulus x sample) elicitations, concurrently."""
+                     on_progress=None,
+                     checkpoint_path=None,
+                     done: list[dict] | None = None) -> list[dict]:
+    """All (persona x stimulus x sample) elicitations, concurrently.
+
+    checkpoint_path: partial results are flushed there every few completions,
+    so an interrupted run resumes (pass its content back via `done`).
+    """
     key = load_groq_key()
     sem = asyncio.Semaphore(MAX_CONCURRENCY)
-    out: list[dict] = []
+    out: list[dict] = list(done or [])
+    have = {(r["persona_id"], r["flow_key"], r["sample"]) for r in out}
     async with httpx.AsyncClient() as client:
         tasks = []
         for p in personas:
@@ -110,9 +121,16 @@ async def elicit_all(personas: list[dict], stimuli: list[dict],
                 if s["flow_key"] == "overall":
                     constructs = ["ease", "clarity", "trust", "adoption"]
                 for i in range(n_samples):
+                    if (p["id"], s["flow_key"], i) in have:
+                        continue
                     tasks.append(_one(client, key, p, s, constructs, i, sem))
+        total = len(tasks) + len(out)
         for fut in asyncio.as_completed(tasks):
             out.append(await fut)
+            if checkpoint_path and len(out) % 10 == 0:
+                pathlib.Path(checkpoint_path).write_text(json.dumps(out))
             if on_progress:
-                on_progress(len(out), len(tasks))
+                on_progress(len(out), total)
+    if checkpoint_path:
+        pathlib.Path(checkpoint_path).write_text(json.dumps(out))
     return out
