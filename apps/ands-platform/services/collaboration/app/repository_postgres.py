@@ -35,6 +35,15 @@ CREATE TABLE IF NOT EXISTS email_outbox (
 
 
 class PostgresCollaborationRepository:
+    # self-healing tenancy migrations (mirror the SQLite adapter); Postgres
+    # supports IF NOT EXISTS so the try/except is belt-and-suspenders
+    _MIGRATIONS = (
+        "ALTER TABLE comments ADD COLUMN IF NOT EXISTS tenant_id TEXT",
+        "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS tenant_id TEXT",
+        "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS tenant_id TEXT",
+        "ALTER TABLE email_outbox ADD COLUMN IF NOT EXISTS tenant_id TEXT",
+    )
+
     def __init__(self, dsn: str) -> None:
         import pg8000.dbapi  # lazy: prod-only
         from urllib.parse import urlparse
@@ -44,6 +53,11 @@ class PostgresCollaborationRepository:
             port=u.port or 5432, database=(u.path or "/").lstrip("/"))
         self._lock = threading.Lock()
         self._exec(_SCHEMA, (), script=True)
+        for mig in self._MIGRATIONS:
+            try:
+                self._exec(mig)
+            except Exception:
+                pass   # column already exists
 
     def _exec(self, sql: str, params: tuple = (), *, script: bool = False):
         with self._lock:
@@ -68,45 +82,52 @@ class PostgresCollaborationRepository:
         return rows[0] if rows else None
 
     # -- comments -----------------------------------------------------------
-    def add_comment(self, comment: dict) -> dict:
+    def add_comment(self, comment: dict, tenant_id: str | None = None) -> dict:
         cid, created = new_id(), utcnow_iso()
         self._exec(
             "INSERT INTO comments (id, target_type, target_id, author, body, "
-            "parent_id, created_at) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+            "parent_id, tenant_id, created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
             (cid, comment["target_type"], comment["target_id"],
              comment["author"], comment["body"], comment.get("parent_id"),
-             created))
+             tenant_id or None, created))
         return self._one("SELECT * FROM comments WHERE id = %s", (cid,))
 
-    def list_comments(self, target_type: str, target_id: str) -> list[dict]:
+    def list_comments(self, target_type: str, target_id: str,
+                      tenant_id: str | None = None) -> list[dict]:
+        scope = " AND tenant_id = %s" if tenant_id else ""
+        params = (target_type, target_id) + ((tenant_id,) if tenant_id else ())
         return self._all(
-            "SELECT * FROM comments WHERE target_type = %s AND target_id = %s "
-            "ORDER BY created_at, id", (target_type, target_id))
+            "SELECT * FROM comments WHERE target_type = %s AND target_id = %s"
+            + scope + " ORDER BY created_at, id", params)
 
     # -- tasks --------------------------------------------------------------
-    def add_task(self, task: dict) -> dict:
+    def add_task(self, task: dict, tenant_id: str | None = None) -> dict:
         tid, now = new_id(), utcnow_iso()
         self._exec(
             "INSERT INTO tasks (id, title, assignee, created_by, due_date, "
-            "target_type, target_id, dossier_id, status, created_at, "
-            "updated_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "target_type, target_id, dossier_id, status, tenant_id, "
+            "created_at, updated_at) VALUES "
+            "(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (tid, task["title"], task["assignee"], task.get("created_by") or "",
              task.get("due_date"), task.get("target_type"),
              task.get("target_id"), task.get("dossier_id"), task["status"],
-             now, now))
+             tenant_id or None, now, now))
         return self.get_task(tid)
 
     def get_task(self, task_id: str) -> dict | None:
         return self._one("SELECT * FROM tasks WHERE id = %s", (task_id,))
 
     def list_tasks(self, *, assignee: str = "", dossier_id: str = "",
-                   status: str = "") -> list[dict]:
+                   status: str = "", tenant_id: str | None = None) -> list[dict]:
         clauses, params = [], []
         for col, val in (("assignee", assignee), ("dossier_id", dossier_id),
                          ("status", status)):
             if str(val or "").strip():
                 clauses.append(f"{col} = %s")  # col is a hardcoded literal
                 params.append(str(val).strip())
+        if tenant_id:
+            clauses.append("tenant_id = %s")
+            params.append(tenant_id)
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         return self._all("SELECT * FROM tasks" + where + " ORDER BY created_at, id",
                          tuple(params))
@@ -117,39 +138,47 @@ class PostgresCollaborationRepository:
         return self.get_task(task_id)
 
     # -- notifications + email outbox --------------------------------------
-    def add_notification(self, note: dict) -> dict:
+    def add_notification(self, note: dict, tenant_id: str | None = None) -> dict:
         nid, created = new_id(), utcnow_iso()
         self._exec(
             "INSERT INTO notifications (id, kind, recipient, subject, body, "
-            "meta, created_at, read) VALUES (%s,%s,%s,%s,%s,%s,%s,0)",
+            "meta, tenant_id, created_at, read) VALUES "
+            "(%s,%s,%s,%s,%s,%s,%s,%s,0)",
             (nid, note["kind"], note["recipient"], note["subject"],
-             note["body"], json.dumps(note.get("meta") or {}), created))
+             note["body"], json.dumps(note.get("meta") or {}),
+             tenant_id or None, created))
         row = self._one("SELECT * FROM notifications WHERE id = %s", (nid,))
         row["read"] = bool(row["read"])
         row["meta"] = json.loads(row["meta"])
         return row
 
-    def enqueue_email(self, email: dict) -> dict:
+    def enqueue_email(self, email: dict, tenant_id: str | None = None) -> dict:
         eid, created = new_id(), utcnow_iso()
         self._exec(
-            "INSERT INTO email_outbox (id, to_addr, subject, body, created_at, "
-            "sent) VALUES (%s,%s,%s,%s,%s,0)",
-            (eid, email["to"], email["subject"], email["body"], created))
+            "INSERT INTO email_outbox (id, to_addr, subject, body, tenant_id, "
+            "created_at, sent) VALUES (%s,%s,%s,%s,%s,%s,0)",
+            (eid, email["to"], email["subject"], email["body"],
+             tenant_id or None, created))
         row = self._one("SELECT * FROM email_outbox WHERE id = %s", (eid,))
         row["sent"] = bool(row["sent"])
         return row
 
-    def inbox(self, user: str) -> list[dict]:
+    def inbox(self, user: str, tenant_id: str | None = None) -> list[dict]:
+        scope = " AND tenant_id = %s" if tenant_id else ""
+        params = (str(user or "").strip(),) + ((tenant_id,) if tenant_id else ())
         rows = self._all(
-            "SELECT * FROM notifications WHERE recipient = %s "
-            "ORDER BY created_at DESC, id DESC", (str(user or "").strip(),))
+            "SELECT * FROM notifications WHERE recipient = %s" + scope
+            + " ORDER BY created_at DESC, id DESC", params)
         for r in rows:
             r["read"] = bool(r["read"])
             r["meta"] = json.loads(r["meta"])
         return rows
 
-    def outbox(self) -> list[dict]:
-        rows = self._all("SELECT * FROM email_outbox ORDER BY created_at, id")
+    def outbox(self, tenant_id: str | None = None) -> list[dict]:
+        scope = " WHERE tenant_id = %s" if tenant_id else ""
+        params = (tenant_id,) if tenant_id else ()
+        rows = self._all("SELECT * FROM email_outbox" + scope
+                         + " ORDER BY created_at, id", params)
         for r in rows:
             r["sent"] = bool(r["sent"])
         return rows

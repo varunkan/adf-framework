@@ -37,13 +37,13 @@ class CollaborationService:
         return self
 
     # -- comments -----------------------------------------------------------
-    def add_comment(self, data: dict) -> dict:
+    def add_comment(self, data: dict, tenant_id: str | None = None) -> dict:
         res = domain.normalize_comment(data)
         if not res["valid"]:
             raise ProblemError(422, "Invalid comment",
                                detail="comment failed validation",
                                errors=res["errors"])
-        comment = self.repo.add_comment(res["comment"])
+        comment = self.repo.add_comment(res["comment"], tenant_id or None)
         self.bus.publish(EventEnvelope.make(
             EventType.COLLAB_COMMENT_ADDED, source=self.source,
             dossier_id=comment.get("target_id"),
@@ -52,20 +52,21 @@ class CollaborationService:
                   "target_id": comment["target_id"]}))
         return comment
 
-    def list_comments(self, target_type: str, target_id: str) -> dict:
-        rows = self.repo.list_comments(target_type, target_id)
+    def list_comments(self, target_type: str, target_id: str,
+                      tenant_id: str | None = None) -> dict:
+        rows = self.repo.list_comments(target_type, target_id, tenant_id or None)
         return {"comments": domain.thread_comments(rows), "count": len(rows)}
 
     # -- tasks --------------------------------------------------------------
-    def create_task(self, data: dict) -> dict:
+    def create_task(self, data: dict, tenant_id: str | None = None) -> dict:
         res = domain.build_task(data)
         if not res["valid"]:
             raise ProblemError(422, "Invalid task",
                                detail="task failed validation",
                                errors=res["errors"])
-        task = self.repo.add_task(res["task"])
-        # Trigger 1: assignment notification.
-        self._emit(domain.notification_for_assignment(task))
+        task = self.repo.add_task(res["task"], tenant_id or None)
+        # Trigger 1: assignment notification (same tenant as the task).
+        self._emit(domain.notification_for_assignment(task), tenant_id or None)
         self.bus.publish(EventEnvelope.make(
             EventType.COLLAB_TASK_ASSIGNED, source=self.source,
             dossier_id=task.get("dossier_id"),
@@ -73,14 +74,18 @@ class CollaborationService:
         return task
 
     def list_tasks(self, *, assignee: str = "", dossier_id: str = "",
-                   status: str = "") -> dict:
+                   status: str = "", tenant_id: str | None = None) -> dict:
         tasks = self.repo.list_tasks(assignee=assignee, dossier_id=dossier_id,
-                                     status=status)
+                                     status=status, tenant_id=tenant_id or None)
         return {"tasks": tasks, "count": len(tasks)}
 
-    def update_task_status(self, task_id: str, status: str) -> dict:
+    def update_task_status(self, task_id: str, status: str,
+                           tenant_id: str | None = None) -> dict:
         task = self.repo.get_task(task_id)
-        if not task:
+        # tenant present → a task owned by ANOTHER tenant (or unowned) is
+        # invisible: 404, never 403 (don't confirm existence). Absent = unscoped.
+        if task is None or (tenant_id and (task.get("tenant_id") or "")
+                            != tenant_id):
             raise ProblemError(404, "Task not found",
                                detail=f"no task with id {task_id}")
         check = domain.validate_status_transition(task["status"], status)
@@ -91,31 +96,33 @@ class CollaborationService:
 
     # -- notifications ------------------------------------------------------
     def notify_blocking_defect(self, dossier_id: str, finding: Any,
-                               recipients: list[str]) -> list[dict]:
+                               recipients: list[str],
+                               tenant_id: str | None = None) -> list[dict]:
         notes = []
         for recipient in recipients or []:
             note = domain.notification_for_blocking_defect(
                 dossier_id, finding, recipient)
-            self._emit(note)
+            self._emit(note, tenant_id or None)
             notes.append(note)
         return notes
 
     def notify_hc_ack(self, dossier_id: str, core_id: str,
-                      recipients: list[str]) -> list[dict]:
+                      recipients: list[str],
+                      tenant_id: str | None = None) -> list[dict]:
         notes = []
         for recipient in recipients or []:
             note = domain.notification_for_hc_ack(dossier_id, core_id, recipient)
-            self._emit(note)
+            self._emit(note, tenant_id or None)
             notes.append(note)
         return notes
 
-    def inbox(self, user: str) -> dict:
-        rows = self.repo.inbox(user)
+    def inbox(self, user: str, tenant_id: str | None = None) -> dict:
+        rows = self.repo.inbox(user, tenant_id or None)
         unread = sum(1 for n in rows if not n["read"])
         return {"notifications": rows, "unread": unread, "count": len(rows)}
 
-    def outbox(self) -> dict:
-        rows = self.repo.outbox()
+    def outbox(self, tenant_id: str | None = None) -> dict:
+        rows = self.repo.outbox(tenant_id or None)
         pending = sum(1 for e in rows if not e["sent"])
         return {"emails": rows, "pending": pending, "count": len(rows)}
 
@@ -137,7 +144,8 @@ class CollaborationService:
             data.get("core_id") or "", data.get("recipients") or [])
 
     # -- internal -----------------------------------------------------------
-    def _emit(self, note: dict) -> None:
-        """Fan a notification to the in-app inbox AND the email outbox."""
-        self.repo.add_notification(note)
-        self.repo.enqueue_email(domain.format_email(note))
+    def _emit(self, note: dict, tenant_id: str | None = None) -> None:
+        """Fan a notification to the in-app inbox AND the email outbox, both
+        stamped with the originating tenant (None from in-process bus events)."""
+        self.repo.add_notification(note, tenant_id or None)
+        self.repo.enqueue_email(domain.format_email(note), tenant_id or None)
