@@ -93,6 +93,19 @@ export function dossierIdFromReq(
   return q && DID_RE.test(q) ? q : null;
 }
 
+/** dossier_id carried in a JSON body (write routes) — the proxy can't see it
+ *  in the path/query, so writes like create-NOA/report-shortage/submit would
+ *  otherwise escape the ownership check. Parses a pre-read body buffer. */
+export function dossierIdFromBody(bodyText: string): string | null {
+  try {
+    const b = JSON.parse(bodyText);
+    const v = b?.dossier_id;
+    return typeof v === "string" && DID_RE.test(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The dossier service is the ownership authority: ancillary services
  * (governance/registry/lifecycle/collab) key on dossier_id with no tenant
