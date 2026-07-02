@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { api, session } from "@/lib/api";
 import { UserChip } from "@/components/UserChip";
 import type { JourneyView } from "@/lib/types";
@@ -86,6 +87,8 @@ export default function Page() {
         </span>
         <span className="spacer" />
         <UserChip />
+        <Link className="chip" href="/dossiers">My dossiers</Link>
+        <Link className="chip" href="/portfolio">Portfolio</Link>
         {view && (
           <>
             <span className={`chip ${view.readiness.status === "READY" ? "ready" : "blocked"}`}>
@@ -173,6 +176,11 @@ function Hero({
       <button className="start" onClick={onStart} disabled={busy}>
         {busy ? "Starting…" : "Start my submission →"}
       </button>
+      <div style={{ marginTop: 14 }}>
+        <Link className="chip" href="/dossiers">
+          Or open your dossiers — every product in submission →
+        </Link>
+      </div>
       {error && <div className="notice bad">{error}</div>}
       <div className="sub">
         Grounded in real Health Canada process · your progress is saved
