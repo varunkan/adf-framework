@@ -240,9 +240,15 @@ class JourneyService:
             signals["oriented"] = True
         elif step == "company":
             cid = _s(data.get("company_id"))
-            if not cid:
+            if not cid and data.get("company_pending"):
+                # OSIP request filed but ID not issued yet — everything except
+                # transmission works without it, so don't wall the journey
+                signals["company_pending"] = True
+            elif not cid:
                 raise ProblemError(422, "company_id is required", detail="company")
-            signals["company_id"] = cid
+            else:
+                signals["company_id"] = cid
+                signals.pop("company_pending", None)
         elif step == "dossier":
             did = _s(data.get("dossier_id"))
             branch = _s(data.get("branch")) or "pharmaceutical"

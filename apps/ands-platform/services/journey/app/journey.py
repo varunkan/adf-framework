@@ -108,7 +108,8 @@ def _completion(payload: dict) -> list[bool]:
     """Per-stage completion flags (index == stage number) from the BFF signals."""
     payload = payload or {}
     company = bool(_s(payload.get("company_id"))
-                   or _s((payload.get("company") or {}).get("company_id")))
+                   or _s((payload.get("company") or {}).get("company_id"))
+                   or payload.get("company_pending"))
     dossier = bool(_s(payload.get("dossier_id")))
     submission = bool(
         _s(payload.get("sequence"))

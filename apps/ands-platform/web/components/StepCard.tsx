@@ -80,9 +80,12 @@ export function StepCard({
         <>
           <div className="teach">
             Health Canada assigns your company a 5-digit{" "}
-            <Term k="Company ID" />. You need it before you can transmit. If you
-            don&apos;t have one yet, request it from the Office of Submission and
-            Intellectual Property.
+            <Term k="Company ID" />. You need it before you can transmit — but
+            nothing else waits on it. Don&apos;t have one? Enrol through the{" "}
+            <Term k="REP" /> by sending a completed Company Template to the
+            Office of Submission and Intellectual Property
+            (hc.osip-bpip.sc@canada.ca); IDs are typically issued within a
+            couple of weeks.
           </div>
           <label>Your Health Canada Company ID</label>
           <input
@@ -91,6 +94,10 @@ export function StepCard({
             placeholder="e.g. 12345"
             inputMode="numeric"
           />
+          <button className="ghost" style={{ marginTop: 8, fontSize: 13 }}
+            onClick={() => onAdvance(stage.key, { company_pending: true })}>
+            I&apos;ve requested it — continue while it&apos;s pending →
+          </button>
         </>
       )}
 

@@ -68,9 +68,43 @@ export const TERMS: Record<string, string> = {
     "Patient Medication Information — plain-language medication info written at a " +
     "Grade 6–8 reading level, bilingual.",
   "Form IV":
-    "The Patent List under the Patented Medicines (Notice of Compliance) " +
-    "Regulations — an ANDS must address the patents/CSPs on the reference " +
-    "product's Patent Register.",
+    "The innovator's Patent List under the PM(NOC) Regulations — the patents " +
+    "the brand registered against its product. Generics don't file Form IV; " +
+    "they answer it with Form V.",
+  "Form V":
+    "The generic's declaration under s.5 of the PM(NOC) Regulations: for every " +
+    "patent/CSP on the reference product's register you either accept waiting " +
+    "for expiry or allege invalidity/non-infringement (which triggers a Notice " +
+    "of Allegation).",
+  NOA:
+    "Notice of Allegation — your Form V challenge served on the brand. They " +
+    "have 45 days to sue; doing so triggers a stay of your approval of up to " +
+    "24 months.",
+  DIN:
+    "Drug Identification Number — the 8-digit number on every marketed drug in " +
+    "Canada, assigned at NOC. It identifies the product (dose form, strength, " +
+    "route), not the submission.",
+  sequence:
+    "One numbered eCTD package in the dossier's lifetime (0000 = the original " +
+    "filing; 0001+ = responses and post-approval changes). Each sequence " +
+    "amends the one before it — the 'current view' is the merged result.",
+  SANDS:
+    "Supplemental ANDS — the pathway for changing an already-approved generic " +
+    "(new strength, new indication text, manufacturing change requiring " +
+    "review).",
+  OSIP:
+    "Health Canada's Office of Submission and Intellectual Property — the " +
+    "office that issues Company IDs and Dossier IDs and runs intake for " +
+    "submissions.",
+  "Product Monograph":
+    "The authoritative bilingual label: Part I for practitioners, Part II " +
+    "science, Part III patient information. Generics align theirs to the " +
+    "reference product's monograph. Filed as structured XML (XML PM) on " +
+    "Health Canada's mandated stylesheet.",
+  "CS-BE":
+    "Comparative Studies–Bioequivalence: the study package (design, AUC and " +
+    "Cmax 90% confidence intervals vs the 80.00–125.00% window) that proves " +
+    "your generic performs the same in the body.",
 };
 
 export const TERM_KEYS = Object.keys(TERMS).sort((a, b) => b.length - a.length);
