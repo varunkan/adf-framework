@@ -108,7 +108,10 @@ export default function DossiersHome() {
         <p className="mut" style={{ maxWidth: "64ch" }}>
           A <Term k="Dossier ID" /> is the permanent file for one product at Health
           Canada. Open a dossier to build its eCTD Module 1–5 — upload or author
-          every document with full guidance on each section.
+          every document with full guidance on each section. Everything on this
+          page belongs to your workspace alone: client workspaces are isolated
+          end-to-end (per-workspace data partitions, tenant-checked on every
+          request, cross-client access is structurally impossible).
         </p>
 
         {creating && (

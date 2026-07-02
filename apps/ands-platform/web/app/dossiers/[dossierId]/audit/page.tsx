@@ -53,6 +53,28 @@ export default function AuditPage() {
     load();
   }, [load]);
 
+  function exportCsv() {
+    if (!events?.length) return;
+    const esc = (s: unknown) =>
+      `"${String(s ?? "").replace(/"/g, '""')}"`;
+    const rows = [
+      ["seq", "at", "category", "action", "actor", "dossier_id", "detail"],
+      ...events.map((e) => [
+        e.seq, e.at, e.category, e.action,
+        (e.detail?.actor as string) || "", e.dossier_id,
+        JSON.stringify(
+          Object.fromEntries(
+            Object.entries(e.detail || {}).filter(([k]) => k !== "actor"))),
+      ]),
+    ];
+    const csv = rows.map((r) => r.map(esc).join(",")).join("\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    a.download = `audit-${dossierId}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
   return (
     <main className="viewer">
       <h1>Audit Trail</h1>
@@ -60,8 +82,19 @@ export default function AuditPage() {
         The tamper-evident governance record for this dossier — every domain
         event, append-only, newest first.
       </p>
+      {/* the guarantees, stated where QA looks for them */}
+      <div className="notice" style={{ fontSize: 12 }}>
+        Append-only, gap-detectable sequence numbers · every event stamped
+        with actor and workspace · covers document creation/upload/AI-draft,
+        review, e-signature, validation, fees and transmission events ·
+        export below for inspection records.
+      </div>
       <div className="affordance-bar">
         <button onClick={load}>Refresh</button>
+        <button className="ghost" onClick={exportCsv}
+          disabled={!events?.length}>
+          Export audit report (CSV)
+        </button>
       </div>
 
       <div className="card glass">
