@@ -196,7 +196,8 @@ class JourneyService:
                 if _s(leaf.get("checksum"))]
 
     # -- advance the journey (perform a step's primary action) --------------
-    def advance(self, session_id: str, step: str, data: dict) -> dict:
+    def advance(self, session_id: str, step: str, data: dict,
+                tenant_id: str | None = None) -> dict:
         session = self._load(session_id)
         step = _s(step)
         if step not in _STEP_KEYS:
@@ -231,12 +232,15 @@ class JourneyService:
             signals["drug_product"] = product
             signals["sequence"] = _s(data.get("sequence")) or "0000"
             signals["submission_created"] = True
-            # Provision the real dossier so the Module builder is ready to fill.
+            # Provision the real dossier so the Module builder is ready to
+            # fill — OWNED by the caller's tenant from birth (else it would be
+            # created unscoped and leak across workspaces).
             if self.dossier is not None and _s(signals.get("dossier_id")):
                 self.dossier.ensure_dossier(
                     _s(signals.get("dossier_id")), title=product,
                     submission_type=_s(signals.get("submission_type")) or "ANDS",
-                    cs_be_only=bool(signals.get("cs_be_only", True)))
+                    cs_be_only=bool(signals.get("cs_be_only", True)),
+                    tenant_id=tenant_id)
         elif step == "content":
             # Gate authoritatively against the LIVE plan so 'content_done' can
             # never stick true over an empty/incomplete eCTD — from the real

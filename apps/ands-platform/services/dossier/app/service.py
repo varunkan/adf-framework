@@ -527,13 +527,24 @@ class DossierService:
         return rec
 
     def _tenant_guard(self, dossier_id: str, tenant_id: str | None) -> None:
-        """A dossier owned by another tenant is invisible (404, not 403)."""
+        """Enforce per-dossier tenant ownership. When a tenant context is
+        present (every authenticated request via the web proxy carries one), a
+        dossier owned by a DIFFERENT tenant — or by no tenant at all — is
+        invisible (404, not 403, to avoid confirming existence). tenant_id
+        empty = no scoping (in-process mesh / tests only)."""
         if not tenant_id:
             return
         idx = self.repo.get_dossier_index(_s(dossier_id))
-        owner = _s((idx or {}).get("tenant_id"))
-        if owner and owner != _s(tenant_id):
+        if idx is None:
+            return   # genuinely absent — let the caller's own 404 handle it
+        owner = _s(idx.get("tenant_id"))
+        if owner != _s(tenant_id):
             raise ProblemError(404, "no such dossier", detail=_s(dossier_id))
+
+    def assert_access(self, dossier_id: str, tenant_id: str | None) -> None:
+        """Public tenant-ownership gate — the API layer calls this on every
+        dossier-scoped route before delegating."""
+        self._tenant_guard(dossier_id, tenant_id)
 
     def delete_dossier(self, dossier_id: str, tenant_id: str | None = None) -> dict:
         self._tenant_guard(dossier_id, tenant_id)

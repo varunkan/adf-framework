@@ -44,12 +44,35 @@ def test_upsert_never_rehomes_a_dossier(client):
     assert rec["tenant_id"] == "tenant-a"
 
 
-def test_legacy_unowned_dossiers_stay_visible(client):
+def test_unowned_dossiers_hidden_from_tenants(client):
+    # strict isolation: an unowned (pre-tenancy) dossier is invisible to any
+    # tenant context — the CRO guarantee. It only shows with no scoping.
     client.post("/api/dossier/dossiers",
                 json={"dossier_id": "e999999", "title": "pre-tenancy"})
     a = client.get("/api/dossier/dossiers",
                    headers={"X-Tenant-Id": "tenant-a"}).json()
-    assert "e999999" in [d["dossier_id"] for d in a["dossiers"]]
+    assert "e999999" not in [d["dossier_id"] for d in a["dossiers"]]
+    assert client.get("/api/dossier/dossiers/e999999",
+                      headers={"X-Tenant-Id": "tenant-a"}).status_code == 404
+    # visible when unscoped (mesh/tests)
+    allv = client.get("/api/dossier/dossiers").json()
+    assert "e999999" in [d["dossier_id"] for d in allv["dossiers"]]
+
+
+def test_cross_tenant_scoped_routes_all_404(client):
+    # every dossier-scoped route must reject a foreign tenant, not just get/list
+    _mk(client, "e111111", "tenant-a")
+    hb = {"X-Tenant-Id": "tenant-b"}
+    for path in ("/api/dossier/dossiers/e111111/content",
+                 "/api/dossier/dossiers/e111111/validate",
+                 "/api/dossier/dossiers/e111111/sequences",
+                 "/api/dossier/ectd/e111111/viewer/files",
+                 "/api/dossier/ectd/e111111/current-view",
+                 "/api/dossier/ectd/e111111/export/0000"):
+        assert client.get(path, headers=hb).status_code == 404, path
+    # the owner still reaches them
+    assert client.get("/api/dossier/dossiers/e111111/content",
+                      headers={"X-Tenant-Id": "tenant-a"}).status_code == 200
 
 
 def test_no_header_remains_unscoped(client):

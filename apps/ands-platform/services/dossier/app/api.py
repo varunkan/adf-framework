@@ -88,15 +88,18 @@ def build_app(service: DossierService) -> FastAPI:
         return service.add_leaf(body.model_dump())
 
     @router.get("/ectd/{dossier_id}/current-view")
-    def current_view(dossier_id: str):
+    def current_view(dossier_id: str, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        service.assert_access(dossier_id, x_tenant_id or None)
         return service.current_view(dossier_id)
 
     @router.get("/ectd/{dossier_id}/viewer/files")
-    def files_view(dossier_id: str):
+    def files_view(dossier_id: str, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        service.assert_access(dossier_id, x_tenant_id or None)
         return service.files_view(dossier_id)
 
     @router.get("/ectd/{dossier_id}/viewer/outline/{sequence}")
-    def outline_view(dossier_id: str, sequence: str):
+    def outline_view(dossier_id: str, sequence: str, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        service.assert_access(dossier_id, x_tenant_id or None)
         return service.outline_view(dossier_id, sequence)
 
     # -- submission archive / binder (REQ-110) ------------------------
@@ -149,46 +152,55 @@ def build_app(service: DossierService) -> FastAPI:
         return service.delete_dossier(dossier_id, x_tenant_id or None)
 
     @router.get("/dossiers/{dossier_id}/content")
-    def dossier_content(dossier_id: str):
+    def dossier_content(dossier_id: str, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        service.assert_access(dossier_id, x_tenant_id or None)
         return service.content_state(dossier_id)
 
     @router.post("/dossiers/{dossier_id}/fees")
-    def set_fees(dossier_id: str, body: FeeStatusIn):
+    def set_fees(dossier_id: str, body: FeeStatusIn, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        service.assert_access(dossier_id, x_tenant_id or None)
         return service.set_fee_status(dossier_id, body.fee_paid, body.sme_granted)
 
     @router.get("/dossiers/{dossier_id}/validate")
-    def validate_submission(dossier_id: str):
+    def validate_submission(dossier_id: str, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        service.assert_access(dossier_id, x_tenant_id or None)
         return service.validate_submission(dossier_id)
 
     @router.get("/dossiers/{dossier_id}/sequences")
-    def list_sequences(dossier_id: str):
+    def list_sequences(dossier_id: str, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        service.assert_access(dossier_id, x_tenant_id or None)
         return service.list_sequences(dossier_id)
 
     @router.post("/dossiers/{dossier_id}/sequences", status_code=201)
-    def create_sequence(dossier_id: str, body: SequenceIn):
+    def create_sequence(dossier_id: str, body: SequenceIn, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        service.assert_access(dossier_id, x_tenant_id or None)
         return service.create_sequence(dossier_id, body.sequence,
                                        body.purpose, body.note)
 
     @router.post("/dossiers/{dossier_id}/sequences/{sequence}/activate")
-    def activate_sequence(dossier_id: str, sequence: str):
+    def activate_sequence(dossier_id: str, sequence: str, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        service.assert_access(dossier_id, x_tenant_id or None)
         return service.activate_sequence(dossier_id, sequence)
 
     @router.post("/ectd/{dossier_id}/section/{section}/upload")
     async def upload_section(dossier_id: str, section: str,
                              file: UploadFile = File(...),
-                             lang: str = Form("")):
+                             lang: str = Form(""), x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        service.assert_access(dossier_id, x_tenant_id or None)
         body = await file.read()
         return service.upload_document(
             dossier_id, section, file.filename or "document",
             file.content_type or "application/octet-stream", body, lang or None)
 
     @router.post("/ectd/{dossier_id}/section/{section}/generate")
-    def generate_section(dossier_id: str, section: str, body: GenerateIn):
+    def generate_section(dossier_id: str, section: str, body: GenerateIn, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        service.assert_access(dossier_id, x_tenant_id or None)
         return service.generate_document(dossier_id, section, body.model_dump())
 
     # -- interactive (LLM chat) drafting --------------------------------
     @router.post("/ectd/{dossier_id}/section/{section}/draft-chat")
-    async def draft_chat(dossier_id: str, section: str, body: DraftChatIn):
+    async def draft_chat(dossier_id: str, section: str, body: DraftChatIn, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        service.assert_access(dossier_id, x_tenant_id or None)
         # validated eagerly: bad section / missing GROQ_API_KEY -> clean
         # JSON error, not a broken stream
         node, ctx = service.prepare_draft_chat(dossier_id, section)
@@ -209,7 +221,8 @@ def build_app(service: DossierService) -> FastAPI:
                                           "X-Accel-Buffering": "no"})
 
     @router.post("/ectd/{dossier_id}/section/{section}/mark-na")
-    def mark_na_section(dossier_id: str, section: str, body: MarkNaIn):
+    def mark_na_section(dossier_id: str, section: str, body: MarkNaIn, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        service.assert_access(dossier_id, x_tenant_id or None)
         return service.mark_na(dossier_id, section, body.reason)
 
     @router.get("/ectd/{dossier_id}/export/{sequence}")

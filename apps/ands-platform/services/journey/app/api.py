@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, FastAPI, Query
+from fastapi import APIRouter, FastAPI, Header, Query
 
 from ands_shared import create_app
 
@@ -36,8 +36,10 @@ def build_app(service: JourneyService) -> FastAPI:
         return service.get(session_id)
 
     @router.post("/{session_id}/advance")
-    def advance(session_id: str, body: AdvanceIn):
-        return service.advance(session_id, body.step, body.data)
+    def advance(session_id: str, body: AdvanceIn,
+                x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        return service.advance(session_id, body.step, body.data,
+                               tenant_id=x_tenant_id or None)
 
     @router.post("/intake")
     def intake(body: IntakeIn):

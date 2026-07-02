@@ -17,7 +17,8 @@ from typing import Protocol
 class DossierClient(Protocol):
     def ensure_dossier(self, dossier_id: str, *, title: str = "",
                        submission_type: str = "ANDS",
-                       cs_be_only: bool = True) -> None: ...
+                       cs_be_only: bool = True,
+                       tenant_id: str | None = None) -> None: ...
     def content_state(self, dossier_id: str) -> dict | None: ...
     def validate(self, dossier_id: str) -> dict | None: ...
     def set_fees(self, dossier_id: str, fee_paid: bool,
@@ -30,11 +31,13 @@ class HttpDossierClient:
         self._c = httpx.Client(base_url=base_url.rstrip("/"), timeout=5.0)
 
     def ensure_dossier(self, dossier_id, *, title="", submission_type="ANDS",
-                       cs_be_only=True) -> None:
+                       cs_be_only=True, tenant_id=None) -> None:
         try:
+            headers = {"X-Tenant-Id": tenant_id} if tenant_id else {}
             self._c.post("/api/dossier/dossiers", json={
                 "dossier_id": dossier_id, "title": title or dossier_id,
-                "submission_type": submission_type, "cs_be_only": cs_be_only})
+                "submission_type": submission_type, "cs_be_only": cs_be_only},
+                headers=headers)
         except Exception:
             pass
 
@@ -75,11 +78,12 @@ class InProcessDossierClient:
         self.service = service
 
     def ensure_dossier(self, dossier_id, *, title="", submission_type="ANDS",
-                       cs_be_only=True) -> None:
+                       cs_be_only=True, tenant_id=None) -> None:
         try:
             self.service.create_dossier({
                 "dossier_id": dossier_id, "title": title or dossier_id,
-                "submission_type": submission_type, "cs_be_only": cs_be_only})
+                "submission_type": submission_type, "cs_be_only": cs_be_only},
+                tenant_id)
         except Exception:
             pass
 

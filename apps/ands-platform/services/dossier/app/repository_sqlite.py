@@ -344,10 +344,11 @@ class SqliteDossierRepository:
 
     def list_dossier_index(self, tenant_id: str | None = None) -> list[dict]:
         if tenant_id:
-            # a tenant sees its own dossiers plus pre-tenancy (unowned) ones
+            # strict: a tenant sees ONLY its own dossiers (unowned/other-tenant
+            # dossiers are invisible — the CRO isolation guarantee)
             rows = self.db.fetchall(
-                "SELECT * FROM dossier_index WHERE tenant_id = ? OR "
-                "tenant_id IS NULL ORDER BY created_at DESC", (tenant_id,))
+                "SELECT * FROM dossier_index WHERE tenant_id = ? "
+                "ORDER BY created_at DESC", (tenant_id,))
         else:
             rows = self.db.fetchall(
                 "SELECT * FROM dossier_index ORDER BY created_at DESC")

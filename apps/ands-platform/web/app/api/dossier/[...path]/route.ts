@@ -3,26 +3,26 @@
 // multipart file uploads survive; it also forwards content-type/disposition on
 // responses so document downloads work.
 import { NextRequest, NextResponse } from "next/server";
-import { resolveTenant } from "@/lib/serverAuth";
+import { requireTenant, tenantHeaders } from "@/lib/serverAuth";
 
 export const dynamic = "force-dynamic";
 
 const BFF = process.env.DOSSIER_BFF_URL || "http://127.0.0.1:8010";
 
 async function forward(req: NextRequest, path: string[]) {
+  // gate: no valid session -> 401 (never reach the service unauthenticated).
+  // The dossier service then enforces per-dossier tenant ownership on EVERY
+  // route from the injected X-Tenant-Id.
+  const gate = await requireTenant(req);
+  if (gate instanceof NextResponse) return gate;
+
   const suffix = path.map(encodeURIComponent).join("/");
   const qs = req.nextUrl.search || "";
   const url = `${BFF}/api/dossier/${suffix}${qs}`;
 
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...tenantHeaders(gate) };
   const ct = req.headers.get("content-type");
   if (ct) headers["content-type"] = ct;
-  // tenant scoping: the session cookie resolves to the client workspace
-  const session = await resolveTenant(req);
-  if (session) {
-    headers["x-tenant-id"] = session.tenantId;
-    headers["authorization"] = `Bearer ${session.token}`;
-  }
 
   const init: RequestInit & { duplex?: string } = {
     method: req.method,
