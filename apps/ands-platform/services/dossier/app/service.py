@@ -752,6 +752,8 @@ class DossierService:
             # REP identity — sponsor company (distinct from the product title)
             "company_id": _s(data.get("company_id")) or None,
             "sponsor": _s(data.get("sponsor")) or None,
+            # WS6 portfolio: the accountable PM/owner for this dossier
+            "owner": _s(data.get("owner")) or None,
             "tenant_id": _s(tenant_id) or None})
         model = self._dossier_model(dossier_id, create=True)
         assembly.add_sequence(model, "0000")
@@ -941,11 +943,29 @@ class DossierService:
         for idx in self.repo.list_dossier_index(_s(tenant_id) or None):
             states = self.repo.list_section_state(idx["dossier_id"])
             out.append({**idx,
+                        # WS6 portfolio: the soonest upcoming deadline for this
+                        # dossier — DERIVED from its content-plan items, not
+                        # stored (owner/sponsor pass through from the index).
+                        "soonest_due": self._soonest_due(idx["dossier_id"]),
                         "tower": dossier_state.tower_view(
                             cs_be_only=idx["cs_be_only"], states=states),
                         "gate": dossier_state.completeness_gate(
                             cs_be_only=idx["cs_be_only"], states=states)})
         return {"dossiers": out, "count": len(out)}
+
+    def _soonest_due(self, dossier_id: str) -> str | None:
+        """Earliest ISO ``due_date`` across the dossier's OPEN (non-complete)
+        content-plan items, or None. A completed item is not an upcoming
+        deadline. Pure read — no new storage; the deadline is the truth already
+        held on the plan items (see ``assign_item``)."""
+        plan = self.repo.get_plan_by_dossier(_s(dossier_id))
+        if not plan:
+            return None
+        due = [d for d in (
+                _s(i.get("due_date")) for i in plan.get("items", [])
+                if i.get("status") != content_plan.ITEM_COMPLETE)
+               if d]
+        return min(due) if due else None
 
     def get_dossier_full(self, dossier_id: str,
                          tenant_id: str | None = None) -> dict:

@@ -223,11 +223,18 @@ export interface DossierIndex {
   created_at?: string;
   din?: string | null;
   tenant_id?: string | null;
+  // REP identity — the sponsor/client company (distinct from the product title)
+  company_id?: string | null;
+  sponsor?: string | null;
+  // WS6 portfolio: the accountable PM/owner for this dossier
+  owner?: string | null;
 }
 
 export interface DossierListItem extends DossierIndex {
   tower: ModuleTower[];
   gate: { complete: boolean; missing: any[] };
+  // WS6: soonest upcoming deadline, derived server-side from content-plan items
+  soonest_due?: string | null;
 }
 
 export interface DossierFull {

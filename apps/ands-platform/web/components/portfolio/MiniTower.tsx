@@ -1,14 +1,43 @@
 "use client";
 // Compact Module 1–5 roll-up for a portfolio row — five tiny progress bars
 // (same .progress pattern as the readiness card), one per eCTD module.
+// WS6: a per-row toggle swaps the bars for the plain module→requirement
+// checklist (the "gimmick" personas' preferred serious view); the choice is
+// the same persisted preference the 3D SubmissionTower uses.
 import type { ModuleTower } from "@/lib/types";
+import { useTowerView } from "@/lib/useTowerView";
+import { TowerChecklist } from "@/components/TowerChecklist";
 
-export function MiniTower({ tower }: { tower: ModuleTower[] }) {
+export function MiniTower({ tower, missing = [] }: {
+  tower: ModuleTower[];
+  missing?: { key?: string; title: string; module: string }[];
+}) {
+  const [view, setView] = useTowerView();
+  const toggle = (
+    <button type="button" className="chip" style={{ fontSize: 10, padding: "0 6px" }}
+      aria-pressed={view === "checklist"}
+      title={view === "checklist" ? "Show the module bars" : "Show the module → requirement checklist"}
+      onClick={() => setView(view === "checklist" ? "tower" : "checklist")}>
+      {view === "checklist" ? "Bars" : "Checklist"}
+    </button>
+  );
+  if (view === "checklist") {
+    return (
+      <div style={{ flex: "1 1 320px", minWidth: 260 }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 4 }}>
+          {toggle}
+        </div>
+        <TowerChecklist tower={tower} missing={missing} />
+      </div>
+    );
+  }
   return (
-    <div
-      style={{ display: "flex", gap: 8, alignItems: "flex-end" }}
-      aria-label="Module completion, Modules 1 to 5"
-    >
+    <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+      {toggle}
+      <div
+        style={{ display: "flex", gap: 8, alignItems: "flex-end" }}
+        aria-label="Module completion, Modules 1 to 5"
+      >
       {tower.map((t) => {
         const pct =
           t.state === "na" || !t.required_total
@@ -35,6 +64,7 @@ export function MiniTower({ tower }: { tower: ModuleTower[] }) {
           </div>
         );
       })}
+      </div>
     </div>
   );
 }

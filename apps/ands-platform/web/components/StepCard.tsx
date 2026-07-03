@@ -94,10 +94,22 @@ export function StepCard({
             placeholder="e.g. 12345"
             inputMode="numeric"
           />
-          <button className="ghost" style={{ marginTop: 8, fontSize: 13 }}
-            onClick={() => onAdvance(stage.key, { company_pending: true })}>
-            I&apos;ve requested it — continue while it&apos;s pending →
-          </button>
+          {/* WS6: a persistent open-risk flag, not a silent skip. Requesting
+              while pending records the gap so it stays visible until the real
+              5-digit ID is set — mirroring the placeholder Dossier-ID reminder
+              the pre-filing validation raises. */}
+          {sig.company_pending && !sig.company_id ? (
+            <div className="notice warn" style={{ marginTop: 8 }}>
+              ⚠ Open risk tracked: your Company ID is still <b>pending</b> with
+              Health Canada. You can keep working, but you cannot transmit until
+              the real 5-digit ID is set here — this reminder stays until then.
+            </div>
+          ) : (
+            <button className="ghost" style={{ marginTop: 8, fontSize: 13 }}
+              onClick={() => onAdvance(stage.key, { company_pending: true })}>
+              I&apos;ve requested it — flag as an open risk & continue →
+            </button>
+          )}
         </>
       )}
 

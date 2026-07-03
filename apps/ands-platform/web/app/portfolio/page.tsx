@@ -10,6 +10,7 @@ import { UserChip } from "@/components/UserChip";
 import { PortfolioRow, type FeeState, type NoaClock } from "@/components/portfolio/PortfolioRow";
 import { SummaryCards } from "@/components/portfolio/SummaryCards";
 import { noaClockFrom } from "@/lib/noaProvenance";
+import { dueMeta } from "@/lib/deadline";
 
 export default function PortfolioPage() {
   const [items, setItems] = useState<DossierListItem[]>([]);
@@ -78,17 +79,30 @@ export default function PortfolioPage() {
   const ready = items.filter((d) => d.gate?.complete).length;
   const blocked = items.length - ready;
 
+  // WS6 deadline rollup: dossiers with a content-plan deadline in the next
+  // 30 days (or already overdue), soonest first — the PM's "who is blocked on
+  // what" strip. Derived purely from the soonest_due each row already carries.
+  const upcoming = items
+    .map((d) => ({ d, dm: dueMeta(d.soonest_due) }))
+    .filter((x) => x.dm && (x.dm.overdue || x.dm.soon))
+    .sort((a, b) => a.dm!.days - b.dm!.days);
+  const overdueCount = upcoming.filter((x) => x.dm!.overdue).length;
+
   // client-facing status export — PMs report to sponsors in spreadsheets
   function exportStatus() {
     const esc = (s: unknown) => `"${String(s ?? "").replace(/"/g, '""')}"`;
     const rows = [
-      ["dossier_id", "product", "submission_type", "modules_passed",
-       "modules_applicable", "filing_gate", "fee_status"],
+      // WS6: owner / client / soonest due travel to the client status report —
+      // a PM reports ownership, client segregation and deadlines to sponsors.
+      ["dossier_id", "product", "owner", "client", "soonest_due",
+       "submission_type", "modules_passed", "modules_applicable",
+       "filing_gate", "fee_status"],
       ...items.map((d) => {
         const passed = d.tower.filter((t) => t.state === "pass").length;
         const applic = d.tower.filter((t) => t.state !== "na").length;
         const fee = fees[d.dossier_id];
-        return [d.dossier_id, d.title, d.submission_type, passed, applic,
+        return [d.dossier_id, d.title, d.owner || "", d.sponsor || "",
+                d.soonest_due || "", d.submission_type, passed, applic,
                 d.gate?.complete ? "READY" : "in progress",
                 fee?.kind === "due"
                   ? `due ${(fee as any).amount} ${(fee as any).currency}`
@@ -150,6 +164,35 @@ export default function PortfolioPage() {
         ) : (
           <>
             <SummaryCards total={items.length} ready={ready} blocked={blocked} />
+
+            {upcoming.length > 0 && (
+              <div className="card glass" style={{ marginTop: 16, padding: "12px 16px" }}
+                aria-label="Upcoming deadlines">
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                  <b>⏳ {upcoming.length} dossier{upcoming.length === 1 ? "" : "s"} with a deadline in the next 30 days</b>
+                  {overdueCount > 0 && (
+                    <span className="chip blocked" style={{ fontSize: 11 }}>
+                      {overdueCount} overdue
+                    </span>
+                  )}
+                  <span className="mut" style={{ fontSize: 12 }}>soonest first</span>
+                </div>
+                <ul style={{ listStyle: "none", margin: "8px 0 0", padding: 0,
+                  display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {upcoming.slice(0, 8).map(({ d, dm }) => (
+                    <li key={d.dossier_id}>
+                      <Link className={`chip ${dm!.overdue || dm!.days <= 7 ? "blocked" : ""}`}
+                        href={`/dossiers/${encodeURIComponent(d.dossier_id)}/m/1`}
+                        title={`${d.title}${d.owner ? ` · owner ${d.owner}` : ""}${d.sponsor ? ` · client ${d.sponsor}` : ""}`}>
+                        {d.dossier_id} · {dm!.iso} ({dm!.label})
+                        {d.owner ? ` · ${d.owner}` : ""}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             <ul
               aria-label="Product dossiers"
               style={{

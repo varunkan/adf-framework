@@ -89,6 +89,9 @@ CREATE TABLE IF NOT EXISTS dossier_index (
     company_id      TEXT,
     sponsor         TEXT,
     drug_product    TEXT,
+    -- WS6 portfolio: the accountable PM/owner for this dossier (one value per
+    -- dossier; distinct from the many per-plan-item assignees and the sponsor)
+    owner           TEXT,
     fee_paid        INTEGER NOT NULL DEFAULT 0,
     sme_granted     INTEGER NOT NULL DEFAULT 0,
     tenant_id       TEXT,
@@ -153,6 +156,8 @@ class SqliteDossierRepository:
         "ALTER TABLE dossier_index ADD COLUMN company_id TEXT",
         "ALTER TABLE dossier_index ADD COLUMN sponsor TEXT",
         "ALTER TABLE dossier_index ADD COLUMN drug_product TEXT",
+        # WS6 portfolio: per-dossier accountable owner (PM/assignee)
+        "ALTER TABLE dossier_index ADD COLUMN owner TEXT",
         # WS3 recoverable delete: soft-archive stamp (who/when/why)
         "ALTER TABLE dossier_index ADD COLUMN archived_at TEXT",
         "ALTER TABLE dossier_index ADD COLUMN archived_by TEXT",
@@ -414,8 +419,9 @@ class SqliteDossierRepository:
         uid = new_id()
         self.db.execute(
             "INSERT INTO dossier_index (dossier_id, uid, title, submission_type, "
-            "cs_be_only, din, company_id, sponsor, drug_product, tenant_id, "
-            "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "cs_be_only, din, company_id, sponsor, drug_product, owner, "
+            "tenant_id, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(dossier_id) DO UPDATE SET title=excluded.title, "
             # a re-create keeps the original uid — never re-key the ledger
             "uid=COALESCE(dossier_index.uid, excluded.uid), "
@@ -427,13 +433,15 @@ class SqliteDossierRepository:
             "sponsor=COALESCE(excluded.sponsor, dossier_index.sponsor), "
             "drug_product=COALESCE(excluded.drug_product, "
             "dossier_index.drug_product), "
+            # WS6: preserve the owner across upserts that omit it (COALESCE)
+            "owner=COALESCE(excluded.owner, dossier_index.owner), "
             # an upsert never re-homes a dossier to another tenant
             "tenant_id=COALESCE(dossier_index.tenant_id, excluded.tenant_id), "
             "updated_at=excluded.updated_at",
             (rec["dossier_id"], uid, rec["title"], rec.get("submission_type"),
              1 if rec.get("cs_be_only", True) else 0, rec.get("din"),
              rec.get("company_id") or None, rec.get("sponsor") or None,
-             rec.get("drug_product") or None,
+             rec.get("drug_product") or None, rec.get("owner") or None,
              rec.get("tenant_id") or None, now, now))
         return self.get_dossier_index(rec["dossier_id"])
 

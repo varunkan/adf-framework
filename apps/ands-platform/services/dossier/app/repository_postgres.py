@@ -13,8 +13,11 @@ parity it MUST mirror the SQLite soft-delete semantics verbatim: a delete is a
 soft-archive (``archived_at`` / ``archived_by`` / ``archive_reason`` columns,
 mirroring SQLite's migration), the working list filters ``archived_at IS NULL``,
 and restore clears the stamp. A hard ``DELETE FROM`` here would violate the
-record-integrity invariant the SQLite path enforces. Until then, production runs
-on the SQLite adapter for the catalog surface.
+record-integrity invariant the SQLite path enforces. The ``dossier_index`` row
+also carries the REP identity (``company_id`` / ``sponsor``) and the WS6
+portfolio ``owner`` column — this adapter MUST mirror all three when it gains
+the table. Until then, production runs on the SQLite adapter for the catalog
+surface.
 """
 
 from __future__ import annotations

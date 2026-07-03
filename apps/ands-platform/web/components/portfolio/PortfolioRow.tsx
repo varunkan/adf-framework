@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { DossierListItem } from "@/lib/dossierTypes";
 import { MiniTower } from "./MiniTower";
 import { ProvenancePopover, type Provenance } from "@/components/ProvenancePopover";
+import { dueMeta } from "@/lib/deadline";
 
 export type FeeState =
   | { kind: "loading" }
@@ -58,6 +59,38 @@ function FeeChip({ state }: { state: FeeState }) {
   }
 }
 
+// WS6: owner (accountable PM) · client (REP sponsor) · soonest deadline. A PM
+// scanning the portfolio sees ownership and client segregation without opening
+// a dossier. Missing values read as an explicit "—" (unassigned), never blank.
+function PmColumns({ owner, sponsor, due }: {
+  owner?: string | null; sponsor?: string | null; due?: string | null }) {
+  const dm = dueMeta(due);
+  return (
+    <div style={{ flex: "0 1 220px", minWidth: 160, display: "flex",
+      flexDirection: "column", gap: 2, fontSize: 12 }}>
+      <div title="Accountable owner (project manager)">
+        <span className="mut">Owner </span>
+        <b>{owner || "—"}</b>
+      </div>
+      <div title="Client / sponsor company (REP identity)">
+        <span className="mut">Client </span>
+        {sponsor || <span className="mut">—</span>}
+      </div>
+      <div title="Soonest content-plan deadline">
+        <span className="mut">Due </span>
+        {dm ? (
+          <span className={`chip ${dm.overdue || dm.days <= 7 ? "blocked" : ""}`}
+            style={{ fontSize: 11 }}>
+            {dm.iso} · {dm.label}
+          </span>
+        ) : (
+          <span className="mut">none set</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function PortfolioRow({ d, fee, noa = { kind: "none" } }: {
   d: DossierListItem; fee: FeeState; noa?: NoaClock }) {
   const passed = d.tower.filter((t) => t.state === "pass").length;
@@ -84,7 +117,10 @@ export function PortfolioRow({ d, fee, noa = { kind: "none" } }: {
         </div>
       </div>
 
-      <MiniTower tower={d.tower} />
+      {/* WS6 PM columns: owner / client / soonest deadline, at a glance */}
+      <PmColumns owner={d.owner} sponsor={d.sponsor} due={d.soonest_due} />
+
+      <MiniTower tower={d.tower} missing={d.gate?.missing} />
 
       <span className={`chip ${d.gate?.complete ? "ready" : "blocked"}`}>
         {d.gate?.complete ? "Ready to file" : `${passed}/${applic} modules`}

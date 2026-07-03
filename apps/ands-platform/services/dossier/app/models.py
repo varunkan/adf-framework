@@ -16,6 +16,8 @@ class CreateDossierIn(BaseModel):
     # the product/title). company_id is HC's assigned Company ID.
     company_id: str = ""
     sponsor: str = ""
+    # WS6 portfolio: the accountable PM/owner for this dossier
+    owner: str = ""
 
 
 class FeeStatusIn(BaseModel):

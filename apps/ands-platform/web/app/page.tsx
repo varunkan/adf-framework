@@ -8,6 +8,7 @@ import { StepRail } from "@/components/StepRail";
 import { StepCard } from "@/components/StepCard";
 import { ReadinessCard } from "@/components/ReadinessCard";
 import { SubmissionTower } from "@/components/SubmissionTower";
+import { PrereqChecklist } from "@/components/PrereqChecklist";
 
 export default function Page() {
   const [view, setView] = useState<JourneyView | null>(null);
@@ -15,6 +16,14 @@ export default function Page() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [booting, setBooting] = useState(true);
+  // WS6: whether the external-prerequisites readiness screen has been dismissed
+  // (persisted in PrereqChecklist). Loads from localStorage on mount; while
+  // null we suppress the Hero so the checklist can show first.
+  const [prereqAck, setPrereqAck] = useState<boolean | null>(null);
+  useEffect(() => {
+    try { setPrereqAck(window.localStorage.getItem("ands.prereqAck") === "1"); }
+    catch { setPrereqAck(true); }
+  }, []);
 
   // resume a saved session on load
   useEffect(() => {
@@ -111,7 +120,13 @@ export default function Page() {
       </div>
 
       {!view ? (
-        <Hero booting={booting} busy={busy} error={error} onStart={start} />
+        // WS6: gate Step 1 behind the external-prerequisites readiness screen.
+        // Once acknowledged (persisted), the normal Hero shows.
+        !booting && prereqAck === false ? (
+          <PrereqChecklist onBegin={() => setPrereqAck(true)} />
+        ) : (
+          <Hero booting={booting} busy={busy} error={error} onStart={start} />
+        )
       ) : (
         <div className="stage">
           <h1 className="sr-only">
@@ -138,6 +153,7 @@ export default function Page() {
               tiles={view.readiness.tiles}
               status={view.readiness.status}
               modules={activeStage?.key === "content" ? view.content.tower : undefined}
+              missing={activeStage?.key === "content" ? view.content.gate?.missing : undefined}
             />
             <ReadinessCard data={view.readiness} onResume={setActiveKey} />
           </aside>

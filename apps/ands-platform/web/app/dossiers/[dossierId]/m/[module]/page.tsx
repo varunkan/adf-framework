@@ -58,6 +58,7 @@ export default function ModuleWorkspace() {
           tiles={[]}
           status={content.gate.complete ? "READY" : "BLOCKED"}
           modules={content.tower}
+          missing={content.gate?.missing}
         />
         <div className="card glass">
           <div className="mut" style={{ fontSize: 12 }}>
