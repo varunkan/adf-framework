@@ -15,6 +15,10 @@ export function friendlyError(status: number, detail: string): string {
         return "That email and password didn't match — try again, or use “Forgot password?”.";
       return "Your session has ended — please sign in again.";
     case status === 403:
+      // workspace-mandated MFA: password was correct but the workspace requires
+      // a second factor and this member hasn't enrolled one — guide, don't gate.
+      if (/multi-factor|\bmfa\b/i.test(d))
+        return "Your workspace requires multi-factor authentication — sign in on the Account & security page after setting up an authenticator app, or ask your workspace admin. Password-only sign-in is blocked here.";
       return "You don't have access to that in this workspace.";
     case status === 404:
       return "That item isn't in this workspace (it may have been renamed or deleted). Refresh the list and try again.";

@@ -19,11 +19,14 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS sessions (
     token TEXT PRIMARY KEY, user_id TEXT NOT NULL, tenant_id TEXT NOT NULL,
     role TEXT NOT NULL, email TEXT NOT NULL, created_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL);
+    expires_at TEXT NOT NULL, scope TEXT NOT NULL DEFAULT 'full');
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT 'full';
 CREATE TABLE IF NOT EXISTS tenants (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, plan_id TEXT NOT NULL,
     status TEXT NOT NULL, created_at TEXT NOT NULL,
-    billing_status TEXT NOT NULL DEFAULT 'active', grace_until TEXT);
+    billing_status TEXT NOT NULL DEFAULT 'active', grace_until TEXT,
+    require_mfa INTEGER NOT NULL DEFAULT 0);
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS require_mfa INTEGER NOT NULL DEFAULT 0;
 CREATE TABLE IF NOT EXISTS plans (
     id TEXT PRIMARY KEY, name TEXT UNIQUE NOT NULL, features TEXT NOT NULL,
     created_at TEXT NOT NULL);
@@ -132,12 +135,12 @@ class PostgresIdentityRepository:
             (tenant_id,))]
 
     # sessions
-    def create_session(self, token, user, expires_at):
+    def create_session(self, token, user, expires_at, scope="full"):
         self._exec(
             "INSERT INTO sessions (token, user_id, tenant_id, role, email, "
-            "created_at, expires_at) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+            "created_at, expires_at, scope) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
             (token, user["id"], user["tenant_id"], user["role"], user["email"],
-             utcnow_iso(), expires_at))
+             utcnow_iso(), expires_at, scope))
 
     def get_session(self, token):
         return self._one("SELECT * FROM sessions WHERE token = %s", (token,))
@@ -150,6 +153,14 @@ class PostgresIdentityRepository:
 
     def delete_sessions_for_tenant(self, tenant_id):
         self._exec("DELETE FROM sessions WHERE tenant_id = %s", (tenant_id,))
+
+    def delete_sessions_for_tenant_without_mfa(self, tenant_id):
+        # WS4 fix (revoke-on-mandate-on): drop full sessions of tenant members
+        # who have no verified MFA, so flipping the mandate on takes effect now.
+        self._exec(
+            "DELETE FROM sessions WHERE tenant_id = %s AND user_id IN ("
+            "SELECT id FROM users WHERE tenant_id = %s AND "
+            "COALESCE(mfa_enabled, 0) = 0)", (tenant_id, tenant_id))
 
     # tenants
     def create_tenant(self, tenant_id, name, plan_id, status):
@@ -177,6 +188,11 @@ class PostgresIdentityRepository:
     def set_billing(self, tenant_id, billing_status, grace_until):
         self._exec("UPDATE tenants SET billing_status = %s, grace_until = %s "
                    "WHERE id = %s", (billing_status, grace_until, tenant_id))
+        return self.get_tenant(tenant_id)
+
+    def set_require_mfa(self, tenant_id, require_mfa):
+        self._exec("UPDATE tenants SET require_mfa = %s WHERE id = %s",
+                   (1 if require_mfa else 0, tenant_id))
         return self.get_tenant(tenant_id)
 
     # plans + overrides

@@ -22,11 +22,12 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS sessions (
     token TEXT PRIMARY KEY, user_id TEXT NOT NULL, tenant_id TEXT NOT NULL,
     role TEXT NOT NULL, email TEXT NOT NULL, created_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL);
+    expires_at TEXT NOT NULL, scope TEXT NOT NULL DEFAULT 'full');
 CREATE TABLE IF NOT EXISTS tenants (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, plan_id TEXT NOT NULL,
     status TEXT NOT NULL, created_at TEXT NOT NULL,
-    billing_status TEXT NOT NULL DEFAULT 'active', grace_until TEXT);
+    billing_status TEXT NOT NULL DEFAULT 'active', grace_until TEXT,
+    require_mfa INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS plans (
     id TEXT PRIMARY KEY, name TEXT UNIQUE NOT NULL, features TEXT NOT NULL,
     created_at TEXT NOT NULL);
@@ -45,10 +46,24 @@ class SqliteIdentityRepository:
     def __init__(self, db: SqliteDb | None = None) -> None:
         self.db = db or SqliteDb(":memory:")
         self.db.executescript(_SCHEMA)
+        self._migrate()
         if not self.get_plan(entitlements.DEFAULT_PLAN_ID):
             self.create_plan(entitlements.DEFAULT_PLAN_ID,
                              entitlements.DEFAULT_PLAN_NAME,
                              list(entitlements.FEATURES))
+
+    def _migrate(self) -> None:
+        # add columns introduced after the original schema on already-created DBs
+        cols = {r["name"] for r in self.db.fetchall("PRAGMA table_info(tenants)")}
+        if "require_mfa" not in cols:
+            self.db.execute("ALTER TABLE tenants ADD COLUMN require_mfa "
+                            "INTEGER NOT NULL DEFAULT 0")
+        scols = {r["name"] for r in self.db.fetchall(
+            "PRAGMA table_info(sessions)")}
+        if "scope" not in scols:
+            # WS4 fix: existing sessions predate scoping — treat them as full.
+            self.db.execute("ALTER TABLE sessions ADD COLUMN scope TEXT "
+                            "NOT NULL DEFAULT 'full'")
 
     # -- users --------------------------------------------------------------
     @staticmethod
@@ -121,12 +136,12 @@ class SqliteIdentityRepository:
         return [self._public(dict(r)) for r in rows]
 
     # -- sessions -----------------------------------------------------------
-    def create_session(self, token, user, expires_at) -> None:
+    def create_session(self, token, user, expires_at, scope="full") -> None:
         self.db.execute(
             "INSERT INTO sessions (token, user_id, tenant_id, role, email, "
-            "created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "created_at, expires_at, scope) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (token, user["id"], user["tenant_id"], user["role"], user["email"],
-             utcnow_iso(), expires_at))
+             utcnow_iso(), expires_at, scope))
 
     def get_session(self, token) -> dict | None:
         row = self.db.fetchone(
@@ -141,6 +156,14 @@ class SqliteIdentityRepository:
 
     def delete_sessions_for_tenant(self, tenant_id) -> None:
         self.db.execute("DELETE FROM sessions WHERE tenant_id = ?", (tenant_id,))
+
+    def delete_sessions_for_tenant_without_mfa(self, tenant_id) -> None:
+        # WS4 fix (revoke-on-mandate-on): drop full sessions of tenant members
+        # who have no verified MFA, so flipping the mandate on takes effect now.
+        self.db.execute(
+            "DELETE FROM sessions WHERE tenant_id = ? AND user_id IN ("
+            "SELECT id FROM users WHERE tenant_id = ? AND "
+            "COALESCE(mfa_enabled, 0) = 0)", (tenant_id, tenant_id))
 
     # -- tenants ------------------------------------------------------------
     def create_tenant(self, tenant_id, name, plan_id, status) -> dict:
@@ -172,6 +195,11 @@ class SqliteIdentityRepository:
         self.db.execute(
             "UPDATE tenants SET billing_status = ?, grace_until = ? WHERE id = ?",
             (billing_status, grace_until, tenant_id))
+        return self.get_tenant(tenant_id)
+
+    def set_require_mfa(self, tenant_id, require_mfa) -> dict | None:
+        self.db.execute("UPDATE tenants SET require_mfa = ? WHERE id = ?",
+                        (1 if require_mfa else 0, tenant_id))
         return self.get_tenant(tenant_id)
 
     # -- plans + overrides --------------------------------------------------

@@ -66,3 +66,7 @@ class BillingIn(BaseModel):
     tenant_id: str = ""
     billing_status: str = ""
     grace_until: str = ""
+
+
+class RequireMfaIn(BaseModel):
+    require_mfa: bool = False

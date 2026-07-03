@@ -11,6 +11,9 @@ from .ports import IdentityRepository
 
 PLATFORM_TENANT = ""          # owner accounts live outside any tenant
 SESSION_TTL = timedelta(hours=12)
+# a member locked out by a workspace MFA mandate gets a short-lived token that
+# only carries them through enrolment; they must re-login with a code after.
+MFA_SETUP_TTL = timedelta(minutes=15)
 TENANT_TRIAL = "trial"
 TENANT_ACTIVE = "active"
 TENANT_SUSPENDED = "suspended"
@@ -117,12 +120,44 @@ class IdentityService:
                                         data.get("mfa_code")):
                 raise ProblemError(401, "an MFA code is required",
                                    rule="mfa_required")
+        else:
+            # WORKSPACE-MANDATED MFA (WS4.1): if this member's workspace requires
+            # MFA and they have none enrolled, password alone must NOT mint a
+            # session. Enforced SERVER-SIDE here — the ONLY session-minting path —
+            # off the DB tenant record, so no client flag can bypass it. We hand
+            # back a short-lived setup token so they can enrol and continue.
+            user = self.repo._public(row)
+            if self._workspace_requires_mfa(user["tenant_id"]):
+                # scope the token to MFA setup ONLY — resolve() rejects it for
+                # every endpoint except the enrolment path, so a password-only
+                # member never gets a working session under the mandate.
+                setup = self._start_session(user, ttl=MFA_SETUP_TTL,
+                                            scope="mfa_setup")
+                raise ProblemError(
+                    403, "your workspace requires multi-factor authentication "
+                    "— set it up to continue signing in",
+                    rule="workspace_mfa_required", setup_token=setup)
         user = self.repo._public(row)
         return {"user": user, "token": self._start_session(user)}
 
+    def _workspace_requires_mfa(self, tenant_id: str) -> bool:
+        if not tenant_id:  # platform owner — no workspace mandate applies
+            return False
+        tenant = self.repo.get_tenant(tenant_id)
+        return bool(tenant and tenant.get("require_mfa"))
+
     # -- MFA (SAAS-NFR-003) -------------------------------------------------
+    def _require_mfa_setup_principal(self, token: str) -> dict:
+        # enrolment must work for a member BLOCKED by the mandate, so it accepts
+        # a scope="mfa_setup" token and skips the mandate check (that is the
+        # whole point of the setup token). A full token still works too.
+        principal = self.resolve(token, for_mfa_setup=True)
+        if not principal:
+            raise ProblemError(401, "no active session", rule="no_session")
+        return principal
+
     def enroll_mfa(self, token: str) -> dict:
-        principal = self.me(token)
+        principal = self._require_mfa_setup_principal(token)
         secret = security.new_totp_secret()
         self.repo.set_mfa(principal["user_id"], secret, False)
         return {"secret": secret, "enabled": False,
@@ -130,7 +165,7 @@ class IdentityService:
                     secret, principal["email"])}
 
     def verify_mfa(self, token: str, code: str) -> dict:
-        principal = self.me(token)
+        principal = self._require_mfa_setup_principal(token)
         user = self.repo.get_user_raw(principal["user_id"]) or {}
         secret = user.get("mfa_secret")
         if not secret:
@@ -145,13 +180,54 @@ class IdentityService:
         user = self.repo.get_user_raw(principal["user_id"]) or {}
         return {"enabled": bool(user.get("mfa_enabled"))}
 
-    def _start_session(self, user: dict) -> str:
+    def _start_session(self, user: dict, *, ttl: timedelta = SESSION_TTL,
+                       scope: str = "full") -> str:
         token = security.new_session_token()
-        expires = (datetime.now(timezone.utc) + SESSION_TTL).isoformat()
-        self.repo.create_session(token, user, expires)
+        expires = (datetime.now(timezone.utc) + ttl).isoformat()
+        self.repo.create_session(token, user, expires, scope=scope)
         return token
 
-    def resolve(self, token: str) -> dict | None:
+    # -- workspace security policy (WS4.1) ----------------------------------
+    def _require_tenant_admin(self, token: str) -> dict:
+        principal = self.resolve(token)
+        if not principal:
+            raise ProblemError(401, "no active session", rule="no_session")
+        if principal["role"] not in (rbac.OWNER_ROLE, rbac.TENANT_ADMIN_ROLE):
+            raise ProblemError(403, "only a workspace admin can change this",
+                               rule="forbidden")
+        return principal
+
+    def tenant_security(self, token: str) -> dict:
+        principal = self.me(token)
+        tenant = (self.repo.get_tenant(principal["tenant_id"])
+                  if principal["tenant_id"] else None) or {}
+        return {"tenant_id": principal["tenant_id"],
+                "require_mfa": bool(tenant.get("require_mfa")),
+                "can_manage": principal["role"] in (rbac.OWNER_ROLE,
+                                                    rbac.TENANT_ADMIN_ROLE)}
+
+    def set_require_mfa(self, token: str, data: dict) -> dict:
+        principal = self._require_tenant_admin(token)
+        tenant_id = principal["tenant_id"]
+        if not tenant_id:
+            raise ProblemError(422, "the platform owner has no workspace to "
+                               "configure", rule="no_tenant")
+        want = bool(data.get("require_mfa"))
+        tenant = self.repo.set_require_mfa(tenant_id, want) or {}
+        if want:
+            # defense in depth: kill live sessions of members without verified
+            # MFA now, so the mandate bites immediately (resolve() also enforces
+            # it on every subsequent request as the durable backstop).
+            self.repo.delete_sessions_for_tenant_without_mfa(tenant_id)
+        return {"tenant_id": tenant_id,
+                "require_mfa": bool(tenant.get("require_mfa"))}
+
+    # -- role permission matrix (WS4.2) -------------------------------------
+    def role_matrix(self, token: str) -> dict:
+        self.me(token)  # any authenticated principal may read it
+        return {"roles": rbac.role_matrix()}
+
+    def resolve(self, token: str, *, for_mfa_setup: bool = False) -> dict | None:
         row = self.repo.get_session(_s(token))
         if not row:
             return None
@@ -162,8 +238,32 @@ class IdentityService:
         if expires < datetime.now(timezone.utc):
             self.repo.delete_session(token)
             return None
-        return {"user_id": row["user_id"], "tenant_id": row["tenant_id"],
-                "role": row["role"], "email": row["email"]}
+        scope = row.get("scope") or "full"
+        # (i) an mfa_setup-scoped token is accepted ONLY on the enrolment path.
+        # Everywhere else it must not authenticate — otherwise it is a full
+        # session in disguise (the CRITICAL hole).
+        if scope == "mfa_setup" and not for_mfa_setup:
+            raise ProblemError(403, "this token is only valid for MFA setup",
+                               rule="mfa_setup_scope")
+        principal = {"user_id": row["user_id"], "tenant_id": row["tenant_id"],
+                     "role": row["role"], "email": row["email"]}
+        # (ii) enforce the workspace mandate on the SESSION-VALIDATION path so it
+        # also locks out sessions minted BEFORE the mandate was turned on. The
+        # enrolment path (for_mfa_setup) skips this so a blocked member can enrol.
+        if not for_mfa_setup and self._session_blocked_by_mandate(principal):
+            raise ProblemError(
+                403, "your workspace requires multi-factor authentication "
+                "— set it up to continue signing in",
+                rule="workspace_mfa_required")
+        return principal
+
+    def _session_blocked_by_mandate(self, principal: dict) -> bool:
+        """True when the principal's workspace requires MFA and the user has no
+        verified MFA — the check that revokes pre-existing non-MFA sessions."""
+        if not self._workspace_requires_mfa(principal.get("tenant_id")):
+            return False
+        user = self.repo.get_user_raw(principal["user_id"]) or {}
+        return not bool(user.get("mfa_enabled"))
 
     def me(self, token: str) -> dict:
         principal = self.resolve(token)

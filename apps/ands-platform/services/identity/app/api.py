@@ -9,7 +9,7 @@ from ands_shared import ProblemError, create_app
 from . import rbac
 from .models import (AssignPlanIn, AuthorizeIn, BillingIn, CreatePlanIn,
                      LoginIn, MfaVerifyIn, OverrideIn, ProvisionTenantIn,
-                     ResetCompleteIn, ResetRequestIn, SignupIn)
+                     RequireMfaIn, ResetCompleteIn, ResetRequestIn, SignupIn)
 from .service import IdentityService
 
 
@@ -61,6 +61,21 @@ def build_app(service: IdentityService) -> FastAPI:
     @router.get("/auth/mfa/status")
     def mfa_status(authorization: str = Header(default="")):
         return service.mfa_status(_bearer(authorization))
+
+    # -- workspace security policy + role matrix (WS4) -----------------
+    @router.get("/tenant/security")
+    def tenant_security(authorization: str = Header(default="")):
+        return service.tenant_security(_bearer(authorization))
+
+    @router.post("/tenant/security/require-mfa")
+    def set_require_mfa(body: RequireMfaIn,
+                        authorization: str = Header(default="")):
+        return service.set_require_mfa(_bearer(authorization),
+                                       body.model_dump())
+
+    @router.get("/rbac/matrix")
+    def rbac_matrix(authorization: str = Header(default="")):
+        return service.role_matrix(_bearer(authorization))
 
     # -- entitlements + authorize ---------------------------------------
     @router.get("/entitlements")

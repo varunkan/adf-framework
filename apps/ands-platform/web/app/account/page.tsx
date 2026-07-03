@@ -7,6 +7,9 @@ import Link from "next/link";
 import { auth, type Principal } from "@/lib/auth";
 import { UserChip } from "@/components/UserChip";
 import { WorkspaceAudit } from "@/components/account/WorkspaceAudit";
+import { RoleMatrix } from "@/components/account/RoleMatrix";
+import { WorkspaceMfaPolicy } from "@/components/account/WorkspaceMfaPolicy";
+import { RoadmapCard } from "@/components/account/RoadmapCard";
 
 type MfaFlow =
   | { step: "idle" }
@@ -81,6 +84,7 @@ export default function AccountPage() {
                   dossier, document and filing here is isolated to this
                   workspace)</small></div>
               <div><span className="mut">Role</span> {me.role}</div>
+              <RoleMatrix myRole={me.role} />
             </div>
           ) : (
             <div className="mut" style={{ marginTop: 8, fontSize: 13 }}>
@@ -164,6 +168,10 @@ export default function AccountPage() {
             {err}</div>}
         </section>
 
+        {/* WS4.1: workspace-wide MFA mandate — a NEW section; the per-user MFA
+            enrol section above is left untouched. */}
+        <WorkspaceMfaPolicy />
+
         <section className="card glass" style={{ padding: "14px 18px",
           maxWidth: 720, marginTop: 14 }}>
           <h2 style={{ margin: 0, fontSize: 15 }}>Password &amp; sessions</h2>
@@ -204,6 +212,9 @@ export default function AccountPage() {
             A NEW section only — the MFA/identity/data-residency sections above
             are owned by WS4 and are left untouched. */}
         <WorkspaceAudit />
+
+        {/* WS4.3: honest roadmap of not-yet-built enterprise capabilities. */}
+        <RoadmapCard />
       </main>
     </>
   );

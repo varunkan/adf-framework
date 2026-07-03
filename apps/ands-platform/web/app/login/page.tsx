@@ -1,7 +1,9 @@
 "use client";
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { auth } from "@/lib/auth";
+import { ssoEntry } from "@/lib/roadmap";
 
 const PW_RULE = "At least 10 characters, with letters and numbers.";
 
@@ -12,6 +14,11 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [company, setCompany] = useState("");
+  // WS4.5 — first-run CRO-vs-in-house: 'own' = filing for your own company,
+  // 'clients' = a CRO filing on behalf of client companies. Drives the copy so
+  // an in-house RA doesn't feel the product is CRO-only.
+  const [filingFor, setFilingFor] = useState<"own" | "clients">("own");
+  const [revealCode, setRevealCode] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   // reset-mode state
@@ -30,6 +37,7 @@ export default function LoginPage() {
     setResetSent(false);
     setResetCode("");
     setDevCode("");
+    setRevealCode(false);
   }
 
   async function go() {
@@ -42,7 +50,12 @@ export default function LoginPage() {
       router.refresh();
     } catch (e) {
       const msg = String(e);
-      if (/multi-factor|authenticator/i.test(msg)) {
+      // workspace-mandated MFA (member has NO enrolled secret): show the guidance
+      // message, NOT the 6-digit challenge field — they have nothing to type yet.
+      if (/workspace requires multi-factor/i.test(msg)) {
+        setNeedMfa(false);
+        setErr(msg);
+      } else if (/multi-factor|authenticator/i.test(msg)) {
         setNeedMfa(true);
         setErr(needMfa && mfaCode ? "That code didn't verify — codes rotate every 30 seconds; try the current one." : "");
       } else {
@@ -59,7 +72,7 @@ export default function LoginPage() {
       const r = await auth.resetRequest(email);
       setResetSent(true);
       setNotice(r.message);
-      if (r.reset_code) setDevCode(r.reset_code);
+      if (r.reset_code) { setDevCode(r.reset_code); setRevealCode(false); }
     } catch (e) {
       setErr(String(e));
     } finally {
@@ -97,18 +110,52 @@ export default function LoginPage() {
           {mode === "login"
             ? "Your clients' dossiers are isolated per workspace."
             : mode === "signup"
-            ? "One workspace per client company — dossiers, documents and " +
-              "filings stay isolated."
+            ? (filingFor === "own"
+              ? "One workspace for your company — dossiers, documents and " +
+                "filings stay isolated to your organisation."
+              : "One workspace per client company — dossiers, documents and " +
+                "filings stay isolated between the clients you file for.")
             : "Enter your account email. We issue a one-time code (expires " +
               "in 15 minutes) to set a new password."}
         </p>
 
         {mode === "signup" && (
-          <div>
-            <label>Company / client name</label>
-            <input value={company} onChange={(e) => setCompany(e.target.value)}
-              placeholder="Northbridge Regulatory CRO" autoComplete="organization" />
-          </div>
+          <>
+            <div>
+              <label>Who are you filing for?</label>
+              <div className="cta-row" role="radiogroup"
+                aria-label="Who are you filing for?" style={{ gap: 8 }}>
+                <button type="button" role="radio"
+                  aria-checked={filingFor === "own"}
+                  className={filingFor === "own" ? "" : "ghost"}
+                  onClick={() => setFilingFor("own")}>
+                  Your own company
+                </button>
+                <button type="button" role="radio"
+                  aria-checked={filingFor === "clients"}
+                  className={filingFor === "clients" ? "" : "ghost"}
+                  onClick={() => setFilingFor("clients")}>
+                  On behalf of clients (CRO)
+                </button>
+              </div>
+              <div className="mut" style={{ fontSize: 12, marginTop: 4 }}>
+                {filingFor === "own"
+                  ? "In-house regulatory affairs — one workspace for your "
+                    + "organisation's own dossiers."
+                  : "Contract research / consultancy — create a separate "
+                    + "isolated workspace per client company."}
+              </div>
+            </div>
+            <div>
+              <label>
+                {filingFor === "own" ? "Your company name" : "Client company name"}
+              </label>
+              <input value={company} onChange={(e) => setCompany(e.target.value)}
+                placeholder={filingFor === "own"
+                  ? "Acme Therapeutics Inc." : "Northbridge Regulatory CRO"}
+                autoComplete="organization" />
+            </div>
+          </>
         )}
         <div>
           <label>Email</label>
@@ -120,12 +167,23 @@ export default function LoginPage() {
           <>
             {devCode && (
               <div className="notice" style={{ fontSize: 13 }}>
-                <b>Demo environment — no outbound email.</b> Your one-time
-                code is shown on-screen below. In a production deployment
-                this code is emailed to {email || "your address"} and never
-                displayed.
+                <b>Demo environment — no outbound email.</b> In a production
+                deployment this code is emailed to {email || "your address"}{" "}
+                and never displayed. Here it is available on-screen, but hidden
+                until you reveal it so it is never accidentally captured in a
+                screenshot of a real workflow.
                 <div style={{ marginTop: 6 }}>
-                  One-time code: <b>{devCode}</b>
+                  {revealCode ? (
+                    <>One-time code: <b>{devCode}</b>{" "}
+                      <button className="ghost" style={{ fontSize: 12 }}
+                        onClick={() => setRevealCode(false)}>Hide</button>
+                    </>
+                  ) : (
+                    <button className="ghost" style={{ fontSize: 12 }}
+                      onClick={() => setRevealCode(true)}>
+                      Reveal demo code
+                    </button>
+                  )}
                 </div>
               </div>
             )}
@@ -201,14 +259,29 @@ export default function LoginPage() {
               </button>
               <button className="ghost"
                 onClick={() => switchMode(mode === "login" ? "signup" : "login")}>
-                {mode === "login" ? "New client? Create a workspace" : "Have an account? Sign in"}
+                {mode === "login" ? "New here? Create a workspace" : "Have an account? Sign in"}
               </button>
             </div>
             {mode === "login" && (
-              <button className="ghost" style={{ fontSize: 13, marginTop: 6 }}
-                onClick={() => switchMode("reset")}>
-                Forgot password?
-              </button>
+              <>
+                <button className="ghost" style={{ fontSize: 13, marginTop: 6 }}
+                  onClick={() => switchMode("reset")}>
+                  Forgot password?
+                </button>
+                {/* WS4.3 — honest SSO affordance: SAML/OIDC is NOT built, so this
+                    links to the dated roadmap entry rather than faking a flow. */}
+                <div className="mut" style={{ fontSize: 12, marginTop: 10,
+                  borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 10 }}>
+                  Sign in with your organization (SSO)?{" "}
+                  <Link href="/roadmap#sso">
+                    Planned — target {ssoEntry().targetQuarter} →
+                  </Link>
+                  <div style={{ marginTop: 2 }}>
+                    Not available yet. Today: per-workspace email &amp; password
+                    with optional TOTP MFA.
+                  </div>
+                </div>
+              </>
             )}
           </>
         )}

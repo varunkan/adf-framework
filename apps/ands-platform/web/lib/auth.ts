@@ -13,6 +13,20 @@ export interface Principal {
   tenant_name?: string;  // workspace name — server-side, not a browser cache
 }
 
+export interface RoleMatrixRow {
+  role: string;
+  label: string;
+  summary: string;
+  capabilities: string[];
+  assignable_by: string;
+}
+
+export interface TenantSecurity {
+  tenant_id: string;
+  require_mfa: boolean;
+  can_manage: boolean;
+}
+
 const TENANT_NAME_KEY = "ands_tenant_name";
 export function tenantName(): string {
   try { return localStorage.getItem(TENANT_NAME_KEY) || ""; } catch { return ""; }
@@ -68,6 +82,12 @@ export const auth = {
       j<{ enabled: boolean }>("/auth/mfa/verify",
         { method: "POST", body: JSON.stringify({ code }) }),
   },
+  roleMatrix: () => j<{ roles: RoleMatrixRow[] }>("/rbac/matrix"),
+  tenantSecurity: () => j<TenantSecurity>("/tenant/security"),
+  setRequireMfa: (require_mfa: boolean) =>
+    j<{ tenant_id: string; require_mfa: boolean }>(
+      "/tenant/security/require-mfa",
+      { method: "POST", body: JSON.stringify({ require_mfa }) }),
   resetRequest: (email: string) =>
     j<{ ok: boolean; message: string; reset_code?: string; delivery?: string }>(
       "/auth/reset/request",
