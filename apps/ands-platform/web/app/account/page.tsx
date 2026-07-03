@@ -178,6 +178,26 @@ export default function AccountPage() {
               page scripts can never read your token.</li>
           </ul>
         </section>
+
+        <section className="card glass" style={{ padding: "14px 18px",
+          maxWidth: 720, marginTop: 14 }}>
+          <h2 style={{ margin: 0, fontSize: 15 }}>
+            Deployment &amp; data residency
+          </h2>
+          <ul className="mut" style={{ margin: "8px 0 0", paddingLeft: 18,
+            fontSize: 13, display: "grid", gap: 4 }}>
+            <li>ANDS Studio is self-hosted: every service and database runs
+              inside your own environment. Nothing leaves it except the
+              packages you deliberately transmit to Health Canada.</li>
+            <li>Every record is scoped to this workspace at every service —
+              cross-workspace reads are refused at the API, not just hidden
+              in the UI.</li>
+            <li>Honest limits: single sign-on (SAML/OIDC) is not yet
+              available — accounts are per-workspace, with TOTP MFA above as
+              the second factor. Every state change lands on the append-only
+              audit event stream.</li>
+          </ul>
+        </section>
       </main>
     </>
   );
