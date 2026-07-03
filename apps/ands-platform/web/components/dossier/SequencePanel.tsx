@@ -1,7 +1,11 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { dossierApi } from "@/lib/dossierApi";
-import type { SequenceInfo, SequenceList } from "@/lib/dossierTypes";
+import type {
+  ExportValidationVerdict,
+  SequenceInfo,
+  SequenceList,
+} from "@/lib/dossierTypes";
 
 const PURPOSES = [
   { value: "response", label: "Response" },
@@ -31,6 +35,17 @@ export function SequencePanel({ dossierId }: { dossierId: string }) {
   const [creating, setCreating] = useState(false);
   const [purpose, setPurpose] = useState("response");
   const [note, setNote] = useState("");
+  // Export gate: when the backend fails closed (409), we hold the blocking
+  // verdict + the sequence it belongs to so the modal can show the findings
+  // and offer an explicit, reasoned override.
+  const [block, setBlock] = useState<{
+    sequence: string;
+    verdict?: ExportValidationVerdict;
+    title: string;
+    detail?: string;
+  } | null>(null);
+  const [overrideReason, setOverrideReason] = useState("");
+  const [exporting, setExporting] = useState("");
 
   const refresh = useCallback(async () => {
     try {
@@ -78,6 +93,47 @@ export function SequencePanel({ dossierId }: { dossierId: string }) {
     }
   }
 
+  function saveBlob(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  // Export fails CLOSED: on 409 we surface the blocking findings + criteria in
+  // a modal rather than silently downloading an unfileable package or letting
+  // the browser navigate to the JSON error.
+  async function exportSeq(
+    sequence: string,
+    opts: { override?: boolean; reason?: string } = {}
+  ) {
+    setExporting(sequence);
+    setError("");
+    try {
+      const out = await dossierApi.exportSequence(dossierId, sequence, opts);
+      if (out.ok) {
+        saveBlob(out.blob, out.filename);
+        setBlock(null);
+        setOverrideReason("");
+      } else {
+        setBlock({
+          sequence,
+          verdict: out.validation,
+          title: out.title,
+          detail: out.detail,
+        });
+      }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setExporting("");
+    }
+  }
+
   return (
     <div className="card glass">
       <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
@@ -93,6 +149,103 @@ export function SequencePanel({ dossierId }: { dossierId: string }) {
           {error}
         </div>
       )}
+
+      {block && (
+        <div
+          className="notice bad"
+          style={{ marginTop: 8, fontSize: 12 }}
+          role="alertdialog"
+          aria-label="Export blocked by validation"
+        >
+          <div style={{ fontWeight: 700 }}>
+            Export blocked — sequence {block.sequence}
+          </div>
+          <div style={{ marginTop: 4 }}>
+            {block.detail ||
+              (block.title === "validation_unavailable"
+                ? "Validation could not run, so export is blocked."
+                : "The completeness check did not pass.")}
+          </div>
+          {block.verdict?.criteria && (
+            <div className="mut" style={{ marginTop: 6, fontSize: 11 }}>
+              Checked against {block.verdict.criteria.name} v
+              {block.verdict.criteria.version}. This is a structural/format
+              check — not a Health Canada review.
+            </div>
+          )}
+          {block.verdict?.errors?.length ? (
+            <div style={{ marginTop: 6 }}>
+              {block.verdict.errors.slice(0, 8).map((f, i) => (
+                <div
+                  key={i}
+                  style={{ display: "flex", gap: 6, alignItems: "baseline" }}
+                >
+                  <code style={{ fontSize: 10, whiteSpace: "nowrap" }}>
+                    {f.rule_id || f.rule}
+                  </code>
+                  <span style={{ fontSize: 11 }}>
+                    {f.leaf ? (
+                      <code style={{ fontSize: 10, opacity: 0.8 }}>
+                        {f.leaf}:{" "}
+                      </code>
+                    ) : null}
+                    {f.message}
+                  </span>
+                </div>
+              ))}
+              {block.verdict.errors.length > 8 && (
+                <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>
+                  +{block.verdict.errors.length - 8} more
+                </div>
+              )}
+            </div>
+          ) : null}
+          <div style={{ marginTop: 10 }}>
+            <label
+              className="mut"
+              style={{ fontSize: 11, display: "block", marginBottom: 4 }}
+            >
+              To export anyway, type a reason (recorded to the audit trail):
+            </label>
+            <input
+              aria-label="Override reason"
+              placeholder="e.g. internal QA review only — not for transmission"
+              value={overrideReason}
+              onChange={(e) => setOverrideReason(e.target.value)}
+              style={{ fontSize: 12, padding: "7px 9px", width: "100%" }}
+            />
+            <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+              <button
+                style={{ fontSize: 12, padding: "6px 10px" }}
+                disabled={
+                  !overrideReason.trim() || exporting === block.sequence
+                }
+                onClick={() =>
+                  exportSeq(block.sequence, {
+                    override: true,
+                    reason: overrideReason.trim(),
+                  })
+                }
+              >
+                {exporting === block.sequence
+                  ? "Exporting…"
+                  : "Export anyway (override)"}
+              </button>
+              <button
+                className="ghost"
+                style={{ fontSize: 12, padding: "6px 10px" }}
+                onClick={() => {
+                  setBlock(null);
+                  setOverrideReason("");
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {data?.sequences.map((s) => (
         <div
           key={s.sequence}
@@ -126,33 +279,15 @@ export function SequencePanel({ dossierId }: { dossierId: string }) {
                 Make active
               </button>
             )}
-            <a
+            <button
               className="chip"
-              href={dossierApi.exportUrl(dossierId, s.sequence)}
+              style={{ fontSize: 11, padding: "3px 8px" }}
               title={`Download the eCTD package for sequence ${s.sequence}`}
-              onClick={async (e) => {
-                // don't hand over a package screening would bounce — check
-                // validation first and make an un-validated export explicit
-                e.preventDefault();
-                const href = dossierApi.exportUrl(dossierId, s.sequence);
-                try {
-                  const v = await dossierApi.validate(dossierId);
-                  if (
-                    v.passed ||
-                    window.confirm(
-                      `Validation has ${v.errors.length} unresolved error(s)` +
-                      (v.errors[0] ? ` (e.g. ${(v.errors[0] as any).rule_id ||
-                        v.errors[0].rule}: ${v.errors[0].message})` : "") +
-                      ".\n\nHealth Canada screening would reject this " +
-                      "package. Export anyway for internal review?")
-                  ) window.location.assign(href);
-                } catch {
-                  window.location.assign(href); // validator offline — export
-                }
-              }}
+              disabled={busy || exporting === s.sequence}
+              onClick={() => exportSeq(s.sequence)}
             >
-              Export
-            </a>
+              {exporting === s.sequence ? "Exporting…" : "Export"}
+            </button>
           </span>
         </div>
       ))}

@@ -1,29 +1,165 @@
 "use client";
 import { useState } from "react";
 import { dossierApi } from "@/lib/dossierApi";
-import type { ValidationResult } from "@/lib/dossierTypes";
+import type {
+  ValidationCriteria,
+  ValidationFinding,
+  ValidationResult,
+} from "@/lib/dossierTypes";
 
-type Finding = ValidationResult["errors"][number];
-
-// One validation finding, labeled with its HC-style rule ID — regulatory
-// operations people reason in rule IDs, not prose.
-function Row({ f, warn }: { f: Finding; warn?: boolean }) {
+// One finding, labeled with its rule id, severity, the failing leaf/file and
+// the message. Regulatory-ops people reason in rule ids, not prose.
+function Row({ f, warn }: { f: ValidationFinding; warn?: boolean }) {
   return (
-    <div className="mut" style={{ fontSize: 12, marginTop: 3, display: "flex",
-      gap: 6, alignItems: "baseline" }}>
+    <div
+      className="mut"
+      style={{
+        fontSize: 12,
+        marginTop: 4,
+        display: "flex",
+        gap: 6,
+        alignItems: "baseline",
+      }}
+    >
       <code style={{ fontSize: 10, opacity: 0.85, whiteSpace: "nowrap" }}>
         {f.rule_id || (warn ? "CA-W" : "CA-E")}
       </code>
+      <span
+        className={`chip ${warn ? "" : "bad"}`}
+        style={{ fontSize: 9, padding: "0 5px", textTransform: "uppercase" }}
+      >
+        {warn ? "warning" : "error"}
+      </span>
       <span>
+        {f.leaf ? (
+          <code style={{ fontSize: 10, opacity: 0.8 }}>{f.leaf}: </code>
+        ) : null}
         {f.message}
-        {f.leaf ? <i style={{ opacity: 0.7 }}> — {f.leaf}</i> : null}
       </span>
     </div>
   );
 }
 
-// Shows the structural eCTD validation from content-state, with a button to run
-// the FULL technical validation (incl. PDF conformance on the stored bytes).
+// The honest coverage statement: names + versions the criteria, states the
+// disclaimer, and expands into what IS and — explicitly — what is NOT checked.
+function CriteriaHeader({ criteria }: { criteria?: ValidationCriteria }) {
+  const [open, setOpen] = useState(false);
+  if (!criteria) {
+    return (
+      <div className="mut" style={{ fontSize: 11, marginTop: 6 }}>
+        Draft completeness check — checks presence and format only, not
+        scientific adequacy or full eCTD technical validation. Run Health
+        Canada&apos;s eValidator before you transmit.
+      </div>
+    );
+  }
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ fontSize: 12, fontWeight: 600 }}>
+        {criteria.name}{" "}
+        <span className="mut" style={{ fontWeight: 400 }}>
+          v{criteria.version}
+        </span>
+      </div>
+      <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>
+        {criteria.disclaimer}
+      </div>
+      <button
+        className="ghost"
+        style={{ fontSize: 11, padding: "2px 6px", marginTop: 6 }}
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {open ? "Hide coverage" : "What this does / does NOT check"}
+      </button>
+      {open && (
+        <div style={{ marginTop: 6, fontSize: 11 }}>
+          <div className="mut" style={{ opacity: 0.9 }}>
+            Modeled on: {criteria.modeled_on}
+          </div>
+          <div style={{ marginTop: 6, fontWeight: 600 }}>Checks (structure &amp; format):</div>
+          <ul style={{ margin: "3px 0 0 16px", padding: 0 }}>
+            {criteria.coverage.checked.map((c) => (
+              <li key={c} className="mut">
+                {c}
+              </li>
+            ))}
+          </ul>
+          <div style={{ marginTop: 8, fontWeight: 600 }}>
+            Does NOT check:
+          </div>
+          <ul style={{ margin: "3px 0 0 16px", padding: 0 }}>
+            {criteria.coverage.not_checked.map((c) => (
+              <li key={c} className="mut">
+                {c}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Client-side export of findings + criteria — no backend. Triggers a Blob
+// download in CSV or JSON.
+function downloadBlob(name: string, mime: string, text: string) {
+  const url = URL.createObjectURL(new Blob([text], { type: mime }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function csvCell(v: unknown): string {
+  const s = v == null ? "" : String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function report(v: ValidationResult, dossierId: string) {
+  const rows: { severity: string; finding: ValidationFinding }[] = [
+    ...v.errors.map((finding) => ({ severity: "error", finding })),
+    ...v.warnings.map((finding) => ({ severity: "warning", finding })),
+  ];
+  const csv = [
+    ["severity", "rule_id", "rule", "leaf", "message"].join(","),
+    ...rows.map((r) =>
+      [
+        r.severity,
+        r.finding.rule_id || "",
+        r.finding.rule,
+        r.finding.leaf || "",
+        r.finding.message,
+      ]
+        .map(csvCell)
+        .join(",")
+    ),
+  ].join("\n");
+  const json = JSON.stringify(
+    {
+      dossier_id: dossierId,
+      generated_at: new Date().toISOString(),
+      passed: v.passed,
+      criteria: v.criteria || null,
+      note:
+        "Structural/format completeness check only — NOT Health Canada " +
+        "review and NOT full eCTD technical validation.",
+      errors: v.errors,
+      warnings: v.warnings,
+    },
+    null,
+    2
+  );
+  return { csv, json };
+}
+
+// Draft completeness check — the structural/format check run from content
+// state, with a button to run the fuller technical check (incl. the PDF header
+// / encryption check on the stored bytes). This is NOT a Health Canada review
+// and does NOT assert scientific adequacy or full eCTD technical validation.
 export function ValidationCard({
   dossierId,
   structural,
@@ -46,38 +182,92 @@ export function ValidationCard({
     }
   }
 
+  const { csv, json } = report(v, dossierId);
+  const stamp = `${dossierId}-completeness-check`;
+
   return (
     <div className="card glass">
       <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-        <div className="mut" style={{ fontSize: 12 }}>eCTD validation</div>
-        <span style={{ marginLeft: "auto" }}
-          className={`ready-status ${v.passed ? "READY" : "BLOCKED"}`}>
-          {v.passed ? "● PASSED" : `● ${v.errors.length} error(s)`}
+        <div className="mut" style={{ fontSize: 12 }}>
+          Draft completeness check
+        </div>
+        <span
+          style={{ marginLeft: "auto" }}
+          className={`ready-status ${v.passed ? "READY" : "BLOCKED"}`}
+        >
+          {v.passed
+            ? "● NO STRUCTURAL ISSUES"
+            : `● ${v.errors.length} issue(s)`}
         </span>
       </div>
-      {errs.map((e, i) => <Row key={i} f={e} />)}
-      {v.errors.length > 5 && (
-        <button className="ghost" style={{ fontSize: 11, padding: "2px 6px" }}
-          onClick={() => setShowAll((s) => !s)}>
-          {showAll ? "Show fewer" : `Show all ${v.errors.length} errors`}
+
+      <CriteriaHeader criteria={v.criteria} />
+
+      <div style={{ marginTop: 10 }}>
+        {errs.map((e, i) => (
+          <Row key={i} f={e} />
+        ))}
+        {v.errors.length > 5 && (
+          <button
+            className="ghost"
+            style={{ fontSize: 11, padding: "2px 6px", marginTop: 4 }}
+            onClick={() => setShowAll((s) => !s)}
+          >
+            {showAll ? "Show fewer" : `Show all ${v.errors.length} findings`}
+          </button>
+        )}
+        {(showAll ? v.warnings : v.warnings.slice(0, 3)).map((w, i) => (
+          <Row key={`w${i}`} f={w} warn />
+        ))}
+        {v.warnings.length > 3 && !showAll && (
+          <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>
+            +{v.warnings.length - 3} more warning(s) — Show all above
+          </div>
+        )}
+        {v.errors.length === 0 && v.warnings.length === 0 && (
+          <div className="mut" style={{ fontSize: 12 }}>
+            No presence/format issues found. This does not confirm scientific
+            adequacy or full eCTD validity — run eValidator before transmission.
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
+        <button
+          className="ghost"
+          style={{ fontSize: 12, padding: "6px 10px" }}
+          onClick={run}
+          disabled={busy}
+        >
+          {busy ? "Checking…" : "Run technical check (PDF header/encryption)"}
         </button>
-      )}
-      {(showAll ? v.warnings : v.warnings.slice(0, 3)).map((w, i) => (
-        <Row key={`w${i}`} f={w} warn />
-      ))}
-      {v.warnings.length > 3 && !showAll && (
-        <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>
-          +{v.warnings.length - 3} more warning(s) — Show all above
-        </div>
-      )}
-      <button className="ghost" style={{ marginTop: 10, fontSize: 12, padding: "6px 10px" }}
-        onClick={run} disabled={busy}>
-        {busy ? "Checking…" : "Run full check (PDF conformance)"}
-      </button>
-      <div className="mut" style={{ fontSize: 10, marginTop: 6 }}>
-        Findings carry Health Canada eCTD validation-rule-style IDs
-        (CA-E-…/CA-W-…) covering leaf integrity, lifecycle legality, naming,
-        sequence numbering, XML backbone and PDF conformance.
+        <button
+          className="ghost"
+          style={{ fontSize: 12, padding: "6px 10px" }}
+          onClick={() =>
+            downloadBlob(`${stamp}.csv`, "text/csv;charset=utf-8", csv)
+          }
+        >
+          Download report (CSV)
+        </button>
+        <button
+          className="ghost"
+          style={{ fontSize: 12, padding: "6px 10px" }}
+          onClick={() =>
+            downloadBlob(`${stamp}.json`, "application/json", json)
+          }
+        >
+          Download report (JSON)
+        </button>
+      </div>
+
+      <div className="mut" style={{ fontSize: 10, marginTop: 8 }}>
+        Findings carry structural-rule ids (CA-E-…/CA-W-…) covering leaf
+        integrity, lifecycle legality, naming, sequence numbering, XML backbone
+        and the document PDF header/encryption. This is a presence/format
+        completeness check — <b>not</b> a Health Canada review and{" "}
+        <b>not</b> full eCTD technical validation. Where a checksum is shown it
+        is document control (md5), not validation.
       </div>
     </div>
   );

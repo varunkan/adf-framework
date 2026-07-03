@@ -55,6 +55,12 @@ async function forward(req: NextRequest, path: string[]) {
     };
     const cd = upstream.headers.get("content-disposition");
     if (cd) respHeaders["content-disposition"] = cd;
+    // forward the export gate's provenance headers so the UI can show whether a
+    // package was exported on a clean validation or an explicit override
+    for (const h of ["x-export-validation", "x-export-missing"]) {
+      const v = upstream.headers.get(h);
+      if (v) respHeaders[h] = v;
+    }
     return new NextResponse(buf, { status: upstream.status, headers: respHeaders });
   } catch (e) {
     return NextResponse.json(

@@ -1,4 +1,5 @@
 "use client";
+import { useState } from "react";
 import type { ReadinessCardData } from "@/lib/types";
 
 const MARK: Record<string, string> = { pass: "✓", current: "◉", todo: "○" };
@@ -16,6 +17,8 @@ export function ReadinessCard({
   data: ReadinessCardData;
   onResume: (key: string) => void;
 }) {
+  const [showBreakdown, setShowBreakdown] = useState(false);
+  const doneCount = data.tiles.filter((t) => t.state === "pass").length;
   return (
     <div className="card glass ready-card">
       <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
@@ -25,11 +28,55 @@ export function ReadinessCard({
         </span>
       </div>
       <div className="mut" style={{ fontSize: 12 }}>
-        {data.done} of {data.total} filing steps complete
+        {data.percent}% ready — {data.done} of {data.total} filing steps complete
       </div>
       <div className="progress" aria-hidden>
         <i style={{ width: `${data.percent}%` }} />
       </div>
+
+      <button
+        className="ghost"
+        style={{ fontSize: 11, padding: "2px 6px", marginTop: 6 }}
+        aria-expanded={showBreakdown}
+        onClick={() => setShowBreakdown((s) => !s)}
+      >
+        {showBreakdown
+          ? "Hide breakdown"
+          : `How is ${data.percent}% measured?`}
+      </button>
+      {showBreakdown && (
+        <div style={{ marginTop: 6, fontSize: 11 }}>
+          <div className="mut">
+            The percentage counts completed filing steps: {doneCount} of{" "}
+            {data.tiles.length} tracked steps below are done. Each step maps to
+            the regulatory requirement it satisfies.
+          </div>
+          <ul style={{ margin: "6px 0 0 0", padding: 0, listStyle: "none" }}>
+            {data.tiles.map((t) => (
+              <li
+                key={t.key}
+                style={{
+                  display: "flex",
+                  gap: 6,
+                  alignItems: "baseline",
+                  marginTop: 4,
+                }}
+              >
+                <span aria-hidden>{MARK[t.state] ?? "○"}</span>
+                <span className="sr-only">
+                  {WORD[t.state] ?? "to do"}:{" "}
+                </span>
+                <span style={{ fontWeight: 600 }}>{t.label}</span>
+                {t.reg ? (
+                  <span className="mut">— {t.reg}</span>
+                ) : (
+                  <span className="mut">— orientation</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="tiles">
         {data.tiles.map((t) => (

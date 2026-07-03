@@ -4,9 +4,11 @@ import type {
   ContentState,
   DossierFull,
   DossierListItem,
+  ExportOutcome,
   OutlineView,
   SequenceList,
   ValidationResult,
+  ValidationRuleCatalog,
 } from "./dossierTypes";
 
 const BASE = "/api/dossier";
@@ -92,6 +94,11 @@ export const dossierApi = {
   validate: (id: string) =>
     j<ValidationResult>(`/dossiers/${encodeURIComponent(id)}/validate`),
 
+  // The queryable registry of every structural/technical rule + the honest
+  // criteria block. Powers the "what do we actually check" surface.
+  validationRules: () =>
+    j<ValidationRuleCatalog>(`/validation/rules`),
+
   outline: (id: string, sequence = "0000") =>
     j<OutlineView>(
       `/ectd/${encodeURIComponent(id)}/viewer/outline/${encodeURIComponent(sequence)}`
@@ -118,8 +125,62 @@ export const dossierApi = {
       { method: "POST" }
     ),
 
-  exportUrl: (id: string, sequence: string) =>
-    `${BASE}/ectd/${encodeURIComponent(id)}/export/${encodeURIComponent(sequence)}`,
+  // (Removed exportUrl — a bare export URL is a silent-download footgun that
+  // would bypass the fail-closed validation gate. All export goes through
+  // exportSequence below, which surfaces the 409 block.)
+
+  // Export the transmissible package. The backend FAILS CLOSED: without a
+  // valid, passing validation it returns 409 with the blocking findings +
+  // criteria instead of a package. So we cannot use a bare browser download —
+  // we fetch, and:
+  //   - on 2xx: return the package Blob (+ X-Export-Validation stamp) so the
+  //     caller can trigger a real download.
+  //   - on 409: return the parsed verdict so the UI can show the blocking
+  //     findings and offer an explicit override (below).
+  // Pass { override:true, reason } to override a failed validation; the backend
+  // records the reason to the audit trail. A 422 override_reason_required comes
+  // back if the reason is blank (surfaced as a normal block outcome).
+  exportSequence: async (
+    id: string,
+    sequence: string,
+    opts: { override?: boolean; reason?: string } = {}
+  ): Promise<ExportOutcome> => {
+    const params = new URLSearchParams();
+    if (opts.override) params.set("override", "true");
+    if (opts.reason) params.set("reason", opts.reason);
+    const qs = params.toString();
+    const url =
+      `${BASE}/ectd/${encodeURIComponent(id)}/export/${encodeURIComponent(sequence)}` +
+      (qs ? `?${qs}` : "");
+    const res = await fetch(url, { cache: "no-store" });
+    if (res.ok) {
+      const blob = await res.blob();
+      const cd = res.headers.get("content-disposition") || "";
+      const m = /filename="?([^"]+)"?/.exec(cd);
+      return {
+        ok: true,
+        blob,
+        filename: m?.[1] || `${id}-${sequence}.zip`,
+        stamp: (res.headers.get("X-Export-Validation") as
+          | "passed"
+          | "overridden"
+          | "unknown"
+          | null) || null,
+      };
+    }
+    // problem+json — carries { title, detail, validation:{...} } on the gate
+    let body: any = {};
+    try {
+      body = await res.json();
+    } catch {}
+    return {
+      ok: false,
+      status: res.status,
+      title: body.title || `${res.status}`,
+      detail: body.detail,
+      validation: body.validation,
+    };
+  },
 
   buildPmXml: (body: { dossier_id: string; lang: string; product_name: string;
                        din?: string; sections: { code: string; title: string;

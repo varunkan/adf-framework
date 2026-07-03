@@ -88,12 +88,81 @@ export interface FeesBlock {
   sme_granted: boolean;
 }
 
+// A single structural/format finding. `leaf` is the failing file/leaf id.
+export interface ValidationFinding {
+  rule: string;
+  rule_id?: string;
+  message: string;
+  leaf?: string | null;
+}
+
+// The named, versioned validator profile + an honest coverage statement.
+// This is what makes the green checkmark truthful: it says WHAT was checked
+// (presence/format) and — explicitly — what was NOT (scientific adequacy,
+// full eCTD technical validation, Health Canada acceptance).
+export interface ValidationCriteria {
+  name: string;
+  version: string;
+  modeled_on: string;
+  disclaimer: string;
+  coverage: {
+    checked: string[];
+    not_checked: string[];
+  };
+}
+
 export interface ValidationResult {
   passed: boolean;
-  errors: { rule: string; rule_id?: string; message: string; leaf?: string }[];
-  warnings: { rule: string; rule_id?: string; message: string; leaf?: string }[];
+  errors: ValidationFinding[];
+  warnings: ValidationFinding[];
   checked: number;
+  // present on the full validate() result and export-block bodies
+  criteria?: ValidationCriteria;
 }
+
+// One rule in the queryable catalogue (GET /api/dossier/validation/rules).
+export interface ValidationRule {
+  rule: string;
+  rule_id: string;
+  family: string;
+  severity: "error" | "warning";
+  description: string;
+}
+
+export interface ValidationRuleCatalog {
+  count: number;
+  rules: ValidationRule[];
+  criteria: ValidationCriteria;
+}
+
+// The verdict block the export gate returns inside a 409 problem body when
+// validation does not pass (fail-closed). `ran=false` => the validator itself
+// could not run, so export is blocked as "validation_unavailable".
+export interface ExportValidationVerdict {
+  passed: boolean;
+  ran: boolean;
+  errors: ValidationFinding[];
+  criteria: ValidationCriteria;
+}
+
+// GET /ectd/{id}/export/{sequence} → 409 problem+json when blocked.
+export interface ExportBlocked {
+  ok: false;
+  status: number; // 409 (validation_not_passed / validation_unavailable) | other
+  title: string;
+  detail?: string;
+  validation?: ExportValidationVerdict;
+}
+
+// Successful export: the transmissible package blob + its validation stamp.
+export interface ExportOk {
+  ok: true;
+  blob: Blob;
+  filename: string;
+  stamp: "passed" | "overridden" | "unknown" | null; // X-Export-Validation
+}
+
+export type ExportOutcome = ExportOk | ExportBlocked;
 
 export interface ContentState {
   dossier_id: string;

@@ -8,6 +8,42 @@ export default function ViewerPage() {
   const { content, loading, dossierId } = useDossier();
   const [tab, setTab] = useState<"files" | "outline">("files");
   const [outline, setOutline] = useState<OutlineView | null>(null);
+  const [exportMsg, setExportMsg] = useState("");
+  const [exporting, setExporting] = useState(false);
+
+  // Export fails CLOSED: fetch (not a bare download link) so a 409 shows the
+  // reason instead of downloading a JSON error body. Override lives on the
+  // dossier's Sequences panel (typed-reason gate) — not offered here.
+  async function exportPackage() {
+    setExporting(true);
+    setExportMsg("");
+    try {
+      const out = await dossierApi.exportSequence(dossierId, "0000");
+      if (out.ok) {
+        const url = URL.createObjectURL(out.blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = out.filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } else {
+        const n = out.validation?.errors?.length ?? 0;
+        setExportMsg(
+          `Export blocked — the completeness check did not pass` +
+            (n ? ` (${n} structural issue(s))` : "") +
+            ". Resolve the findings on the module pages, or override with a " +
+            "typed reason from the Sequences panel. This structural check is " +
+            "not a Health Canada review."
+        );
+      }
+    } catch (e) {
+      setExportMsg(String(e));
+    } finally {
+      setExporting(false);
+    }
+  }
 
   useEffect(() => {
     if (tab === "outline" && !outline)
@@ -35,11 +71,16 @@ export default function ViewerPage() {
           Outline
         </button>
         <span className="spacer" />
-        <a className="chip" href={`/api/dossier/ectd/${encodeURIComponent(dossierId)}/export/0000`}
-          download title="Download the transmissible eCTD package (sequence 0000) — upload it via CESG WebTrader">
-          ⬇ Export eCTD package
-        </a>
+        <button className="chip" onClick={exportPackage} disabled={exporting}
+          title="Download the transmissible eCTD package (sequence 0000) — upload it via CESG WebTrader">
+          {exporting ? "Exporting…" : "⬇ Export eCTD package"}
+        </button>
       </div>
+      {exportMsg && (
+        <div className="notice bad" style={{ marginTop: 8, fontSize: 12 }}>
+          {exportMsg}
+        </div>
+      )}
       <p className="mut" style={{ fontSize: 12 }}>
         The export is the spec folder tree (index.xml, ca-regional.xml, REP RT
         XML, every leaf at its href with checksums) zipped — what you upload
