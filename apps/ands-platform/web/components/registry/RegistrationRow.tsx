@@ -63,7 +63,8 @@ export function RegistrationRow({
         {next.map((s) => (
           <button key={s} className="chip" disabled={busy}
             onClick={() => onTransition(reg.id, s)}
-            aria-label={`Move ${reg.product} to ${s}`}>
+            aria-label={`Move ${reg.product} to ${s} — records the status only, does not file with Health Canada`}
+            title={`Records this status in your workspace only — it does not file or transmit anything to Health Canada. Set it to mirror what Health Canada has told you.`}>
             → {s}
           </button>
         ))}

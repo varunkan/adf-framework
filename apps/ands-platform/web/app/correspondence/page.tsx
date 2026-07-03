@@ -7,6 +7,7 @@ import Link from "next/link";
 import { dossierApi } from "@/lib/dossierApi";
 import type { DossierListItem } from "@/lib/dossierTypes";
 import { UserChip } from "@/components/UserChip";
+import { Term } from "@/components/Term";
 import { CorrespondenceHub } from "@/components/correspondence/CorrespondenceHub";
 import { NoticeInbox } from "@/components/correspondence/NoticeInbox";
 import { NoaRegister } from "@/components/correspondence/NoaRegister";
@@ -57,14 +58,24 @@ export default function CorrespondencePage() {
         <h1>Correspondence &amp; notices</h1>
         <p className="mut" style={{ maxWidth: "70ch" }}>
           Log every exchange with Health Canada, ingest notices to drive the
-          DSTS lifecycle, and watch the PM(NOC) statutory clocks on each
-          Form V allegation.
+          DSTS lifecycle, and watch the PM(NOC) statutory clocks on each{" "}
+          <Term k="Form V" /> allegation (a <Term k="NOA" /> opens the{" "}
+          <Term k="s.6" /> action window; an s.6 action starts the{" "}
+          <Term k="24-month stay" />).
         </p>
         <p className="mut" style={{ fontSize: 12, maxWidth: "72ch" }}>
           Every change on this page is captured in the dossier’s append-only
           audit trail — actor and workspace stamped, sequence-numbered,
           exportable for inspections (open a dossier → Audit).
         </p>
+
+        <div className="notice" style={{ maxWidth: "72ch" }}>
+          <b>Record only.</b> Everything on this page logs a record in your own
+          workspace — it does <b>not</b> transmit anything to Health Canada.
+          Ingesting a notice, serving an NOA or logging correspondence updates
+          your tracking; filing with Health Canada happens only through the
+          guided journey&apos;s transmit step (CESG).
+        </div>
 
         <div className="card glass" style={{ padding: 16, maxWidth: 560 }}>
           <label htmlFor="corr-dossier">Dossier</label>

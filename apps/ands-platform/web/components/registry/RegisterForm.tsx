@@ -2,6 +2,7 @@
 // Register a marketed product post-NOC: dossier × product × DIN × country.
 import { useState } from "react";
 import { DRUG_TYPES, registryApi, type Registration } from "./registryApi";
+import { Term } from "@/components/Term";
 
 export function RegisterForm({
   onCreated,
@@ -102,8 +103,8 @@ export function RegisterForm({
       </div>
       <p className="mut" style={{ fontSize: 12, margin: "10px 0 0" }}>
         New registrations start as <b>Submitted</b>; move them to NOC-Issued
-        and Marketed as Health Canada progresses. Leave the DIN blank until
-        it is issued with the NOC.
+        and Marketed as Health Canada progresses. Leave the <Term k="DIN" />{" "}
+        blank until it is issued with the <Term k="NOC" />.
       </p>
       {err && <div className="notice bad" style={{ marginTop: 10 }}>{err}</div>}
       <div className="cta-row">

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { ssoEntry } from "@/lib/roadmap";
+import { Term } from "@/components/Term";
 
 const PW_RULE = "At least 10 characters, with letters and numbers.";
 
@@ -226,8 +227,10 @@ export default function LoginPage() {
               inputMode="numeric" placeholder="6-digit code" autoFocus
               onKeyDown={(e) => { if (e.key === "Enter") go(); }} />
             <div className="mut" style={{ fontSize: 12, marginTop: 4 }}>
-              This account has multi-factor authentication enabled — enter
-              the current code from your authenticator app.
+              This account has{" "}
+              <Term k="MFA">multi-factor authentication</Term> enabled — a
+              second code from your phone. Enter the current 6-digit code from
+              your authenticator app.
             </div>
           </div>
         )}
@@ -278,7 +281,7 @@ export default function LoginPage() {
                   </Link>
                   <div style={{ marginTop: 2 }}>
                     Not available yet. Today: per-workspace email &amp; password
-                    with optional TOTP MFA.
+                    with optional <Term k="TOTP" /> <Term k="MFA" />.
                   </div>
                 </div>
               </>

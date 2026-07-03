@@ -180,7 +180,8 @@ export default function DossiersHome() {
         </div>
         <p className="mut" style={{ maxWidth: "64ch" }}>
           A <Term k="Dossier ID" /> is the permanent file for one product at Health
-          Canada. Open a dossier to build its eCTD Module 1–5 — upload or author
+          Canada. Open a dossier to build its <Term k="eCTD" />{" "}
+          <Term k="Module 1">Module 1–5</Term> — upload or author
           every document with full guidance on each section. Everything on this
           page belongs to your workspace alone: client workspaces are isolated
           end-to-end (per-workspace data partitions, tenant-checked on every
@@ -203,7 +204,8 @@ export default function DossiersHome() {
             </div>
             <p className="mut" style={{ fontSize: 12, margin: "6px 0 0" }}>
               Health Canada issues your Dossier ID when you file a Dossier ID
-              Request through REP (via your CESG account).{" "}
+              Request through <Term k="REP" /> (via your <Term k="CESG" />{" "}
+              account).{" "}
               <button className="ghost" style={{ fontSize: 12, padding: "0 4px" }}
                 onClick={usePlaceholder}>
                 No ID yet? Start with a placeholder →
@@ -246,7 +248,9 @@ export default function DossiersHome() {
                     )}
                   </div>
                   <div className="d-title">{d.title}</div>
-                  <div className="d-meta mut">{d.submission_type} · CS-BE</div>
+                  <div className="d-meta mut">
+                    {d.submission_type} · <Term k="CS-BE" />
+                  </div>
                   <div className="progress"><i style={{
                     width: `${applic ? (passed / applic) * 100 : 0}%` }} /></div>
                   <span className={`chip ${d.gate?.complete ? "ready" : "blocked"}`}>

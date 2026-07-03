@@ -10,6 +10,7 @@ import {
   type LifecycleState,
   type NoticeResult,
 } from "./api";
+import { Term } from "@/components/Term";
 
 export function NoticeInbox({
   dossierId,
@@ -200,9 +201,15 @@ export function NoticeInbox({
               {busy ? "Ingesting…" : `Ingest ${notice}`}
             </button>
             <span className="nexthint">
-              Screening: SAL / SDN / SRL · Review decisions: NOC / NOD / NON
+              Screening: <Term k="SAL" /> / <Term k="SDN" /> / <Term k="SRL" />{" "}
+              · Review decisions: <Term k="NOC" /> / <Term k="NOD" /> /{" "}
+              <Term k="NON" />
             </span>
           </div>
+          <p className="mut" style={{ fontSize: 12, margin: "6px 0 0" }}>
+            Record only — this logs the notice you received and updates your
+            tracking. It does <b>not</b> file anything with Health Canada.
+          </p>
           {result && (
             <div
               className={`notice ${

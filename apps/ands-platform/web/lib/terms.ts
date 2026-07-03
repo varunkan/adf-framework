@@ -32,12 +32,62 @@ export const TERMS: Record<string, string> = {
   QOS: "Quality Overall Summary — the Module 2.3 summary of your CMC/quality data.",
   CMC: "Chemistry, Manufacturing and Controls — Module 3, how the drug is made and tested.",
   CESG:
-    "Common Electronic Submissions Gateway — how you transmit. Health Canada has " +
-    "no portal of its own: you register with the US FDA's ESG gateway and tag " +
-    "the package 'HC' so it's redirected to Health Canada.",
+    "Common Electronic Submissions Gateway — Health Canada's official channel " +
+    "for transmitting an eCTD. It runs on the US FDA's shared ESG " +
+    "infrastructure, so you register once as an FDA ESG Trading Partner and tag " +
+    "the package 'HC' to route it to Health Canada. Applies whenever you " +
+    "transmit a sequence. (Health Canada CESG guidance, canada.ca.)",
   "FDA-ESG":
-    "The US FDA Electronic Submissions Gateway. Canada's CESG rides on it — you " +
-    "register as an FDA ESG Trading Partner and select Health Canada as the centre.",
+    "US FDA Electronic Submissions Gateway — the shared transmission " +
+    "infrastructure Canada's CESG uses. Because it's shared, a Canadian ANDS " +
+    "legitimately produces FDA-side receipts (an FDA MDN, then an FDA ACK) " +
+    "before the Health Canada acknowledgement routes back. Applies at the " +
+    "transmit step.",
+  MDN:
+    "Message Delivery Notification — the first receipt from the FDA ESG " +
+    "confirming your transmission physically arrived at the shared gateway. It " +
+    "proves delivery, not acceptance. Applies at the transmit step; a Canadian " +
+    "ANDS gets an FDA-side MDN because CESG rides the shared FDA ESG.",
+  ACK:
+    "Acknowledgement Receipt — routes back through the gateway after the MDN. " +
+    "The FDA ACK confirms the ESG accepted the package; the Health Canada ACK " +
+    "(Core ID) is the proof Health Canada itself has your submission. Applies " +
+    "at the transmit step.",
+  "Core ID":
+    "The identifier on the Health Canada acknowledgement — the final of the " +
+    "three transmit receipts and the real proof Health Canada has your " +
+    "submission. Don't stop at the FDA ACK. Applies at the transmit step.",
+  MFA:
+    "Multi-factor authentication — a second code from your phone (an " +
+    "authenticator app) on top of your password. Applies at sign-in once you " +
+    "turn it on, or when your workspace requires it.",
+  TOTP:
+    "Time-based One-Time Password — the rotating 6-digit code from an " +
+    "authenticator app (a second sign-in factor beyond your password). Applies " +
+    "when MFA is turned on for your account.",
+  "s.5":
+    "Section 5 of the PM(NOC) Regulations — the rule that makes a generic " +
+    "address every patent on the reference product's register (via Form V). " +
+    "Applies when the reference product has listed patents.",
+  "s.6":
+    "Section 6 of the PM(NOC) Regulations — the innovator's right to start a " +
+    "court action within 45 days of an NOA to block your approval. Applies once " +
+    "you serve a Notice of Allegation.",
+  "AUC 90% CI":
+    "The 90% confidence interval on AUC (total drug exposure over time) — it " +
+    "must sit inside the 80.00–125.00% window to prove bioequivalence. Applies " +
+    "to your comparative bioequivalence (CS-BE) study data.",
+  SAL:
+    "Screening Acceptance Letter — Health Canada confirms your submission " +
+    "passed the completeness check and enters review. Applies during screening " +
+    "(~45 days after transmit).",
+  SRL:
+    "Screening Rejection Letter — the submission failed the completeness check " +
+    "and is not accepted into review. Applies during screening.",
+  "24-month stay":
+    "The pause on your approval that starts when the innovator commences an " +
+    "s.6 court action after your NOA — up to 24 months, or until the court " +
+    "decides. Applies once an s.6 action is filed.",
   NOC:
     "Notice of Compliance — approval. You also get a DIN (Drug Identification " +
     "Number) and may sell the drug.",
@@ -54,7 +104,11 @@ export const TERMS: Record<string, string> = {
     "Screening Deficiency Notice — 'something's missing, send it in 45 days'. " +
     "This is the completeness check, not the science review.",
   "Right to Sell":
-    "An annual fee to keep your DIN active, due each October 1.",
+    "An annual obligation (with fee) to keep your DIN active, due each " +
+    "October 1. Applies to every marketed DIN after NOC.",
+  "Right-to-Sell":
+    "An annual obligation (with fee) to keep your DIN active, due each " +
+    "October 1. Applies to every marketed DIN after NOC.",
   "small business":
     "A status (granted BEFORE you file) that gives a 50% fee reduction — and a " +
     "full waiver on your first-ever submission. Filing first forfeits it.",

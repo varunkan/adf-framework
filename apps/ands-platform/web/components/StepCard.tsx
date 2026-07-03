@@ -362,31 +362,43 @@ function TransmitStep({ sig }: { sig: Record<string, any> }) {
   const sent = !!sig.transmission;
   // real transmission records per-ack flags; the simulation implies all three
   const chain = [
-    { k: "FDA MDN", d: "FDA gateway received your message",
+    { k: "FDA MDN", termKey: "MDN",
+      d: "First receipt: the FDA ESG confirms your transmission physically arrived at the shared gateway. This proves delivery, not acceptance. A Canadian ANDS gets an FDA-side receipt because CESG rides the shared FDA ESG infrastructure.",
       done: tx.real ? !!tx.mdn_received : sent },
-    { k: "FDA ACK", d: "FDA gateway accepted it",
+    { k: "FDA ACK", termKey: "ACK",
+      d: "Second receipt: the FDA ESG accepted the package for routing. Still an FDA-side receipt — legitimate, because Canada's CESG shares the FDA ESG. Don't stop here.",
       done: tx.real ? !!tx.fda_ack_received : sent },
-    { k: "HC ACK (Core ID)", d: "Health Canada actually has it — this is the proof",
+    { k: "HC ACK (Core ID)", termKey: "Core ID",
+      d: "Third and final receipt: Health Canada itself acknowledges your submission and issues the Core ID. This is the real proof Health Canada has it.",
       done: tx.real ? !!tx.hc_ack_received : sent },
   ];
   return (
     <>
       <div className="teach">
-        Health Canada has no portal of its own. Transmission rides on the US{" "}
-        <Term k="FDA-ESG" /> gateway (<Term k="CESG" />): you register as an FDA
-        ESG Trading Partner, install a certificate, and tag the package
-        &ldquo;HC&rdquo;. Over 10&nbsp;GB goes on physical media; send one
-        sequence at a time and wait for the acknowledgement before the next.
+        You transmit through the{" "}
+        <Term k="CESG">Common Electronic Submissions Gateway (CESG)</Term> —
+        Health Canada&apos;s official channel for sending an <Term k="eCTD" />.
+        CESG runs on the shared US <Term k="FDA-ESG" /> infrastructure, so you
+        register once as an FDA ESG Trading Partner, install a certificate, and
+        tag the package &ldquo;HC&rdquo; to route it to Health Canada. Over
+        10&nbsp;GB goes on physical media; send one sequence at a time and wait
+        for the acknowledgement before the next.
       </div>
       <div className="notice">
-        You get <b>three receipts, in order</b> — don&apos;t stop at the FDA ACK:
+        Because CESG uses the shared FDA gateway, a Canadian ANDS legitimately
+        produces <b>FDA-side receipts first</b>, then the Health Canada one. You
+        get <b>three receipts, in order</b> — don&apos;t stop at the{" "}
+        <Term k="ACK">FDA ACK</Term>. (Per Health Canada&apos;s CESG guidance,
+        canada.ca.)
       </div>
       <div className="tiles" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
         {chain.map((c) => (
           <div key={c.k} className={`tile ${c.done ? "pass" : "todo"}`} title={c.d}>
             <span className="d" aria-hidden>{c.done ? "✓" : "○"}</span>
-            <span className="sr-only">{c.done ? "received" : "pending"}: </span>
-            {c.k}
+            <span className="sr-only">
+              {c.done ? "received" : "pending"}: {c.d}{" "}
+            </span>
+            <Term k={c.termKey}>{c.k}</Term>
           </div>
         ))}
       </div>

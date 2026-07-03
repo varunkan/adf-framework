@@ -26,6 +26,12 @@ export function SectionTree({
   return (
     <nav className="section-tree" aria-label={`Module ${module.module} sections`}>
       <h2>{module.title}</h2>
+      <ul className="tree-legend" aria-label="What each status glyph means">
+        <li><span className="t-glyph empty" aria-hidden>{GLYPH.empty}</span> Not started</li>
+        <li><span className="t-glyph partial" aria-hidden>{GLYPH.partial}</span> In progress</li>
+        <li><span className="t-glyph complete" aria-hidden>{GLYPH.complete}</span> Complete</li>
+        <li><span className="t-glyph na" aria-hidden>{GLYPH.na}</span> N/A</li>
+      </ul>
       <ul role="tree">
         {visible.map((n) =>
           n.kind === "group" ? (

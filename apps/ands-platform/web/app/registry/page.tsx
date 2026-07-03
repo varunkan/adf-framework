@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { UserChip } from "@/components/UserChip";
+import { Term } from "@/components/Term";
 import {
   registryApi,
   type Registration,
@@ -76,14 +77,23 @@ export default function RegistryPage() {
           </button>
         </div>
         <p className="mut" style={{ maxWidth: "64ch" }}>
-          Every marketed-product registration — DIN, market status and the
-          post-approval obligations that follow the Notice of Compliance.
+          Every marketed-product registration — <Term k="DIN" />, market status
+          and the post-approval obligations (including{" "}
+          <Term k="Right to Sell" />) that follow the{" "}
+          <Term k="NOC">Notice of Compliance</Term>.
         </p>
         <p className="mut" style={{ fontSize: 12, maxWidth: "72ch" }}>
           Every change on this page is captured in the dossier’s append-only
           audit trail — actor and workspace stamped, sequence-numbered,
           exportable for inspections (open a dossier → Audit).
         </p>
+
+        <div className="notice" style={{ maxWidth: "72ch" }}>
+          <b>Record only.</b> Registering a product or changing its status here
+          logs a record in your own workspace — it does <b>not</b> transmit or
+          file anything with Health Canada. Update these to mirror what Health
+          Canada has already told you.
+        </div>
 
         {creating && <RegisterForm onCreated={created} />}
 

@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ALLEGATIONS, lifecycleApi, today, type NoaRecord } from "./api";
 import { ProvenancePopover, type Provenance } from "@/components/ProvenancePopover";
+import { Term } from "@/components/Term";
 import { actionProvenance, stayProvenance } from "@/lib/noaProvenance";
 
 const STATUS_LABEL: Record<NoaRecord["status"], string> = {
@@ -122,10 +123,16 @@ export function NoaRegister({ dossierId }: { dossierId: string }) {
         </button>
       </div>
       <p className="mut" style={{ margin: "6px 0 0", maxWidth: "70ch" }}>
-        One Form V allegation per patent/CSP on the Patent Register.
-        Non-infringement and invalidity allegations require a Notice of
-        Allegation served on the innovator — service opens their 45-day
-        window to sue; a commenced s.6 action triggers the 24-month stay.
+        One <Term k="Form V" /> allegation per patent/CSP on the Patent
+        Register. Non-infringement and invalidity allegations require a{" "}
+        <Term k="NOA">Notice of Allegation</Term> served on the innovator —
+        service opens their 45-day window to sue; a commenced{" "}
+        <Term k="s.6" /> action triggers the <Term k="24-month stay" />.
+      </p>
+      <p className="mut" style={{ margin: "6px 0 0", fontSize: 12, maxWidth: "70ch" }}>
+        Record only — <b>Serve NOA</b> and <b>Record s.6 action</b> log what has
+        already happened out in the world and start the tracking clocks. They do
+        not serve, file or transmit anything with Health Canada or the courts.
       </p>
 
       {adding && (
