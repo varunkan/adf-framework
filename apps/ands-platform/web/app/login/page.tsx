@@ -19,6 +19,9 @@ export default function LoginPage() {
   const [resetCode, setResetCode] = useState("");
   const [devCode, setDevCode] = useState("");
   const [notice, setNotice] = useState("");
+  // MFA challenge: shown only after the service asks for it
+  const [needMfa, setNeedMfa] = useState(false);
+  const [mfaCode, setMfaCode] = useState("");
 
   function switchMode(m: "login" | "signup" | "reset") {
     setMode(m);
@@ -34,11 +37,17 @@ export default function LoginPage() {
     setErr("");
     try {
       if (mode === "signup") await auth.signup(email, password, company);
-      else await auth.login(email, password);
+      else await auth.login(email, password, mfaCode);
       router.push(params.get("next") || "/dossiers");
       router.refresh();
     } catch (e) {
-      setErr(String(e));
+      const msg = String(e);
+      if (/multi-factor|authenticator/i.test(msg)) {
+        setNeedMfa(true);
+        setErr(needMfa && mfaCode ? "That code didn't verify — codes rotate every 30 seconds; try the current one." : "");
+      } else {
+        setErr(msg);
+      }
       setBusy(false);
     }
   }
@@ -111,8 +120,13 @@ export default function LoginPage() {
           <>
             {devCode && (
               <div className="notice" style={{ fontSize: 13 }}>
-                Your one-time code (shown here because this environment has
-                no email delivery): <b>{devCode}</b>
+                <b>Demo environment — no outbound email.</b> Your one-time
+                code is shown on-screen below. In a production deployment
+                this code is emailed to {email || "your address"} and never
+                displayed.
+                <div style={{ marginTop: 6 }}>
+                  One-time code: <b>{devCode}</b>
+                </div>
               </div>
             )}
             <div>
@@ -144,6 +158,19 @@ export default function LoginPage() {
                       ? ` (${10 - password.length} more characters)` : ""}`}
               </div>
             )}
+          </div>
+        )}
+
+        {needMfa && mode === "login" && (
+          <div>
+            <label>Authenticator code</label>
+            <input value={mfaCode} onChange={(e) => setMfaCode(e.target.value)}
+              inputMode="numeric" placeholder="6-digit code" autoFocus
+              onKeyDown={(e) => { if (e.key === "Enter") go(); }} />
+            <div className="mut" style={{ fontSize: 12, marginTop: 4 }}>
+              This account has multi-factor authentication enabled — enter
+              the current code from your authenticator app.
+            </div>
           </div>
         )}
 

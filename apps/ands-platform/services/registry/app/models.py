@@ -16,3 +16,9 @@ class RegistrationIn(BaseModel):
 class StatusIn(BaseModel):
     id: str
     status: str = ""
+
+
+class ChecklistItemIn(BaseModel):
+    year: int = 0            # 0 = current year (server decides)
+    item_key: str = ""
+    done: bool = True

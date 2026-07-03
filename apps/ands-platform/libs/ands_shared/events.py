@@ -44,6 +44,7 @@ class EventType(str):
     USER_INVITED = "identity.user_invited"
     # registry context
     REGISTRATION_STATUS_CHANGED = "registration.status_changed"
+    ANNUAL_CHECKLIST_SIGNED = "registry.annual_checklist_signed"
 
 
 class EventEnvelope(BaseModel):

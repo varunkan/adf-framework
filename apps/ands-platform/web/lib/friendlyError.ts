@@ -7,6 +7,12 @@ export function friendlyError(status: number, detail: string): string {
   const looksHuman = d && !/^\d{3}$/.test(d) && !/^[A-Z_]+$/.test(d);
   switch (true) {
     case status === 401:
+      // three very different 401s — a session timeout message on a wrong
+      // password (or an MFA challenge) reads as a bug to an RA professional
+      if (/mfa/i.test(d))
+        return "This account uses multi-factor authentication — enter the 6-digit code from your authenticator app.";
+      if (/credential/i.test(d))
+        return "That email and password didn't match — try again, or use “Forgot password?”.";
       return "Your session has ended — please sign in again.";
     case status === 403:
       return "You don't have access to that in this workspace.";

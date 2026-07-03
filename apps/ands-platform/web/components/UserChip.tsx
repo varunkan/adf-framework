@@ -1,25 +1,29 @@
 "use client";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { auth, tenantName, type Principal } from "@/lib/auth";
 
 export function UserChip() {
   const router = useRouter();
   const [me, setMe] = useState<Principal | null>(null);
-  const [tenant, setTenant] = useState("");
 
   useEffect(() => {
-    auth.me().then((p) => { setMe(p); setTenant(tenantName()); })
-      .catch(() => setMe(null));
+    auth.me().then(setMe).catch(() => setMe(null));
   }, []);
 
   if (!me) return null;
+  // workspace name comes from the account record (server), with the old
+  // localStorage value only as a fallback for sessions predating the field
+  const tenant = me.tenant_name || tenantName();
   return (
     <span className="user-chip">
-      <span className="uc-id">
+      <Link className="uc-id" href="/account"
+        title="Account & security (workspace, MFA)"
+        style={{ textDecoration: "none", color: "inherit" }}>
         <b>{me.email}</b>
         {tenant ? <small className="mut"> · {tenant}</small> : null}
-      </span>
+      </Link>
       <button className="ghost uc-out" title="Sign out"
         onClick={async () => { await auth.logout(); router.push("/login"); router.refresh(); }}>
         Sign out

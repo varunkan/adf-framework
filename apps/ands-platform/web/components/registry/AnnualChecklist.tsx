@@ -1,68 +1,88 @@
 "use client";
-// Annual notification checklist — a LOCAL REMINDER only. The registry
-// service has no annual-notification endpoint yet, so nothing here is
-// filed or tracked server-side; ticks live in this browser (localStorage).
+// Annual notification checklist — SERVER-tracked per workspace and year.
+// Every tick is a recorded sign-off (who + when, on the registry service and
+// its event stream), so it survives any browser and is visible to the whole
+// team. Round-4 panel fix: the old localStorage version was unanimously
+// rejected ("worthless to an MAH").
 import { useEffect, useState } from "react";
+import { registryApi, type ChecklistItem } from "./registryApi";
 
-const KEY = "ands_registry_annual_checklist";
-
-const ITEMS = [
-  "Confirm each DIN's marketed / dormant status is current in the registry",
-  "File the Annual Drug Notification (ADN) with Health Canada for every DIN",
-  "Pay the annual Right-to-Sell fee by October 1 (see deadlines above)",
-  "Report any discontinuation of sale within the required window",
-];
+function signedLine(item: ChecklistItem): string {
+  if (!item.done || !item.signed_at) return "";
+  const when = item.signed_at.slice(0, 16).replace("T", " ");
+  return `signed by ${item.signed_by || "unrecorded"} · ${when} UTC`;
+}
 
 export function AnnualChecklist() {
-  const [done, setDone] = useState<boolean[]>(() => ITEMS.map(() => false));
+  const [year, setYear] = useState(0);
+  const [items, setItems] = useState<ChecklistItem[] | null>(null);
+  const [err, setErr] = useState("");
+  const [saving, setSaving] = useState<string | null>(null);
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(KEY);
-      if (raw) {
-        const saved = JSON.parse(raw);
-        if (Array.isArray(saved)) {
-          setDone(ITEMS.map((_, i) => Boolean(saved[i])));
-        }
-      }
-    } catch {}
+    registryApi.annualChecklist()
+      .then((r) => { setYear(r.year); setItems(r.items); })
+      .catch((e) => setErr(String(e)));
   }, []);
 
-  function toggle(i: number) {
-    setDone((prev) => {
-      const next = prev.map((v, k) => (k === i ? !v : v));
-      try {
-        window.localStorage.setItem(KEY, JSON.stringify(next));
-      } catch {}
-      return next;
-    });
+  async function toggle(item: ChecklistItem) {
+    setSaving(item.item_key);
+    setErr("");
+    try {
+      const r = await registryApi.setAnnualItem(
+        item.item_key, !item.done, year);
+      setItems((prev) => (prev || []).map(
+        (i) => (i.item_key === item.item_key ? r.item : i)));
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setSaving(null);
+    }
   }
 
   return (
     <div className="card glass" style={{ marginTop: 20, maxWidth: 720 }}>
       <h2 style={{ margin: "0 0 2px", fontSize: 15, fontWeight: 700 }}>
-        Annual notification checklist
+        Annual notification checklist{year ? ` — ${year}` : ""}
       </h2>
-      <div className="notice warn" style={{ margin: "10px 0", fontSize: 12 }}>
-        Reminder only — this checklist is stored in your browser and is NOT
-        filed with Health Canada or tracked by the registry service.
-      </div>
-      <ul style={{ listStyle: "none", margin: 0, padding: 0,
-        display: "flex", flexDirection: "column", gap: 8 }}>
-        {ITEMS.map((label, i) => (
-          <li key={label}>
-            <label style={{ display: "flex", gap: 10, alignItems: "baseline",
-              cursor: "pointer", fontSize: 13 }}>
-              <input type="checkbox" checked={done[i]}
-                onChange={() => toggle(i)} />
-              <span className={done[i] ? "mut" : undefined}
-                style={done[i] ? { textDecoration: "line-through" } : undefined}>
-                {label}
-              </span>
-            </label>
-          </li>
-        ))}
-      </ul>
+      <p className="mut" style={{ margin: "6px 0 10px", fontSize: 12 }}>
+        Tracked on the registry service for this workspace: each tick records
+        who signed it and when, and lands on the audit event stream. (The
+        filings themselves still happen with Health Canada — sources in
+        Help.)
+      </p>
+      {err && <div className="notice bad" style={{ fontSize: 12,
+        marginBottom: 8 }}>{err}</div>}
+      {items === null && !err ? (
+        <div className="mut" style={{ fontSize: 13 }}>Loading…</div>
+      ) : (
+        <ul style={{ listStyle: "none", margin: 0, padding: 0,
+          display: "flex", flexDirection: "column", gap: 8 }}>
+          {(items || []).map((item) => (
+            <li key={item.item_key}>
+              <label style={{ display: "flex", gap: 10,
+                alignItems: "baseline", cursor: "pointer", fontSize: 13 }}>
+                <input type="checkbox" checked={item.done}
+                  disabled={saving === item.item_key}
+                  onChange={() => toggle(item)} />
+                <span>
+                  <span className={item.done ? "mut" : undefined}
+                    style={item.done
+                      ? { textDecoration: "line-through" } : undefined}>
+                    {item.label}
+                  </span>
+                  {item.done && (
+                    <small className="mut" style={{ display: "block",
+                      fontSize: 11 }}>
+                      ✓ {signedLine(item)}
+                    </small>
+                  )}
+                </span>
+              </label>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

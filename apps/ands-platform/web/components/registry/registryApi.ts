@@ -108,4 +108,24 @@ export const registryApi = {
     j<RightToSell>(
       `/registrations/${encodeURIComponent(id)}/right-to-sell?as_of=${encodeURIComponent(asOf)}`
     ),
+
+  // annual notification checklist — server-tracked per workspace + year;
+  // each tick records who signed it and when (round-4 panel fix)
+  annualChecklist: (year = 0) =>
+    j<{ year: number; items: ChecklistItem[]; count: number }>(
+      `/annual-checklist${year ? `?year=${year}` : ""}`),
+
+  setAnnualItem: (itemKey: string, done: boolean, year = 0) =>
+    j<{ year: number; item: ChecklistItem }>("/annual-checklist/items", {
+      method: "POST",
+      body: JSON.stringify({ item_key: itemKey, done, year }),
+    }),
 };
+
+export interface ChecklistItem {
+  item_key: string;
+  label: string;
+  done: boolean;
+  signed_by: string | null;
+  signed_at: string | null;
+}

@@ -11,6 +11,10 @@ CREATE TABLE IF NOT EXISTS registrations (
     id TEXT PRIMARY KEY, product TEXT NOT NULL, country TEXT NOT NULL,
     dossier_id TEXT NOT NULL, din TEXT, drug_type TEXT, status TEXT NOT NULL,
     tenant_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS annual_checklist (
+    tenant_id TEXT NOT NULL, year INTEGER NOT NULL, item_key TEXT NOT NULL,
+    done INTEGER NOT NULL DEFAULT 0, signed_by TEXT, signed_at TEXT,
+    PRIMARY KEY (tenant_id, year, item_key));
 """
 
 # pre-tenancy databases lack the column; ALTER is a no-op error then
@@ -89,3 +93,24 @@ class PostgresRegistrationRepository:
         self._exec("UPDATE registrations SET status = %s, updated_at = %s "
                    "WHERE id = %s", (status, utcnow_iso(), reg_id))
         return self.get(reg_id)
+
+    def get_checklist(self, tenant_id: str, year: int) -> list[dict]:
+        return self._all(
+            "SELECT * FROM annual_checklist WHERE tenant_id = %s AND year = %s",
+            (tenant_id or "", int(year)))
+
+    def set_checklist_item(self, tenant_id: str, year: int, item_key: str,
+                           done: bool, signed_by: str | None,
+                           signed_at: str | None) -> dict:
+        self._exec(
+            "INSERT INTO annual_checklist (tenant_id, year, item_key, done, "
+            "signed_by, signed_at) VALUES (%s,%s,%s,%s,%s,%s) "
+            "ON CONFLICT (tenant_id, year, item_key) DO UPDATE SET "
+            "done = EXCLUDED.done, signed_by = EXCLUDED.signed_by, "
+            "signed_at = EXCLUDED.signed_at",
+            (tenant_id or "", int(year), item_key, 1 if done else 0,
+             signed_by, signed_at))
+        rows = self._all(
+            "SELECT * FROM annual_checklist WHERE tenant_id = %s AND year = %s "
+            "AND item_key = %s", (tenant_id or "", int(year), item_key))
+        return rows[0]

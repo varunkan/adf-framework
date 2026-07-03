@@ -17,6 +17,15 @@ CREATE TABLE IF NOT EXISTS registrations (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS annual_checklist (
+    tenant_id TEXT NOT NULL,
+    year      INTEGER NOT NULL,
+    item_key  TEXT NOT NULL,
+    done      INTEGER NOT NULL DEFAULT 0,
+    signed_by TEXT,
+    signed_at TEXT,
+    PRIMARY KEY (tenant_id, year, item_key)
+);
 """
 
 _FILTERS = ("product", "country", "din", "status", "dossier_id")
@@ -80,3 +89,25 @@ class SqliteRegistrationRepository:
             "UPDATE registrations SET status = ?, updated_at = ? WHERE id = ?",
             (status, utcnow_iso(), reg_id))
         return self.get(reg_id)
+
+    def get_checklist(self, tenant_id: str, year: int) -> list[dict]:
+        rows = self.db.fetchall(
+            "SELECT * FROM annual_checklist WHERE tenant_id = ? AND year = ?",
+            (tenant_id or "", int(year)))
+        return [dict(r) for r in rows]
+
+    def set_checklist_item(self, tenant_id: str, year: int, item_key: str,
+                           done: bool, signed_by: str | None,
+                           signed_at: str | None) -> dict:
+        self.db.execute(
+            "INSERT INTO annual_checklist (tenant_id, year, item_key, done, "
+            "signed_by, signed_at) VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (tenant_id, year, item_key) DO UPDATE SET "
+            "done = excluded.done, signed_by = excluded.signed_by, "
+            "signed_at = excluded.signed_at",
+            (tenant_id or "", int(year), item_key, 1 if done else 0,
+             signed_by, signed_at))
+        row = self.db.fetchone(
+            "SELECT * FROM annual_checklist WHERE tenant_id = ? AND year = ? "
+            "AND item_key = ?", (tenant_id or "", int(year), item_key))
+        return dict(row)

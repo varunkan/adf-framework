@@ -18,6 +18,9 @@ def test_signup_creates_tenant_admin_and_session(client):
     me = client.get("/api/identity/auth/me", headers=auth(body["token"]))
     assert me.status_code == 200
     assert me.json()["email"] == "ra@acme.io"
+    # workspace identity is server-side: the header chip renders THIS, not a
+    # value the browser cached at signup (round-4 panel fix, 12/12 personas)
+    assert me.json()["tenant_name"] == "Acme Generics"
 
 
 def test_signup_publishes_tenant_provisioned(ctx):

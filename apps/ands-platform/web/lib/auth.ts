@@ -9,6 +9,8 @@ export interface Principal {
   tenant_id: string;
   role: string;
   email: string;
+  name?: string;         // display name from the account record
+  tenant_name?: string;  // workspace name — server-side, not a browser cache
 }
 
 const TENANT_NAME_KEY = "ands_tenant_name";
@@ -49,14 +51,23 @@ export const auth = {
     } catch {}
     return r;
   },
-  login: async (email: string, password: string) => {
+  login: async (email: string, password: string, mfaCode = "") => {
     const r = await j<{ user: any; token: string }>("/auth/login", {
       method: "POST",
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, mfa_code: mfaCode }),
     });
     return r;
   },
   me: () => j<Principal>("/auth/me"),
+  mfa: {
+    status: () => j<{ enabled: boolean }>("/auth/mfa/status"),
+    enroll: () =>
+      j<{ secret: string; provisioning_uri: string }>("/auth/mfa/enroll",
+        { method: "POST" }),
+    verify: (code: string) =>
+      j<{ enabled: boolean }>("/auth/mfa/verify",
+        { method: "POST", body: JSON.stringify({ code }) }),
+  },
   resetRequest: (email: string) =>
     j<{ ok: boolean; message: string; reset_code?: string; delivery?: string }>(
       "/auth/reset/request",

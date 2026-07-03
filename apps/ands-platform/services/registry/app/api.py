@@ -6,7 +6,7 @@ from fastapi import APIRouter, FastAPI, Header, Query
 
 from ands_shared import create_app
 
-from .models import RegistrationIn, StatusIn
+from .models import ChecklistItemIn, RegistrationIn, StatusIn
 from .service import RegistryService
 
 
@@ -34,6 +34,22 @@ def build_app(service: RegistryService) -> FastAPI:
     def set_status(body: StatusIn,
                    x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
         return service.set_status(body.id, body.status, x_tenant_id or None)
+
+    # server-tracked annual obligations: each tick records who + when
+    @router.get("/annual-checklist")
+    def annual_checklist(year: int = 0,
+                         x_tenant_id: str = Header(default="",
+                                                   alias="X-Tenant-Id")):
+        return service.annual_checklist(year, x_tenant_id or None)
+
+    @router.post("/annual-checklist/items")
+    def set_annual_item(body: ChecklistItemIn,
+                        x_tenant_id: str = Header(default="",
+                                                  alias="X-Tenant-Id"),
+                        x_user_email: str = Header(default="",
+                                                   alias="X-User-Email")):
+        return service.set_annual_item(body.model_dump(), x_tenant_id or None,
+                                       x_user_email)
 
     @router.get("/registrations/{reg_id}")
     def get(reg_id: str,

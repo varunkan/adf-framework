@@ -169,7 +169,16 @@ class IdentityService:
         principal = self.resolve(token)
         if not principal:
             raise ProblemError(401, "no active session", rule="no_session")
-        return principal
+        # workspace identity is SERVER-side: the header chip renders what the
+        # account record says, not whatever the browser cached at signup
+        user = self.repo.get_user_raw(principal["user_id"]) or {}
+        tenant = (self.repo.get_tenant(principal["tenant_id"])
+                  if principal["tenant_id"] else None)
+        return {**principal,
+                "name": user.get("name") or "",
+                "tenant_name": (tenant or {}).get("name")
+                or ("Platform" if principal["tenant_id"] == PLATFORM_TENANT
+                    else "")}
 
     def logout(self, token: str) -> dict:
         self.repo.delete_session(_s(token))

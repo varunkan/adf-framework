@@ -27,6 +27,19 @@ _TRANSITIONS = {
 }
 
 DRUG_TYPES = ("prescription", "non-prescription", "disinfectant", "biocide")
+
+# the MAH's annual post-approval obligations — the server-tracked checklist
+# (each tick records who signed it and when, per workspace and year)
+ANNUAL_CHECKLIST_ITEMS = (
+    ("din_status",
+     "Confirm each DIN's marketed / dormant status is current in the registry"),
+    ("adn_filed",
+     "File the Annual Drug Notification (ADN) with Health Canada for every DIN"),
+    ("rts_fee", "Pay the annual Right-to-Sell fee by October 1"),
+    ("discontinuation",
+     "Report any discontinuation of sale within the required window"),
+)
+ANNUAL_CHECKLIST_KEYS = tuple(k for k, _ in ANNUAL_CHECKLIST_ITEMS)
 # a Right-to-Sell obligation exists once the product is marketable (post-NOC)
 _RIGHT_TO_SELL_STATUSES = {STATUS_NOC, STATUS_MARKETED, STATUS_SUSPENDED}
 
