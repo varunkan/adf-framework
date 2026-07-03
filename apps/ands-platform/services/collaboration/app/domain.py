@@ -136,6 +136,39 @@ def build_task(data: dict) -> dict:
         "status": TASK_OPEN}}
 
 
+def summarize_open_tasks(tasks: list, today: str = "") -> dict:
+    """Portfolio roll-up of live (non-done) tasks, grouped by dossier (WS7).
+
+    Surfaces — from the REAL task store — who is on the hook and whether a
+    dossier is blocked, so a CRO/CDMO PM sees the team at a glance without
+    opening each dossier. A dossier with only completed (or no) tasks is
+    omitted. ``blocked`` is derived: any open task whose ``due_date`` is on or
+    before ``today`` is overdue → the dossier reads as blocked. Assignees are
+    distinct and sorted for a stable display.
+    """
+    today = _s(today)
+    out: dict = {}
+    for t in tasks or []:
+        if _s(t.get("status")) == TASK_DONE:
+            continue
+        did = _s(t.get("dossier_id"))
+        if not did:
+            continue
+        row = out.setdefault(did, {"open": 0, "overdue": 0,
+                                   "assignees": set(), "blocked": False})
+        row["open"] += 1
+        assignee = _s(t.get("assignee"))
+        if assignee:
+            row["assignees"].add(assignee)
+        due = _s(t.get("due_date"))
+        if due and today and due < today:   # strictly past due = overdue
+            row["overdue"] += 1
+            row["blocked"] = True
+    return {did: {"open": r["open"], "overdue": r["overdue"],
+                  "assignees": sorted(r["assignees"]), "blocked": r["blocked"]}
+            for did, r in out.items()}
+
+
 def validate_status_transition(old: str, new: str) -> dict:
     """Is moving a task from ``old`` to ``new`` allowed? ``{"valid", "rule"?}``."""
     new = _s(new)

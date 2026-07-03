@@ -114,11 +114,11 @@ export function CollabPane({ dossierId }: { dossierId: string }) {
     }
   }
 
-  async function complete(id: string) {
+  async function setStatus(id: string, status: string) {
     try {
       await j("/tasks/status", {
         method: "POST",
-        body: JSON.stringify({ id, status: "done" }),
+        body: JSON.stringify({ id, status }),
       });
       await refresh(me);
     } catch (e: any) {
@@ -128,6 +128,13 @@ export function CollabPane({ dossierId }: { dossierId: string }) {
 
   const open = tasks.filter((t) => t.status !== "done");
   const done = tasks.length - open.length;
+  // WS7: who is BLOCKED — an open task whose due date is in the past. Derived
+  // from the real task store (assignee + due_date), not a hardcoded flag.
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const overdue = open.filter((t) => t.due_date && t.due_date < todayIso);
+  const assignees = Array.from(
+    new Set(open.map((t) => t.assignee).filter(Boolean))
+  );
   const input = {
     width: "100%",
     fontSize: 12,
@@ -173,13 +180,33 @@ export function CollabPane({ dossierId }: { dossierId: string }) {
         </div>
       )}
 
+      {/* WS7: assignees + blocked status for this dossier, at a glance. */}
+      {open.length > 0 && (
+        <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 4 }}>
+          {assignees.map((a) => (
+            <span key={a} className="chip" style={{ fontSize: 10 }}
+              title="Assigned an open task on this dossier">
+              {a}
+            </span>
+          ))}
+          {overdue.length > 0 && (
+            <span className="chip blocked" style={{ fontSize: 10 }}
+              title={`${overdue.length} task(s) past due`}>
+              ⛔ {overdue.length} blocked
+            </span>
+          )}
+        </div>
+      )}
+
       <div style={{ marginTop: 8 }}>
         {open.length === 0 && (
           <div className="mut" style={{ fontSize: 12 }}>
             No open tasks for this dossier.
           </div>
         )}
-        {open.map((t) => (
+        {open.map((t) => {
+          const isOverdue = !!t.due_date && t.due_date < todayIso;
+          return (
           <div
             key={t.id}
             style={{
@@ -196,16 +223,34 @@ export function CollabPane({ dossierId }: { dossierId: string }) {
                 {" "}— {t.assignee}
                 {t.due_date ? ` · due ${t.due_date}` : ""}
               </span>
+              {" "}
+              <span
+                className={`chip ${isOverdue ? "blocked" : ""}`}
+                style={{ fontSize: 10 }}
+              >
+                {isOverdue ? "overdue" : t.status.replace("_", " ")}
+              </span>
             </span>
+            {t.status === "open" && (
+              <button
+                className="ghost"
+                style={{ fontSize: 11, padding: "2px 8px" }}
+                onClick={() => setStatus(t.id, "in_progress")}
+                title="Mark in progress"
+              >
+                Start
+              </button>
+            )}
             <button
               className="ghost"
               style={{ fontSize: 11, padding: "2px 8px" }}
-              onClick={() => complete(t.id)}
+              onClick={() => setStatus(t.id, "done")}
             >
               Done
             </button>
           </div>
-        ))}
+          );
+        })}
         {done > 0 && (
           <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>
             {done} completed

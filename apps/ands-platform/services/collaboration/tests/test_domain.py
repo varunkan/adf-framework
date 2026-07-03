@@ -130,3 +130,41 @@ def test_format_email_maps_recipient_subject_body():
     assert email["to"] == "ra"
     assert email["subject"] == note["subject"]
     assert email["body"] == note["body"]
+
+
+# -- portfolio open-task summary (WS7 collaboration surfacing) ----------------
+def test_summarize_open_tasks_groups_by_dossier_with_assignees():
+    tasks = [
+        {"dossier_id": "e1", "assignee": "alice", "status": "open",
+         "due_date": "2026-08-01"},
+        {"dossier_id": "e1", "assignee": "bob", "status": "in_progress",
+         "due_date": None},
+        {"dossier_id": "e1", "assignee": "alice", "status": "done",
+         "due_date": None},
+        {"dossier_id": "e2", "assignee": "carol", "status": "open",
+         "due_date": None},
+    ]
+    out = domain.summarize_open_tasks(tasks, today="2026-07-03")
+    assert set(out) == {"e1", "e2"}
+    e1 = out["e1"]
+    # done task excluded; two OPEN/in_progress tasks remain
+    assert e1["open"] == 2
+    assert e1["assignees"] == ["alice", "bob"]   # distinct, sorted
+    assert e1["blocked"] is False
+
+
+def test_summarize_open_tasks_flags_overdue_as_blocked():
+    tasks = [
+        {"dossier_id": "e1", "assignee": "alice", "status": "open",
+         "due_date": "2026-06-01"},   # in the past → overdue
+    ]
+    out = domain.summarize_open_tasks(tasks, today="2026-07-03")
+    assert out["e1"]["blocked"] is True
+    assert out["e1"]["overdue"] == 1
+
+
+def test_summarize_open_tasks_ignores_taskless_or_done_only_dossiers():
+    tasks = [{"dossier_id": "e9", "assignee": "z", "status": "done",
+              "due_date": None}]
+    out = domain.summarize_open_tasks(tasks, today="2026-07-03")
+    assert out == {}

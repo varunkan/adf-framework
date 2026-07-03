@@ -2,10 +2,13 @@
 import { friendlyError } from "./friendlyError";
 import type {
   ContentState,
+  CurrentView,
   DossierFull,
   DossierListItem,
   ExportOutcome,
+  MonographStatus,
   OutlineView,
+  PmXmlValidation,
   SequenceList,
   ValidationResult,
   ValidationRuleCatalog,
@@ -215,6 +218,25 @@ export const dossierApi = {
       validation: body.validation,
     };
   },
+
+  // The live eCTD leaf set + retired history, each leaf carrying its lifecycle
+  // operator (new/replace/append/delete) — powers the operator breakdown in the
+  // sequence/viewer (WS7).
+  currentView: (id: string) =>
+    j<CurrentView>(`/ectd/${encodeURIComponent(id)}/current-view`),
+
+  // Bilingual EN/FR Product Monograph status (REQ-098): both languages present?
+  // blocking? — surfaced in the Module-1 builder for the labelling specialist.
+  monographStatus: (id: string) =>
+    j<MonographStatus>(`/monograph/status?dossier_id=${encodeURIComponent(id)}`),
+
+  // Validate a pasted/built XML Product Monograph (REQ-099) against the HC
+  // schema/stylesheet rules — the mandated XML PM affordance.
+  validatePmXml: (xml: string) =>
+    j<PmXmlValidation>(`/monograph/xml/validate`, {
+      method: "POST",
+      body: JSON.stringify({ xml }),
+    }),
 
   buildPmXml: (body: { dossier_id: string; lang: string; product_name: string;
                        din?: string; sections: { code: string; title: string;

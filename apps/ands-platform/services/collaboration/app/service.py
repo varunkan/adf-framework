@@ -79,6 +79,20 @@ class CollaborationService:
                                      status=status, tenant_id=tenant_id or None)
         return {"tasks": tasks, "count": len(tasks)}
 
+    def task_summary(self, tenant_id: str | None = None,
+                     today: str = "") -> dict:
+        """Portfolio roll-up of open tasks by dossier (WS7 surfacing).
+
+        Reads the tenant's live tasks and groups them via the pure domain
+        summariser so the portfolio can show assignees + blocked status without
+        opening each dossier. ``today`` defaults to the current date (overdue
+        detection); callers may pass one for determinism.
+        """
+        from datetime import date
+        tasks = self.repo.list_tasks(tenant_id=tenant_id or None)
+        return {"by_dossier": domain.summarize_open_tasks(
+            tasks, today=today or date.today().isoformat())}
+
     def update_task_status(self, task_id: str, status: str,
                            tenant_id: str | None = None) -> dict:
         task = self.repo.get_task(task_id)

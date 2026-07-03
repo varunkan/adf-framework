@@ -10,12 +10,15 @@ import { UserChip } from "@/components/UserChip";
 import { PortfolioRow, type FeeState, type NoaClock } from "@/components/portfolio/PortfolioRow";
 import { SummaryCards } from "@/components/portfolio/SummaryCards";
 import { noaClockFrom } from "@/lib/noaProvenance";
+import { collabApi, type DossierTaskSummary } from "@/lib/collabApi";
 import { dueMeta } from "@/lib/deadline";
 
 export default function PortfolioPage() {
   const [items, setItems] = useState<DossierListItem[]>([]);
   const [fees, setFees] = useState<Record<string, FeeState>>({});
   const [noas, setNoas] = useState<Record<string, NoaClock>>({});
+  // WS7: open-task roll-up by dossier (assignees + blocked), one aggregate call.
+  const [collab, setCollab] = useState<Record<string, DossierTaskSummary>>({});
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
@@ -27,6 +30,16 @@ export default function PortfolioPage() {
         if (!alive) return;
         setItems(dossiers);
         setLoading(false);
+        // WS7: one aggregate call for the whole portfolio's open tasks →
+        // assignees + blocked status per dossier (collaboration service).
+        collabApi
+          .taskSummary()
+          .then((s) => {
+            if (alive) setCollab(s.by_dossier);
+          })
+          .catch(() => {
+            /* collaboration offline — rows simply show no assignees */
+          });
         // fee state lives on per-dossier content — fill rows as each lands
         dossiers.forEach(async (d) => {
           try {
@@ -210,6 +223,7 @@ export default function PortfolioPage() {
                     d={d}
                     fee={fees[d.dossier_id] ?? { kind: "loading" }}
                     noa={noas[d.dossier_id]}
+                    collab={collab[d.dossier_id]}
                   />
                 </li>
               ))}

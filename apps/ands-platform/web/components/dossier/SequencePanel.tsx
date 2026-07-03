@@ -2,10 +2,27 @@
 import { useCallback, useEffect, useState } from "react";
 import { dossierApi } from "@/lib/dossierApi";
 import type {
+  CurrentView,
+  CurrentViewLeaf,
   ExportValidationVerdict,
   SequenceInfo,
   SequenceList,
 } from "@/lib/dossierTypes";
+
+// WS7 — make the new/replace/append/delete lifecycle OPERATOR of each leaf
+// visible per sequence. The counts + the modified-leaf back-pointer come from
+// the eCTD current view (live set reconstructed from the operations in order).
+const OP_LABEL: Record<string, string> = {
+  new: "new",
+  replace: "replace",
+  append: "append",
+  delete: "delete",
+};
+
+function opsForSequence(view: CurrentView | null, sequence: string): CurrentViewLeaf[] {
+  if (!view) return [];
+  return [...view.live, ...view.history].filter((l) => l.sequence === sequence);
+}
 
 const PURPOSES = [
   { value: "response", label: "Response" },
@@ -30,6 +47,7 @@ function nextSequence(seqs: SequenceInfo[]): string {
 // purpose, plus per-sequence export of the transmissible package.
 export function SequencePanel({ dossierId }: { dossierId: string }) {
   const [data, setData] = useState<SequenceList | null>(null);
+  const [view, setView] = useState<CurrentView | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -53,6 +71,13 @@ export function SequencePanel({ dossierId }: { dossierId: string }) {
       setError("");
     } catch (e) {
       setError(String(e));
+    }
+    // Operator breakdown is best-effort: a dossier with no eCTD leaves yet has
+    // no current view — that must not break the sequence list.
+    try {
+      setView(await dossierApi.currentView(dossierId));
+    } catch {
+      setView(null);
     }
   }, [dossierId]);
 
@@ -246,14 +271,19 @@ export function SequencePanel({ dossierId }: { dossierId: string }) {
         </div>
       )}
 
-      {data?.sequences.map((s) => (
+      {data?.sequences.map((s) => {
+        const ops = opsForSequence(view, s.sequence);
+        const counts = ops.reduce<Record<string, number>>((acc, l) => {
+          acc[l.operation] = (acc[l.operation] || 0) + 1;
+          return acc;
+        }, {});
+        return (
+        <div key={s.sequence} style={{ marginTop: 8 }}>
         <div
-          key={s.sequence}
           style={{
             display: "flex",
             alignItems: "center",
             gap: 8,
-            marginTop: 8,
             fontSize: 12,
           }}
         >
@@ -290,7 +320,49 @@ export function SequencePanel({ dossierId }: { dossierId: string }) {
             </button>
           </span>
         </div>
-      ))}
+        {ops.length > 0 && (
+          <div
+            style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 4 }}
+            aria-label={`Lifecycle operators in sequence ${s.sequence}`}
+          >
+            {Object.entries(counts).map(([op, n]) => (
+              <span
+                key={op}
+                className={`chip ${op === "delete" ? "blocked" : ""}`}
+                style={{ fontSize: 10 }}
+                title={
+                  op === "new"
+                    ? "New leaf placed in this sequence"
+                    : op === "replace"
+                      ? "Replaces a leaf from a prior sequence"
+                      : op === "append"
+                        ? "Appends to a prior leaf"
+                        : op === "delete"
+                          ? "Retires a leaf from the live view"
+                          : op
+                }
+              >
+                {n}× {OP_LABEL[op] || op}
+              </span>
+            ))}
+            {ops
+              .filter((l) => l.modified_leaf)
+              .slice(0, 3)
+              .map((l) => (
+                <span
+                  key={l.leaf_id}
+                  className="mut"
+                  style={{ fontSize: 10 }}
+                  title={`${l.operation} ${l.leaf_id} → modifies ${l.modified_leaf}`}
+                >
+                  {l.operation} → {l.modified_leaf}
+                </span>
+              ))}
+          </div>
+        )}
+        </div>
+        );
+      })}
       {creating && data ? (
         <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
           <div className="mut" style={{ fontSize: 12 }}>

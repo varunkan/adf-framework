@@ -139,3 +139,28 @@ def test_inbox_empty_for_unknown_user(client):
     inbox = client.get("/api/collab/inbox", params={"user": "nobody"}).json()
     assert inbox["unread"] == 0
     assert inbox["notifications"] == []
+
+
+# -- portfolio open-task summary (WS7) ---------------------------------------
+def test_tasks_summary_groups_open_tasks_by_dossier(client):
+    client.post("/api/collab/tasks", json={
+        "title": "Draft 1.3.1 FR PM", "assignee": "alice",
+        "dossier_id": "e100001", "due_date": "2026-08-01"})
+    client.post("/api/collab/tasks", json={
+        "title": "Review CQAs", "assignee": "bob", "dossier_id": "e100001"})
+    client.post("/api/collab/tasks", json={
+        "title": "Unrelated", "assignee": "carol", "dossier_id": "e200002"})
+    body = client.get("/api/collab/tasks/summary").json()
+    by = body["by_dossier"]
+    assert by["e100001"]["open"] == 2
+    assert by["e100001"]["assignees"] == ["alice", "bob"]
+    assert set(by) == {"e100001", "e200002"}
+
+
+def test_tasks_summary_excludes_completed_tasks(client):
+    tid = client.post("/api/collab/tasks", json={
+        "title": "t", "assignee": "z", "dossier_id": "e300003"
+    }).json()["task"]["id"]
+    client.post("/api/collab/tasks/status", json={"id": tid, "status": "done"})
+    body = client.get("/api/collab/tasks/summary").json()
+    assert "e300003" not in body["by_dossier"]

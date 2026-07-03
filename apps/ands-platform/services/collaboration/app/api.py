@@ -49,6 +49,12 @@ def build_app(service: CollaborationService) -> FastAPI:
         return service.list_tasks(assignee=assignee, dossier_id=dossier_id,
                                   status=status, tenant_id=x_tenant_id or None)
 
+    @router.get("/tasks/summary")
+    def tasks_summary(today: str = "", x_tenant_id: str = _Tenant):
+        # portfolio roll-up: open tasks grouped by dossier → assignees +
+        # blocked status (WS7). ``today`` optional (deterministic overdue).
+        return service.task_summary(x_tenant_id or None, today=today)
+
     @router.post("/tasks/status")
     def update_status(body: TaskStatusIn, x_tenant_id: str = _Tenant):
         return {"task": service.update_task_status(body.id, body.status,

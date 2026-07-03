@@ -213,6 +213,57 @@ export interface SequenceList {
   sequences: SequenceInfo[];
 }
 
+// -- eCTD current view: the live leaf set + retired history, each carrying its
+// lifecycle operator (new/replace/append/delete) — GET /ectd/{id}/current-view.
+export interface CurrentViewLeaf {
+  leaf_id: string;
+  title: string;
+  heading: string;
+  href: string;
+  operation: "new" | "replace" | "append" | "delete" | string;
+  sequence: string;
+  checksum: string;
+  modified_leaf: string | null;
+}
+
+export interface CurrentView {
+  live: CurrentViewLeaf[];
+  history: CurrentViewLeaf[];
+}
+
+// -- bilingual Product Monograph status (REQ-098) — GET /monograph/status.
+// A missing EN or FR leaf is a transmission BLOCKER; EN newer than FR is a
+// non-blocking Plain-Language-Labelling sync warning.
+export interface MonographLeaf {
+  dossier_id: string;
+  lang: "en" | "fr";
+  leaf_id: string;
+  title: string;
+  version: number;
+  heading: string;
+}
+
+export interface MonographFinding {
+  rule: string;
+  severity: "blocking" | "warning";
+  message: string;
+}
+
+export interface MonographStatus {
+  status: "complete" | "blocked";
+  blocking: boolean;
+  findings: MonographFinding[];
+  pair: { en: MonographLeaf | null; fr: MonographLeaf | null };
+}
+
+// -- XML Product Monograph validation (REQ-099) — POST /monograph/xml/validate.
+export interface PmXmlValidation {
+  valid: boolean;
+  blocking: boolean;
+  findings: { rule: string; severity: string; message: string;
+              code?: string; field?: string }[];
+}
+
 export interface DossierIndex {
   dossier_id: string;
   title: string;

@@ -2,6 +2,7 @@
 // One dossier in the CRO portfolio: identity, module tower, gate, fees, links.
 import Link from "next/link";
 import type { DossierListItem } from "@/lib/dossierTypes";
+import type { DossierTaskSummary } from "@/lib/collabApi";
 import { MiniTower } from "./MiniTower";
 import { ProvenancePopover, type Provenance } from "@/components/ProvenancePopover";
 import { dueMeta } from "@/lib/deadline";
@@ -91,8 +92,33 @@ function PmColumns({ owner, sponsor, due }: {
   );
 }
 
-export function PortfolioRow({ d, fee, noa = { kind: "none" } }: {
-  d: DossierListItem; fee: FeeState; noa?: NoaClock }) {
+// WS7: who is assigned + whether the dossier is blocked, from the collaboration
+// service's open-task roll-up. Absent = no open tasks (or collab offline) — the
+// column simply doesn't render; never a fabricated status.
+function CollabChips({ collab }: { collab?: DossierTaskSummary }) {
+  if (!collab || collab.open === 0) return null;
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4,
+      flexWrap: "wrap" }}>
+      {collab.blocked && (
+        <span className="chip blocked" style={{ fontSize: 11 }}
+          title={`${collab.overdue} open task(s) past due`}>
+          ⛔ blocked
+        </span>
+      )}
+      <span className="chip" style={{ fontSize: 11 }}
+        title={`${collab.open} open task(s) — assigned to ${collab.assignees.join(", ")}`}>
+        👤 {collab.assignees.length === 1
+          ? collab.assignees[0]
+          : `${collab.assignees.length} assignees`} · {collab.open} open
+      </span>
+    </span>
+  );
+}
+
+export function PortfolioRow({ d, fee, noa = { kind: "none" }, collab }: {
+  d: DossierListItem; fee: FeeState; noa?: NoaClock;
+  collab?: DossierTaskSummary }) {
   const passed = d.tower.filter((t) => t.state === "pass").length;
   const applic = d.tower.filter((t) => t.state !== "na").length;
   const id = encodeURIComponent(d.dossier_id);
@@ -128,6 +154,7 @@ export function PortfolioRow({ d, fee, noa = { kind: "none" } }: {
 
       <FeeChip state={fee} />
       <NoaChip clock={noa} />
+      <CollabChips collab={collab} />
 
       <span style={{ display: "flex", gap: 8 }}>
         <Link className="chip" href={`/dossiers/${id}/m/1`}
