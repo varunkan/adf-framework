@@ -3,7 +3,6 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { ssoEntry } from "@/lib/roadmap";
 import { Term } from "@/components/Term";
 
 const PW_RULE = "At least 10 characters, with letters and numbers.";
@@ -271,18 +270,14 @@ export default function LoginPage() {
                   onClick={() => switchMode("reset")}>
                   Forgot password?
                 </button>
-                {/* WS4.3 — honest SSO affordance: SAML/OIDC is NOT built, so this
-                    links to the dated roadmap entry rather than faking a flow. */}
+                {/* Round-6 WS-A (front door must feel finished): the SSO teaser
+                    and "not available yet" roadmap copy are removed from the
+                    sign-in card. SSO stays discoverable via a single small
+                    roadmap link — nothing on the front door promises a flow
+                    that isn't built. */}
                 <div className="mut" style={{ fontSize: 12, marginTop: 10,
                   borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 10 }}>
-                  Sign in with your organization (SSO)?{" "}
-                  <Link href="/roadmap#sso">
-                    Planned — target {ssoEntry().targetQuarter} →
-                  </Link>
-                  <div style={{ marginTop: 2 }}>
-                    Not available yet. Today: per-workspace email &amp; password
-                    with optional <Term k="TOTP" /> <Term k="MFA" />.
-                  </div>
+                  <Link href="/roadmap#sso">Enterprise SSO on the roadmap →</Link>
                 </div>
               </>
             )}

@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { dossierApi } from "@/lib/dossierApi";
+import { Disclosure } from "../Disclosure";
 import type {
   ValidationCriteria,
   ValidationFinding,
@@ -232,43 +233,53 @@ export function ValidationCard({
         )}
       </div>
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
-        <button
-          className="ghost"
-          style={{ fontSize: 12, padding: "6px 10px" }}
-          onClick={run}
-          disabled={busy}
-        >
-          {busy ? "Checking…" : "Run technical check (PDF header/encryption)"}
-        </button>
-        <button
-          className="ghost"
-          style={{ fontSize: 12, padding: "6px 10px" }}
-          onClick={() =>
-            downloadBlob(`${stamp}.csv`, "text/csv;charset=utf-8", csv)
-          }
-        >
-          Download report (CSV)
-        </button>
-        <button
-          className="ghost"
-          style={{ fontSize: 12, padding: "6px 10px" }}
-          onClick={() =>
-            downloadBlob(`${stamp}.json`, "application/json", json)
-          }
-        >
-          Download report (JSON)
-        </button>
-      </div>
+      {/* Round-6 WS-A (density reduction): the pass/fail result + findings above
+          are the GATING signal — always visible. The extra technical sub-check,
+          report exports and the coverage footnote are non-gating detail, so they
+          collapse behind a quiet expander (still one click away). */}
+      <Disclosure
+        showLabel="Technical check & report"
+        hideLabel="Hide technical check & report"
+        summary={<span>Run PDF header/encryption sub-check · export CSV/JSON</span>}
+      >
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          <button
+            className="ghost"
+            style={{ fontSize: 12, padding: "6px 10px" }}
+            onClick={run}
+            disabled={busy}
+          >
+            {busy ? "Checking…" : "Run technical check (PDF header/encryption)"}
+          </button>
+          <button
+            className="ghost"
+            style={{ fontSize: 12, padding: "6px 10px" }}
+            onClick={() =>
+              downloadBlob(`${stamp}.csv`, "text/csv;charset=utf-8", csv)
+            }
+          >
+            Download report (CSV)
+          </button>
+          <button
+            className="ghost"
+            style={{ fontSize: 12, padding: "6px 10px" }}
+            onClick={() =>
+              downloadBlob(`${stamp}.json`, "application/json", json)
+            }
+          >
+            Download report (JSON)
+          </button>
+        </div>
 
-      <div className="mut" style={{ fontSize: 10, marginTop: 8 }}>
-        Findings carry structural-rule ids (CA-E-…/CA-W-…) covering leaf
-        integrity, lifecycle legality, naming, sequence numbering, XML backbone
-        and the document PDF header/encryption. This is a presence/format
-        completeness check — <b>not</b> a Health Canada review and{" "}
-        <b>not</b> full eCTD technical validation. Where a checksum is shown it
-        is document control (md5), not validation.
-      </div>
+        <div className="mut" style={{ fontSize: 10, marginTop: 8 }}>
+          Findings carry structural-rule ids (CA-E-…/CA-W-…) covering leaf
+          integrity, lifecycle legality, naming, sequence numbering, XML backbone
+          and the document PDF header/encryption. This is a presence/format
+          completeness check — <b>not</b> a Health Canada review and{" "}
+          <b>not</b> full eCTD technical validation. Where a checksum is shown it
+          is document control (md5), not validation.
+        </div>
+      </Disclosure>
     </div>
   );
 }

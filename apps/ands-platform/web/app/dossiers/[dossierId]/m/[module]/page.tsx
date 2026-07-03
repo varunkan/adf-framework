@@ -10,12 +10,16 @@ import { LifecyclePanel } from "@/components/dossier/LifecyclePanel";
 import { MonographPanel } from "@/components/dossier/MonographPanel";
 import { CollabPane } from "@/components/dossier/CollabPane";
 import { SubmissionTower } from "@/components/SubmissionTower";
+import { Disclosure } from "@/components/Disclosure";
 
 export default function ModuleWorkspace() {
   const { content, loading, error } = useDossier();
   const params = useParams();
   const moduleId = String((params as any).module || "1");
   const [selected, setSelected] = useState("");
+  // Round-6 WS-A: when the Sequences panel holds an active export-block, force
+  // its expander open so the blocking findings are never hidden.
+  const [seqBlocked, setSeqBlocked] = useState(false);
 
   const mod = content?.modules.find((m) => m.module === moduleId);
 
@@ -98,13 +102,51 @@ export default function ModuleWorkspace() {
             </span>
           </div>
         </div>
-        <LifecyclePanel dossierId={content.dossier_id} />
-        <SequencePanel dossierId={content.dossier_id} />
-        {moduleId === "1" && (
-          <MonographPanel dossierId={content.dossier_id} />
-        )}
+        {/* Round-6 WS-A (density reduction): the gating draft-completeness
+            check stays expanded and primary. The secondary reference panels —
+            lifecycle, sequences/export, monograph detail, collaboration — are
+            each collapsed behind a one-line "Show details" expander so the
+            builder shows one primary thing per surface, not a wall of cards.
+            Every panel stays reachable; none is removed. The sample/AI "not yet
+            filable" safety banner lives in the progress card above and is never
+            collapsed. */}
         <ValidationCard dossierId={content.dossier_id} structural={content.validation} />
-        <CollabPane dossierId={content.dossier_id} />
+        <Disclosure
+          className="card glass"
+          summary={<span>Submission lifecycle &amp; deficiency clock</span>}
+        >
+          <LifecyclePanel dossierId={content.dossier_id} />
+        </Disclosure>
+        <Disclosure
+          className="card glass"
+          summary={
+            <span>
+              eCTD sequences &amp; package export
+              {seqBlocked ? " — export blocked" : ""}
+            </span>
+          }
+          forceOpen={seqBlocked}
+          forceOpenNote="export blocked"
+        >
+          <SequencePanel
+            dossierId={content.dossier_id}
+            onBlockedChange={setSeqBlocked}
+          />
+        </Disclosure>
+        {moduleId === "1" && (
+          <Disclosure
+            className="card glass"
+            summary={<span>Bilingual / XML Product Monograph detail</span>}
+          >
+            <MonographPanel dossierId={content.dossier_id} />
+          </Disclosure>
+        )}
+        <Disclosure
+          className="card glass"
+          summary={<span>Collaboration &amp; task assignments</span>}
+        >
+          <CollabPane dossierId={content.dossier_id} />
+        </Disclosure>
       </aside>
     </div>
   );

@@ -148,13 +148,43 @@ export function PortfolioRow({ d, fee, noa = { kind: "none" }, collab }: {
 
       <MiniTower tower={d.tower} missing={d.gate?.missing} />
 
-      <span className={`chip ${d.gate?.complete ? "ready" : "blocked"}`}>
-        {d.gate?.complete ? "Ready to file" : `${passed}/${applic} modules`}
+      {/* Round-6 WS-A (density reduction): ONE primary status chip per row.
+          A blocked collaboration state outranks the gate — it reads "blocked"
+          so a scanning PM sees the single most important status, not chip-soup.
+          Owner / client / due stay visible (above); fee, NOA and collaboration
+          detail move behind the per-row "details" expander. */}
+      <span
+        className={`chip ${
+          collab?.blocked ? "blocked" : d.gate?.complete ? "ready" : "blocked"
+        }`}
+        title={
+          collab?.blocked
+            ? "Has an open task past due — see details"
+            : d.gate?.complete
+              ? "All applicable modules complete"
+              : "Modules still outstanding"
+        }
+      >
+        {collab?.blocked
+          ? "Blocked"
+          : d.gate?.complete
+            ? "Ready to file"
+            : `${passed}/${applic} modules`}
       </span>
 
-      <FeeChip state={fee} />
-      <NoaChip clock={noa} />
-      <CollabChips collab={collab} />
+      {/* secondary chips collapsed behind a quiet per-row expander; nothing is
+          removed. The day-counter provenance popovers inside NoaChip stay
+          on-demand as before. */}
+      <details className="row-details">
+        <summary aria-label={`Show fee, litigation and collaboration detail for ${d.dossier_id}`}>
+          Details
+        </summary>
+        <div className="row-details-body">
+          <FeeChip state={fee} />
+          <NoaChip clock={noa} />
+          <CollabChips collab={collab} />
+        </div>
+      </details>
 
       <span style={{ display: "flex", gap: 8 }}>
         <Link className="chip" href={`/dossiers/${id}/m/1`}

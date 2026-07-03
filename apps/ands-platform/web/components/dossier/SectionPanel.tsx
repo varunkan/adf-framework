@@ -4,6 +4,7 @@ import { dossierApi } from "@/lib/dossierApi";
 import type { DocMeta, FeesBlock, SectionNode } from "@/lib/dossierTypes";
 import { DraftChat } from "./DraftChat";
 import { useDossier } from "./DossierContext";
+import { Disclosure } from "../Disclosure";
 
 function fmtSize(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -50,17 +51,34 @@ export function SectionPanel({ node }: { node: SectionNode }) {
       <div className="teach">
         <b>What Health Canada needs here</b>
         <p style={{ margin: "6px 0 0" }}>{node.guidance}</p>
-        <div className="guide-meta">
-          {node.formats.length > 0 && (
-            <span className="fmt">
-              Format: {node.formats.map((f) => f.toUpperCase()).join(" + ")}
+        {/* Round-6 WS-A (density reduction): the format / bilingual / source
+            reference chips are secondary detail — collapse them so the primary
+            guidance reads clean. The safety/review banner and the actionable
+            affordances below are never collapsed. */}
+        <Disclosure
+          showLabel="Format & source"
+          hideLabel="Hide format & source"
+          summary={
+            <span>
+              {node.formats.length > 0
+                ? `${node.formats.map((f) => f.toUpperCase()).join(" + ")}`
+                : "Reference"}
+              {node.bilingual ? " · bilingual EN + FR" : ""}
             </span>
-          )}
-          {node.bilingual && <span className="fmt">Bilingual: EN + FR</span>}
-          <a href={node.source_url} target="_blank" rel="noopener noreferrer">
-            Health Canada guidance ↗
-          </a>
-        </div>
+          }
+        >
+          <div className="guide-meta">
+            {node.formats.length > 0 && (
+              <span className="fmt">
+                Format: {node.formats.map((f) => f.toUpperCase()).join(" + ")}
+              </span>
+            )}
+            {node.bilingual && <span className="fmt">Bilingual: EN + FR</span>}
+            <a href={node.source_url} target="_blank" rel="noopener noreferrer">
+              Health Canada guidance ↗
+            </a>
+          </div>
+        </Disclosure>
       </div>
 
       {node.applicability === "na" || node.applicability === "suppressed" ? (

@@ -45,7 +45,16 @@ function nextSequence(seqs: SequenceInfo[]): string {
 // Sidebar card: the dossier's eCTD sequences — which one is the ACTIVE
 // working sequence (new placements land there), each one's regulatory
 // purpose, plus per-sequence export of the transmissible package.
-export function SequencePanel({ dossierId }: { dossierId: string }) {
+export function SequencePanel({
+  dossierId,
+  onBlockedChange,
+}: {
+  dossierId: string;
+  // Round-6 WS-A: report whether an export-block state is currently active so a
+  // collapsing wrapper can keep this panel forced-open (a blocking state must
+  // never be hidden behind a collapsed expander).
+  onBlockedChange?: (blocked: boolean) => void;
+}) {
   const [data, setData] = useState<SequenceList | null>(null);
   const [view, setView] = useState<CurrentView | null>(null);
   const [error, setError] = useState("");
@@ -84,6 +93,11 @@ export function SequencePanel({ dossierId }: { dossierId: string }) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // keep the collapsing wrapper informed of the active export-block state
+  useEffect(() => {
+    onBlockedChange?.(!!block);
+  }, [block, onBlockedChange]);
 
   async function create() {
     if (!data) return;

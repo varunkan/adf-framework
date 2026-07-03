@@ -407,3 +407,20 @@ header.topbar .chip,header.topbar a.chip{white-space:nowrap;flex:0 0 auto}
 header.topbar .brand{white-space:nowrap}
 header.topbar .brand small{white-space:nowrap}
 @media (max-width:1100px){.user-chip .uc-id{display:none}}
+
+/* Round-6 WS-A — progressive-disclosure expander (density reduction). Calm by
+   default: one-line summary + a quiet toggle; secondary detail collapsed. */
+.disclosure{margin-top:8px}
+.disclosure-head{display:flex;align-items:baseline;gap:8px}
+.disclosure-summary{flex:1 1 auto;min-width:0;font-size:12px;color:var(--mut)}
+.disclosure-toggle{flex:0 0 auto;font-size:11px;padding:2px 8px}
+.disclosure-body{margin-top:8px}
+/* a per-row details expander inside a portfolio row */
+.row-details{flex:0 0 auto}
+.row-details > summary{cursor:pointer;font-size:11px;color:var(--mut);
+  list-style:none;padding:3px 8px;border:1px solid var(--line);border-radius:999px;
+  display:inline-block;white-space:nowrap}
+.row-details > summary::-webkit-details-marker{display:none}
+.row-details[open] > summary{color:var(--fg)}
+.row-details .row-details-body{display:flex;align-items:center;gap:8px;
+  flex-wrap:wrap;margin-top:8px;flex-basis:100%}

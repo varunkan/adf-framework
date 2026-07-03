@@ -6,6 +6,7 @@ import type { JourneyView, Stage } from "@/lib/types";
 import { Term } from "./Term";
 import { DrugIntake } from "./DrugIntake";
 import { TrackView } from "./TrackView";
+import { Disclosure } from "./Disclosure";
 
 type AdvanceFn = (step: string, data?: Record<string, any>) => Promise<void>;
 
@@ -384,36 +385,50 @@ function TransmitStep({ sig }: { sig: Record<string, any> }) {
       d: "Third and final receipt: Health Canada itself acknowledges your submission and issues the Core ID. This is the real proof Health Canada has it.",
       done: tx.real ? !!tx.hc_ack_received : sent },
   ];
+  const received = chain.filter((c) => c.done).length;
   return (
     <>
       <div className="teach">
         You transmit through the{" "}
         <Term k="CESG">Common Electronic Submissions Gateway (CESG)</Term> —
         Health Canada&apos;s official channel for sending an <Term k="eCTD" />.
-        CESG runs on the shared US <Term k="FDA-ESG" /> infrastructure, so you
-        register once as an FDA ESG Trading Partner, install a certificate, and
-        tag the package &ldquo;HC&rdquo; to route it to Health Canada. Over
-        10&nbsp;GB goes on physical media; send one sequence at a time and wait
-        for the acknowledgement before the next.
+        Send one sequence at a time and wait for the acknowledgement before the
+        next.
       </div>
-      <div className="notice">
-        Because CESG uses the shared FDA gateway, a Canadian ANDS legitimately
-        produces <b>FDA-side receipts first</b>, then the Health Canada one. You
-        get <b>three receipts, in order</b> — don&apos;t stop at the{" "}
-        <Term k="ACK">FDA ACK</Term>. (Per Health Canada&apos;s CESG guidance,
-        canada.ca.)
-      </div>
-      <div className="tiles" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
-        {chain.map((c) => (
-          <div key={c.k} className={`tile ${c.done ? "pass" : "todo"}`} title={c.d}>
-            <span className="d" aria-hidden>{c.done ? "✓" : "○"}</span>
-            <span className="sr-only">
-              {c.done ? "received" : "pending"}: {c.d}{" "}
-            </span>
-            <Term k={c.termKey}>{c.k}</Term>
-          </div>
-        ))}
-      </div>
+      {/* Round-6 WS-A: one primary thing — the receipt progress — with the
+          CESG detail + the three receipt tiles collapsed behind an expander.
+          Nothing is hidden; the summary shows the live count and the toggle. */}
+      <Disclosure
+        showLabel="Show the three receipts"
+        hideLabel="Hide the three receipts"
+        summary={
+          <>
+            <b>Transmission receipts: {received} of 3 received</b> — you get
+            three, in order (two FDA-side, then Health Canada&apos;s). Don&apos;t
+            stop at the <Term k="ACK">FDA ACK</Term>.
+          </>
+        }
+      >
+        <div className="notice">
+          Because CESG uses the shared FDA gateway, a Canadian ANDS legitimately
+          produces <b>FDA-side receipts first</b>, then the Health Canada one.
+          CESG runs on the shared US <Term k="FDA-ESG" /> infrastructure — you
+          register once as an FDA ESG Trading Partner, install a certificate, and
+          tag the package &ldquo;HC&rdquo;. Over 10&nbsp;GB goes on physical
+          media. (Per Health Canada&apos;s CESG guidance, canada.ca.)
+        </div>
+        <div className="tiles" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+          {chain.map((c) => (
+            <div key={c.k} className={`tile ${c.done ? "pass" : "todo"}`} title={c.d}>
+              <span className="d" aria-hidden>{c.done ? "✓" : "○"}</span>
+              <span className="sr-only">
+                {c.done ? "received" : "pending"}: {c.d}{" "}
+              </span>
+              <Term k={c.termKey}>{c.k}</Term>
+            </div>
+          ))}
+        </div>
+      </Disclosure>
       {tx.real && tx.core_id && (
         <div className="notice ok">
           ✓ Transmitted for real through the transmission service — state{" "}
