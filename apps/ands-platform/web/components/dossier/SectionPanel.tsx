@@ -205,19 +205,31 @@ function AttachedDocs({
           style={{ marginBottom: 10 }}>
           <b>⚠ Not yet filable — review required.</b>{" "}
           {isAi
-            ? "This is an AI-assisted draft. "
-            : "This section was filled from a worked example (sample). "}
-          It will <b>not</b> count as complete and the submission cannot be
-          exported until you review it against the Health Canada guidance and
-          confirm it as your own content. Run <b>Review vs Health Canada</b>{" "}
-          under <b>✦ Author in-app</b>, edit every value to your product, then:
-          <div style={{ marginTop: 8 }}>
-            <button onClick={confirm} disabled={confirming}>
-              {confirming
-                ? "Recording…"
-                : "I have reviewed and edited this — it is my content"}
-            </button>
-          </div>
+            ? "This is an AI-assisted draft. It will "
+            : "This section still shows worked-example (sample) values. It will "}
+          <b>not</b> count as complete and the submission cannot be exported
+          until{" "}
+          {isAi ? (
+            <>
+              you review it against the Health Canada guidance and attest it as
+              your own content:
+              <div style={{ marginTop: 8 }}>
+                <button onClick={confirm} disabled={confirming}>
+                  {confirming
+                    ? "Recording…"
+                    : "I have reviewed this AI draft — it is my content"}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              you <b>replace every example value</b> in the form above with your
+              product&apos;s real data and re-author. The example is detected
+              server-side, so it clears automatically once no example values
+              remain — there is nothing to &ldquo;confirm&rdquo; while the
+              worked example is still in place.
+            </>
+          )}
         </div>
       )}
       {docs.map(({ lang, meta }) => (

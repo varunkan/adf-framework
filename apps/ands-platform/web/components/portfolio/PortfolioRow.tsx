@@ -3,6 +3,7 @@
 import Link from "next/link";
 import type { DossierListItem } from "@/lib/dossierTypes";
 import { MiniTower } from "./MiniTower";
+import { ProvenancePopover, type Provenance } from "@/components/ProvenancePopover";
 
 export type FeeState =
   | { kind: "loading" }
@@ -11,23 +12,29 @@ export type FeeState =
   | { kind: "waived" }
   | { kind: "due"; amount: number; currency: string };
 
-// live PM(NOC) clock on a served Form V allegation, from the lifecycle service
+// live PM(NOC) clock on a served Form V allegation, from the lifecycle service.
+// WS3: each clock carries its PROVENANCE so a displayed day-count can be traced
+// to the anchor date, its source and the counting rule (record integrity — a
+// regulatory deadline number must never be an unexplained figure on screen).
 export type NoaClock =
   | { kind: "none" }
-  | { kind: "action"; days: number }    // brand's 45-day window to litigate
-  | { kind: "stay"; days: number };     // 24-month stay running
+  | { kind: "action"; days: number; prov: Provenance }  // brand's 45-day window
+  | { kind: "stay"; days: number; prov: Provenance };   // 24-month stay running
 
 function NoaChip({ clock }: { clock: NoaClock }) {
   if (clock.kind === "none") return null;
   const urgent = clock.days <= 10;
   return (
-    <span className={`chip ${urgent ? "blocked" : ""}`}
-      title={clock.kind === "action"
-        ? "A Notice of Allegation is served — days left in the brand's 45-day window to start litigation"
-        : "PM(NOC) 24-month stay is running — days until it lapses"}>
-      ⏱ {clock.kind === "action"
-        ? `NOA: ${clock.days}d for brand to act`
-        : `stay: ${clock.days}d remaining`}
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+      <span className={`chip ${urgent ? "blocked" : ""}`}
+        title={clock.kind === "action"
+          ? "A Notice of Allegation is served — days left in the brand's 45-day window to start litigation"
+          : "PM(NOC) 24-month stay is running — days until it lapses"}>
+        ⏱ {clock.kind === "action"
+          ? `NOA: ${clock.days}d for brand to act`
+          : `stay: ${clock.days}d remaining`}
+      </span>
+      <ProvenancePopover prov={clock.prov} />
     </span>
   );
 }

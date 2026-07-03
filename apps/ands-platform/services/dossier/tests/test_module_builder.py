@@ -281,14 +281,27 @@ def test_upload_rejects_extension_not_in_section_formats(client):
     assert r.status_code == 200
 
 
-def test_delete_dossier_cascades_and_404s_after(client):
+def test_delete_soft_archives_recoverably(client):
+    # WS3 record-integrity: a delete on a regulated dossier is a RECOVERABLE
+    # soft-archive, not a hard purge. It leaves the working catalog but its
+    # documents survive (so a restore is lossless), and re-archiving an already
+    # archived dossier is a 404 (nothing live to archive).
     did = _dossier(client)
     client.post(f"/api/dossier/ectd/{did}/section/1.0/generate", json={})
     doc_id = next(n for m in client.get(f"/api/dossier/dossiers/{did}").json()
                   ["content"]["modules"] for n in m["nodes"]
                   if n["section"] == "1.0")["document"]["doc_id"]
-    r = client.delete(f"/api/dossier/dossiers/{did}")
-    assert r.status_code == 200 and r.json()["deleted"] == did
+    r = client.request("DELETE", f"/api/dossier/dossiers/{did}",
+                       json={"reason": "created in error", "confirm_id": did})
+    assert r.status_code == 200 and r.json()["archived"] == did
     assert client.get("/api/dossier/dossiers").json()["count"] == 0
-    assert client.get(f"/api/dossier/documents/{doc_id}").status_code == 404
-    assert client.delete(f"/api/dossier/dossiers/{did}").status_code == 404
+    # RECOVERABLE: the bytes are NOT purged — the document is still fetchable
+    assert client.get(f"/api/dossier/documents/{doc_id}").status_code == 200
+    # already archived => nothing live to re-archive
+    assert client.request("DELETE", f"/api/dossier/dossiers/{did}",
+                          json={"reason": "again",
+                                "confirm_id": did}).status_code == 404
+    # ...and it can be restored back into the working catalog
+    assert client.post(f"/api/dossier/dossiers/{did}/restore",
+                       json={}).status_code == 200
+    assert client.get("/api/dossier/dossiers").json()["count"] == 1

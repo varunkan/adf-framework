@@ -76,6 +76,12 @@ CREATE TABLE IF NOT EXISTS section_state (
 );
 CREATE TABLE IF NOT EXISTS dossier_index (
     dossier_id      TEXT PRIMARY KEY,
+    -- WS3 immutable internal identity: assigned once at creation and NEVER
+    -- changed by rename/archive/restore. The durable audit ledger keys off THIS
+    -- (not the human dossier_id, which is reusable after a rename-away), so a
+    -- new dossier reusing a freed dossier_id gets a fresh uid and inherits no
+    -- prior dossier's events. The human dossier_id is denormalized context.
+    uid             TEXT,
     title           TEXT NOT NULL,
     submission_type TEXT,
     cs_be_only      INTEGER NOT NULL DEFAULT 1,
@@ -87,8 +93,47 @@ CREATE TABLE IF NOT EXISTS dossier_index (
     sme_granted     INTEGER NOT NULL DEFAULT 0,
     tenant_id       TEXT,
     active_sequence TEXT NOT NULL DEFAULT '0000',
+    -- WS3 recoverable delete: a soft-archive stamp (who/when/why). NULL
+    -- archived_at == live; a value == archived (excluded from the working
+    -- catalog, still restorable). The dossier's bytes are NEVER purged.
+    archived_at     TEXT,
+    archived_by     TEXT,
+    archive_reason  TEXT,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
+);
+-- WS3 Part-11 DURABLE AUDIT: a service-local, append-only ledger written
+-- SYNCHRONOUSLY in the same SQLite DB as the mutation. This — NOT the
+-- best-effort governance forward — is the authoritative durable record of a
+-- destructive rename/archive/restore. It survives a dead governance service.
+-- Rows are never updated or deleted; ``seq`` is a monotone insert order.
+CREATE TABLE IF NOT EXISTS dossier_events (
+    seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type  TEXT NOT NULL,
+    -- the IMMUTABLE dossier uid this event belongs to (keying identity). A
+    -- rename changes dossier_id but not uid, so the ledger stays attached to
+    -- the same real dossier; a reused dossier_id (fresh uid) inherits nothing.
+    uid         TEXT,
+    -- denormalized human dossier_id AT THE TIME of the event (context only —
+    -- NOT the key; a reused id must not surface a prior dossier's rows).
+    dossier_id  TEXT NOT NULL,
+    tenant_id   TEXT,
+    actor       TEXT,
+    reason      TEXT,
+    data        TEXT NOT NULL,
+    timestamp   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_dossier_events_did
+    ON dossier_events (dossier_id);
+CREATE INDEX IF NOT EXISTS ix_dossier_events_uid
+    ON dossier_events (uid);
+-- Re-key chain: a rename OVERWRITES dossier_id across every table, so history
+-- recorded under the OLD id would be orphaned. This maps new_id -> old_id so a
+-- history read for the current id can walk back and still resolve prior events.
+CREATE TABLE IF NOT EXISTS dossier_rename_chain (
+    new_id      TEXT PRIMARY KEY,
+    old_id      TEXT NOT NULL,
+    created_at  TEXT NOT NULL
 );
 """
 
@@ -108,6 +153,31 @@ class SqliteDossierRepository:
         "ALTER TABLE dossier_index ADD COLUMN company_id TEXT",
         "ALTER TABLE dossier_index ADD COLUMN sponsor TEXT",
         "ALTER TABLE dossier_index ADD COLUMN drug_product TEXT",
+        # WS3 recoverable delete: soft-archive stamp (who/when/why)
+        "ALTER TABLE dossier_index ADD COLUMN archived_at TEXT",
+        "ALTER TABLE dossier_index ADD COLUMN archived_by TEXT",
+        "ALTER TABLE dossier_index ADD COLUMN archive_reason TEXT",
+        # WS3 immutable internal identity for the uid-keyed audit ledger
+        "ALTER TABLE dossier_index ADD COLUMN uid TEXT",
+        # WS3 uid-keyed ledger: pre-existing events rows lack the uid column
+        "ALTER TABLE dossier_events ADD COLUMN uid TEXT",
+    )
+
+    # DDL that must run on pre-existing DBs too (the durable audit ledger +
+    # rename chain). executescript in __init__ creates them on fresh DBs; these
+    # cover a DB created before this feature. IF NOT EXISTS makes them no-ops.
+    _POST_DDL = (
+        "CREATE TABLE IF NOT EXISTS dossier_events ("
+        " seq INTEGER PRIMARY KEY AUTOINCREMENT, event_type TEXT NOT NULL,"
+        " uid TEXT, dossier_id TEXT NOT NULL, tenant_id TEXT, actor TEXT,"
+        " reason TEXT, data TEXT NOT NULL, timestamp TEXT NOT NULL)",
+        "CREATE INDEX IF NOT EXISTS ix_dossier_events_did"
+        " ON dossier_events (dossier_id)",
+        "CREATE INDEX IF NOT EXISTS ix_dossier_events_uid"
+        " ON dossier_events (uid)",
+        "CREATE TABLE IF NOT EXISTS dossier_rename_chain ("
+        " new_id TEXT PRIMARY KEY, old_id TEXT NOT NULL,"
+        " created_at TEXT NOT NULL)",
     )
 
     def __init__(self, db: SqliteDb | None = None) -> None:
@@ -118,6 +188,32 @@ class SqliteDossierRepository:
                 self.db.execute(mig)
             except Exception:
                 pass   # column already exists (fresh schema or re-run)
+        for ddl in self._POST_DDL:
+            try:
+                self.db.execute(ddl)
+            except Exception:
+                pass   # already present
+        self._backfill_uids()
+
+    def _backfill_uids(self) -> None:
+        """Idempotently give every pre-existing DOSSIER an immutable uid (rows
+        written before this feature). New rows get one at insert.
+
+        Pre-feature EVENT rows are deliberately NOT rewritten — the ledger is
+        append-only (never UPDATE/DELETE dossier_events). Those legacy rows carry
+        no uid; ``list_events`` resolves them by their denormalized dossier_id as
+        a read-time fallback. New events always carry a uid, so the id-reuse
+        leak is closed for everything written under this feature."""
+        try:
+            rows = self.db.fetchall(
+                "SELECT dossier_id FROM dossier_index "
+                "WHERE uid IS NULL OR uid = ''")
+        except Exception:
+            return
+        for r in rows:
+            self.db.execute(
+                "UPDATE dossier_index SET uid = ? WHERE dossier_id = ? "
+                "AND (uid IS NULL OR uid = '')", (new_id(), r["dossier_id"]))
 
     # -- content plans ------------------------------------------------------
     def create_plan(self, dossier_id: str, submission_type: str,
@@ -308,11 +404,21 @@ class SqliteDossierRepository:
     # -- dossier index (home catalog) --------------------------------------
     def create_dossier_index(self, rec: dict) -> dict:
         now = utcnow_iso()
+        # Mint an immutable uid for a genuine INSERT. On CONFLICT (a re-create /
+        # upsert of an existing dossier) the stored uid is PRESERVED (COALESCE),
+        # so a dossier's audit identity is stable for its whole life — a rename
+        # never changes it, and a re-create of the same live id keeps the same
+        # ledger. (A dossier_id freed by a rename-away and later re-created gets
+        # here as an INSERT — a fresh uid — because the old row now carries the
+        # new id, so this row does not exist yet.)
+        uid = new_id()
         self.db.execute(
-            "INSERT INTO dossier_index (dossier_id, title, submission_type, "
+            "INSERT INTO dossier_index (dossier_id, uid, title, submission_type, "
             "cs_be_only, din, company_id, sponsor, drug_product, tenant_id, "
-            "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(dossier_id) DO UPDATE SET title=excluded.title, "
+            # a re-create keeps the original uid — never re-key the ledger
+            "uid=COALESCE(dossier_index.uid, excluded.uid), "
             "submission_type=excluded.submission_type, "
             "cs_be_only=excluded.cs_be_only, din=excluded.din, "
             # preserve REP identity across upserts that omit it (COALESCE keeps
@@ -324,12 +430,20 @@ class SqliteDossierRepository:
             # an upsert never re-homes a dossier to another tenant
             "tenant_id=COALESCE(dossier_index.tenant_id, excluded.tenant_id), "
             "updated_at=excluded.updated_at",
-            (rec["dossier_id"], rec["title"], rec.get("submission_type"),
+            (rec["dossier_id"], uid, rec["title"], rec.get("submission_type"),
              1 if rec.get("cs_be_only", True) else 0, rec.get("din"),
              rec.get("company_id") or None, rec.get("sponsor") or None,
              rec.get("drug_product") or None,
              rec.get("tenant_id") or None, now, now))
         return self.get_dossier_index(rec["dossier_id"])
+
+    def _uid_for(self, dossier_id: str) -> str | None:
+        """The immutable uid of the dossier CURRENTLY holding this dossier_id,
+        or None if absent. This is the audit-ledger key — resolved from the live
+        index row, so a reused human id maps only to ITS OWN uid."""
+        row = self.db.fetchone(
+            "SELECT uid FROM dossier_index WHERE dossier_id = ?", (dossier_id,))
+        return (row["uid"] if row else None) or None
 
     def set_fee_status(self, dossier_id: str, fee_paid: bool,
                        sme_granted: bool) -> dict | None:
@@ -351,24 +465,186 @@ class SqliteDossierRepository:
         rec["fee_paid"] = bool(rec.get("fee_paid"))
         rec["sme_granted"] = bool(rec.get("sme_granted"))
         rec["active_sequence"] = rec.get("active_sequence") or "0000"
+        rec["archived"] = bool(rec.get("archived_at"))
+        rec["uid"] = rec.get("uid") or ""
         return rec
 
     def get_dossier_index(self, dossier_id: str) -> dict | None:
+        # resolves archived rows too — restore + content access need it; the
+        # working-catalog exclusion lives in list_dossier_index alone.
         row = self.db.fetchone(
             "SELECT * FROM dossier_index WHERE dossier_id = ?", (dossier_id,))
         return self._index_row(row) if row else None
 
     def list_dossier_index(self, tenant_id: str | None = None) -> list[dict]:
+        # WS3: the working catalog excludes soft-archived dossiers.
         if tenant_id:
             # strict: a tenant sees ONLY its own dossiers (unowned/other-tenant
             # dossiers are invisible — the CRO isolation guarantee)
             rows = self.db.fetchall(
                 "SELECT * FROM dossier_index WHERE tenant_id = ? "
-                "ORDER BY created_at DESC", (tenant_id,))
+                "AND archived_at IS NULL ORDER BY created_at DESC", (tenant_id,))
         else:
             rows = self.db.fetchall(
-                "SELECT * FROM dossier_index ORDER BY created_at DESC")
+                "SELECT * FROM dossier_index WHERE archived_at IS NULL "
+                "ORDER BY created_at DESC")
         return [self._index_row(r) for r in rows]
+
+    def list_archived_index(self, tenant_id: str | None = None) -> list[dict]:
+        """The 'trash' view — soft-archived dossiers, restorable, newest-first
+        by archive time. Same tenant partition as the working catalog."""
+        if tenant_id:
+            rows = self.db.fetchall(
+                "SELECT * FROM dossier_index WHERE tenant_id = ? "
+                "AND archived_at IS NOT NULL ORDER BY archived_at DESC",
+                (tenant_id,))
+        else:
+            rows = self.db.fetchall(
+                "SELECT * FROM dossier_index WHERE archived_at IS NOT NULL "
+                "ORDER BY archived_at DESC")
+        return [self._index_row(r) for r in rows]
+
+    def archive_dossier(self, dossier_id: str, *, actor: str = "",
+                        reason: str = "") -> bool:
+        """Soft-delete: stamp who/when/why. Reversible — nothing is purged.
+        Returns False when the dossier is absent or already archived."""
+        row = self.db.fetchone(
+            "SELECT archived_at FROM dossier_index WHERE dossier_id = ?",
+            (dossier_id,))
+        if not row or row["archived_at"]:
+            return False
+        self.db.execute(
+            "UPDATE dossier_index SET archived_at = ?, archived_by = ?, "
+            "archive_reason = ?, updated_at = ? WHERE dossier_id = ?",
+            (utcnow_iso(), actor or None, reason or None, utcnow_iso(),
+             dossier_id))
+        return True
+
+    def restore_dossier(self, dossier_id: str) -> bool:
+        """Undo a soft-delete: clear the archive stamp. Returns False when the
+        dossier is absent or not currently archived."""
+        row = self.db.fetchone(
+            "SELECT archived_at FROM dossier_index WHERE dossier_id = ?",
+            (dossier_id,))
+        if not row or not row["archived_at"]:
+            return False
+        self.db.execute(
+            "UPDATE dossier_index SET archived_at = NULL, archived_by = NULL, "
+            "archive_reason = NULL, updated_at = ? WHERE dossier_id = ?",
+            (utcnow_iso(), dossier_id))
+        return True
+
+    # -- WS3 DURABLE append-only audit ledger ------------------------------
+    def append_event(self, event_type: str, dossier_id: str, *,
+                     actor: str = "", reason: str = "",
+                     tenant_id: str = "", data: dict | None = None) -> dict:
+        """Append one immutable audit event, SYNCHRONOUSLY, in the SAME DB as
+        the mutation. This is the authoritative Part-11 record — it cannot be
+        lost when the governance forward is down. Rows are never mutated.
+
+        The event is keyed on the dossier's IMMUTABLE uid (resolved from the
+        current index row), with the human dossier_id kept only as denormalized
+        context. That is what stops a dossier_id reused after a rename-away from
+        inheriting a prior dossier's ledger. Call this INSIDE a
+        ``db.transaction()`` alongside the state mutation so the two commit
+        atomically (no mutation without a record, no phantom record)."""
+        ts = utcnow_iso()
+        uid = self._uid_for(str(dossier_id or "").strip())
+        cur = self.db.execute(
+            "INSERT INTO dossier_events (event_type, uid, dossier_id, "
+            "tenant_id, actor, reason, data, timestamp) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (str(event_type or ""), uid, str(dossier_id or ""),
+             str(tenant_id or "") or None, str(actor or "") or None,
+             str(reason or "") or None, json.dumps(data or {}), ts))
+        return {"seq": cur.lastrowid, "event_type": event_type, "uid": uid,
+                "dossier_id": dossier_id, "actor": actor, "reason": reason,
+                "tenant_id": tenant_id, "data": dict(data or {}),
+                "timestamp": ts}
+
+    def list_events(self, dossier_id: str) -> list[dict]:
+        """The durable ledger for a dossier, newest-first, resolved by the
+        dossier's IMMUTABLE uid. A rename changes dossier_id but not uid, so all
+        of a dossier's events (incl. those recorded under a prior id) surface;
+        a NEW dossier reusing a freed id has a fresh uid and inherits none."""
+        did = str(dossier_id or "").strip()
+        uid = self._uid_for(did)
+        if not uid:
+            return []
+        # Resolved STRICTLY by the immutable uid — never by the reusable
+        # dossier_id. This ledger has always been uid-keyed (the table is
+        # introduced with the uid column), so there are no NULL-uid rows to
+        # fall back to; matching on dossier_id would be a cross-dossier leak
+        # vector (a reused id inheriting a prior dossier's events), so we don't.
+        rows = self.db.fetchall(
+            "SELECT * FROM dossier_events WHERE uid = ? ORDER BY seq DESC",
+            (uid,))
+        out = []
+        for r in rows:
+            rec = dict(r)
+            rec["data"] = json.loads(rec["data"]) if rec.get("data") else {}
+            rec["actor"] = rec.get("actor") or ""
+            rec["reason"] = rec.get("reason") or ""
+            rec["tenant_id"] = rec.get("tenant_id") or ""
+            out.append(rec)
+        return out
+
+    def record_rename_chain(self, old_id: str, new_id: str) -> None:
+        # Retained for API compatibility. The uid-keyed ledger no longer needs
+        # an id-lineage walk to resolve history (the uid is stable across a
+        # rename), so this is a harmless denormalized breadcrumb only.
+        self.db.execute(
+            "INSERT OR REPLACE INTO dossier_rename_chain (new_id, old_id, "
+            "created_at) VALUES (?, ?, ?)", (new_id, old_id, utcnow_iso()))
+
+    # -- WS3 ATOMIC mutation+ledger operations -----------------------------
+    # Each pairs the state mutation with its durable audit write in ONE
+    # transaction: either both commit or neither. This is what makes "no
+    # mutation without a record" and "no phantom record" hold SIMULTANEOUSLY —
+    # a failed ledger write rolls the mutation back; a raced mutation (returns
+    # no-op) rolls the ledger event back.
+
+    def archive_with_event(self, dossier_id: str, *, actor: str, reason: str,
+                           event_type: str, tenant_id: str,
+                           data: dict) -> dict | None:
+        """Soft-archive AND record the durable audit event atomically. Returns
+        the appended event dict, or None if the dossier is absent/already
+        archived (nothing committed)."""
+        with self.db.transaction():
+            if not self.archive_dossier(dossier_id, actor=actor, reason=reason):
+                return None   # rolls back — no phantom event
+            return self.append_event(event_type, dossier_id, actor=actor,
+                                     reason=reason, tenant_id=tenant_id,
+                                     data=data)
+
+    def restore_with_event(self, dossier_id: str, *, actor: str, reason: str,
+                           event_type: str, tenant_id: str,
+                           data: dict) -> dict | None:
+        """Restore AND record the durable audit event atomically. Returns the
+        appended event, or None if not currently archived (nothing committed)."""
+        with self.db.transaction():
+            if not self.restore_dossier(dossier_id):
+                return None
+            return self.append_event(event_type, dossier_id, actor=actor,
+                                     reason=reason, tenant_id=tenant_id,
+                                     data=data)
+
+    def rename_with_event(self, old_id: str, new_id: str, *, actor: str,
+                          reason: str, event_type: str, tenant_id: str,
+                          data: dict) -> dict | None:
+        """Re-key AND record the durable audit event + rename-chain atomically.
+        The uid is stable across the re-key, so the event (appended under the
+        NEW id post-rekey) lands on the SAME uid as the dossier's prior events.
+        Returns the appended event, or None if the re-key was a no-op (nothing
+        committed — no orphan chain, no phantom 'renamed' event)."""
+        with self.db.transaction():
+            if not self.rename_dossier(old_id, new_id):
+                return None
+            ev = self.append_event(event_type, new_id, actor=actor,
+                                   reason=reason, tenant_id=tenant_id,
+                                   data=data)
+            self.record_rename_chain(old_id, new_id)
+            return ev
 
     def rename_dossier(self, old_id: str, new_id: str) -> bool:
         """Re-key a dossier (placeholder -> real HC Dossier ID). Rewrites the

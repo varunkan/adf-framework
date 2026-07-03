@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { auth, type Principal } from "@/lib/auth";
 import { UserChip } from "@/components/UserChip";
+import { WorkspaceAudit } from "@/components/account/WorkspaceAudit";
 
 type MfaFlow =
   | { step: "idle" }
@@ -198,6 +199,11 @@ export default function AccountPage() {
               audit event stream.</li>
           </ul>
         </section>
+
+        {/* WS3: workspace-wide Part-11 audit viewer + inspection export.
+            A NEW section only — the MFA/identity/data-residency sections above
+            are owned by WS4 and are left untouched. */}
+        <WorkspaceAudit />
       </main>
     </>
   );

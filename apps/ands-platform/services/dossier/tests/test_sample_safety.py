@@ -88,12 +88,18 @@ def test_uploaded_content_is_confirmed_user_content(client):
 
 
 # -- the confirm action clears the flag + audits ----------------------------
-def test_confirm_content_clears_flag_and_completes(client):
+def test_sample_cleared_by_reauthoring_real_values(client):
+    """A sample block clears by EDITING the example away and re-authoring — the
+    server re-derives no-longer-sample — not by a confirm rubber stamp."""
     did = _dossier(client)
     client.post(f"/api/dossier/ectd/{did}/section/1.0/generate",
-                json={"sample_origin": True})
-    c = client.post(f"/api/dossier/ectd/{did}/section/1.0/confirm-content",
-                    json={}).json()
+                json={"contact_email": "regulatory@sponsor.example"})  # example
+    gate = client.get(f"/api/dossier/dossiers/{did}/content").json()["gate"]
+    assert gate["unconfirmed_sample_count"] >= 1
+    c = client.post(f"/api/dossier/ectd/{did}/section/1.0/generate",
+                    json={"contact_name": "Dana Real",
+                          "contact_email": "dana@myco.com",
+                          "sequence_description": "Initial ANDS for Myco"}).json()
     node = next(n for m in c["modules"] for n in m["nodes"]
                 if n["section"] == "1.0")
     assert node["content_confirmed"] is True
@@ -135,11 +141,13 @@ def test_gate_blocked_while_sample_unconfirmed(client):
 def test_pre_file_sample_count_in_content_state(client):
     did = _dossier(client)
     client.post(f"/api/dossier/ectd/{did}/section/1.0/generate",
-                json={"sample_origin": True})
+                json={"contact_email": "regulatory@sponsor.example"})
     content = client.get(f"/api/dossier/dossiers/{did}/content").json()
     assert content["gate"]["unconfirmed_sample_count"] == 1
-    # confirming clears the count
-    client.post(f"/api/dossier/ectd/{did}/section/1.0/confirm-content", json={})
+    # editing the example away (re-author with real values) clears the count
+    client.post(f"/api/dossier/ectd/{did}/section/1.0/generate",
+                json={"contact_name": "Dana Real", "contact_email": "dana@myco.com",
+                      "sequence_description": "Initial ANDS for Myco"})
     content = client.get(f"/api/dossier/dossiers/{did}/content").json()
     assert content["gate"]["unconfirmed_sample_count"] == 0
 
@@ -148,12 +156,14 @@ def test_pre_file_sample_count_in_content_state(client):
 def test_validate_submission_blocks_on_unconfirmed_sample(client):
     did = _dossier(client)
     client.post(f"/api/dossier/ectd/{did}/section/1.0/generate",
-                json={"sample_origin": True})
+                json={"contact_email": "regulatory@sponsor.example"})
     v = client.get(f"/api/dossier/dossiers/{did}/validate").json()
     assert v["passed"] is False
     assert any(e["rule"] == "unconfirmed_sample_content" for e in v["errors"])
-    # confirming the content clears the export block
-    client.post(f"/api/dossier/ectd/{did}/section/1.0/confirm-content", json={})
+    # replacing the example (re-author with real values) clears the export block
+    client.post(f"/api/dossier/ectd/{did}/section/1.0/generate",
+                json={"contact_name": "Dana Real", "contact_email": "dana@myco.com",
+                      "sequence_description": "Initial ANDS for Myco"})
     v2 = client.get(f"/api/dossier/dossiers/{did}/validate").json()
     assert not any(e["rule"] == "unconfirmed_sample_content"
                    for e in v2["errors"])
@@ -228,3 +238,32 @@ def test_real_values_typed_over_samples_are_not_flagged(client):
     client.post(f"/api/dossier/ectd/{did}/section/1.6/generate", json=real)
     gate = client.get(f"/api/dossier/dossiers/{did}/content").json()["gate"]
     assert gate["unconfirmed_sample_count"] == 0
+
+
+# ── WS2 re-verify hardening: Unicode-dash retype + no rubber-stamp confirm ────
+
+def test_ascii_hyphen_retype_of_example_ci_is_still_flagged(client):
+    """Finding #1: the cs_be CI examples use an en-dash. A filer who retypes the
+    SAME fabricated range with a normal keyboard hyphen must still be caught."""
+    did = _cs_be_dossier(client)
+    # sample auc_ci is '94.2 – 106.8%' (en-dash); retype with ASCII hyphen
+    client.post(f"/api/dossier/ectd/{did}/section/1.6/generate",
+                json={"auc_ci": "94.2 - 106.8%", "cmax": "91.5 - 109.3%"})
+    gate = client.get(f"/api/dossier/dossiers/{did}/content").json()["gate"]
+    assert gate["unconfirmed_sample_count"] >= 1
+    assert gate["complete"] is False
+
+
+def test_confirm_refuses_unedited_sample(client):
+    """Finding #2: confirm-content is not a rubber stamp — it cannot attest a
+    section that still carries worked-example values."""
+    did = _cs_be_dossier(client)
+    client.post(f"/api/dossier/ectd/{did}/section/1.6/generate",
+                json={"crp_din": "02123456"})
+    r = client.post(f"/api/dossier/ectd/{did}/section/1.6/confirm-content",
+                    json={})
+    assert r.status_code == 422
+    assert r.json()["title"].startswith("This section still shows")
+    # still blocked afterwards
+    gate = client.get(f"/api/dossier/dossiers/{did}/content").json()["gate"]
+    assert gate["unconfirmed_sample_count"] >= 1

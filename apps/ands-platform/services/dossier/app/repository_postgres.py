@@ -2,6 +2,19 @@
 
 Same contract as the SQLite adapter; exercised against a real Postgres in CI /
 docker-compose, not in the sandbox.
+
+PARITY GAP (pre-existing, flagged not silently no-op'd): this adapter predates
+the home-catalog surface and does NOT yet implement the ``dossier_index`` /
+``section_state`` / ``documents`` methods the SQLite adapter carries — including
+the WS3 recoverable-delete trio (``archive_dossier`` / ``restore_dossier`` /
+``list_archived_index``) and ``get_dossier_index`` / ``list_dossier_index`` /
+``delete_dossier`` / ``rename_dossier``. When this adapter is brought to full
+parity it MUST mirror the SQLite soft-delete semantics verbatim: a delete is a
+soft-archive (``archived_at`` / ``archived_by`` / ``archive_reason`` columns,
+mirroring SQLite's migration), the working list filters ``archived_at IS NULL``,
+and restore clears the stamp. A hard ``DELETE FROM`` here would violate the
+record-integrity invariant the SQLite path enforces. Until then, production runs
+on the SQLite adapter for the catalog surface.
 """
 
 from __future__ import annotations

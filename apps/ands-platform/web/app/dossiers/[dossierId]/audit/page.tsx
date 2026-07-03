@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { useDossier } from "@/components/dossier/DossierContext";
+import { dossierApi } from "@/lib/dossierApi";
 
 type AuditEvent = {
   id: string;
@@ -34,15 +35,31 @@ export default function AuditPage() {
 
   const load = useCallback(() => {
     setError("");
-    fetch(
-      `/api/governance/audit?dossier_id=${encodeURIComponent(dossierId)}&limit=200`,
-      { cache: "no-store" }
-    )
-      .then((r) => {
-        if (!r.ok) throw new Error(`governance service replied ${r.status}`);
-        return r.json();
-      })
-      .then((body) => setEvents(body.events || []))
+    // PRIMARY: the DURABLE dossier-local Part-11 ledger (chained across
+    // renames). This is the authoritative record — it cannot silently lose an
+    // entry when the governance forward is down, which the governance /audit
+    // read could. Governance is no longer the source of truth for this panel.
+    dossierApi
+      .getHistory(dossierId)
+      .then((body) =>
+        setEvents(
+          (body.events || []).map((e) => ({
+            id: `${e.dossier_id}:${e.seq}`,
+            seq: e.seq,
+            at: e.timestamp,
+            category: (e.event_type.split(".")[0] || "dossier"),
+            action: e.event_type,
+            dossier_id: e.dossier_id,
+            tenant_id: e.tenant_id,
+            // fold actor + reason into the detail line the renderer expects
+            detail: {
+              ...(e.actor ? { actor: e.actor } : {}),
+              ...(e.reason ? { reason: e.reason } : {}),
+              ...e.data,
+            },
+          }))
+        )
+      )
       .catch((e) => {
         setEvents([]);
         setError(String(e?.message || e));
@@ -79,8 +96,10 @@ export default function AuditPage() {
     <main className="viewer">
       <h1>Audit Trail</h1>
       <p className="mut">
-        The tamper-evident governance record for this dossier — every domain
-        event, append-only, newest first.
+        The durable, append-only Part-11 record for this dossier — written
+        synchronously alongside each change and preserved even if the central
+        governance service is unreachable. Newest first; chained across a
+        Dossier ID re-key so history for the prior ID still resolves.
       </p>
       {/* the guarantees, stated where QA looks for them */}
       <div className="notice" style={{ fontSize: 12 }}>
@@ -142,8 +161,8 @@ export default function AuditPage() {
         )}
         {events !== null && !error && (
           <div className="mut" style={{ marginTop: 10, fontSize: 12 }}>
-            {events.length} event{events.length === 1 ? "" : "s"} · governance
-            records every bus event plus HTTP-ingested service events
+            {events.length} event{events.length === 1 ? "" : "s"} · durable
+            dossier-local ledger, mirrored to the central governance trail
           </div>
         )}
       </div>

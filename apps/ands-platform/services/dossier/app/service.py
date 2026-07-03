@@ -402,10 +402,15 @@ class DossierService:
         return self.content_state(dossier_id)
 
     def confirm_content(self, dossier_id, section) -> dict:
-        """The explicit 'I have reviewed and edited this — it is my content'
-        action. Clears the sample/AI review flag so the section can complete,
-        and records the confirmation to the audit stream. SAFETY: this is the
-        ONLY path that turns unconfirmed sample/AI content into filable."""
+        """The explicit 'I have reviewed this AI-assisted draft — it is my
+        content' attestation, recorded to the audit stream.
+
+        SAFETY: attestation is only meaningful for an AI draft (freeform prose a
+        human must vouch for). A SAMPLE fill still carrying worked-example values
+        CANNOT be attested away — that would be a rubber stamp letting a
+        fabricated value file unedited. A sample block is cleared only by editing
+        the fields and re-authoring, which the server re-derives as no-longer-
+        sample. So confirm refuses a section whose content is still sample."""
         node = self._node(dossier_id, section)
         entry = self.repo.get_section_state(_s(dossier_id), _s(section))
         if not entry or not (entry.get("doc_id")
@@ -416,6 +421,12 @@ class DossierService:
                                "section to confirm", rule="nothing_to_confirm",
                                detail=_s(section))
         origin = entry.get("content_origin") or "generated"
+        if origin == "sample":
+            raise ProblemError(
+                422, "This section still shows worked-example values — replace "
+                "them in the form and re-author. There is nothing to attest as "
+                "your own content until the example is edited.",
+                rule="worked_example_not_replaced", detail=_s(section))
         self._write_entry(dossier_id, section, node,
                           action=entry.get("action") or "generated",
                           content_confirmed=True)
@@ -767,18 +778,127 @@ class DossierService:
         dossier-scoped route before delegating."""
         self._tenant_guard(dossier_id, tenant_id)
 
-    def delete_dossier(self, dossier_id: str, tenant_id: str | None = None) -> dict:
+    def _forward_governance(self, event_type: str, dossier_id: str, *,
+                            reason: str = "", data: dict | None = None) -> None:
+        """SECONDARY, best-effort sink: forward an already-durably-recorded
+        event to governance. Runs AFTER the atomic ledger+mutation transaction
+        has committed, and is free to fail — the local uid-keyed ledger is the
+        authoritative Part-11 record QA/inspectors read."""
+        audit_hook.record(event_type, _s(dossier_id),
+                          {**(data or {}), "reason": reason})
+
+    def dossier_history(self, dossier_id: str,
+                        tenant_id: str | None = None) -> dict:
+        """The DURABLE local Part-11 ledger for a dossier (chained across any
+        rename so the previous_id still resolves). This is the tamper-evident
+        record that cannot be silently lost when governance is unreachable."""
         self._tenant_guard(dossier_id, tenant_id)
-        if not self.repo.delete_dossier(_s(dossier_id)):
+        events = self.repo.list_events(_s(dossier_id))
+        return {"dossier_id": _s(dossier_id), "events": events,
+                "count": len(events)}
+
+    def delete_dossier(self, dossier_id: str, tenant_id: str | None = None,
+                       reason: str = "", confirm_id: str = "") -> dict:
+        """RECORD-INTEGRITY (WS3): a destructive delete on a regulated dossier
+        is RECOVERABLE — it soft-archives (actor + timestamp + reason) instead
+        of purging. The dossier drops out of the working catalog but stays
+        restorable, and the archive lands on the DURABLE local audit ledger with
+        a reason-for-change field. A written reason is REQUIRED (Part-11 why).
+
+        SERVER-SIDE typed-id gate: the caller must echo the exact dossier_id as
+        ``confirm_id``. The client's 'type the ID to delete' box is not enough —
+        a direct API DELETE would otherwise bypass it — so the destructive
+        confirmation is enforced here on the server."""
+        self._tenant_guard(dossier_id, tenant_id)
+        reason = _s(reason)
+        if not reason:
+            raise ProblemError(
+                422, "a reason is required to archive a dossier",
+                rule="archive_reason_required",
+                detail="Deleting a regulated dossier archives it (recoverable) "
+                       "and is recorded to the audit trail — state why.")
+        if str(confirm_id or "") != _s(dossier_id):
+            raise ProblemError(
+                422, "confirm_id must match the dossier ID",
+                rule="delete_confirm_id_mismatch",
+                detail="Type the exact Dossier ID to confirm this destructive "
+                       "delete. The typed confirmation is enforced on the "
+                       "server, not just in the browser (exact match — no "
+                       "leading/trailing spaces).")
+        # existence + not-already-archived guard BEFORE the durable write, so we
+        # never log a phantom archive for a missing/already-archived dossier.
+        idx = self.repo.get_dossier_index(_s(dossier_id))
+        if not idx or idx.get("archived_at"):
             raise ProblemError(404, "no such dossier", detail=_s(dossier_id))
-        audit_hook.record("dossier.deleted", _s(dossier_id), {})
-        return {"deleted": _s(dossier_id)}
+        # actor from the request contextvar so the stored stamp is
+        # reconstructable offline (who), independent of the audit forward.
+        actor = audit_hook._actor.get()
+        # ATOMIC: the soft-archive state flip AND the durable audit write commit
+        # in ONE transaction — either both persist or neither. A ledger-write
+        # failure rolls the archive back (no mutation without a record); a
+        # raced/absent dossier (archive is a no-op -> None) commits nothing (no
+        # phantom audit). The local uid-keyed ledger survives a governance
+        # outage; the governance forward below is a secondary best-effort sink.
+        ev = self.repo.archive_with_event(
+            _s(dossier_id), actor=actor, reason=reason,
+            event_type="dossier.archived",
+            tenant_id=audit_hook._tenant.get(), data={"recoverable": True})
+        if ev is None:
+            raise ProblemError(404, "no such dossier", detail=_s(dossier_id))
+        self._forward_governance("dossier.archived", _s(dossier_id),
+                                 reason=reason, data={"recoverable": True})
+        return {"archived": _s(dossier_id), "reason": reason,
+                "recoverable": True}
+
+    def restore_dossier(self, dossier_id: str, tenant_id: str | None = None,
+                        reason: str = "") -> dict:
+        """Undo a soft-delete: return the dossier to the working catalog. The
+        restore is itself recorded to the DURABLE local audit ledger (who/when/
+        why). RESTORE MUST NOT DESTROY EVIDENCE: flipping ``archived_at`` back
+        to NULL clears the 'currently archived' flag, but the ledger still
+        carries the archive event (who/when/why) AND the restore event captures
+        the prior archive stamp it undid, so the record the dossier was ever
+        archived is never erased."""
+        self._tenant_guard(dossier_id, tenant_id)
+        # capture the archive stamp being undone BEFORE the repo NULLs it, so
+        # the durable restore event preserves that evidence.
+        idx = self.repo.get_dossier_index(_s(dossier_id)) or {}
+        if not idx.get("archived_at"):
+            # absent, or not currently archived — don't log a phantom restore
+            raise ProblemError(404, "no archived dossier to restore",
+                               detail=_s(dossier_id))
+        prior = {"prior_archived_at": idx.get("archived_at"),
+                 "prior_archived_by": idx.get("archived_by"),
+                 "prior_archive_reason": idx.get("archive_reason")}
+        actor = audit_hook._actor.get()
+        # ATOMIC restore + durable audit (prior archive evidence captured above,
+        # BEFORE the repo NULLs it). One transaction: a raced/failed restore
+        # (no-op -> None) leaves no phantom restore entry; a ledger failure rolls
+        # the restore back. Governance forward is a secondary best-effort sink.
+        ev = self.repo.restore_with_event(
+            _s(dossier_id), actor=actor, reason=_s(reason),
+            event_type="dossier.restored",
+            tenant_id=audit_hook._tenant.get(), data=prior)
+        if ev is None:
+            # absent, or not currently archived
+            raise ProblemError(404, "no archived dossier to restore",
+                               detail=_s(dossier_id))
+        self._forward_governance("dossier.restored", _s(dossier_id),
+                                 reason=_s(reason), data=prior)
+        return {"restored": _s(dossier_id), "reason": _s(reason)}
+
+    def list_archived(self, tenant_id: str | None = None) -> dict:
+        """The recoverable 'trash' view — soft-archived dossiers a user can
+        restore, each carrying its archive stamp (who/when/why)."""
+        rows = self.repo.list_archived_index(_s(tenant_id) or None)
+        return {"dossiers": rows, "count": len(rows)}
 
     def rename_dossier(self, dossier_id: str, new_id: str,
-                       tenant_id: str | None = None) -> dict:
+                       tenant_id: str | None = None, reason: str = "") -> dict:
         """Re-key a dossier — the 'placeholder to real HC Dossier ID' path.
         Users can start work before Health Canada issues their ID (REP
-        Dossier ID Request) and set the real one here later."""
+        Dossier ID Request) and set the real one here later. The before/after
+        IDs and an optional reason-for-change land on the audit trail."""
         old, new = _s(dossier_id), _s(new_id).lower()
         self._tenant_guard(old, tenant_id)
         if not _ID_RE.match(new):
@@ -790,9 +910,30 @@ class DossierService:
         if self.repo.get_dossier_index(new):
             raise ProblemError(409, f"a dossier with ID {new} already exists",
                                rule="dossier_id_taken")
-        if not self.repo.rename_dossier(old, new):
+        if not self.repo.get_dossier_index(old):
             raise ProblemError(404, "no such dossier", detail=old)
-        audit_hook.record("dossier.renamed", new, {"previous_id": old})
+        actor = audit_hook._actor.get()
+        data = {"previous_id": old, "new_id": new,
+                # a 'd' placeholder -> real HC id is the distinctive regulatory
+                # event; flag it for the trail readers
+                "placeholder_to_real": old.startswith("d")}
+        # ATOMIC re-key + durable 'renamed' event + rename-chain in ONE
+        # transaction. The dossier's uid is IMMUTABLE across the re-key, so the
+        # event (appended under the NEW id) lands on the SAME uid as its prior
+        # events — a history read for the new id surfaces the whole life, while a
+        # DIFFERENT dossier later reusing a freed id has its own uid and inherits
+        # nothing. A raced/failed re-key (no-op -> None) commits nothing: no
+        # orphan chain, no phantom 'renamed' event that could mis-attribute
+        # another dossier's history to a reused id.
+        ev = self.repo.rename_with_event(
+            old, new, actor=actor, reason=_s(reason),
+            event_type="dossier.renamed",
+            tenant_id=audit_hook._tenant.get(), data=data)
+        if ev is None:
+            raise ProblemError(404, "no such dossier", detail=old)
+        # SECONDARY sink: governance forward stays, best-effort.
+        self._forward_governance("dossier.renamed", new, reason=_s(reason),
+                                 data=data)
         return {"renamed": old, "dossier_id": new}
 
     def list_dossiers(self, tenant_id: str | None = None) -> dict:

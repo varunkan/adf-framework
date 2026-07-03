@@ -8,6 +8,7 @@ import {
   type Registration,
   type RightToSell,
 } from "./registryApi";
+import { ProvenancePopover } from "@/components/ProvenancePopover";
 
 export function DeadlinesStrip({ regs }: { regs: Registration[] }) {
   const [rts, setRts] = useState<Record<string, RightToSell>>({});
@@ -61,11 +62,32 @@ export function DeadlinesStrip({ regs }: { regs: Registration[] }) {
           }
           return (
             <span key={r.id}
-              className={`chip ${o.overdue ? "blocked" : "ready"}`}>
-              {r.product}
-              {o.din ? ` (${o.din})` : ""} · due {o.due_date}
-              {" · FY "}{o.fiscal_year}
-              {o.overdue ? " · OVERDUE" : ""}
+              style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+              <span className={`chip ${o.overdue ? "blocked" : "ready"}`}>
+                {r.product}
+                {o.din ? ` (${o.din})` : ""} · due {o.due_date}
+                {" · FY "}{o.fiscal_year}
+                {o.overdue ? " · OVERDUE" : ""}
+              </span>
+              {/* WS3 provenance: the RTS due date is a fixed statutory anchor
+                  (October 1 of the fiscal year) from the registry service — not
+                  a computed running clock, so the anchor IS the due date. */}
+              <ProvenancePopover
+                prov={{
+                  anchorLabel: `Right-to-Sell due (FY ${o.fiscal_year})`,
+                  anchorDate: o.due_date,
+                  anchorSource: "ingested",
+                  basis: "calendar",
+                  rule:
+                    "The annual Right-to-Sell fee for a marketable DIN falls " +
+                    "due on October 1 of the fiscal year; the registry service " +
+                    "fixes this date per registration.",
+                  citation:
+                    "Food and Drug Regulations — annual Right-to-Sell / DIN " +
+                    "notification (statutory October 1)",
+                  asOf: null,
+                }}
+              />
             </span>
           );
         })}

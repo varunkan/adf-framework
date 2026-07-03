@@ -156,6 +156,13 @@ def build_app(service: DossierService) -> FastAPI:
                                                  alias="X-Tenant-Id")):
         return service.create_dossier(body.model_dump(), x_tenant_id or None)
 
+    # NB: /dossiers/archived is declared BEFORE /dossiers/{dossier_id} so the
+    # literal path wins over the {dossier_id} capture.
+    @router.get("/dossiers/archived")
+    def list_archived(x_tenant_id: str = Header(default="",
+                                                alias="X-Tenant-Id")):
+        return service.list_archived(x_tenant_id or None)
+
     @router.get("/dossiers/{dossier_id}")
     def get_dossier(dossier_id: str,
                     x_tenant_id: str = Header(default="",
@@ -163,10 +170,32 @@ def build_app(service: DossierService) -> FastAPI:
         return service.get_dossier_full(dossier_id, x_tenant_id or None)
 
     @router.delete("/dossiers/{dossier_id}")
-    def delete_dossier(dossier_id: str,
+    def delete_dossier(dossier_id: str, body: dict | None = None,
                        x_tenant_id: str = Header(default="",
                                                  alias="X-Tenant-Id")):
-        return service.delete_dossier(dossier_id, x_tenant_id or None)
+        # WS3: a delete is a RECOVERABLE soft-archive requiring a reason AND a
+        # server-side typed-id confirmation (confirm_id must equal dossier_id) —
+        # a direct API DELETE cannot bypass the client's "type the ID" gate.
+        return service.delete_dossier(
+            dossier_id, x_tenant_id or None,
+            reason=str((body or {}).get("reason", "")),
+            confirm_id=str((body or {}).get("confirm_id", "")))
+
+    @router.get("/dossiers/{dossier_id}/history")
+    def dossier_history(dossier_id: str,
+                        x_tenant_id: str = Header(default="",
+                                                  alias="X-Tenant-Id")):
+        # the DURABLE local Part-11 ledger (chained across renames) — the
+        # authoritative record that cannot be lost when governance is down.
+        return service.dossier_history(dossier_id, x_tenant_id or None)
+
+    @router.post("/dossiers/{dossier_id}/restore")
+    def restore_dossier(dossier_id: str, body: dict | None = None,
+                        x_tenant_id: str = Header(default="",
+                                                  alias="X-Tenant-Id")):
+        return service.restore_dossier(
+            dossier_id, x_tenant_id or None,
+            reason=str((body or {}).get("reason", "")))
 
     @router.get("/validation/rules")
     def validation_rules():
@@ -180,7 +209,8 @@ def build_app(service: DossierService) -> FastAPI:
                                                  alias="X-Tenant-Id")):
         return service.rename_dossier(dossier_id,
                                       str(body.get("new_id", "")),
-                                      x_tenant_id or None)
+                                      x_tenant_id or None,
+                                      reason=str(body.get("reason", "")))
 
     @router.get("/dossiers/{dossier_id}/content")
     def dossier_content(dossier_id: str, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):

@@ -95,8 +95,25 @@ def sample_fields(generator_key: str, ctx: dict) -> dict:
     return {"fields": fields, "sample_keys": sorted(sample.keys())}
 
 
+# Worked-example seed values contain typographic punctuation (en/em dashes in
+# the bioequivalence CIs and the Form V allegation, curly quotes, nbsp). A filer
+# who reviews the example and retypes the SAME value on a normal keyboard
+# produces ASCII punctuation — which must still be recognised as the unedited
+# example, or a fabricated clinical/legal value slips into a filing. So the
+# comparison folds Unicode punctuation to ASCII before matching (WS2 hardening).
+_PUNCT_FOLD = {
+    0x2010: 0x2D, 0x2011: 0x2D, 0x2012: 0x2D, 0x2013: 0x2D,  # hyphen..en-dash
+    0x2014: 0x2D, 0x2015: 0x2D, 0x2212: 0x2D,                # em-dash, minus
+    0x2018: 0x27, 0x2019: 0x27, 0x2032: 0x27,                # single quotes/prime
+    0x201C: 0x22, 0x201D: 0x22, 0x2033: 0x22,                # double quotes/prime
+    0x00A0: 0x20, 0x2007: 0x20, 0x202F: 0x20, 0x2009: 0x20,  # nbsp/thin spaces
+}
+
+
 def _norm(v) -> str:
-    return " ".join(_s(v).split()).lower()
+    import unicodedata
+    s = unicodedata.normalize("NFKC", _s(v)).translate(_PUNCT_FOLD)
+    return " ".join(s.split()).lower()
 
 
 def unedited_sample_fields(generator_key: str, ctx: dict) -> list[str]:

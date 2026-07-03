@@ -5,6 +5,8 @@
 // commenced. Serve/action buttons drive the real lifecycle endpoints.
 import { useCallback, useEffect, useState } from "react";
 import { ALLEGATIONS, lifecycleApi, today, type NoaRecord } from "./api";
+import { ProvenancePopover, type Provenance } from "@/components/ProvenancePopover";
+import { actionProvenance, stayProvenance } from "@/lib/noaProvenance";
 
 const STATUS_LABEL: Record<NoaRecord["status"], string> = {
   draft: "Draft — NOA not yet served",
@@ -23,16 +25,22 @@ const STATUS_CHIP: Record<NoaRecord["status"], string> = {
   resolved: "ready",
 };
 
-function Clock({ label, days, end }: {
+function Clock({ label, days, end, prov }: {
   label: string;
   days: number | null | undefined;
   end: string | null;
+  // WS3: the provenance of THIS displayed day-count (anchor date + source +
+  // counting rule + citation), attached as an inline popover.
+  prov: Provenance;
 }) {
   if (days == null || !end) return null;
   const tone = days === 0 ? "ok" : days <= 10 ? "warn" : "";
   return (
-    <span className={`notice ${tone}`} style={{ padding: "4px 10px", fontSize: 12 }}>
-      <b>{days}</b> day{days === 1 ? "" : "s"} left · {label} ends {end}
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+      <span className={`notice ${tone}`} style={{ padding: "4px 10px", fontSize: 12 }}>
+        <b>{days}</b> day{days === 1 ? "" : "s"} left · {label} ends {end}
+      </span>
+      <ProvenancePopover prov={prov} />
     </span>
   );
 }
@@ -232,6 +240,7 @@ export function NoaRegister({ dossierId }: { dossierId: string }) {
                     label="45-day action window"
                     days={n.action_days_remaining}
                     end={n.action_window_end}
+                    prov={actionProvenance(n)}
                   />
                 )}
                 {(n.status === "stay_running" ||
@@ -240,6 +249,7 @@ export function NoaRegister({ dossierId }: { dossierId: string }) {
                     label="24-month stay"
                     days={n.stay_days_remaining}
                     end={n.stay_end}
+                    prov={stayProvenance(n)}
                   />
                 )}
                 {n.status === "draft" && n.noa_required && (

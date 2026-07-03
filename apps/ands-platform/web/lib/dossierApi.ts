@@ -44,16 +44,42 @@ export const dossierApi = {
 
   getDossier: (id: string) => j<DossierFull>(`/dossiers/${encodeURIComponent(id)}`),
 
-  deleteDossier: (id: string) =>
-    j<{ deleted: string }>(`/dossiers/${encodeURIComponent(id)}`, {
-      method: "DELETE",
-    }),
+  // WS3 recoverable delete: a soft-archive requiring a reason-for-change AND a
+  // server-side typed-id confirmation (confirm_id must equal the dossier id) —
+  // the "type the ID" gate is enforced on the server, not just the browser.
+  deleteDossier: (id: string, reason: string, confirmId: string) =>
+    j<{ archived: string; reason: string; recoverable: boolean }>(
+      `/dossiers/${encodeURIComponent(id)}`,
+      { method: "DELETE",
+        body: JSON.stringify({ reason, confirm_id: confirmId }) }),
+
+  // WS3 DURABLE Part-11 ledger for a dossier (chained across renames). The
+  // authoritative audit record — survives a governance outage that the
+  // best-effort forward would silently drop.
+  getHistory: (id: string) =>
+    j<{ dossier_id: string; count: number; events: {
+        seq: number; event_type: string; dossier_id: string; actor: string;
+        reason: string; tenant_id: string; timestamp: string;
+        data: Record<string, unknown> }[] }>(
+      `/dossiers/${encodeURIComponent(id)}/history`),
+
+  // undo a soft-delete — return the dossier to the working catalog
+  restoreDossier: (id: string, reason = "") =>
+    j<{ restored: string; reason: string }>(
+      `/dossiers/${encodeURIComponent(id)}/restore`,
+      { method: "POST", body: JSON.stringify({ reason }) }),
+
+  // the recoverable 'trash' view — soft-archived dossiers with their stamp
+  listArchived: () =>
+    j<{ dossiers: (DossierListItem & { archived_at?: string;
+        archived_by?: string; archive_reason?: string })[]; count: number }>(
+      "/dossiers/archived"),
 
   // placeholder ID -> real Health Canada Dossier ID (issued via REP)
-  renameDossier: (id: string, newId: string) =>
+  renameDossier: (id: string, newId: string, reason = "") =>
     j<{ renamed: string; dossier_id: string }>(
       `/dossiers/${encodeURIComponent(id)}/rename`,
-      { method: "POST", body: JSON.stringify({ new_id: newId }) }),
+      { method: "POST", body: JSON.stringify({ new_id: newId, reason }) }),
 
   getContent: (id: string) =>
     j<ContentState>(`/dossiers/${encodeURIComponent(id)}/content`),

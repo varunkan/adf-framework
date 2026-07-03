@@ -9,6 +9,7 @@ import type { DossierListItem } from "@/lib/dossierTypes";
 import { UserChip } from "@/components/UserChip";
 import { PortfolioRow, type FeeState, type NoaClock } from "@/components/portfolio/PortfolioRow";
 import { SummaryCards } from "@/components/portfolio/SummaryCards";
+import { noaClockFrom } from "@/lib/noaProvenance";
 
 export default function PortfolioPage() {
   const [items, setItems] = useState<DossierListItem[]>([]);
@@ -55,13 +56,9 @@ export default function PortfolioPage() {
               { cache: "no-store" });
             if (!r.ok || !alive) return;
             const { allegations: recs = [] } = await r.json();
-            let clock: NoaClock = { kind: "none" };
-            for (const n of recs) {
-              if (n.status === "served" && n.action_days_remaining > 0)
-                clock = { kind: "action", days: n.action_days_remaining };
-              else if (n.status === "stay_running" && n.stay_days_remaining > 0)
-                clock = { kind: "stay", days: n.stay_days_remaining };
-            }
+            // WS3: derive the clock AND its provenance from the raw records —
+            // the anchor date/source/basis travel to the row's popover.
+            const clock = noaClockFrom(recs);
             if (clock.kind !== "none")
               setNoas((m) => ({ ...m, [d.dossier_id]: clock }));
           } catch { /* lifecycle offline — row simply shows no clock */ }
