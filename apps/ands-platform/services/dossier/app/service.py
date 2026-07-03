@@ -405,13 +405,53 @@ class DossierService:
                           {"section": _s(section), "reason": _s(reason)})
         return self.content_state(dossier_id)
 
+    def _export_validation(self, dossier_id: str) -> dict:
+        """Run the full eCTD validation for the export gate. Fails CLOSED: if
+        the validator itself cannot run, the report is treated as not-passed."""
+        try:
+            r = self.validate_submission(dossier_id)
+            return {"passed": bool(r.get("passed")), "ran": True,
+                    "errors": r.get("errors", []),
+                    "criteria": r.get("criteria") or ectd_validation.criteria()}
+        except Exception as exc:  # noqa: BLE001 - validator unavailable => block
+            return {"passed": False, "ran": False, "errors": [],
+                    "criteria": ectd_validation.criteria(),
+                    "unavailable": str(exc)}
+
     def export_sequence(self, dossier_id: str, sequence: str = "0000",
-                        tenant_id: str | None = None) -> dict:
-        """The transmissible eCTD package for one sequence, as a zip."""
+                        tenant_id: str | None = None, *,
+                        override: bool = False, reason: str = "") -> dict:
+        """The transmissible eCTD package for one sequence, as a zip.
+
+        Fails CLOSED (WS1 trust fix): a package is emitted only when eCTD
+        validation passes, or when the caller supplies an explicit override
+        WITH a reason — which is flagged on the package and written to the
+        audit stream. A silent export of an invalid submission is never done."""
         self._tenant_guard(dossier_id, tenant_id)
         model = self.repo.get_dossier(_s(dossier_id))
         if not model:
             raise ProblemError(404, "no eCTD dossier", detail=_s(dossier_id))
+        report = self._export_validation(dossier_id)
+        overridden = (not report["passed"]) and bool(override)
+        if not report["passed"] and not override:
+            raise ProblemError(
+                409,
+                "validation_not_passed" if report["ran"]
+                else "validation_unavailable",
+                detail=("Export is blocked — eCTD validation "
+                        + ("did not pass. Resolve the findings below, or "
+                           "export with an explicit override and a reason."
+                           if report["ran"] else
+                           "could not run, so export is blocked. Retry, or "
+                           "export with an explicit override and a reason.")),
+                validation={"passed": report["passed"], "ran": report["ran"],
+                            "errors": report["errors"],
+                            "criteria": report["criteria"]})
+        if overridden and not _s(reason):
+            raise ProblemError(
+                422, "override_reason_required",
+                detail="Overriding a failed-validation export requires a "
+                       "written reason — it is recorded to the audit trail.")
         # leaf_id -> stored bytes, via the per-section state (incl. bilingual)
         doc_by_leaf: dict[str, str] = {}
         for section, state in self.repo.list_section_state(_s(dossier_id)).items():
@@ -448,10 +488,21 @@ class DossierService:
         pkg = export_pkg.build_package(model, _s(sequence) or "0000",
                                        resolve, rt["body"],
                                        ca_regional_extra=extra)
-        audit_hook.record("dossier.sequence_exported", _s(dossier_id),
-                          {"sequence": _s(sequence) or "0000",
-                           "files": len(pkg["files"]),
-                           "missing": len(pkg["missing"])})
+        audit_hook.record(
+            "dossier.sequence_exported_override" if overridden
+            else "dossier.sequence_exported", _s(dossier_id),
+            {"sequence": _s(sequence) or "0000",
+             "files": len(pkg["files"]),
+             "missing": len(pkg["missing"]),
+             "validation_passed": report["passed"],
+             "validation_ran": report["ran"],
+             "criteria_version": (report["criteria"] or {}).get("version"),
+             **({"override_reason": _s(reason)} if overridden else {})})
+        pkg["validation"] = {
+            "passed": report["passed"], "ran": report["ran"],
+            "overridden": overridden,
+            "reason": _s(reason) if overridden else "",
+            "criteria": report["criteria"]}
         return pkg
 
     def form_sample(self, dossier_id: str, section: str,

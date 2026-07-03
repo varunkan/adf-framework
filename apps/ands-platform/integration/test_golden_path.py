@@ -17,7 +17,8 @@ def _clean_validation_ctx():
 
 def test_golden_path_signup_to_marketed(mesh):
     # 1. identity — a generic sponsor self-serves a trial tenant.
-    signup = mesh.identity.signup({"email": "ra@acme.io", "password": "pw12345",
+    signup = mesh.identity.signup({"email": "ra@acme.io",
+                                   "password": "acmePass123",
                                    "company_name": "Acme Generics"})
     assert signup["token"] and signup["tenant"]["status"] == "trial"
 

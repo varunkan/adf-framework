@@ -135,6 +135,41 @@ _FAMILIES = {
     "6": "ca-regional.xml structure (CA Module 1 v2.2)",
     "7": "Document payload conformance",
 }
+
+# WS1 (round-4 trust fix): name and version this validator, and state plainly
+# what it does and does NOT do. Regulatory professionals distrust an unlabelled
+# green checkmark; they trust an honest scope statement. This validator is
+# ANDS Studio's own STRUCTURAL/TECHNICAL checker modeled on Health Canada's
+# eCTD Validation Criteria rule scheme — it is NOT Health Canada's official
+# eValidator and does not replace it.
+CRITERIA_VERSION = "1.1"
+
+
+def criteria() -> dict:
+    """The named, versioned validation profile + an honest coverage statement."""
+    return {
+        "name": "ANDS Studio structural eCTD validator",
+        "version": CRITERIA_VERSION,
+        "modeled_on": "Health Canada eCTD Validation Criteria v5.3 rule scheme "
+                      "(CA-<severity>-<block> ids), CA Module 1 v2.2 regional "
+                      "backbone and the ICH eCTD 3.2.2 index",
+        "disclaimer": "Structural and technical checks only. This is NOT Health "
+                      "Canada's official eValidator and does not replace it — "
+                      "run eValidator (or your publisher's validator) before "
+                      "you transmit.",
+        "coverage": {
+            "checked": sorted(set(_FAMILIES.values())),
+            "not_checked": [
+                "Scientific, clinical or quality adequacy of the content",
+                "Full PDF/A-1 conformance (only the %PDF header and encryption "
+                "are checked, not the ISO profile)",
+                "Cross-document hyperlink target resolution",
+                "Health Canada screening or review acceptance",
+            ],
+        },
+    }
+
+
 _RULE_DESCRIPTIONS = {
     "href_required": "Every live leaf must reference a file (href).",
     "checksum_required": "Every live leaf must carry an MD5 checksum.",
@@ -188,7 +223,7 @@ def rule_catalog() -> dict:
         "description": "Filing is blocked while the dossier uses a placeholder "
                        "ID instead of the Health Canada-issued one (REP).",
     })
-    return {"count": len(rules), "rules": rules}
+    return {"count": len(rules), "rules": rules, "criteria": criteria()}
 
 
 def _s(v) -> str:
@@ -554,4 +589,4 @@ def validate(dossier: dict, *, documents: dict | None = None) -> dict:
 
     checked = len(assembly.current_view(dossier)["live"])
     return {"passed": not errors, "errors": errors, "warnings": warnings,
-            "checked": checked}
+            "checked": checked, "criteria": criteria()}

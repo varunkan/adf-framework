@@ -267,15 +267,21 @@ def build_app(service: DossierService) -> FastAPI:
 
     @router.get("/ectd/{dossier_id}/export/{sequence}")
     def export_sequence(dossier_id: str, sequence: str,
+                        override: bool = False, reason: str = "",
                         x_tenant_id: str = Header(default="",
                                                   alias="X-Tenant-Id")):
         pkg = service.export_sequence(dossier_id, sequence,
-                                      x_tenant_id or None)
+                                      x_tenant_id or None,
+                                      override=override, reason=reason)
+        v = pkg.get("validation", {})
+        stamp = ("overridden" if v.get("overridden")
+                 else "passed" if v.get("passed") else "unknown")
         return Response(
             content=pkg["body"], media_type=pkg["content_type"],
             headers={"Content-Disposition":
                      f'attachment; filename="{pkg["filename"]}"',
-                     "X-Export-Missing": str(len(pkg["missing"]))})
+                     "X-Export-Missing": str(len(pkg["missing"])),
+                     "X-Export-Validation": stamp})
 
     @router.get("/documents/{doc_id}")
     def download_document(doc_id: str, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
