@@ -71,6 +71,23 @@ export function RoleMatrix({ myRole }: { myRole?: string }) {
                   </div>
                 </div>
               ))}
+              {/* R6-C: disambiguate the three admin-ish terms professionals
+                  conflated (owner / tenant-admin / workspace-admin). */}
+              <div className="mut" style={{ fontSize: 12, display: "grid",
+                gap: 3 }}>
+                <div><b>A note on the admin terms:</b></div>
+                <div>
+                  <b>Owner</b> — the platform operator who runs this deployment
+                  and can act across every workspace. This is the hosting /
+                  vendor role, not a customer role.
+                </div>
+                <div>
+                  <b>Workspace admin</b> (internally the <b>tenant admin</b> —
+                  &ldquo;tenant&rdquo; is just the code name for a workspace)
+                  administers one workspace: invites and removes its members and
+                  manages its settings, and can never see another workspace.
+                </div>
+              </div>
               <p className="mut" style={{ fontSize: 12, margin: 0 }}>
                 This table is generated from the same capability sets the API
                 enforces on every request — it cannot drift from what is actually

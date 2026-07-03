@@ -159,6 +159,64 @@ export const TERMS: Record<string, string> = {
     "Comparative Studies–Bioequivalence: the study package (design, AUC and " +
     "Cmax 90% confidence intervals vs the 80.00–125.00% window) that proves " +
     "your generic performs the same in the body.",
+
+  // Round-6 C (CLARITY) — enterprise / crypto acronyms, glossed in plain
+  // language so onboarding + Account don't read as unexplained jargon.
+  workspace:
+    "One isolated client company and all of its dossiers, documents and " +
+    "filings. Everything in a workspace stays separate from every other " +
+    "workspace — a CRO creates one per client company; an in-house team has " +
+    "one for its own organisation.",
+  SSO:
+    "Single sign-on — signing in through your organisation's own identity " +
+    "provider (Azure AD/Entra, Okta, Google Workspace) instead of a separate " +
+    "password here. Not built yet; on the roadmap.",
+  SAML:
+    "Security Assertion Markup Language — one of the two standard protocols an " +
+    "identity provider uses to do single sign-on. The other is OIDC. (An " +
+    "enterprise SSO detail; not required to use the app today.)",
+  OIDC:
+    "OpenID Connect — the modern single-sign-on protocol built on OAuth 2.0 " +
+    "(the alternative to SAML). An enterprise SSO detail; not required today.",
+  SCIM:
+    "System for Cross-domain Identity Management — the standard that lets your " +
+    "identity provider automatically create and remove user accounts here " +
+    "(auto-provisioning). Roadmap; today admins invite and remove members " +
+    "by hand.",
+  SIEM:
+    "Security Information and Event Management — your organisation's security " +
+    "log system (Splunk, Microsoft Sentinel…). 'Audit streaming to your SIEM' " +
+    "means forwarding this app's audit trail there. Roadmap; today the trail " +
+    "is viewable and exportable in-app.",
+  "otpauth URI":
+    "The setup link (starting otpauth://) that an authenticator app reads to " +
+    "add your account — it encodes the same secret as the QR code, so you can " +
+    "paste it into an app instead of scanning.",
+  HttpOnly:
+    "A cookie flag that lets the browser send your session token back to the " +
+    "server but hides it from page scripts — so a malicious script on the " +
+    "page can never read or steal your login.",
+  "salted hash":
+    "How your password is stored: it is scrambled one-way with a random value " +
+    "(the 'salt') added first, so the stored form can't be reversed into your " +
+    "password and two identical passwords don't produce the same stored value.",
+  leaf:
+    "One document placed at its exact position in the eCTD folder tree — the " +
+    "smallest unit the submission tracks (a single PDF plus its metadata). " +
+    "Your whole submission is a set of leaves.",
+  "working sequence":
+    "The sequence you are currently building but have not transmitted yet — " +
+    "new documents you place land here. It becomes 'active' once you transmit " +
+    "it to Health Canada.",
+  "active sequence":
+    "A sequence that has already been transmitted to Health Canada and now " +
+    "forms part of the official record — you no longer edit it; you file a new " +
+    "sequence to change anything.",
+  "lifecycle operation":
+    "How each document relates to earlier sequences: new (first time filed), " +
+    "replace (supersedes a prior document), append (adds alongside it), or " +
+    "delete (withdraws it). The eCTD backbone records the operation so Health " +
+    "Canada's systems know what changed.",
 };
 
 export const TERM_KEYS = Object.keys(TERMS).sort((a, b) => b.length - a.length);

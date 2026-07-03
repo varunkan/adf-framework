@@ -106,6 +106,12 @@ export default function LoginPage() {
             : mode === "signup" ? "Create your workspace"
             : "Reset your password"}
         </h1>
+        {mode === "signup" && (
+          <p className="mut" style={{ fontSize: 12, marginTop: -4 }}>
+            <Term k="workspace">What is a workspace?</Term> — a workspace is
+            one isolated client company and its dossiers.
+          </p>
+        )}
         <p className="mut" style={{ fontSize: 13 }}>
           {mode === "login"
             ? "Your clients' dossiers are isolated per workspace."

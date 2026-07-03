@@ -1,5 +1,9 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { dossierApi } from "@/lib/dossierApi";
+import { RuleCatalogue } from "./dossier/RuleCatalogue";
+import { EctdPrimer } from "./dossier/EctdPrimer";
+import type { ValidationCriteria } from "@/lib/dossierTypes";
 import type { ReadinessCardData } from "@/lib/types";
 
 const MARK: Record<string, string> = { pass: "✓", current: "◉", todo: "○" };
@@ -18,6 +22,18 @@ export function ReadinessCard({
   onResume: (key: string) => void;
 }) {
   const [showBreakdown, setShowBreakdown] = useState(false);
+  const [showRules, setShowRules] = useState(false);
+  // R6-B: name + version the validation profile that underpins READY-TO-FILE,
+  // live from the engine so it can never drift. (Round-5 blocker: "which
+  // ruleset/version underpins READY-TO-FILE?")
+  const [criteria, setCriteria] = useState<ValidationCriteria | null>(null);
+  useEffect(() => {
+    let live = true;
+    dossierApi.validationRules()
+      .then((c) => { if (live) setCriteria(c.criteria); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, []);
   const doneCount = data.tiles.filter((t) => t.state === "pass").length;
   return (
     <div className="card glass ready-card">
@@ -28,11 +44,33 @@ export function ReadinessCard({
         </span>
       </div>
       <div className="mut" style={{ fontSize: 12 }}>
-        {data.percent}% ready — {data.done} of {data.total} filing steps complete
+        {data.done} of {data.total} filing steps complete ({data.percent}% of the
+        tracked filing checklist)
       </div>
+      {criteria && (
+        <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>
+          Checked against <b>{criteria.name} v{criteria.version}</b> — structural
+          completeness, not HC&apos;s official eValidator.{" "}
+          <button
+            className="ghost"
+            style={{ fontSize: 11, padding: "1px 5px" }}
+            aria-expanded={showRules}
+            onClick={() => setShowRules((s) => !s)}
+          >
+            {showRules ? "Hide rule catalogue" : "Rule catalogue"}
+          </button>
+        </div>
+      )}
+      {showRules && (
+        <div style={{ marginTop: 6 }}>
+          <RuleCatalogue criteria={criteria ?? undefined} />
+        </div>
+      )}
       <div className="progress" aria-hidden>
         <i style={{ width: `${data.percent}%` }} />
       </div>
+
+      <EctdPrimer compact />
 
       <button
         className="ghost"

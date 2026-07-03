@@ -3,8 +3,10 @@ import { useEffect, useRef, useState } from "react";
 import { dossierApi } from "@/lib/dossierApi";
 import type { DocMeta, FeesBlock, SectionNode } from "@/lib/dossierTypes";
 import { DraftChat } from "./DraftChat";
+import { EctdPrimer } from "./EctdPrimer";
 import { useDossier } from "./DossierContext";
 import { Disclosure } from "../Disclosure";
+import { MODULE_4_NOTE, citeLine } from "@/lib/regCitations";
 
 function fmtSize(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -79,12 +81,19 @@ export function SectionPanel({ node }: { node: SectionNode }) {
             </a>
           </div>
         </Disclosure>
+        <EctdPrimer compact />
       </div>
 
       {node.applicability === "na" || node.applicability === "suppressed" ? (
         <div className="notice">
           This section is not applicable for a generic ANDS on the comparative-BE
           pathway — nothing to file here.
+          {String(node.module) === "4" && (
+            <div className="mut" style={{ fontSize: 12, marginTop: 6 }}>
+              {MODULE_4_NOTE.conditional} {MODULE_4_NOTE.exception}
+              <div style={{ marginTop: 4 }}>{citeLine(MODULE_4_NOTE)}</div>
+            </div>
+          )}
         </div>
       ) : affs.length === 0 ? (
         <div className="notice">
@@ -488,12 +497,12 @@ function AuthorForm({
   const formBody = (
     <>
       <p className="mut" style={{ fontSize: 13 }}>
-        <b>Author in-app</b> produces a PDF/A leaf placed at this section's eCTD
-        position (lifecycle operation: <i>new</i>). Your dossier's known facts
-        are pre-filled; fields marked <i>sample</i> show a <b>ghost example</b>{" "}
-        you must replace with your product's real data — the example is never
-        saved as your content, and any left unreplaced keeps this section
-        blocked until you confirm it.
+        <b>Author in-app</b> produces a PDF/A leaf placed at this section&apos;s
+        eCTD position (lifecycle operation: <i>new</i>). Your dossier&apos;s known
+        facts are pre-filled; fields marked <i>example — replace this</i> show
+        greyed <b>example text you must replace</b> with your product&apos;s real
+        data — the example is never saved as your content, and any left
+        unreplaced keeps this section blocked until you confirm it.
       </p>
       {order.map((k) => {
         const multiline = k === "allegation" || k === "study_design";
@@ -503,7 +512,9 @@ function AuthorForm({
           <div key={k}>
             <label>
               {prettyLabel(k)}{" "}
-              {isSample && <span className="applic optional">sample — replace</span>}
+              {isSample && (
+                <span className="applic optional">example — replace this</span>
+              )}
             </label>
             {multiline ? (
               <textarea rows={2} value={fields[k] || ""} placeholder={ph}

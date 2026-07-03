@@ -2,6 +2,8 @@
 import { useState } from "react";
 import { dossierApi } from "@/lib/dossierApi";
 import { Disclosure } from "../Disclosure";
+import { RuleCatalogue } from "./RuleCatalogue";
+import { EctdPrimer } from "./EctdPrimer";
 import type {
   ValidationCriteria,
   ValidationFinding,
@@ -45,6 +47,7 @@ function Row({ f, warn }: { f: ValidationFinding; warn?: boolean }) {
 // disclaimer, and expands into what IS and — explicitly — what is NOT checked.
 function CriteriaHeader({ criteria }: { criteria?: ValidationCriteria }) {
   const [open, setOpen] = useState(false);
+  const [showRules, setShowRules] = useState(false);
   if (!criteria) {
     return (
       <div className="mut" style={{ fontSize: 11, marginTop: 6 }}>
@@ -56,23 +59,40 @@ function CriteriaHeader({ criteria }: { criteria?: ValidationCriteria }) {
   }
   return (
     <div style={{ marginTop: 8 }}>
+      {/* R6-B: the profile NAME + VERSION headline is on the FACE (not hidden
+          in the expander), with the honest "structural; not HC eValidator"
+          qualifier inline so the green result is never mistaken for the
+          official validator. */}
       <div style={{ fontSize: 12, fontWeight: 600 }}>
         {criteria.name}{" "}
         <span className="mut" style={{ fontWeight: 400 }}>
           v{criteria.version}
+        </span>{" "}
+        <span className="mut" style={{ fontWeight: 400 }}>
+          (structural; not HC eValidator)
         </span>
       </div>
       <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>
         {criteria.disclaimer}
       </div>
-      <button
-        className="ghost"
-        style={{ fontSize: 11, padding: "2px 6px", marginTop: 6 }}
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-      >
-        {open ? "Hide coverage" : "What this does / does NOT check"}
-      </button>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <button
+          className="ghost"
+          style={{ fontSize: 11, padding: "2px 6px", marginTop: 6 }}
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+        >
+          {open ? "Hide coverage" : "What this does / does NOT check"}
+        </button>
+        <button
+          className="ghost"
+          style={{ fontSize: 11, padding: "2px 6px", marginTop: 6 }}
+          aria-expanded={showRules}
+          onClick={() => setShowRules((o) => !o)}
+        >
+          {showRules ? "Hide rule catalogue" : "Rule catalogue (CA-E/CA-W ids)"}
+        </button>
+      </div>
       {open && (
         <div style={{ marginTop: 6, fontSize: 11 }}>
           <div className="mut" style={{ opacity: 0.9 }}>
@@ -96,6 +116,11 @@ function CriteriaHeader({ criteria }: { criteria?: ValidationCriteria }) {
               </li>
             ))}
           </ul>
+        </div>
+      )}
+      {showRules && (
+        <div style={{ marginTop: 8 }}>
+          <RuleCatalogue criteria={criteria} />
         </div>
       )}
     </div>
@@ -203,6 +228,7 @@ export function ValidationCard({
       </div>
 
       <CriteriaHeader criteria={v.criteria} />
+      <EctdPrimer compact />
 
       <div style={{ marginTop: 10 }}>
         {errs.map((e, i) => (

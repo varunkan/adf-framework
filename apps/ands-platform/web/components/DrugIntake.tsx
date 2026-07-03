@@ -3,6 +3,7 @@ import { useState } from "react";
 import { api } from "@/lib/api";
 import type { IntakeAssessment } from "@/lib/types";
 import { Term } from "./Term";
+import { MODULE_4_NOTE, citeLine } from "@/lib/regCitations";
 
 // The branching "Tell me about your drug" conversation — routes the pathway and
 // steers a wrong-pathway filer off ANDS BEFORE they build an invalid submission.
@@ -122,9 +123,13 @@ export function DrugIntake({
           ))}
           {assessment.route.ands_content_model && (
             <p className="mut" style={{ fontSize: 13 }}>
-              Because this is an <Term k="ANDS" />, you won&apos;t need Module 4
-              (animal studies). You&apos;ll prove <Term k="bioequivalence" /> to
-              the <Term k="CRP">Canadian Reference Product</Term> instead.
+              Because this is an <Term k="ANDS" /> on the comparative-BE pathway,
+              you generally won&apos;t need Module 4 (nonclinical / animal
+              studies) — you&apos;ll prove <Term k="bioequivalence" /> to the{" "}
+              <Term k="CRP">Canadian Reference Product</Term> instead. This is
+              pathway-conditional, not a flat rule: {MODULE_4_NOTE.exception}
+              <br />
+              <span style={{ fontSize: 12 }}>{citeLine(MODULE_4_NOTE)}</span>
             </p>
           )}
         </div>

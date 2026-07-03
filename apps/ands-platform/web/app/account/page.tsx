@@ -6,6 +6,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { auth, type Principal } from "@/lib/auth";
 import { UserChip } from "@/components/UserChip";
+import { Term } from "@/components/Term";
+import { Disclosure } from "@/components/Disclosure";
 import { WorkspaceAudit } from "@/components/account/WorkspaceAudit";
 import { RoleMatrix } from "@/components/account/RoleMatrix";
 import { WorkspaceMfaPolicy } from "@/components/account/WorkspaceMfaPolicy";
@@ -78,7 +80,7 @@ export default function AccountPage() {
               gap: 4 }}>
               <div><span className="mut">Signed in as</span>{" "}
                 <b>{me.email}</b></div>
-              <div><span className="mut">Workspace</span>{" "}
+              <div><span className="mut"><Term k="workspace">Workspace</Term></span>{" "}
                 <b>{me.tenant_name || "—"}</b>{" "}
                 <small className="mut">(from the account record — every
                   dossier, document and filing here is isolated to this
@@ -96,7 +98,7 @@ export default function AccountPage() {
         <section className="card glass" style={{ padding: "14px 18px",
           maxWidth: 720, marginTop: 14 }}>
           <h2 style={{ margin: 0, fontSize: 15 }}>
-            Multi-factor authentication
+            <Term k="MFA">Multi-factor authentication</Term>
           </h2>
           {!mfaKnown ? (
             <div className="mut" style={{ marginTop: 8, fontSize: 13 }}>
@@ -113,10 +115,10 @@ export default function AccountPage() {
           ) : mfa.step === "idle" ? (
             <div style={{ marginTop: 8, fontSize: 13 }}>
               <p className="mut" style={{ margin: "0 0 10px" }}>
-                Add a time-based one-time code (TOTP) from any standard
-                authenticator app (1Password, Google Authenticator, Authy…)
-                as a second factor. Recommended for every account that can
-                sign or transmit.
+                Add a time-based one-time code (<Term k="TOTP" />) from any
+                standard authenticator app (1Password, Google Authenticator,
+                Authy…) as a second factor. Recommended for every account that
+                can sign or transmit.
               </p>
               <button onClick={startEnroll} disabled={busy}>
                 {busy ? "Working…" : "Set up authenticator app →"}
@@ -127,8 +129,8 @@ export default function AccountPage() {
               gap: 10 }}>
               <div className="notice">
                 <b>Step 1 —</b> add this secret to your authenticator app
-                (or paste the setup link into an app that accepts
-                otpauth&nbsp;URIs):
+                (or paste the setup link into an app that accepts{" "}
+                <Term k="otpauth URI">otpauth&nbsp;URIs</Term>):
                 <div style={{ marginTop: 6, display: "flex", gap: 8,
                   alignItems: "center", flexWrap: "wrap" }}>
                   <code style={{ fontSize: 14, letterSpacing: 1 }}>
@@ -175,17 +177,35 @@ export default function AccountPage() {
         <section className="card glass" style={{ padding: "14px 18px",
           maxWidth: 720, marginTop: 14 }}>
           <h2 style={{ margin: 0, fontSize: 15 }}>Password &amp; sessions</h2>
+          {/* R6-C: plain, non-technical items on the face; the crypto/security
+              detail (salted hash, HttpOnly) moves into a "For your IT
+              department" expander so the sign-in card stays plain. */}
           <ul className="mut" style={{ margin: "8px 0 0", paddingLeft: 18,
             fontSize: 13, display: "grid", gap: 4 }}>
             <li>Passwords must be at least 10 characters with letters and
-              numbers, and are stored only as salted hashes.</li>
+              numbers.</li>
             <li>To change your password, sign out and use{" "}
               <Link href="/login">Forgot password?</Link> — a one-time code
               (15-minute expiry) sets the new one and signs out every other
               session on the account.</li>
-            <li>Sessions last 12 hours and live in an HttpOnly cookie —
-              page scripts can never read your token.</li>
+            <li>You stay signed in for 12 hours, then sign in again.</li>
           </ul>
+          <Disclosure
+            showLabel="For your IT department"
+            hideLabel="Hide IT / security detail"
+            summary={<span>How credentials and sessions are secured</span>}
+          >
+            <ul className="mut" style={{ margin: "6px 0 0", paddingLeft: 18,
+              fontSize: 12, display: "grid", gap: 4 }}>
+              <li>Passwords are stored only as a{" "}
+                <Term k="salted hash" /> — never in a form that can be reversed
+                back into the password.</li>
+              <li>Your session token lives in an <Term k="HttpOnly" /> cookie,
+                so page scripts can never read or exfiltrate it.</li>
+              <li>Every security-relevant change lands on the append-only audit
+                event stream (see the audit viewer below).</li>
+            </ul>
+          </Disclosure>
         </section>
 
         <section className="card glass" style={{ padding: "14px 18px",
@@ -201,10 +221,12 @@ export default function AccountPage() {
             <li>Every record is scoped to this workspace at every service —
               cross-workspace reads are refused at the API, not just hidden
               in the UI.</li>
-            <li>Honest limits: single sign-on (SAML/OIDC) is not yet
-              available — accounts are per-workspace, with TOTP MFA above as
-              the second factor. Every state change lands on the append-only
-              audit event stream.</li>
+            <li>Honest limits: single sign-on (<Term k="SSO" />: <Term k="SAML" />
+              {" / "}<Term k="OIDC" />) and automated provisioning (<Term k="SCIM" />)
+              are not yet available — accounts are per-workspace, with{" "}
+              <Term k="TOTP" /> MFA above as the second factor. Every state
+              change lands on the append-only audit event stream (streaming to
+              your <Term k="SIEM" /> is on the roadmap).</li>
           </ul>
         </section>
 

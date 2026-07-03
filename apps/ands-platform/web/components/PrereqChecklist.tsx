@@ -9,6 +9,7 @@
 // returning filer is not re-prompted.
 import { useEffect, useState } from "react";
 import { Term } from "./Term";
+import { IDENTITY_LEAD_TIMES, citeLine } from "@/lib/regCitations";
 
 const KEY = "ands.prereqAck";
 
@@ -50,6 +51,11 @@ export function PrereqChecklist({ onBegin }: { onBegin: () => void }) {
             Typically issued within a couple of weeks. You need it before you can
             transmit, but not to start.
           </div>
+          <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>
+            {citeLine(IDENTITY_LEAD_TIMES.companyId)}{" "}
+            <a href={IDENTITY_LEAD_TIMES.companyId.url} target="_blank"
+              rel="noopener noreferrer">HC guidance ↗</a>
+          </div>
         </li>
         <li>
           <b>Permanent <Term k="Dossier ID" /></b>{" "}
@@ -60,6 +66,11 @@ export function PrereqChecklist({ onBegin }: { onBegin: () => void }) {
             most 8 weeks before you file. No ID yet? Begin with a placeholder ID
             and set the real one later — validation flags the placeholder as an
             open risk until you do.
+          </div>
+          <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>
+            {citeLine(IDENTITY_LEAD_TIMES.dossierId)}{" "}
+            <a href={IDENTITY_LEAD_TIMES.dossierId.url} target="_blank"
+              rel="noopener noreferrer">HC guidance ↗</a>
           </div>
         </li>
       </ol>

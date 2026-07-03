@@ -1,6 +1,7 @@
 "use client";
 import { useRef, useState } from "react";
 import { dossierApi } from "@/lib/dossierApi";
+import { EctdPrimer } from "./EctdPrimer";
 import type { SectionNode } from "@/lib/dossierTypes";
 
 type Msg = { role: "user" | "assistant"; content: string };
@@ -82,8 +83,13 @@ export function DraftChat({
       <p className="mut" style={{ fontSize: 13 }}>
         Chat with an AI assistant to draft this document — it will ask for any
         details it needs instead of leaving blanks. Nothing is saved until you
-        click <b>Use this draft</b>.
+        click <b>Use this draft</b>. The saved draft is checked by ANDS
+        Studio&apos;s structural completeness check (a technical checker modeled
+        on HC criteria — not HC&apos;s official eValidator), and stays
+        not-yet-filable until you review and confirm it.
       </p>
+      <EctdPrimer compact />
+
       <div className="chat-thread" ref={listRef}>
         {messages.length === 0 && (
           <div className="mut" style={{ fontSize: 13, padding: "8px 0" }}>

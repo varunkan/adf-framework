@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { lifecycleApi } from "@/lib/lifecycleApi";
 import type { LifecycleState, ServiceStandard } from "@/lib/lifecycleApi";
 import { dueMeta } from "@/lib/deadline";
+import { DEFICIENCY_WINDOWS, citeLine } from "@/lib/regCitations";
 
 // WS7 — LIFECYCLE & DEFICIENCY (addresses regops_publisher "lifecycle blindness").
 // Surfaces the DSTS submission lifecycle for this dossier from the lifecycle
@@ -162,6 +163,11 @@ export function LifecyclePanel({ dossierId }: { dossierId: string }) {
                   </span>
                 )}
               </div>
+              {DEFICIENCY_WINDOWS[defKind as "SDN" | "NOD" | "NON"] && (
+                <div className="mut" style={{ fontSize: 10, marginTop: 6 }}>
+                  {citeLine(DEFICIENCY_WINDOWS[defKind as "SDN" | "NOD" | "NON"])}
+                </div>
+              )}
             </div>
           )}
 
