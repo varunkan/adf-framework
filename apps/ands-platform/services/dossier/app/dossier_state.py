@@ -13,6 +13,20 @@ from . import section_tree
 
 EMPTY, PARTIAL, COMPLETE, NA = "empty", "partial", "complete", "na"
 
+# content origins that require an explicit "I reviewed & edited this" confirm
+# before the section counts as complete (WS2 patient-safety block). A worked
+# EXAMPLE ("sample") or an AI draft ("ai_draft") must be structurally incapable
+# of reaching a filing while it is still unconfirmed.
+_REVIEW_REQUIRED_ORIGINS = ("sample", "ai_draft")
+
+
+def needs_review(entry: dict | None) -> bool:
+    """True when the section holds sample-origin or AI-draft content the filer
+    has not yet confirmed as their own. Such content can never be complete."""
+    entry = entry or {}
+    return (entry.get("content_origin") in _REVIEW_REQUIRED_ORIGINS
+            and not entry.get("content_confirmed"))
+
 
 def resolve_status(node: dict, entry: dict | None) -> str:
     """The status of one section given its persisted state entry (or None)."""
@@ -24,11 +38,14 @@ def resolve_status(node: dict, entry: dict | None) -> str:
         return NA
     if node.get("bilingual"):
         langs = {str(x).lower() for x in (entry.get("languages") or [])}
-        if {"en", "fr"} <= langs:
+        # an unconfirmed sample/AI draft is never "complete", even bilingually
+        if {"en", "fr"} <= langs and not needs_review(entry):
             return COMPLETE
         return PARTIAL if langs else EMPTY
     if entry.get("doc_id") or entry.get("action") in ("uploaded", "generated"):
-        return COMPLETE
+        # SAFETY: sample/AI content pending review stalls at PARTIAL — a placed
+        # document is present, but it is not yet the filer's confirmed content.
+        return PARTIAL if needs_review(entry) else COMPLETE
     return EMPTY
 
 
@@ -49,6 +66,10 @@ def annotate(nodes: list[dict], states: dict) -> list[dict]:
         item["documents"] = entry.get("documents")        # bilingual: {en,fr}
         item["languages"] = entry.get("languages")
         item["na_reason"] = entry.get("na_reason")
+        # provenance the UI needs to show the review/confirm banner + block
+        item["content_origin"] = entry.get("content_origin")
+        item["content_confirmed"] = bool(entry.get("content_confirmed"))
+        item["needs_review"] = needs_review(entry)
         out.append(item)
     return out
 
@@ -63,14 +84,27 @@ def module_progress(nodes: list[dict], states: dict) -> dict:
             "complete": total > 0 and filled == total}
 
 
+def unconfirmed_sample_count(states: dict) -> int:
+    """How many sections (across ALL of them, not only required) still hold an
+    unconfirmed sample/AI draft — the pre-file 'N sample values remain' count."""
+    return sum(1 for entry in (states or {}).values() if needs_review(entry))
+
+
 def completeness_gate(*, cs_be_only: bool, states: dict) -> dict:
-    """Which required sections across all modules are still incomplete."""
+    """Which required sections across all modules are still incomplete.
+
+    A required section holding an unconfirmed sample/AI draft is reported as
+    still-missing AND flagged with ``needs_review`` so the caller can render a
+    'review your sample' blocker distinct from a genuinely empty section."""
     missing = []
     for n in _required_docs(section_tree.all_nodes(cs_be_only=cs_be_only)):
-        if resolve_status(n, states.get(n["section"])) != COMPLETE:
+        entry = states.get(n["section"])
+        if resolve_status(n, entry) != COMPLETE:
             missing.append({"section": n["section"], "title": n["title"],
-                            "module": n["module"]})
-    return {"complete": not missing, "missing": missing}
+                            "module": n["module"],
+                            "needs_review": needs_review(entry)})
+    return {"complete": not missing, "missing": missing,
+            "unconfirmed_sample_count": unconfirmed_sample_count(states)}
 
 
 PASS, TODO = "pass", "todo"

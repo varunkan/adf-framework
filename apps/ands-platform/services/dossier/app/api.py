@@ -260,6 +260,13 @@ def build_app(service: DossierService) -> FastAPI:
         return service.form_review(dossier_id, section, body.model_dump(),
                                    x_tenant_id or None)
 
+    @router.post("/ectd/{dossier_id}/section/{section}/confirm-content")
+    def confirm_content(dossier_id: str, section: str, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        # the explicit "I reviewed & edited this — it is my content" action that
+        # clears the sample/AI review block (recorded to the audit trail).
+        service.assert_access(dossier_id, x_tenant_id or None)
+        return service.confirm_content(dossier_id, section)
+
     @router.post("/ectd/{dossier_id}/section/{section}/mark-na")
     def mark_na_section(dossier_id: str, section: str, body: MarkNaIn, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
         service.assert_access(dossier_id, x_tenant_id or None)

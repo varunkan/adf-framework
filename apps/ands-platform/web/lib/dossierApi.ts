@@ -79,6 +79,14 @@ export const dossierApi = {
       `/ectd/${encodeURIComponent(id)}/section/${encodeURIComponent(section)}/review`,
       { method: "POST", body: JSON.stringify(fields) }),
 
+  // WS2: the explicit "I have reviewed and edited this — it is my content"
+  // action that clears the sample/AI review block (recorded to the audit trail).
+  confirmContent: (id: string, section: string) =>
+    j<ContentState>(
+      `/ectd/${encodeURIComponent(id)}/section/${encodeURIComponent(section)}/confirm-content`,
+      { method: "POST", body: JSON.stringify({}) }
+    ),
+
   markNa: (id: string, section: string, reason: string) =>
     j<ContentState>(
       `/ectd/${encodeURIComponent(id)}/section/${encodeURIComponent(section)}/mark-na`,

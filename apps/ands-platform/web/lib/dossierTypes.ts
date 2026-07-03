@@ -42,6 +42,12 @@ export interface SectionNode {
   documents?: Record<string, DocMeta> | null;
   languages?: string[] | null;
   na_reason?: string | null;
+  // WS2 safety provenance: how the section's content was produced and whether
+  // the filer has confirmed it as their own reviewed content. A section with
+  // `needs_review` holds a sample/AI draft that is NOT yet filable.
+  content_origin?: "uploaded" | "generated" | "sample" | "ai_draft" | null;
+  content_confirmed?: boolean;
+  needs_review?: boolean;
 }
 
 export interface ModuleProgress {
@@ -171,10 +177,13 @@ export interface ContentState {
   modules: ModuleView[];
   gate: {
     complete: boolean;
-    missing: { section: string; title: string; module: string }[];
+    missing: { section: string; title: string; module: string;
+               needs_review?: boolean }[];
     section_complete?: boolean;
     fee_paid?: boolean;
     validation_passed?: boolean;
+    // WS2: how many sections still hold an unconfirmed sample/AI draft
+    unconfirmed_sample_count?: number;
   };
   tower: ModuleTower[];
   fees: FeesBlock;

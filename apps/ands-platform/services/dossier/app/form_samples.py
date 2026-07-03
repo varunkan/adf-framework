@@ -93,3 +93,20 @@ def sample_fields(generator_key: str, ctx: dict) -> dict:
     for k, v in sample.items():
         fields.setdefault(k, v)                   # sample fills the gaps
     return {"fields": fields, "sample_keys": sorted(sample.keys())}
+
+
+def _norm(v) -> str:
+    return " ".join(_s(v).split()).lower()
+
+
+def unedited_sample_fields(generator_key: str, ctx: dict) -> list[str]:
+    """SERVER-SIDE sample detection (the safety backstop): the sample-key fields
+    whose submitted value still equals this generator's worked example — i.e. the
+    filer left the example in place. Computed from the deterministic samples, so
+    it holds regardless of any client-supplied 'sample_origin' flag. A non-empty
+    result means the produced document still carries example values and must not
+    reach a filing until the filer confirms it as reviewed content."""
+    b = _base(ctx)
+    sample = _samples_for(_s(generator_key), b)
+    return sorted(k for k, v in sample.items()
+                  if _s(v) and _norm((ctx or {}).get(k)) == _norm(v))

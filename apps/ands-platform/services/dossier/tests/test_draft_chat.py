@@ -83,7 +83,18 @@ def test_generate_with_llm_draft_places_pdf(client):
     assert r.status_code == 200
     node = next(n for m in r.json()["modules"] for n in m["nodes"]
                 if n["section"] == "1.2.3")
-    assert node["status"] == "complete" and node["action"] == "generated"
+    # WS2 SAFETY: an AI draft is placed but is NOT complete until the filer
+    # confirms it as their own reviewed content — it stalls at 'partial'.
+    assert node["action"] == "generated"
+    assert node["content_origin"] == "ai_draft"
+    assert node["content_confirmed"] is False
+    assert node["status"] == "partial"
     doc = client.get(f"/api/dossier/documents/{node['document']['doc_id']}")
     assert doc.status_code == 200
     assert b"The sponsor attests everything." in doc.content
+    # confirming the reviewed draft completes the section
+    c = client.post(f"/api/dossier/ectd/{did}/section/1.2.3/confirm-content",
+                    json={}).json()
+    node = next(n for m in c["modules"] for n in m["nodes"]
+                if n["section"] == "1.2.3")
+    assert node["status"] == "complete" and node["content_confirmed"] is True

@@ -67,8 +67,9 @@ export function DraftChat({
         llm_draft: lastAssistant.content,
       });
       onDone(c, `${node.title} saved as an AI-assisted draft — provenance is ` +
-        "recorded in the audit trail. Use “Review vs Health Canada” under " +
-        "✦ Sample & edit to check the required elements before filing.");
+        "recorded in the audit trail. It is NOT filable yet: review it against " +
+        "the Health Canada guidance, then confirm it as your own content using " +
+        "the review banner on the saved-document card above.");
     } catch (e) {
       onError(String(e));
     } finally {
@@ -99,7 +100,7 @@ export function DraftChat({
       {chatErr && (
         <div className="notice bad">
           {chatErr.includes("GROQ_API_KEY") || chatErr.includes("not configured")
-            ? "AI drafting isn't set up yet (no GROQ_API_KEY). Use the standard \"Author\" button below instead, or ask an admin to configure it."
+            ? "AI drafting isn't set up yet (no GROQ_API_KEY). Switch to the \"✦ Fill the form\" tab above to author this section instead, or ask an admin to configure it."
             : chatErr}
         </div>
       )}

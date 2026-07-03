@@ -76,6 +76,13 @@ export default function ModuleWorkspace() {
               fee, or validation).
             </div>
           )}
+          {(content.gate.unconfirmed_sample_count || 0) > 0 && (
+            <div className="notice bad" style={{ fontSize: 12, marginTop: 8 }}>
+              <b>⚠ {content.gate.unconfirmed_sample_count} sample/AI draft
+              value(s) remain</b> — each must be reviewed and confirmed as your
+              own content before this submission can be filed or exported.
+            </div>
+          )}
           <div className="ready-flags" style={{ marginTop: 8, fontSize: 12 }}>
             <span className={content.gate.section_complete ? "ok-flag" : "todo-flag"}>
               {content.gate.section_complete ? "✓" : "○"} Documents

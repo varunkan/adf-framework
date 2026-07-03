@@ -86,7 +86,15 @@ export function SectionPanel({ node }: { node: SectionNode }) {
           {node.section === "1.3.1" && (
             <PmXmlPanel dossierId={dossierId} title={content?.dossier_id || ""} />
           )}
-          <AttachedDocs node={node} />
+          <AttachedDocs
+            node={node}
+            dossierId={dossierId}
+            onConfirm={(c) => {
+              setContent(c);
+              setAnnounce(`${node.section} confirmed as your reviewed content`);
+            }}
+            onError={setErr}
+          />
 
           <div className="affordance-bar" role="tablist" aria-label="Actions">
             {affs.includes("upload") && (
@@ -136,7 +144,29 @@ export function SectionPanel({ node }: { node: SectionNode }) {
   );
 }
 
-function AttachedDocs({ node }: { node: SectionNode }) {
+// The honest AI provenance tooltip: what the chip means + where AI-processed
+// dossier text goes and how per-sponsor isolation holds. md5 is NOT claimed as
+// validation anywhere — it is only a content fingerprint.
+const AI_PROVENANCE_TOOLTIP =
+  "Drafted interactively with the AI assistant under your direction, and " +
+  "recorded in the audit trail. Data residency: your dossier text is sent to " +
+  "the configured AI provider for this draft only, isolated per sponsor — it " +
+  "is never shared across clients or used to train models. This is assistance, " +
+  "not a filing: review it against the Health Canada guidance and confirm it " +
+  "as your own content before filing.";
+
+function AttachedDocs({
+  node,
+  dossierId,
+  onConfirm,
+  onError,
+}: {
+  node: SectionNode;
+  dossierId: string;
+  onConfirm: (c: any) => void;
+  onError: (e: string) => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
   const docs: { lang?: string; meta: DocMeta }[] = [];
   if (node.documents) {
     for (const [lang, meta] of Object.entries(node.documents)) docs.push({ lang, meta });
@@ -150,8 +180,46 @@ function AttachedDocs({ node }: { node: SectionNode }) {
       </div>
     );
   if (docs.length === 0) return null;
+
+  // WS2 SAFETY: a persistent, sighted-visible blocking banner on the saved
+  // document card whenever this section holds an unconfirmed sample/AI draft.
+  // This is NOT a screen-reader-only region — it must block the eye too.
+  const needsReview = !!node.needs_review;
+  const isAi = node.content_origin === "ai_draft";
+
+  async function confirm() {
+    setConfirming(true);
+    try {
+      onConfirm(await dossierApi.confirmContent(dossierId, node.section));
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setConfirming(false);
+    }
+  }
+
   return (
     <div className="attached">
+      {needsReview && (
+        <div className="notice bad" role="status"
+          style={{ marginBottom: 10 }}>
+          <b>⚠ Not yet filable — review required.</b>{" "}
+          {isAi
+            ? "This is an AI-assisted draft. "
+            : "This section was filled from a worked example (sample). "}
+          It will <b>not</b> count as complete and the submission cannot be
+          exported until you review it against the Health Canada guidance and
+          confirm it as your own content. Run <b>Review vs Health Canada</b>{" "}
+          under <b>✦ Author in-app</b>, edit every value to your product, then:
+          <div style={{ marginTop: 8 }}>
+            <button onClick={confirm} disabled={confirming}>
+              {confirming
+                ? "Recording…"
+                : "I have reviewed and edited this — it is my content"}
+            </button>
+          </div>
+        </div>
+      )}
       {docs.map(({ lang, meta }) => (
         <div key={meta.doc_id} className="attached-doc">
           <span className="ad-icon" aria-hidden>
@@ -162,18 +230,26 @@ function AttachedDocs({ node }: { node: SectionNode }) {
             {lang ? <b className="ad-lang">{lang.toUpperCase()}</b> : null} {meta.filename}
           </span>
           <span className="ad-meta mut">
-            {fmtSize(meta.size)} · md5 {meta.checksum.slice(0, 8)}…
+            {/* md5 is a content fingerprint (matches the placed leaf), NOT a
+                validation or acceptance signal — labelled as such. */}
+            {fmtSize(meta.size)} · fingerprint md5 {meta.checksum.slice(0, 8)}…
           </span>
-          {/* provenance travels with every document — who/what produced it */}
+          {/* provenance travels with every document — who/what produced it,
+              and whether the filer has confirmed it as their own content. */}
           <span
-            className={`chip ${meta.origin === "ai_draft" ? "blocked" : "ready"}`}
+            className={`chip ${needsReview ? "blocked" : "ready"}`}
             style={{ fontSize: 11 }}
-            title={meta.origin === "ai_draft"
-              ? "Drafted interactively with the AI assistant under your direction. Recorded in the audit trail. Review against the Health Canada guidance before filing."
+            title={isAi
+              ? AI_PROVENANCE_TOOLTIP
+              : node.content_origin === "sample"
+              ? "Filled from a worked example (sample) using a deterministic Health Canada template. Replace the sample values with your product's real data, then confirm it as your content before filing."
               : meta.origin === "generated"
               ? "Produced in-app from your entries by a deterministic Health Canada template."
               : "Uploaded by your team — content is exactly what you provided."}>
-            {meta.origin === "ai_draft" ? "AI-assisted — review before filing"
+            {needsReview
+              ? (isAi ? "AI draft — review & confirm" : "sample — review & confirm")
+              : node.content_confirmed && (isAi || node.content_origin === "sample")
+              ? (isAi ? "AI-assisted · confirmed" : "authored in-app · confirmed")
               : meta.origin === "generated" ? "authored in-app"
               : "uploaded"}
           </span>
@@ -303,7 +379,10 @@ function AuthorForm({
   onError: (e: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  // real dossier facts pre-fill as saved values; sample keys start EMPTY and
+  // show the worked example only as a ghost placeholder (never saved content).
   const [fields, setFields] = useState<Record<string, string>>({});
+  const [ghosts, setGhosts] = useState<Record<string, string>>({});
   const [order, setOrder] = useState<string[]>([]);
   const [sampleKeys, setSampleKeys] = useState<Set<string>>(new Set());
   const [review, setReview] = useState<any>(null);
@@ -311,22 +390,46 @@ function AuthorForm({
   const aiDraftable = !!node.ai_draftable;
   const [mode, setMode] = useState<"ai" | "template">(aiDraftable ? "ai" : "template");
 
-  // pull the realistic, editable sample (real dossier facts + worked example)
+  // pull the realistic sample. Real dossier facts become editable values; each
+  // sample/example key becomes a GHOST placeholder on an empty field, so the
+  // example is not saved content the filer can forget to replace.
   useEffect(() => {
     let live = true;
     setReview(null);
     dossierApi.formSample(dossierId, node.section).then((s) => {
       if (!live) return;
-      setFields(s.fields || {});
-      setOrder(Object.keys(s.fields || {}));
-      setSampleKeys(new Set(s.sample_keys || []));
+      const sk = new Set(s.sample_keys || []);
+      const all = s.fields || {};
+      const real: Record<string, string> = {};
+      const ghost: Record<string, string> = {};
+      for (const [k, v] of Object.entries(all)) {
+        if (sk.has(k)) ghost[k] = v;   // worked example → ghost placeholder
+        else real[k] = v;              // dossier's own fact → editable value
+      }
+      setFields(real);
+      setGhosts(ghost);
+      setOrder(Object.keys(all));
+      setSampleKeys(sk);
     }).catch(() => {});
     return () => { live = false; };
   }, [dossierId, node.section]);
 
+  // Any sample-key field the filer left blank falls back to the ghost example
+  // on author. Whether the fill still carries worked-example values is decided
+  // SERVER-SIDE (it re-derives which fields equal the example and blocks until
+  // confirmed) — the client does not send, and the server does not trust, a
+  // sample-origin flag. So an unreplaced example is always caught.
+  function payload(): Record<string, any> {
+    const merged: Record<string, string> = { ...fields };
+    for (const k of sampleKeys) {
+      if (!((merged[k] || "").trim()) && ghosts[k]) merged[k] = ghosts[k];
+    }
+    return merged;
+  }
+
   async function runReview(): Promise<boolean> {
     try {
-      const r = await dossierApi.formReview(dossierId, node.section, fields);
+      const r = await dossierApi.formReview(dossierId, node.section, payload());
       setReview(r);
       return r.passed;
     } catch (e) {
@@ -338,8 +441,12 @@ function AuthorForm({
   async function go() {
     setBusy(true);
     try {
-      const c = await dossierApi.generate(dossierId, node.section, fields);
-      onDone(c, `${node.title} authored`);
+      const p = payload();
+      const c = await dossierApi.generate(dossierId, node.section, p);
+      onDone(c, p.sample_origin
+        ? `${node.title} drafted from the sample — review it against the ` +
+          "Health Canada guidance and confirm it as your content before filing."
+        : `${node.title} authored`);
       await runReview();   // surface HC content review right after authoring
     } catch (e) {
       onError(String(e));
@@ -351,23 +458,28 @@ function AuthorForm({
   const formBody = (
     <>
       <p className="mut" style={{ fontSize: 13 }}>
-        Pre-filled with a realistic sample from your dossier — <b>edit every
-        field</b> to your product, then author. Fields marked <i>sample</i> are
-        worked examples to replace.
+        <b>Author in-app</b> produces a PDF/A leaf placed at this section's eCTD
+        position (lifecycle operation: <i>new</i>). Your dossier's known facts
+        are pre-filled; fields marked <i>sample</i> show a <b>ghost example</b>{" "}
+        you must replace with your product's real data — the example is never
+        saved as your content, and any left unreplaced keeps this section
+        blocked until you confirm it.
       </p>
       {order.map((k) => {
         const multiline = k === "allegation" || k === "study_design";
+        const isSample = sampleKeys.has(k);
+        const ph = isSample ? `e.g. ${ghosts[k] || ""}` : undefined;
         return (
           <div key={k}>
             <label>
               {prettyLabel(k)}{" "}
-              {sampleKeys.has(k) && <span className="applic optional">sample</span>}
+              {isSample && <span className="applic optional">sample — replace</span>}
             </label>
             {multiline ? (
-              <textarea rows={2} value={fields[k] || ""}
+              <textarea rows={2} value={fields[k] || ""} placeholder={ph}
                 onChange={(e) => set(k, e.target.value)} />
             ) : (
-              <input value={fields[k] || ""}
+              <input value={fields[k] || ""} placeholder={ph}
                 onChange={(e) => set(k, e.target.value)} />
             )}
           </div>
@@ -388,13 +500,17 @@ function AuthorForm({
   if (aiDraftable) {
     return (
       <div className="author-form">
-        <div className="affordance-bar" role="tablist" aria-label="Drafting mode">
+        {/* Two ways to draft the SAME leaf; each keeps its own Review action so
+            the filer reviews in the mode they drafted in. Both save an
+            unconfirmed draft that the review/confirm banner (on the saved-doc
+            card above) then blocks until confirmed. */}
+        <div className="affordance-bar" role="tablist" aria-label="How to draft this section">
           <button role="tab" aria-selected={mode === "ai"}
             className={mode === "ai" ? "on" : ""}
             onClick={() => setMode("ai")}>💬 Draft with AI</button>
           <button role="tab" aria-selected={mode === "template"}
             className={mode === "template" ? "on" : ""}
-            onClick={() => setMode("template")}>✦ Sample &amp; edit</button>
+            onClick={() => setMode("template")}>✦ Fill the form</button>
         </div>
         {mode === "ai" ? (
           <DraftChat node={node} dossierId={dossierId} onDone={onDone} onError={onError} />

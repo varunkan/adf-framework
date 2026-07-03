@@ -290,11 +290,19 @@ class DossierService:
         self.repo.save_dossier(model)
 
     def _write_entry(self, dossier_id, section, node, *, action, meta=None,
-                     lang=None, leaf_id=None, na_reason=None) -> dict:
+                     lang=None, leaf_id=None, na_reason=None,
+                     content_origin=None, content_confirmed=None) -> dict:
         entry = self.repo.get_section_state(_s(dossier_id), _s(section)) or {}
         entry["action"] = action
         if na_reason is not None:
             entry["na_reason"] = na_reason
+        # SAFETY provenance: what produced this section's content, and whether
+        # the filer has confirmed it as their own reviewed content. Sample/AI
+        # content stays unconfirmed (blocking the gate) until confirm_content.
+        if content_origin is not None:
+            entry["content_origin"] = content_origin
+        if content_confirmed is not None:
+            entry["content_confirmed"] = bool(content_confirmed)
         if node["bilingual"] and lang:
             docs = dict(entry.get("documents") or {})
             if meta:
@@ -337,8 +345,10 @@ class DossierService:
             raise ProblemError(413, str(exc), rule="file_too_large")
         leaf_id = node["leaf_id"] + (f"-{lang}" if node["bilingual"] and lang else "")
         self._place(dossier_id, node, leaf_id, body, self._ext(filename))
+        # an upload is the filer's OWN content — origin uploaded, confirmed.
         self._write_entry(dossier_id, section, node, action="uploaded",
-                          meta=meta, lang=lang, leaf_id=leaf_id)
+                          meta=meta, lang=lang, leaf_id=leaf_id,
+                          content_origin="uploaded", content_confirmed=True)
         audit_hook.record("dossier.document_uploaded", _s(dossier_id),
                           {"section": _s(section), "filename": _s(filename),
                            "lang": lang or ""})
@@ -350,24 +360,67 @@ class DossierService:
         if "generate" not in node["affordances"] or not key:
             raise ProblemError(422, "this section cannot be authored in-app",
                                rule="section_not_generatable", detail=_s(section))
-        ctx = {**self._ctx_for(dossier_id), **(payload or {})}
+        payload = payload or {}
+        ctx = {**self._ctx_for(dossier_id), **payload}
         try:
             doc = generators.generate(key, ctx)
         except KeyError:
             raise ProblemError(422, "no generator for this section", detail=key)
-        # provenance travels with the document: an AI-assisted draft is a
-        # different origin than a deterministic template fill
-        origin = "ai_draft" if (payload or {}).get("llm_draft") else "generated"
+        # provenance travels with the document: an AI-assisted draft, a
+        # sample-origin fill, and a deterministic template fill are distinct.
+        # SAFETY: an AI draft OR a fill still carrying worked-example values is
+        # UNCONFIRMED — it cannot complete the section or reach export until the
+        # filer confirms it as reviewed content.
+        #
+        # The sample decision is made SERVER-SIDE, not from a client flag: the
+        # server re-derives which fields still equal this generator's worked
+        # example. So a client that omits/forges ``sample_origin`` cannot slip
+        # example values into a filing. An explicit client hint still counts
+        # (fail-safe OR) but is never required and can never turn the block off.
+        is_ai = bool(_s(payload.get("llm_draft")))   # carries the AI text itself
+        unedited_samples = form_samples.unedited_sample_fields(key, ctx)
+        is_sample = bool(unedited_samples) or bool(payload.get("sample_origin"))
+        origin = "ai_draft" if is_ai else "sample" if is_sample else "generated"
+        # blob store keeps its own coarse origin (ai_draft|generated); a
+        # sample-fill's bytes are template output, hence "generated" there.
+        blob_origin = "ai_draft" if is_ai else "generated"
         meta = self.store.put(_s(dossier_id), _s(section), doc["filename"],
-                              doc["content_type"], doc["body"], origin=origin)
+                              doc["content_type"], doc["body"],
+                              origin=blob_origin)
         self._place(dossier_id, node, node["leaf_id"], doc["body"],
                     self._ext(doc["filename"]))
+        confirmed = not (is_ai or is_sample)
         self._write_entry(dossier_id, section, node, action="generated",
-                          meta=meta, leaf_id=node["leaf_id"])
+                          meta=meta, leaf_id=node["leaf_id"],
+                          content_origin=origin, content_confirmed=confirmed)
         audit_hook.record("dossier.document_generated", _s(dossier_id),
                           {"section": _s(section),
                            "generator": _s(node.get("generator_key")),
-                           "ai_draft": bool((payload or {}).get("llm_draft"))})
+                           "content_origin": origin,
+                           "confirmed": confirmed,
+                           "ai_draft": is_ai})
+        return self.content_state(dossier_id)
+
+    def confirm_content(self, dossier_id, section) -> dict:
+        """The explicit 'I have reviewed and edited this — it is my content'
+        action. Clears the sample/AI review flag so the section can complete,
+        and records the confirmation to the audit stream. SAFETY: this is the
+        ONLY path that turns unconfirmed sample/AI content into filable."""
+        node = self._node(dossier_id, section)
+        entry = self.repo.get_section_state(_s(dossier_id), _s(section))
+        if not entry or not (entry.get("doc_id")
+                             or entry.get("documents")
+                             or entry.get("action") in ("uploaded",
+                                                        "generated")):
+            raise ProblemError(422, "there is no drafted content in this "
+                               "section to confirm", rule="nothing_to_confirm",
+                               detail=_s(section))
+        origin = entry.get("content_origin") or "generated"
+        self._write_entry(dossier_id, section, node,
+                          action=entry.get("action") or "generated",
+                          content_confirmed=True)
+        audit_hook.record("dossier.content_confirmed", _s(dossier_id),
+                          {"section": _s(section), "prior_origin": origin})
         return self.content_state(dossier_id)
 
     def prepare_draft_chat(self, dossier_id: str, section: str) -> tuple[dict, dict]:
@@ -570,6 +623,25 @@ class DossierService:
                 if doc:
                     documents[meta.get("filename") or meta["doc_id"]] = doc["body"]
         result = ectd_validation.validate(model, documents=documents)
+        # SAFETY (WS2): the export gate fails closed on unconfirmed sample/AI
+        # content. Surface each such section as a hard validation error so a
+        # worked example is structurally incapable of reaching a filing — WS1's
+        # export gate already blocks on any error, so no WS1 code is touched.
+        for section, state in self.repo.list_section_state(
+                _s(dossier_id)).items():
+            if dossier_state.needs_review(state):
+                origin = state.get("content_origin") or "sample"
+                label = ("AI-drafted" if origin == "ai_draft"
+                         else "sample-origin")
+                result["errors"].append({
+                    "rule": "unconfirmed_sample_content",
+                    "rule_id": "CA-WS2-0001",
+                    "message": f"Section {section} holds {label} content that "
+                               "has not been reviewed and confirmed. Open the "
+                               "section and confirm it as your own content "
+                               "before filing.",
+                    "leaf": section})
+                result["passed"] = False
         if _s(dossier_id).startswith("d"):
             result["errors"].insert(0, {
                 "rule": "placeholder_dossier_id", "rule_id": "CA-REP-0001",
@@ -613,6 +685,17 @@ class DossierService:
                             "checked": 0})
         # combined "ready to file" gate: content + fee arranged + validation clean
         missing = list(section_gate["missing"])
+        # SAFETY: surface the unconfirmed sample/AI drafts as an explicit
+        # pre-file blocker ("N sample values remain") so a worked example can
+        # never silently ride into a real Health Canada filing.
+        sample_count = section_gate.get("unconfirmed_sample_count", 0)
+        if sample_count:
+            missing.append({
+                "section": "unconfirmed_sample", "module": "",
+                "needs_review": True,
+                "title": f"{sample_count} sample/AI draft value(s) still need "
+                         "your review — confirm each as your own content "
+                         "before filing"})
         if not fee_paid:
             missing.append({"section": "1.2.2", "module": "1",
                             "title": "Fee payment / small-business status "
@@ -625,7 +708,8 @@ class DossierService:
                 "missing": missing,
                 "section_complete": section_gate["complete"],
                 "fee_paid": fee_paid,
-                "validation_passed": validation.get("passed", True)}
+                "validation_passed": validation.get("passed", True),
+                "unconfirmed_sample_count": sample_count}
         return {
             "dossier_id": dossier_id, "cs_be_only": cs_be_only,
             "version": tree["version"], "modules": modules, "gate": gate,
