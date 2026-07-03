@@ -35,7 +35,7 @@ function NoaChip({ clock }: { clock: NoaClock }) {
 function FeeChip({ state }: { state: FeeState }) {
   switch (state.kind) {
     case "loading":
-      return <span className="chip mut" aria-label="Fee status loading">Fee …</span>;
+      return null;  // no placeholder flicker — the chip appears once resolved
     case "paid":
       return <span className="chip ready">Fee paid</span>;
     case "waived":

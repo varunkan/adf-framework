@@ -118,6 +118,8 @@ export default function PortfolioPage() {
         <UserChip />
         <Link className="chip" href="/help">Help</Link>
         <Link className="chip" href="/dossiers">Dossier manager</Link>
+        <Link className="chip" href="/registry">Registry</Link>
+        <Link className="chip" href="/correspondence">Correspondence</Link>
         <Link className="chip" href="/">Guided journey →</Link>
       </header>
       <main className="dossier-home">

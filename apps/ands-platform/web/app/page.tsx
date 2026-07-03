@@ -83,13 +83,15 @@ export default function Page() {
       <header className="topbar">
         <span className="brand">
           <span className="dot" aria-hidden />
-          ANDS&nbsp;Studio <small>· file a drug like a story</small>
+          ANDS&nbsp;Studio <small>· guided ANDS filing</small>
         </span>
         <span className="spacer" />
         <UserChip />
         <Link className="chip" href="/help">Help</Link>
         <Link className="chip" href="/dossiers">My dossiers</Link>
         <Link className="chip" href="/portfolio">Portfolio</Link>
+        <Link className="chip" href="/registry">Registry</Link>
+        <Link className="chip" href="/correspondence">Correspondence</Link>
         {view && (
           <>
             <span className={`chip ${view.readiness.status === "READY" ? "ready" : "blocked"}`}>
@@ -163,16 +165,17 @@ function Hero({
   return (
     <div className="hero">
       <h1>
-        File a drug with Health Canada,
+        File your ANDS with Health Canada —
         <br />
-        <span className="accent-text">like telling a story.</span>
+        <span className="accent-text">guided end to end.</span>
       </h1>
       <p>
-        An Abbreviated New Drug Submission is one of the most complex things a
-        company can file. This walks you through it step by step — explaining
-        every term, branching you onto the right path, and showing your
-        submission take shape in 3D until it&apos;s ready to send. No regulatory
-        background needed.
+        An Abbreviated New Drug Submission is one of the most complex filings a
+        company can make. This walks you through it step by step — every term
+        explained in plain language with the regulatory vocabulary kept
+        precise, the right pathway chosen for your product, and your
+        submission&apos;s readiness visible at every moment until it&apos;s ready to
+        send.
       </p>
       <button className="start" onClick={onStart} disabled={busy}>
         {busy ? "Starting…" : "Start my submission →"}

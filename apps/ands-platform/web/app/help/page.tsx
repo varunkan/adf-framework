@@ -83,6 +83,8 @@ export default function HelpPage() {
         <UserChip />
         <Link className="chip" href="/dossiers">Dossier manager</Link>
         <Link className="chip" href="/portfolio">Portfolio</Link>
+        <Link className="chip" href="/registry">Registry</Link>
+        <Link className="chip" href="/correspondence">Correspondence</Link>
         <Link className="chip" href="/">Guided journey →</Link>
       </header>
       <main className="dossier-home">
