@@ -33,6 +33,36 @@ auto-compaction as the window fills. (Hard enforcement is a harness/hook concern
 not something the model can self-trigger reliably — so treat the 1M-token mark as
 a standing checkpoint to compact.)
 
+**Treat user/customer feedback as literal acceptance criteria — implement ALL of
+it, don't guess.** When real feedback exists (users, reviewers, evaluation
+personas), enumerate EVERY concrete ask and implement the full set faithfully, the
+way they asked — do not cherry-pick a few top themes, silently drop, or
+de-prioritize comments away. Never guess at fixes when explicit asks are on the
+table. Re-measure/re-review only AFTER the whole backlog is built and verified —
+evaluation cycles are expensive; spend them confirming completed work, not
+re-discovering asks you already hold. Keep a written backlog and check off each
+item against a code change + test so nothing is ignored.
+
+**Root-cause before any fix; never blind-regenerate.** When a build/test/gate/
+review fails, read the error and trace the actual cause before changing code. No
+shotgun edits, no regenerating a whole file to dodge a diagnosis.
+
+**Test-first (TDD).** For any code change, write the test first, prove it RED,
+then implement to GREEN. Let the tests, not vibes, define done.
+
+**Verify against the running system.** "Done" = tests green AND observed working
+in the real running app AND self-reviewed AND committed — never claimed from
+assumptions. Report outcomes faithfully (failures with output, skipped steps as
+skipped).
+
+**Adversarially self-review before every commit.** Do a pass that actively tries
+to REFUTE your own change — security holes, edge cases, unfaithful claims, broken
+invariants. This cheap pass repeatedly catches real defects pre-ship.
+
+**Ground every claim in current source (file:line); never assert from memory.**
+Recalled facts and this file may be stale — verify a symbol/flag/behavior still
+exists in the code before relying on it.
+
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph
 

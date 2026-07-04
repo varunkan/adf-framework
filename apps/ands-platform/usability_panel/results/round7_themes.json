@@ -1,0 +1,852 @@
+[
+ {
+  "flow_key": "onboarding",
+  "themes": [
+   {
+    "name": "Enterprise SSO/SCIM absent = procurement blocker",
+    "respondent_count": 10,
+    "severity": "blocker",
+    "representative_quote": "our security team won't let a client-data tool live outside SSO, so \"on the roadmap\" means we can't actually adopt this yet regardless of how good the rest is.",
+    "persona_ids": [
+     "ra_director_cro",
+     "ra_officer_generic",
+     "startup_founder",
+     "cdmo_ra_manager"
+    ],
+    "concrete_fix": "On the Account & security roadmap card, replace bare \"on the roadmap\" with committed target quarters per item (SSO/SAML/OIDC, SCIM, SIEM) and add a \"Request early access / notify me\" button that captures the org so IT can plan procurement; keep the honest \"not yet available\" label."
+   },
+   {
+    "name": "Three role names (owner/workspace admin/tenant admin) confuse",
+    "respondent_count": 11,
+    "severity": "major",
+    "representative_quote": "\"owner (the platform vendor)\" vs \"workspace admin\" vs \"tenant admin\" is three names for adjacent concepts and I had to re-read it — collapse or rename that.",
+    "persona_ids": [
+     "ra_junior",
+     "qa_manager",
+     "consultant_ex_hc",
+     "startup_founder",
+     "cro_pm",
+     "labelling_specialist"
+    ],
+    "concrete_fix": "In the per-role permission table on Account & security, rename to plain parallel terms (e.g. \"Platform vendor / Workspace admin / Company admin\"), badge \"Your role\" at the top, and put the vendor-only \"owner\" row behind a collapsed \"Advanced / vendor roles\" expander so signups see only the two roles that apply to them."
+   },
+   {
+    "name": "No audit trail / Part-11 controls named",
+    "respondent_count": 6,
+    "severity": "blocker",
+    "representative_quote": "add and surface a tamper-evident audit log and explicit 21 CFR Part 11 / GxP language on the Account & security page, because \"isolated\" and \"refused at the API\" are claims I'd have to independently validate.",
+    "persona_ids": [
+     "qa_manager",
+     "regops_publisher",
+     "cdmo_ra_manager"
+    ],
+    "concrete_fix": "Add an \"Audit & compliance\" section to Account & security showing a real login/settings-change event log (who, what, when for sign-ins, MFA-policy and role changes) plus a named 21 CFR Part 11 / GxP-alignment statement and an \"Export security settings & role table (PDF)\" button for inspection binders."
+   },
+   {
+    "name": "Acronym/jargon density overloads non-IT and newcomers",
+    "respondent_count": 8,
+    "severity": "major",
+    "representative_quote": "the Account & security page throws a lot of jargon at me - SAML/OIDC, SCIM, SIEM, tenant admin versus workspace admin - and even with hover definitions that's more plumbing than a project manager needs to see.",
+    "persona_ids": [
+     "cro_pm",
+     "veteran_contractor",
+     "ra_junior",
+     "labelling_specialist",
+     "startup_founder"
+    ],
+    "concrete_fix": "Move the SAML/OIDC/SCIM/SIEM data-residency card off the sign-in/onboarding screen behind an \"Enterprise & IT details\" expander (collapsed by default), and on each roadmap acronym add a one-line \"why you'd care\" plain-English subtitle rather than hover-only definitions."
+   },
+   {
+    "name": "12-hour session not configurable; MFA optional-by-default",
+    "respondent_count": 9,
+    "severity": "major",
+    "representative_quote": "12-hour sessions may be too long for a shared-workstation CRO environment, and I'd want configurable session timeout and idle lockout.",
+    "persona_ids": [
+     "ra_director_cro",
+     "qa_manager",
+     "consultant_ex_hc",
+     "regops_publisher",
+     "startup_founder",
+     "cdmo_ra_manager"
+    ],
+    "concrete_fix": "In Account & security, make session length and idle-lockout an admin-configurable, documented policy (dropdown: 1/4/8/12h + idle timeout), default workspace MFA to Required rather than optional-per-member, and surface both session length and MFA policy during onboarding instead of buried in settings."
+   },
+   {
+    "name": "Onboarding shows account plumbing, not the filing / next step",
+    "respondent_count": 6,
+    "severity": "major",
+    "representative_quote": "the sign-in screen tells me nothing about what I'm about to build or whether this tool actually knows Health Canada's eCTD rules — I'd add a one-line reassurance or a \"New to ANDS? Start here\" pointer.",
+    "persona_ids": [
+     "cro_pm",
+     "quality_director_newcomer",
+     "startup_founder",
+     "ra_junior"
+    ],
+    "concrete_fix": "Add a post-login \"What you'll do here\" primer: one-line tooltips on the top-bar chips (Journey, Dossiers, Portfolio, Registry, Correspondence), a \"New to ANDS? Start here\" pointer, and route CRO_PM-type roles to a Portfolio/status dashboard as the first screen rather than the security page; add a persistent demo-vs-production banner."
+   },
+   {
+    "name": "No French/bilingual cue on a Health Canada tool",
+    "respondent_count": 2,
+    "severity": "major",
+    "representative_quote": "for anything touching Health Canada and product monographs, I'd expect a language toggle or at least a note that the UI is bilingual, right on the sign-in card.",
+    "persona_ids": [
+     "labelling_specialist"
+    ],
+    "concrete_fix": "Add a visible FR/EN language toggle on the sign-in card and a one-line clarifier that \"self-hosted\" data residency can stay in Canada, since bilingual Product Monograph obligations and Canadian residency are gating questions for HC filers."
+   }
+  ],
+  "highest_leverage_fix": "Fix the three-name role model plus jargon density together: rename owner/workspace-admin/tenant-admin to plain parallel terms, badge \"Your role\", and collapse enterprise/vendor detail (roles + SAML/OIDC/SCIM/SIEM residency card) behind expanders that are closed by default on the sign-in/onboarding surface. This directly attacks the round7 clarity regression (density/overload) that hit the widest set of personas — the newcomers, juniors, the CRO PM, the veteran contractor — without touching the honesty and isolation copy everyone praised.",
+  "do_not_break": "The intellectual honesty must be preserved verbatim: the \"Roadmap — not yet available\" / \"Nothing below works yet\" cards with target quarters, the demo-mode notice (\"no outbound email — in production the code is emailed and never displayed\") and the demo-code reveal being flagged demo-only. Also keep the trust anchors every persona cited: \"Your clients' dossiers are isolated per workspace,\" \"cross-workspace reads are refused at the API,\" the self-hosted/data-residency callout, the \"Your role\" badge on the permission table, the live password-rule counter, disabled-until-filled button + Enter-to-submit, the CRO-vs-own-company signup fork with adaptive labels, hover-defined terms, and MFA enforced only after the code verifies."
+ },
+ {
+  "flow_key": "journey",
+  "themes": [
+   {
+    "name": "Readiness badge = step-completion, not real eCTD validation",
+    "respondent_count": 24,
+    "severity": "blocker",
+    "representative_quote": "A readiness badge that flips READY vs BLOCKED on a percentage of 'filing steps complete' is a workflow checklist, not validation; I trust a submission when it passes eValidator against the current Health Canada validation rules and produces a well-formed eCTD backbone with correct MD5s, and nothing here names a rule set, a version, or an XML output I could inspect.",
+    "persona_ids": [
+     "ra_director_cro",
+     "ra_officer_generic",
+     "ra_junior",
+     "qa_manager",
+     "consultant_ex_hc",
+     "startup_founder",
+     "regops_publisher",
+     "cro_pm",
+     "labelling_specialist",
+     "veteran_contractor",
+     "cdmo_ra_manager",
+     "quality_director_newcomer"
+    ],
+    "concrete_fix": "On the readiness panel, replace the bare 'READY TO FILE' badge with a two-tier status: 'In-tool checks passed' vs a distinct 'eCTD validation' row that runs a named validator profile (rule set + version, e.g. HC eCTD Validation Rules vX / ICH). Add a 'Validation report' sub-panel listing rule IDs with pass/fail/warning counts and an Export button producing an archivable report; gate the green 'READY TO FILE' state on that report passing, not on step-completion."
+   },
+   {
+    "name": "Hard linear gating boxes in non-linear expert filers",
+    "respondent_count": 8,
+    "severity": "major",
+    "representative_quote": "it's very wizard-driven, and experienced people like me who work non-linearly (jumping between Module 1 labelling and Module 3 while waiting on data) may feel boxed in by the locked steps.",
+    "persona_ids": [
+     "ra_director_cro",
+     "ra_officer_generic",
+     "consultant_ex_hc",
+     "regops_publisher",
+     "cdmo_ra_manager"
+    ],
+    "concrete_fix": "Add an 'Expert mode' toggle on the journey rail header that unlocks non-blocking navigation: locked steps become 'not-yet-recommended' (dimmed, still clickable) instead of hard-locked, keeping the plain-language reason as a warning tooltip rather than a barrier. Preserve the guided path as the default for juniors."
+   },
+   {
+    "name": "No audit trail / e-signature / version control (Part-11)",
+    "respondent_count": 4,
+    "severity": "blocker",
+    "representative_quote": "I don't see a word about audit trails, e-signature controls, version history, or who can see and change what — for a real Health Canada submission I need Part-11-style records: who signed, when, and an immutable trail. 'Start over' that 'clears your saved session' is the opposite of a validated document vault.",
+    "persona_ids": [
+     "qa_manager",
+     "veteran_contractor",
+     "cdmo_ra_manager",
+     "ra_junior"
+    ],
+    "concrete_fix": "Add an 'Audit trail' tab to the dossier showing an immutable who-changed-what-and-when log with export, plus e-signature capture on the signing step. Guard 'Start over' behind a typed confirmation modal with session versioning/recovery, and rename it to 'Reset session' with an explicit 'this is recoverable from version history' note."
+   },
+   {
+    "name": "'Check my pathway' verdict is opaque and unsourced",
+    "respondent_count": 9,
+    "severity": "major",
+    "representative_quote": "a routing 'verdict' needs to show its reasoning, or people won't understand what they're being told... I'd also make the pathway verdict cite its reasoning and warn, not decide, since generic-vs-SANDS mis-classification has real fee and review consequences.",
+    "persona_ids": [
+     "ra_director_cro",
+     "ra_officer_generic",
+     "ra_junior",
+     "consultant_ex_hc",
+     "startup_founder",
+     "quality_director_newcomer",
+     "cdmo_ra_manager"
+    ],
+    "concrete_fix": "Make 'Check my pathway' output a cited verdict card: the recommended submission class, the specific Health Canada guidance document + date it applied, the answers that drove it, and a 'warns, does not decide' disclaimer with an override. For novices, front it with a short 'Not sure? answer these plain questions' wizard ('Are you making a generic of an existing brand?') instead of the raw ANDS/NDS/SANDS/SNDS/DIN acronym dropdown."
+   },
+   {
+    "name": "eCTD/XML substance hidden behind '3D Submission tower' decoration",
+    "respondent_count": 13,
+    "severity": "major",
+    "representative_quote": "a stacking 3D graphic tells me nothing about whether my regional.xml, index-md5, and node extensions are actually valid... drop or make substantive the '3D submission tower' — a printable eValidator-style checklist is what I'd actually use.",
+    "persona_ids": [
+     "ra_officer_generic",
+     "qa_manager",
+     "consultant_ex_hc",
+     "startup_founder",
+     "regops_publisher",
+     "cro_pm",
+     "labelling_specialist",
+     "veteran_contractor",
+     "cdmo_ra_manager",
+     "quality_director_newcomer"
+    ],
+    "concrete_fix": "Make the printable checklist the default view of the readiness panel and demote the 3D tower to an opt-in toggle. Behind it, expose real eCTD substance: a tree showing regional.xml / index.xml, sequence type + number, lifecycle operators (new/replace/delete/append) per leaf, MD5 checksums, and an 'Export folder structure' button to sanity-check in docuBridge. Rename 'Submission tower' to plain 'eCTD Modules 1-5'."
+   },
+   {
+    "name": "Labelling / bilingual Module 1 PM buried as a per-dossier side note",
+    "respondent_count": 8,
+    "severity": "major",
+    "representative_quote": "labelling, my whole job, is treated as a side pointer inside document assembly rather than a first-class part of the journey; I'd want a dedicated Module 1 step showing EN/FR PM side by side, XML PM validation status, and mock-up checks, with the readiness badge gated on those actually passing.",
+    "persona_ids": [
+     "labelling_specialist",
+     "ra_officer_generic",
+     "ra_junior",
+     "quality_director_newcomer",
+     "cdmo_ra_manager"
+    ],
+    "concrete_fix": "Promote bilingual Module 1 to a first-class journey step with its own screen: EN/FR Product Monograph side-by-side, XML PM schema validation status, and mock-up checks. Add a persistent diagram/legend clarifying the session-vs-dossier split (where PM/labelling actually lives) and gate the readiness badge on PM XML validation passing."
+   },
+   {
+    "name": "Single-author session; no multi-dossier portfolio / client isolation",
+    "respondent_count": 4,
+    "severity": "major",
+    "representative_quote": "for a CDMO filing for many sponsors, I need explicit per-client dossiers with confidentiality separation, not a single journey... give me a portfolio/manager view that isn't buried behind a chip.",
+    "persona_ids": [
+     "cro_pm",
+     "cdmo_ra_manager",
+     "ra_director_cro"
+    ],
+    "concrete_fix": "Make the dossier catalog + portfolio roll-up a first-class top-level screen (not a hero chip): a cross-dossier table of each filing's %-complete, single blocker, owner, and due dates, with per-client data isolation stated plainly and an exportable/shareable client status report (PDF/link). Surface the ~2-week Company ID lead time as a dated, owned task on a timeline."
+   }
+  ],
+  "highest_leverage_fix": "Split the readiness badge into two explicit, provenance-bearing tiers — 'in-tool checks passed' vs a real 'eCTD validation' pass — where the validation row runs and names an actual validator ruleset + version and produces an exportable, rule-ID-level validation report that gates the green 'READY TO FILE' state. All 12 personas withhold trust for the identical reason: the badge scores app steps, not Health Canada technical validation. Making validation-parity legible (named ruleset, per-rule pass/fail, archivable report) is the single change that moves every persona on trust and directly addresses the round7 ease/trust regression.",
+  "do_not_break": "Preserve the honesty that every persona praised: (1) the upfront Company ID / Dossier ID prerequisites gate with real ~2-week lead time and REP request spelled out; (2) the dashed-underline plain-language term tooltips; (3) the locked-steps-with-reasons rail with 'You're here' marker; (4) 'the single thing standing between you and ready' single-blocker call-out with jump-to button; (5) the 'How is x% measured?' expander that shows its work; (6) auto-save; (7) the Health Canada guidance links / non-invented-rules provenance; and (8) the overall honest, non-overclaiming tone about external dependencies. Any fix must keep these intact — they are the trust foundation."
+ },
+ {
+  "flow_key": "catalog",
+  "themes": [
+   {
+    "name": "\"Ready to file\" badge / status chip credibility",
+    "respondent_count": 6,
+    "severity": "blocker",
+    "representative_quote": "the tile status (\"Ready to file\" / \"N/N modules\") to reflect actual eValidator pass state, not just form completeness, or it'll give publishers false comfort",
+    "persona_ids": [
+     "regops_publisher",
+     "ra_officer_generic",
+     "startup_founder",
+     "cro_pm",
+     "ra_director_cro",
+     "quality_director_newcomer"
+    ],
+    "concrete_fix": "On the dossier tile/status chip, split the signal: rename the completeness chip to \"Draft — 3/5 modules built\" (progress only, neutral grey) and gate a separate green \"Validation-passed\" chip strictly behind a real eValidator/HC technical+regional validation run, with a hover tooltip stating the validator, ruleset version, and timestamp of the pass. Never let form-completeness alone render \"Ready to file.\""
+   },
+   {
+    "name": "Placeholder \"d\" ID could leak into a real filing",
+    "respondent_count": 11,
+    "severity": "blocker",
+    "representative_quote": "the placeholder \"d\" + six digits should be validated so a \"d######\" can never be exported as a live sequence",
+    "persona_ids": [
+     "ra_director_cro",
+     "ra_officer_generic",
+     "qa_manager",
+     "consultant_ex_hc",
+     "labelling_specialist",
+     "regops_publisher",
+     "veteran_contractor",
+     "quality_director_newcomer",
+     "ra_junior",
+     "cdmo_ra_manager",
+     "startup_founder"
+    ],
+    "concrete_fix": "Add a hard export/transmission guard in the dossier detail + export screens that blocks any action while a 'd'-prefixed placeholder ID is live, with a blocking modal \"Replace placeholder ID before export.\" Reinforce visually: a persistent amber banner on any dossier detail view carrying a draft ID (not just the tile chip), and restyle the placeholder chip to a distinct shape/color so it can never read as a valid e-number anywhere it appears."
+   },
+   {
+    "name": "Isolation / audit-trail claims asserted as copy, not evidence",
+    "respondent_count": 7,
+    "severity": "major",
+    "representative_quote": "\"isolated end-to-end\" needs to be backed by a security page, per-client access roles, and export of the audit trail, not a paragraph",
+    "persona_ids": [
+     "cdmo_ra_manager",
+     "qa_manager",
+     "ra_director_cro",
+     "consultant_ex_hc",
+     "ra_junior",
+     "labelling_specialist",
+     "ra_officer_generic"
+    ],
+    "concrete_fix": "Make the guardrails legible: add an \"Audit log\" panel on the dossier detail showing the read-only who/when/reason entries with an \"Export audit trail\" button (CSV/PDF). Link the \"client workspaces isolated\" line to a Trust/Security page describing the tenancy model + data residency, and add a visible per-client tenant boundary chip plus a role/permission model (who can create/archive/restore) surfaced in workspace settings."
+   },
+   {
+    "name": "Submission-type acronyms (SANDS/SNDS/CS-BE) unexplained at point of choice",
+    "respondent_count": 8,
+    "severity": "major",
+    "representative_quote": "define every submission type (ANDS/SANDS/SNDS) and the CS-BE path in plain language right at the dropdown, not just as acronyms",
+    "persona_ids": [
+     "ra_junior",
+     "startup_founder",
+     "quality_director_newcomer",
+     "cro_pm",
+     "cdmo_ra_manager",
+     "consultant_ex_hc",
+     "qa_manager",
+     "quality_director_newcomer"
+    ],
+    "concrete_fix": "In the New-dossier inline card, expand the Submission-type dropdown to show a one-line plain-English gloss per option (ANDS/SANDS/SNDS) matching the existing glossary-tooltip pattern, add an inline \"Not sure which? here's how to decide\" helper/link beside the field, and give the CS-BE checkbox a tooltip stating what it commits to and whether it drives Module 1 forms downstream."
+   },
+   {
+    "name": "No lifecycle / sequence lineage on the dossier",
+    "respondent_count": 4,
+    "severity": "major",
+    "representative_quote": "a dossier lives across many sequences and I need to see that lineage at a glance",
+    "persona_ids": [
+     "regops_publisher",
+     "ra_officer_generic",
+     "ra_director_cro",
+     "ra_officer_generic"
+    ],
+    "concrete_fix": "Add a per-dossier lifecycle strip on the tile/detail: current sequence number, original-vs-amendment/response history, and last transmission status + any outstanding HC deficiency/clarifax — replacing the bare progress bar as the primary status. Lock the Dossier-ID rename once a sequence has been filed under that ID."
+   },
+   {
+    "name": "Home-page density / navigation overload",
+    "respondent_count": 5,
+    "severity": "minor",
+    "representative_quote": "six chips plus toggles plus a triage bar is a lot of furniture for what is, at heart, a list of files",
+    "persona_ids": [
+     "veteran_contractor",
+     "ra_director_cro",
+     "consultant_ex_hc",
+     "labelling_specialist",
+     "qa_manager"
+    ],
+    "concrete_fix": "Reduce top-nav density via progressive disclosure: collapse the Journey/Portfolio/Registry chips and triage bar into a single overflow/segmented control, keep only the primary filter + grid/list toggle + \"New dossier\" visible by default, and raise chip contrast (no faint grey) for low-vision users."
+   },
+   {
+    "name": "Portfolio roll-up / notifications missing for PMs",
+    "respondent_count": 2,
+    "severity": "minor",
+    "representative_quote": "give me a portfolio-level roll-up and export, I need to pull \"who is blocked, what's overdue\" across all dossiers into a status report",
+    "persona_ids": [
+     "cro_pm",
+     "cro_pm"
+    ],
+    "concrete_fix": "Add a \"Portfolio\" view that rolls up all dossiers by due date with a \"who's blocked\" column and a one-click export (CSV/client-email summary), plus opt-in notifications when a Soonest-due date goes at-risk rather than a passive red date."
+   }
+  ],
+  "highest_leverage_fix": "Fix the credibility of status signals end-to-end: (1) hard-block export/transmission while a placeholder 'd' ID is live, and (2) gate the green \"Ready to file\" chip strictly behind a real eValidator/HC validation pass, relabeling form-completeness as a neutral \"Draft — N/N modules built\" progress indicator. These two changes directly address the trust regression (the badge's credibility) and together touch the majority of personas across every archetype.",
+  "do_not_break": "Preserve the honesty and controls that earned trust: the archive-not-destroy model with typed-ID-plus-mandatory-reason confirmation and who/when audit-trail attribution; the restore/recoverable-trash path; the accurate, non-overclaiming framing that Health Canada issues the Dossier ID via a Dossier ID Request through REP/CESG (the tool does NOT mint official IDs); the placeholder-ID escape hatch so work can start before the real ID lands (and its distinct 'd' prefix + \"draft ID — set real\" chip); the correct regulatory vocabulary (Dossier ID, eCTD Module 1-5, ANDS/SANDS/SNDS, CS-BE gated to ANDS); the glossary tooltips; the format-validation message with a concrete example; the client-workspace isolation intent; and the overdue-due-date flagging + \"Just my dossiers\" filter + Owner/Client columns."
+ },
+ {
+  "flow_key": "builder_forms",
+  "themes": [
+   {
+    "name": "Screen density / cognitive overload",
+    "respondent_count": 22,
+    "severity": "major",
+    "representative_quote": "Too much is collapsed (Format & source, the primer, the tower, lifecycle clock all behind expanders), so a first-timer has to go hunting.",
+    "persona_ids": [
+     "ra_director_cro",
+     "ra_officer_generic",
+     "ra_junior",
+     "qa_manager",
+     "consultant_ex_hc",
+     "startup_founder",
+     "regops_publisher",
+     "cro_pm",
+     "labelling_specialist",
+     "veteran_contractor",
+     "cdmo_ra_manager",
+     "quality_director_newcomer"
+    ],
+    "concrete_fix": "Add a persistent 'Next 3 things to file' summary card pinned to the top of the right-hand transmit-readiness column that names the blocking section, the leaf, and the literal next action in plain English (e.g. 'Section 1.2.2 needs a signed cover letter — Upload'). Add a top-level 'Guided / Advanced' view toggle on the builder header: Guided mode collapses the 3D tower, lifecycle clock, sequences, and XML expanders and walks one section at a time; Advanced restores today's full-density layout."
+   },
+   {
+    "name": "Three overlapping readiness gates confuse which one gates filing",
+    "respondent_count": 9,
+    "severity": "major",
+    "representative_quote": "I'd want to know precisely what each does and doesn't verify... the distinction between 'Structural check,' 'Draft completeness check,' and 'Ready to transmit' — three separate readiness indicators could confuse people about which one actually gates a filing.",
+    "persona_ids": [
+     "ra_director_cro",
+     "ra_officer_generic",
+     "consultant_ex_hc",
+     "regops_publisher",
+     "cdmo_ra_manager"
+    ],
+    "concrete_fix": "Consolidate the three readiness widgets on the transmit-readiness card into one labeled ladder with explicit scope copy per rung: 'Content complete' (all required leaves placed) -> 'Structurally plausible (NOT eValidator)' -> 'eValidator-passed (run externally / import result)'. Each rung states in one line exactly which eCTD spec/DTD version and rules it covers vs. what only Health Canada eValidator catches, so a green flag is never mistaken for a passed validation."
+   },
+   {
+    "name": "eCTD/XML substance is hidden or absent (backbone, index-md5, leaf lifecycle refs)",
+    "respondent_count": 8,
+    "severity": "major",
+    "representative_quote": "The walkthrough talks about producing PDF/A leaves and structural checks but says nothing about generating the actual eCTD XML backbone, regional Module 1 XML, or index-md5 integrity — that's what I actually transmit, so I need to see it.",
+    "persona_ids": [
+     "ra_officer_generic",
+     "consultant_ex_hc",
+     "regops_publisher",
+     "cdmo_ra_manager",
+     "ra_director_cro"
+    ],
+    "concrete_fix": "Add an 'eCTD package' panel (surfaced, not behind an expander) on the transmit-readiness card showing the generated index.xml / regional Module 1 XML tree, the full checksum (not an md5 fragment) and index-md5 integrity status, and per-row the resolved leaf path plus the lifecycle operation as written to XML. Add an 'Export sequence & diff against previous active sequence' button, and replace the '3D submission tower' with this real folder/leaf/operation view."
+   },
+   {
+    "name": "Bilingual / XML Product Monograph handling buried and unproven",
+    "respondent_count": 6,
+    "severity": "major",
+    "representative_quote": "That XML PM is the core of my daily work, and burying it as a one-line expander tells me they haven't grasped how central it is... I also can't tell whether the bilingual zones enforce that both languages are actually present.",
+    "persona_ids": [
+     "labelling_specialist",
+     "ra_director_cro",
+     "ra_officer_generic",
+     "regops_publisher",
+     "ra_officer_generic"
+    ],
+    "concrete_fix": "Promote 'Bilingual / XML Product Monograph detail' from a bottom-of-column expander to a first-class Module 1 panel, and add 'Bilingual completeness (EN + FR present)' and 'XML PM structure valid' as top-line flags on the Ready-to-transmit card. Have the EN/FR drop zones show an explicit red 'French version missing' state when only one language is present, and show the mandated XML PM structure/translation-parity check inline."
+   },
+   {
+    "name": "Provenance chip is not yet a Part-11-grade audit trail / sign-off",
+    "respondent_count": 7,
+    "severity": "major",
+    "representative_quote": "I need to see the audit trail: who confirmed each AI draft, when, versioning, e-signature, and Part-11-style controls — the md5 fingerprint and a provenance chip are a start but not enough to satisfy me at sign-off.",
+    "persona_ids": [
+     "qa_manager",
+     "ra_director_cro",
+     "regops_publisher",
+     "labelling_specialist",
+     "cdmo_ra_manager"
+    ],
+    "concrete_fix": "Behind the provenance chip on each saved-document card, add an exportable per-leaf audit log (user, timestamp, action, before/after, version history) plus an explicit reviewer sign-off / e-signature step tied to the user's identity that must fire before a leaf is marked filable, and a 'lock reviewed leaf' control so a signed-off leaf cannot be silently re-drafted. Surface the md5 as a plain-language 'file fingerprint' with full checksum on hover."
+   },
+   {
+    "name": "'example — replace this' auto-clear can silently flip a field to filable",
+    "respondent_count": 3,
+    "severity": "minor",
+    "representative_quote": "I dislike that the 'example — replace this' greyed text auto-clearing is the trigger for filability; I would want a hard confirmation, because a partly-edited field could silently flip to 'filable' without a human actually approving it.",
+    "persona_ids": [
+     "cdmo_ra_manager",
+     "qa_manager",
+     "ra_officer_generic"
+    ],
+    "concrete_fix": "Change the greyed 'example — replace this' placeholder behavior so replacing the text does NOT auto-clear the not-filable state; instead require an explicit per-field 'this is my final content' confirmation (matching the AI-draft gate) before the field/leaf can count toward filable, and keep the field visually flagged until confirmed."
+   },
+   {
+    "name": "No PM/coordinator roll-up view (owners, deadlines, who's blocked)",
+    "respondent_count": 2,
+    "severity": "minor",
+    "representative_quote": "There's no view here for me: no deadlines, no owner/assignee per section, no 'who is blocked' at a glance. Collaboration and task assignments are buried in a one-line expander at the very bottom.",
+    "persona_ids": [
+     "cro_pm",
+     "cro_pm"
+    ],
+    "concrete_fix": "Promote the bottom 'Collaboration & task assignments' expander into a dossier-level roll-up tab showing per-section owner/assignee, due date, and blocked status, with a read-only exportable status summary (READY/BLOCKED counts, required-placed, items remaining) suitable for a weekly client status report."
+   }
+  ],
+  "highest_leverage_fix": "Cut the density: add a pinned, plain-English 'Next N things before you can file' summary at the top of the transmit-readiness column plus a Guided/Advanced view toggle that hides the 3D tower, lifecycle clock, sequences and XML expanders by default. 22 of 24 personas named overload/hunting-through-expanders as their top ease/clarity drag; progressive disclosure serves novices and lets experts expand to full detail without removing substance.",
+  "do_not_break": "Preserve the honesty disclaimers and accountability guardrails that earned nearly universal trust: (1) the Structural-check tooltip explicitly stating it is NOT Health Canada's official eValidator and telling users to run eValidator before transmitting — the single most-praised, trust-earning line; (2) the 'Not yet filable — review required' banners; (3) the mandatory 'I have reviewed this AI draft — it is my content' human-confirmation gate that hard-blocks AI/sample drafts; (4) the provenance chip and md5 fingerprint on saved-document cards; (5) the correct, in-line-defined eCTD vocabulary (leaf, sequence, working vs active, new/replace/append/delete, PDF/A) with the 'eCTD in plain language' primer and 'What Health Canada needs here' teach boxes; (6) per-section Required/Optional labels, the 'X/Y required placed' count and progress bar, and the READY/BLOCKED transmit card. Any density/consolidation fix must keep these intact."
+ },
+ {
+  "flow_key": "ai_draft",
+  "themes": [
+   {
+    "name": "One-click attestation is too easy to rubber-stamp; no side-by-side guidance/diff at the moment of signing",
+    "respondent_count": 11,
+    "severity": "major",
+    "representative_quote": "I dislike that the attestation is a single button with no forced diff against the guidance — I'd add a required side-by-side of the draft versus \"What Health Canada needs here\" and capture who confirmed with a timestamp visible on the card.",
+    "persona_ids": [
+     "ra_director_cro",
+     "qa_manager",
+     "consultant_ex_hc",
+     "startup_founder",
+     "veteran_contractor",
+     "quality_director_newcomer",
+     "ra_officer_generic"
+    ],
+    "concrete_fix": "Replace the single confirm button on the AI-draft card with a two-pane Attestation Review modal: left pane pins the live 'What Health Canada needs here' guidance text (with source doc name + revision date); right pane shows the draft; on re-draft show an inline diff of what changed. The 'I have reviewed this AI draft — it is my content' checkbox is disabled until the guidance pane is expanded, and confirming writes reviewer name + timestamp onto the card face (not only the audit trail)."
+   },
+   {
+    "name": "eCTD/XML publishing substance is absent — no leaf lifecycle operator, granularity, index.xml, SHA-256, or eValidator handoff",
+    "respondent_count": 6,
+    "severity": "major",
+    "representative_quote": "It says nothing about eCTD granularity, leaf lifecycle operators (new/replace/delete), STF handling, or valid XML backbone output... I'd also want an eValidator export/handoff so I can run the real validation without leaving my workflow.",
+    "persona_ids": [
+     "regops_publisher",
+     "cdmo_ra_manager",
+     "ra_officer_generic",
+     "consultant_ex_hc"
+    ],
+    "concrete_fix": "Add an 'eCTD placement' section to the saved-draft card showing the leaf's lifecycle operator (new/replace/append/delete), granularity/module context (replace the meaningless 'size' field), and target index.xml mapping. Add an 'Export for eValidator' button on the review banner that hands off the assembled leaf/sequence. Relabel the md5 'fingerprint' with a tooltip clarifying eCTD submission checksums are SHA-256 and this md5 is change-detection only."
+   },
+   {
+    "name": "'Structural completeness check' is an unexplained black box — what it inspects and against which guidance version is unstated",
+    "respondent_count": 9,
+    "severity": "major",
+    "representative_quote": "the whole confidence hinges on a \"structural completeness check\" whose criteria I can't see; I'd want a link showing exactly which HC guidance sections and structural rules it applies, with version dates.",
+    "persona_ids": [
+     "ra_director_cro",
+     "qa_manager",
+     "consultant_ex_hc",
+     "regops_publisher",
+     "veteran_contractor",
+     "ra_officer_generic"
+    ],
+    "concrete_fix": "Make the 'structural completeness check' result expandable into a criteria checklist showing each rule it did/didn't evaluate (heading structure, element presence, granularity — explicitly NOT content adequacy), the HC guidance document name + revision date it maps to, and an exportable pass/fail evidence record. Add a plain tooltip stating what it does and does NOT verify."
+   },
+   {
+    "name": "Data-handling / provider disclosure is buried in a post-hoc chip tooltip and un-verifiable (provider, region, residency, retention, BYO-key)",
+    "respondent_count": 7,
+    "severity": "major",
+    "representative_quote": "surface the \"sent to the configured AI provider\" disclosure and the sponsor-isolation guarantee before I type, not on hover of a chip after the fact — my clients' pre-submission data is confidential and I need that assurance up front.",
+    "persona_ids": [
+     "ra_director_cro",
+     "qa_manager",
+     "cdmo_ra_manager",
+     "labelling_specialist",
+     "startup_founder",
+     "quality_director_newcomer"
+    ],
+    "concrete_fix": "Promote the data-handling disclosure from the chip tooltip to a permanent visible panel shown before the chat input: name the AI provider, region/data-residency (Canada vs US), retention period, and whether isolation is contractual. Record the model name+version into the audit trail per draft, expose an 'export prompt/reply transcript' for the SOP file, and add per-client provider config / BYO-key / on-prem option for enterprise CDMOs."
+   },
+   {
+    "name": "Jargon and developer error-strings block novice/non-technical users (leaf, md5 fingerprint, GROQ_API_KEY)",
+    "respondent_count": 9,
+    "severity": "minor",
+    "representative_quote": "the \"no GROQ_API_KEY\" error is way too technical — a junior seeing that would just be confused; it should say something like \"AI drafting isn't turned on yet — contact your admin\" without the variable name.",
+    "persona_ids": [
+     "ra_junior",
+     "startup_founder",
+     "veteran_contractor",
+     "labelling_specialist",
+     "quality_director_newcomer",
+     "cro_pm"
+    ],
+    "concrete_fix": "Add inline plain-language tooltips (or a glossary drawer) on 'leaf', 'md5 fingerprint', 'structural completeness check', and 'provenance chip'. Replace the raw 'no GROQ_API_KEY' fallback string with 'AI drafting isn't turned on yet — contact your administrator' (no variable name). Open the 'Health Canada guidance ↗' link by default in the banner rather than inside the collapsed 'Format & source' disclosure, and seed the chat with an example first prompt."
+   },
+   {
+    "name": "Density/overload — stacked nested toggles before reaching the chat",
+    "respondent_count": 5,
+    "severity": "minor",
+    "representative_quote": "As a non-author this reads busy - eyebrow lines, disclosures, two layers of toggles before I even get to the chat.",
+    "persona_ids": [
+     "cro_pm",
+     "veteran_contractor",
+     "qa_manager",
+     "ra_director_cro",
+     "cdmo_ra_manager"
+    ],
+    "concrete_fix": "Flatten the Upload/Author/Mark-N/A and Draft-with-AI/Fill-the-form toggles via progressive disclosure: pick the completion mode first, then reveal only the relevant sub-surface. Collapse the eyebrow/disclosure metadata into a single expandable header so the chat input is above the fold."
+   },
+   {
+    "name": "No portfolio/dossier-level roll-up of confirmed vs review-required sections",
+    "respondent_count": 2,
+    "severity": "minor",
+    "representative_quote": "give me a roll-up dashboard across sections showing which are drafted, which are blocked on review, and who's assigned, because from this single-section panel I can't see who is blocked on what.",
+    "persona_ids": [
+     "cro_pm"
+    ],
+    "concrete_fix": "Add a dossier-level status dashboard that aggregates each section's chip state ('AI draft — review & confirm' vs 'AI-assisted · confirmed'), owner, and export-blockers, feeding the confirmed-by name/timestamp into a client-reportable view."
+   }
+  ],
+  "highest_leverage_fix": "Rebuild the attestation step into a two-pane Attestation Review modal that pins the versioned 'What Health Canada needs here' guidance beside the draft (with a diff on re-draft), disables the 'it is my content' checkbox until the guidance is opened, and stamps reviewer name+timestamp onto the card. This directly answers the dominant AI-control/skeptic theme dragging ease (0.24) and trust (0.28): 11 personas across every archetype called the one-click confirm too easy to rubber-stamp and asked for side-by-side guidance at the moment of signing — it converts the honesty disclaimers they already praise into an enforced, defensible review action.",
+  "do_not_break": "The honesty is the entire trust foundation — preserve it verbatim: (1) the explicit 'structural completeness check — modeled on HC criteria, NOT HC's official eValidator' disclaimer (praised by nearly every persona; overclaiming here 'would have killed it'); (2) the persistent red 'Not yet filable — review required' banner and the HARD export block until a human attests 'I have reviewed this AI draft — it is my content'; (3) 'nothing is saved until you click Use this draft' and the no-blanks/asks-for-details behavior; (4) the provenance chip, md5 fingerprint, and audit-trail entry; (5) the per-sponsor data isolation + 'never shared across clients, never used to train models' promise; (6) the graceful fallback to 'Fill the form' when AI is unavailable; (7) the two distinct chip states ('AI draft — review & confirm' vs 'AI-assisted · confirmed'). Any fix must ADD legibility/substance without diluting these guardrails or the candid tone."
+ },
+ {
+  "flow_key": "validate_export",
+  "themes": [
+   {
+    "name": "eCTD jargon undefined inline (no tooltips/glossary)",
+    "respondent_count": 16,
+    "severity": "major",
+    "representative_quote": "a lot of terms fly past me: CA-E-1001 rule ids, \"live-leaf,\" \"lifecycle-operator chips (2× new, 1× replace),\" \"eCTD backbone (index.xml)\" — I sort of know eCTD... but I'd be Googling half of these or asking a senior what they mean in practice.",
+    "persona_ids": [
+     "ra_junior",
+     "qa_manager",
+     "startup_founder",
+     "cro_pm",
+     "quality_director_newcomer",
+     "labelling_specialist"
+    ],
+    "concrete_fix": "Add hover tooltips (and a linked glossary panel) on every eCTD term and rule id in the validate/export screen — 'leaf', 'href', 'backbone/index.xml', 'lifecycle operator (new/replace/delete)', 'sequence purpose', 'md5', and each CA-E/CA-W chip — each with a one-line plain definition plus 'why this matters for your filing'. Bind the tooltip to the same term-registry that renders the rule catalogue so definitions stay single-sourced."
+   },
+   {
+    "name": "CA-E/CA-W rules lack HC-source mapping + criteria version/date",
+    "respondent_count": 13,
+    "severity": "blocker",
+    "representative_quote": "the proprietary CA-E-1001 ids with no visible cross-reference to the specific HC guidance clause each rule enforces — I'd add that mapping so I can defend a finding to a client. I'd also want the rule catalogue to state which guidance version and date it's modeled on.",
+    "persona_ids": [
+     "ra_director_cro",
+     "consultant_ex_hc",
+     "regops_publisher",
+     "cdmo_ra_manager",
+     "ra_officer_generic"
+    ],
+    "concrete_fix": "In the Rule Catalogue drawer, add two columns per CA-E/CA-W id: 'HC/ICH source clause' (the exact guidance/validation-criteria reference each rule enforces) and 'modeled-on criteria version + sync date' (e.g. 'HC eCTD validation criteria v5.x, synced 2026-05'). Print the criteria version+date on the completeness card header and stamp it into every exported CSV/JSON/PDF report so the ruleset provenance travels with the evidence."
+   },
+   {
+    "name": "No real eValidator parity / handoff — stops one step short of filing",
+    "respondent_count": 12,
+    "severity": "blocker",
+    "representative_quote": "if I'm paying $180k a consultancy partly for eValidator confidence, I want to know whether Studio can run or integrate the actual HC eValidator, or at least give me a clear \"here's your next step and cost\" handoff.",
+    "persona_ids": [
+     "ra_director_cro",
+     "startup_founder",
+     "regops_publisher",
+     "quality_director_newcomer",
+     "consultant_ex_hc"
+    ],
+    "concrete_fix": "Add an 'eValidator handoff' checklist step pinned to the export success state: a documented parity-gap table (which CA-E/CA-W rules map to real eValidator rules vs. not-covered), a persistent 'You must still run HC eValidator before transmission' banner with a direct pointer to where/how, and either an integration path or an explicit 'next step + cost' card. Do NOT replace the honesty disclaimers — extend them into an actionable next-step."
+   },
+   {
+    "name": "Findings truncated to 5 errors / 3 warnings by default",
+    "respondent_count": 9,
+    "severity": "major",
+    "representative_quote": "don't hide findings behind \"show first 5 errors / 3 warnings\" toggles — when I'm cleaning a submission I want the whole list in front of me, ideally printable, not paged.",
+    "persona_ids": [
+     "consultant_ex_hc",
+     "regops_publisher",
+     "veteran_contractor",
+     "cdmo_ra_manager",
+     "ra_officer_generic"
+    ],
+    "concrete_fix": "Replace the 5/3 preview cap with a full sortable/filterable findings table (sort by module, severity, rule id; filter by error/warning) that defaults to fully expanded when clearing a sequence, and always include the complete finding set — never the truncated preview — in the exported CSV/JSON/PDF. Keep the collapse toggle available for quick triage but off by default in the export path."
+   },
+   {
+    "name": "No PM-friendly readiness layer (assignee, due date, plain status)",
+    "respondent_count": 6,
+    "severity": "major",
+    "representative_quote": "give me a plain-English readiness summary per sequence (\"3 errors blocking, owner X, est. fix date\") instead of raw rule ids, and surface who is blocked on what — right now there's no notion of assignee, deadline, or client-facing status anywhere.",
+    "persona_ids": [
+     "cro_pm",
+     "ra_director_cro",
+     "startup_founder",
+     "quality_director_newcomer"
+    ],
+    "concrete_fix": "Add a per-sequence 'Submission Readiness' summary strip above the findings list: a one-line plain-English verdict ('3 errors blocking transmission — not ready'), an assignee field and target-fix date per finding, and a screenshot-ready client-facing status chip that translates rule ids into 'blocking / cosmetic'. Make it exportable into a weekly status snapshot."
+   },
+   {
+    "name": "Module 1 / bilingual (French PM, mock-up pairing) checks absent",
+    "respondent_count": 4,
+    "severity": "major",
+    "representative_quote": "I own Module 1 labelling and French, and I see nothing here checking bilingual completeness or that the French PM and mock-ups are present and paired — that is where a submission of mine actually fails.",
+    "persona_ids": [
+     "labelling_specialist"
+    ],
+    "concrete_fix": "Add a 'Module 1 / Bilingual' finding family to the rule catalogue: CA-E/CA-W rules that flag missing French counterparts per leaf, English/French Product Monograph pairing, PM mock-up presence, and a structural PM XML presence check — grouped by module in the findings table so labelling issues route straight to the labelling team."
+   },
+   {
+    "name": "Weak checksum (md5) + audit trail asserted not shown",
+    "respondent_count": 5,
+    "severity": "major",
+    "representative_quote": "the audit-trail claim is asserted but not shown; I'd want a visible, exportable override log with who/when/why and confirmation it can't be edited after the fact... md5 as the checksum — I'd want SHA-256.",
+    "persona_ids": [
+     "qa_manager",
+     "cdmo_ra_manager"
+    ],
+    "concrete_fix": "Upgrade the document-control checksum from md5 to SHA-256 (keep the 'document control, not validation' label). Add a visible, exportable Override/Audit Log panel showing user, UTC timestamp, typed reason, immutability/tamper-evidence indicator, and who is authorized to override (and whether a second signature is required) — plus explicit per-client/sponsor partition confirmation for the CDMO multi-sponsor case."
+   }
+  ],
+  "highest_leverage_fix": "Add inline hover tooltips + a linked glossary on every eCTD term and CA-E/CA-W rule id on the validate/export screen, with each definition carrying its HC/ICH source clause and the modeled-on criteria version+date. This single term-registry move simultaneously kills the #1 drag (16 personas confused by jargon) and delivers the rule-provenance/version legibility the 5 expert personas need to defend findings — moving both the newcomer/PM/founder cohort and the director/consultant/publisher cohort at once.",
+  "do_not_break": "The relentless, repeated honesty disclaimers are the single most-praised feature and MUST be preserved verbatim: '(structural; not HC eValidator)', the 'What this does / does NOT check' split, 'does not confirm scientific adequacy or full eCTD validity — run eValidator before transmission', and 'md5 is document control, not validation'. Nearly every persona said this candor is precisely what earns their trust ('the honesty is what earns my trust more than any feature'; 'overclaiming would have lost it instantly'). Also preserve: the export-blocked-on-failed-check hard gate with forced typed-reason override recorded to the audit trail (called 'real governance, not theatre'); the CA-E/CA-W rule catalogue with plain-language descriptions and error/warning chips; the lifecycle-operator and purpose chips; the index.xml backbone / Application Viewer (href, md5) inspection; and the CSV/JSON report export."
+ },
+ {
+  "flow_key": "operations",
+  "themes": [
+   {
+    "name": "Density/overload across four surfaces",
+    "respondent_count": 19,
+    "severity": "major",
+    "representative_quote": "there's a LOT crammed in here: registry, correspondence, notice inbox, NOA register, audit trail... I'd be nervous about knowing which page I'm supposed to be on for a given task",
+    "persona_ids": [
+     "ra_director_cro",
+     "ra_officer_generic",
+     "ra_junior",
+     "qa_manager",
+     "consultant_ex_hc",
+     "startup_founder",
+     "regops_publisher",
+     "cro_pm",
+     "labelling_specialist",
+     "veteran_contractor",
+     "cdmo_ra_manager",
+     "quality_director_newcomer"
+    ],
+    "concrete_fix": "Add a role-scoped default view on the Portfolio page: a 'View as' switch (Author / Reviewer / PM / Founder-beginner) that collapses the four-surface nav into only the surfaces that role uses and hides litigation clocks/NOA registers behind an 'Advanced' toggle. Ship a 'Beginner mode' preset (per startup_founder) that shows only Portfolio + deadlines + CSV export until the user opts into registry/correspondence."
+   },
+   {
+    "name": "Acronym soup with no inline definitions",
+    "respondent_count": 13,
+    "severity": "major",
+    "representative_quote": "the acronym soup worries me: SDN/SAL/SRL/NOD/NON/NOC, DSTS lifecycle, PM(NOC) clocks, CS-BE, CESG, Part-11... A tooltip or glossary on those would make a big difference for me",
+    "persona_ids": [
+     "ra_junior",
+     "qa_manager",
+     "consultant_ex_hc",
+     "startup_founder",
+     "cro_pm",
+     "labelling_specialist",
+     "veteran_contractor",
+     "quality_director_newcomer"
+    ],
+    "concrete_fix": "Wrap every acronym token (SDN/SAL/SRL/NOD/NON/NOC, DSTS lifecycle, PM(NOC), Form V, NOA, CESG, CS-BE, Part-11) in a hover/tap Glossary tooltip component giving the plain-English expansion plus one-line meaning; add a persistent 'Glossary' link in the top nav. Reuse the existing provenance-popover component so it's the same interaction pattern users already trust."
+   },
+   {
+    "name": "Computed statutory clocks/dates lack visible citation",
+    "respondent_count": 14,
+    "severity": "blocker",
+    "representative_quote": "every computed date — right-to-sell, NOA/stay clocks — needs a visible citation to the regulation or correspondence it derives from, or my reviewers won't sign off on it",
+    "persona_ids": [
+     "ra_director_cro",
+     "ra_officer_generic",
+     "ra_junior",
+     "consultant_ex_hc",
+     "startup_founder",
+     "regops_publisher",
+     "labelling_specialist",
+     "cdmo_ra_manager",
+     "quality_director_newcomer"
+    ],
+    "concrete_fix": "On every litigation clock, NOA/stay counter, and Right-to-Sell (October 1) label, extend the provenance popover to show the source citation (e.g. C.01.014.71, PM(NOC) Regulations) AND the source correspondence/date the value derives from. Make the hard-coded October-1 right-to-sell date configurable/sourced rather than a silent UI assumption, and stamp a 'calculated aid — verify against HC record' caveat on each clock."
+   },
+   {
+    "name": "Critical status (fee/blocked/clock) buried in per-row Details",
+    "respondent_count": 9,
+    "severity": "major",
+    "representative_quote": "critical info like fee status and blocked collaborators is hidden behind a quiet 'Details' expander — if a fee is due or a dossier is blocked I want that screaming at me on the row, not one click away",
+    "persona_ids": [
+     "qa_manager",
+     "consultant_ex_hc",
+     "regops_publisher",
+     "cro_pm",
+     "cdmo_ra_manager",
+     "quality_director_newcomer"
+    ],
+    "concrete_fix": "Promote fee-due, overdue-clock, and blocked-reason/blocker-name from the per-row Details expander to always-visible row-level status pills that only light up when in an at-risk state (fee due, clock overdue, blocked). Keep the neutral/OK states collapsed so the grid stays scannable, preserving the progressive disclosure everyone praised for the non-urgent chips."
+   },
+   {
+    "name": "Portfolio can't filter/sort; deadline card capped at 8 chips",
+    "respondent_count": 6,
+    "severity": "major",
+    "representative_quote": "give me a real filter and sort on the portfolio, not just eight linked chips, because a CRO carries far more than eight active dossiers; let me configure the 'next 30 days' threshold",
+    "persona_ids": [
+     "ra_director_cro",
+     "ra_officer_generic",
+     "cro_pm",
+     "cdmo_ra_manager"
+    ],
+    "concrete_fix": "Add filter/sort controls (by owner, client/sponsor, due date, blocked-state) to the Portfolio grid, a portfolio-wide blocked-and-deadline roll-up that isn't truncated to eight chips, and a configurable deadline window (30/60/90 days) instead of a hard-coded 30. Make the CSV export honor the active filter and support multi-select client export."
+   },
+   {
+    "name": "Multi-client tenant isolation unproven; correspondence defaults to one dossier",
+    "respondent_count": 2,
+    "severity": "blocker",
+    "representative_quote": "multi-client confidentiality is my hard line, and 'central governance trail' mirroring makes me want to see exactly who can read that before I'd put two competing sponsors in the same instance",
+    "persona_ids": [
+     "cdmo_ra_manager"
+    ],
+    "concrete_fix": "Add an explicit per-client/sponsor selector as the first step on the Correspondence and Portfolio surfaces (replacing the 'pre-fill to your first dossier' default), plus a visible tenant-isolation/role-based-visibility statement and per-sponsor access indicator. Document in-app what 'mirrored to the central governance trail' can read across tenants."
+   },
+   {
+    "name": "Positioned as tracker, not validator; module tower is a count not eCTD substance",
+    "respondent_count": 5,
+    "severity": "minor",
+    "representative_quote": "the module tower needs to be backed by actual validation results, not just a progress count, and I'd want the DIN/NOC and Right-to-Sell logic tied to a citable source in-app",
+    "persona_ids": [
+     "ra_officer_generic",
+     "regops_publisher",
+     "quality_director_newcomer",
+     "consultant_ex_hc"
+    ],
+    "concrete_fix": "On the mini module tower, expose eCTD sequence numbers and lifecycle operators (new/replace/delete) per module and link '3/7 modules' to real validation results rather than a raw progress count; state plainly on the Portfolio header that this is a tracking/record layer that complements (not replaces) eValidator/eCTD validation, so nobody assumes 'Ready to file' means validated."
+   }
+  ],
+  "highest_leverage_fix": "Add a role-scoped / beginner-capable view switch on the Portfolio page that collapses the four-surface density and hides advanced litigation/NOA machinery until opted into — this directly addresses the #1 regression driver (overload) cited by all 12 personas and is the single change that de-risks clarity/ease for authors, PMs, juniors and founders alike without touching the substance experts value.",
+  "do_not_break": "The repeated, explicit \"Record only — does not transmit or file anything with Health Canada; filing happens only through the CESG transmit step\" honesty notices (praised by nearly every persona as the single most trust-building element); the append-only, sequence-numbered, actor-and-workspace-stamped Part-11 audit trail with UTC signatures and CSV export; the provenance popovers on the litigation clocks; the annual-notification checklist that records who-signed-and-when; the DIN \"leave blank until issued at NOC\" hint; and the progressive-disclosure Details expander for genuinely non-urgent chips (fee/collaboration) that keeps the grid scannable."
+ },
+ {
+  "flow_key": "overall",
+  "themes": [
+   {
+    "name": "Validation-parity is unproven — show real eCTD/XML/validator output, not descriptions",
+    "respondent_count": 16,
+    "severity": "major",
+    "representative_quote": "show me evidence, not description. I want a sample validation report on a deliberately broken submission, the actual rule text behind CA-E-1xxx, and confirmation the PDF conformance and XML backbone checks track Health Canada's current validation rules version and eCTD 4.0/RTF specifics. Also tell me plainly whether this generates a transmittable eCTD sequence or just prepares content someone still assembles in another tool.",
+    "persona_ids": [
+     "ra_director_cro",
+     "ra_officer_generic",
+     "ra_junior",
+     "consultant_ex_hc",
+     "regops_publisher",
+     "labelling_specialist",
+     "cdmo_ra_manager",
+     "quality_director_newcomer",
+     "veteran_contractor"
+    ],
+    "concrete_fix": "On the overall/Registry surface add a 'Validation coverage' panel and a downloadable sample validation report run against a deliberately known-bad eCTD: each CA-E-1xxx–4xxx finding shows its verbatim rule text, the source link, and pass/fail, plus a stated 'Rule set pinned to HC validation criteria vX.Y, eValidator/eCTD spec version, last synced <date>' badge. Add a 'View generated eCTD XML backbone' link on the readiness tower so publishers can export the sequence.xml/index and re-run it in eValidator/docuBridge before trusting the 'Ready to file' chip."
+   },
+   {
+    "name": "Coined dashboard jargon ('submission tower', 'Journey', 'Portfolio roll-up') vs eCTD-native language",
+    "respondent_count": 13,
+    "severity": "minor",
+    "representative_quote": "drop or clearly gloss the coined terms — 'submission tower,' 'Journey' — since I and my clients think in eCTD modules, and I'd want an obvious way to export and independently re-validate the package.",
+    "persona_ids": [
+     "ra_officer_generic",
+     "ra_junior",
+     "qa_manager",
+     "consultant_ex_hc",
+     "startup_founder",
+     "labelling_specialist",
+     "veteran_contractor",
+     "cdmo_ra_manager"
+    ],
+    "concrete_fix": "Rename the right-hand 'submission tower' component to 'Module tree' (eCTD modules 1–5 labelled), 'Journey' to 'Submission steps', and give 'Portfolio roll-up'/'Registry' the same dashed-underline hover definition treatment as regulatory terms on first appearance in the top nav and hero. Keep any product name only as a parenthetical gloss after the eCTD-native label."
+   },
+   {
+    "name": "Missing data-residency / tenancy / roles — the auditor's first questions absent from overview",
+    "respondent_count": 8,
+    "severity": "blocker",
+    "representative_quote": "nowhere in this overview does it address data residency (is my submission data held in Canada?), user roles and segregation of duties, or how the audit trail is protected from tampering — those are the first questions any auditor asks me.",
+    "persona_ids": [
+     "ra_director_cro",
+     "qa_manager",
+     "cdmo_ra_manager",
+     "consultant_ex_hc",
+     "ra_officer_generic"
+    ],
+    "concrete_fix": "Replace the vague 'your progress is saved automatically' footnote with a persistent 'Trust & security' strip on the overall page stating: data residency (hosted in Canada Y/N), SOC 2 status, tenant isolation/per-client data walls (critical for CROs/CDMOs), user roles & segregation-of-duties model, and audit-trail tamper controls. Link to a one-page validation/security package PDF. Surface a per-tenant boundary indicator on Portfolio/Registry."
+   },
+   {
+    "name": "Percentage-only readiness — no blocker list, owners, or deadlines (esp. PM/portfolio view)",
+    "respondent_count": 8,
+    "severity": "major",
+    "representative_quote": "give me due dates, who is assigned to each blocking item, and a filterable list of what's blocking which product. And add a real client-facing export or report and some integration hook (MS Project/Smartsheet/API), because right now I'd be re-keying its status into my own trackers.",
+    "persona_ids": [
+     "ra_junior",
+     "cro_pm",
+     "startup_founder",
+     "regops_publisher",
+     "quality_director_newcomer"
+    ],
+    "concrete_fix": "Make the readiness chip click-through to an itemized 'What's blocking transmission' list (each blocker named, linked to its dossier step, with owner + due date fields). Add a PM-oriented Portfolio view: dossier table with owner, due date, blocked-count, and a client-facing status export (PDF) plus an API/CSV hook for MS Project/Smartsheet so coordinators don't re-key."
+   },
+   {
+    "name": "French/XML Product Monograph substance is only tracked, not shown — the labelling blocker",
+    "respondent_count": 4,
+    "severity": "major",
+    "representative_quote": "show me the actual XML Product Monograph validation, not just 'PDF conformance' — the mandated XML PM tooling is where my submissions live or die, and I don't see it named among the rule families. I'd also want the French side treated as a first-class translation-review workflow with side-by-side EN/FR proofing.",
+    "persona_ids": [
+     "labelling_specialist",
+     "regops_publisher",
+     "ra_director_cro",
+     "consultant_ex_hc"
+    ],
+    "concrete_fix": "Add an 'XML Product Monograph' rule family (named alongside CA-E families) with its schema version, and surface a side-by-side EN/FR PM proofing workflow reachable from the overview — not just a 'status live inside each dossier' line. Show the actual generated FR PM XML with a validate-against-XML-PM-schema action so labelling specialists can confirm conformance rather than a checkbox."
+   },
+   {
+    "name": "Scope/onboarding overload — dense three-column landing + 'what does this NOT do' unclear",
+    "respondent_count": 6,
+    "severity": "minor",
+    "representative_quote": "give me a concrete sense of the total scope before I click 'Start my submission' — an outline of every stage, an estimate of how long a first ANDS takes and what documents I need to gather — because 'guided end to end' is a big promise, and I've been burned by tools that feel simple on the landing page and overwhelming three screens in.",
+    "persona_ids": [
+     "qa_manager",
+     "ra_junior",
+     "quality_director_newcomer",
+     "veteran_contractor",
+     "startup_founder",
+     "consultant_ex_hc"
+    ],
+    "concrete_fix": "Add a progressive-disclosure 'Before you start' overview card next to 'Start my submission': a collapsed stage outline (all steps, est. time, documents to gather), a front-and-center glossary link (not hover-only), an explicit 'What this tool does NOT do / where your responsibility begins' box, and define what the readiness % actually measures (completeness vs. HC screening) inline so the number doesn't lull users."
+   }
+  ],
+  "highest_leverage_fix": "Ship a downloadable, source-linked sample validation report run against a known-bad eCTD — each CA-E-1xxx–4xxx finding with verbatim rule text, pass/fail, and a visible 'rule set pinned to HC criteria vX.Y / eValidator-equivalent, last synced <date>' badge — plus an 'export the generated eCTD XML backbone' action on the readiness tower. Sixteen of 24 responses gate real adoption on exactly this: proving validation parity against eValidator/docuBridge/the HC validator instead of describing it. It converts the near-universal 'I'd pilot but wouldn't rely on it' into a real trial and directly protects the trust that already rose.",
+  "do_not_break": "The honesty and provenance posture is what earned the +0.32 trust rise and must be preserved: the Roadmap page stating plainly what is NOT built with honest target quarters; every finding hyperlinked to canada.ca / laws-lois primary sources; the live rule catalogue pulled from the engine grouped into CA-E-1xxx–4xxx / CA-REP-0001 families; append-only audit trail with permanent AI labelling; opt-in-per-section AI with nothing saved until 'Use this draft'; the human-review + e-signature gate before transmission; the bilingual Module 1 + EN/FR PM hard transmission-blocker callout; and the plain-language-beside-precise-vocabulary framing with dashed-underline hover definitions."
+ }
+]
