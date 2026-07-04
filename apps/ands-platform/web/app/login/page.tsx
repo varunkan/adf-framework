@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { Term } from "@/components/Term";
 
@@ -9,7 +9,6 @@ const PW_RULE = "At least 10 characters, with letters and numbers.";
 
 export default function LoginPage() {
   const router = useRouter();
-  const params = useSearchParams();
   const [mode, setMode] = useState<"login" | "signup" | "reset">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -46,7 +45,10 @@ export default function LoginPage() {
     try {
       if (mode === "signup") await auth.signup(email, password, company);
       else await auth.login(email, password, mfaCode);
-      router.push(params.get("next") || "/dossiers");
+      // read ?next at click time (no useSearchParams hook → no Suspense
+      // boundary needed → clean production build)
+      router.push(
+        new URLSearchParams(window.location.search).get("next") || "/dossiers");
       router.refresh();
     } catch (e) {
       const msg = String(e);

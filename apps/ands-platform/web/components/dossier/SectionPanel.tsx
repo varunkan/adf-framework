@@ -22,8 +22,12 @@ export function SectionPanel({ node }: { node: SectionNode }) {
   const [announce, setAnnounce] = useState("");
 
   useEffect(() => {
+    // Reset the active tab to the section's first affordance ONLY when the
+    // section changes — not on every render (node.affordances is a fresh array
+    // reference each render, so depending on it would clobber the user's tab).
     setTab(node.affordances[0] || "upload");
     setErr("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [node.section]);
 
   const upload = async (file: File, lang?: string) => {
