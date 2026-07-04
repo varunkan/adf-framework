@@ -2,8 +2,8 @@
 // Registry — marketed-product registrations (product × country × dossier ×
 // DIN), post-NOC status lifecycle and Right-to-Sell obligations (REQ-111).
 import { useCallback, useEffect, useState } from "react";
+import { TopNav } from "@/components/TopNav";
 import Link from "next/link";
-import { UserChip } from "@/components/UserChip";
 import { Term } from "@/components/Term";
 import {
   registryApi,
@@ -56,18 +56,7 @@ export default function RegistryPage() {
 
   return (
     <>
-      <header className="topbar">
-        <span className="brand">
-          <span className="dot" aria-hidden />
-          ANDS&nbsp;Studio <small>· registry</small>
-        </span>
-        <span className="spacer" />
-        <UserChip />
-        <Link className="chip" href="/help">Help</Link>
-        <Link className="chip" href="/dossiers">Dossier manager</Link>
-        <Link className="chip" href="/portfolio">Portfolio</Link>
-        <Link className="chip" href="/">Guided journey →</Link>
-      </header>
+      <TopNav subtitle="registry" />
       <main className="dossier-home">
         <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
           <h1>Product registry</h1>

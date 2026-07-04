@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { dossierApi } from "@/lib/dossierApi";
 import type { DossierListItem } from "@/lib/dossierTypes";
 import { Term } from "@/components/Term";
-import { UserChip } from "@/components/UserChip";
+import { TopNav } from "@/components/TopNav";
 import { Modal } from "@/components/Modal";
 import { auth } from "@/lib/auth";
 import { dueMeta } from "@/lib/deadline";
@@ -240,19 +240,7 @@ export default function DossiersHome() {
 
   return (
     <>
-      <header className="topbar">
-        <span className="brand">
-          <span className="dot" aria-hidden />
-          ANDS&nbsp;Studio <small>· dossier manager</small>
-        </span>
-        <span className="spacer" />
-        <UserChip />
-        <Link className="chip" href="/help">Help</Link>
-        <Link className="chip" href="/portfolio">Portfolio</Link>
-        <Link className="chip" href="/registry">Registry</Link>
-        <Link className="chip" href="/correspondence">Correspondence</Link>
-        <Link className="chip" href="/">Guided journey →</Link>
-      </header>
+      <TopNav subtitle="dossier manager" />
       <main className="dossier-home">
         <div style={{ display: "flex", alignItems: "baseline", gap: 12,
           flexWrap: "wrap" }}>

@@ -3,10 +3,10 @@
 // regulatory-affairs view of everything exchanged with Health Canada for
 // one dossier, backed by the lifecycle service.
 import { useEffect, useState } from "react";
+import { TopNav } from "@/components/TopNav";
 import Link from "next/link";
 import { dossierApi } from "@/lib/dossierApi";
 import type { DossierListItem } from "@/lib/dossierTypes";
-import { UserChip } from "@/components/UserChip";
 import { Term } from "@/components/Term";
 import { CorrespondenceHub } from "@/components/correspondence/CorrespondenceHub";
 import { NoticeInbox } from "@/components/correspondence/NoticeInbox";
@@ -42,18 +42,7 @@ export default function CorrespondencePage() {
 
   return (
     <>
-      <header className="topbar">
-        <span className="brand">
-          <span className="dot" aria-hidden />
-          ANDS&nbsp;Studio <small>· correspondence</small>
-        </span>
-        <span className="spacer" />
-        <UserChip />
-        <Link className="chip" href="/help">Help</Link>
-        <Link className="chip" href="/dossiers">Dossier manager</Link>
-        <Link className="chip" href="/portfolio">Portfolio</Link>
-        <Link className="chip" href="/">Guided journey →</Link>
-      </header>
+      <TopNav subtitle="correspondence" />
       <main className="dossier-home">
         <h1>Correspondence &amp; notices</h1>
         <p className="mut" style={{ maxWidth: "70ch" }}>

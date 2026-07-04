@@ -5,8 +5,8 @@
 // guidance documents" (operations). Same sources the in-app Health Canada
 // content review cites.
 import { useEffect, useState } from "react";
+import { TopNav } from "@/components/TopNav";
 import Link from "next/link";
-import { UserChip } from "@/components/UserChip";
 
 type Rule = { rule: string; rule_id: string; family: string;
   severity: string; description: string };
@@ -74,19 +74,7 @@ export default function HelpPage() {
   for (const r of rules || []) (families[r.family] ||= []).push(r);
   return (
     <>
-      <header className="topbar">
-        <span className="brand">
-          <span className="dot" aria-hidden />
-          ANDS&nbsp;Studio <small>· regulatory reference</small>
-        </span>
-        <span className="spacer" />
-        <UserChip />
-        <Link className="chip" href="/dossiers">Dossier manager</Link>
-        <Link className="chip" href="/portfolio">Portfolio</Link>
-        <Link className="chip" href="/registry">Registry</Link>
-        <Link className="chip" href="/correspondence">Correspondence</Link>
-        <Link className="chip" href="/">Guided journey →</Link>
-      </header>
+      <TopNav subtitle="regulatory reference" />
       <main className="dossier-home">
         <h1>Regulatory reference</h1>
         <p className="mut" style={{ maxWidth: "68ch" }}>

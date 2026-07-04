@@ -3,10 +3,10 @@
 // List payload gives id/title/type/tower/gate; fee state needs per-dossier
 // content, fetched in parallel after first paint so rows land immediately.
 import { useEffect, useState } from "react";
+import { TopNav } from "@/components/TopNav";
 import Link from "next/link";
 import { dossierApi } from "@/lib/dossierApi";
 import type { DossierListItem } from "@/lib/dossierTypes";
-import { UserChip } from "@/components/UserChip";
 import { PortfolioRow, type FeeState, type NoaClock } from "@/components/portfolio/PortfolioRow";
 import { SummaryCards } from "@/components/portfolio/SummaryCards";
 import { noaClockFrom } from "@/lib/noaProvenance";
@@ -133,19 +133,7 @@ export default function PortfolioPage() {
 
   return (
     <>
-      <header className="topbar">
-        <span className="brand">
-          <span className="dot" aria-hidden />
-          ANDS&nbsp;Studio <small>· portfolio</small>
-        </span>
-        <span className="spacer" />
-        <UserChip />
-        <Link className="chip" href="/help">Help</Link>
-        <Link className="chip" href="/dossiers">Dossier manager</Link>
-        <Link className="chip" href="/registry">Registry</Link>
-        <Link className="chip" href="/correspondence">Correspondence</Link>
-        <Link className="chip" href="/">Guided journey →</Link>
-      </header>
+      <TopNav subtitle="portfolio" />
       <main className="dossier-home">
         <h1>Portfolio</h1>
         <p className="mut" style={{ maxWidth: "64ch" }}>

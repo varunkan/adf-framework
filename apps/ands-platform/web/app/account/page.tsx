@@ -3,9 +3,9 @@
 // sees is the SERVER's record (12/12 personas), and the identity service's
 // TOTP MFA (which always existed) finally has a UI (9/12 personas).
 import { useEffect, useState } from "react";
+import { TopNav } from "@/components/TopNav";
 import Link from "next/link";
 import { auth, type Principal } from "@/lib/auth";
-import { UserChip } from "@/components/UserChip";
 import { Term } from "@/components/Term";
 import { Disclosure } from "@/components/Disclosure";
 import { WorkspaceAudit } from "@/components/account/WorkspaceAudit";
@@ -56,19 +56,7 @@ export default function AccountPage() {
 
   return (
     <>
-      <header className="topbar">
-        <span className="brand">
-          <span className="dot" aria-hidden />
-          ANDS&nbsp;Studio <small>· account &amp; security</small>
-        </span>
-        <span className="spacer" />
-        <UserChip />
-        <Link className="chip" href="/dossiers">Dossier manager</Link>
-        <Link className="chip" href="/portfolio">Portfolio</Link>
-        <Link className="chip" href="/registry">Registry</Link>
-        <Link className="chip" href="/correspondence">Correspondence</Link>
-        <Link className="chip" href="/">Guided journey →</Link>
-      </header>
+      <TopNav subtitle="account & security" />
       <main className="dossier-home">
         <h1>Account &amp; security</h1>
 

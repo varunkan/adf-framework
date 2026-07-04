@@ -1,9 +1,9 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { TopNav } from "@/components/TopNav";
 import Link from "next/link";
 import { api, session } from "@/lib/api";
 import { dossierApi } from "@/lib/dossierApi";
-import { UserChip } from "@/components/UserChip";
 import type { JourneyView } from "@/lib/types";
 import { StepRail } from "@/components/StepRail";
 import { StepCard } from "@/components/StepCard";
@@ -104,32 +104,14 @@ export default function Page() {
 
   return (
     <>
-      <header className="topbar">
-        <span className="brand">
-          <span className="dot" aria-hidden />
-          ANDS&nbsp;Studio <small>· guided ANDS filing</small>
-        </span>
-        <span className="spacer" />
-        <UserChip />
-        <Link className="chip" href="/help">Help</Link>
-        <Link className="chip" href="/dossiers">My dossiers</Link>
-        <Link className="chip" href="/portfolio"
-          title="Portfolio roll-up — every dossier, owner, client and deadline on one screen">
-          Portfolio{portfolio.total ? ` · ${portfolio.total} in progress` : ""}
-        </Link>
-        <Link className="chip" href="/registry">Registry</Link>
-        <Link className="chip" href="/correspondence">Correspondence</Link>
-        {view && (
-          <>
-            <span className={`chip ${view.readiness.status === "READY" ? "ready" : "blocked"}`}>
-              {view.readiness.status === "READY" ? "Ready to file" : `${view.readiness.percent}% ready`}
-            </span>
-            <button className="ghost" onClick={restart}>
-              Start over
-            </button>
-          </>
-        )}
-      </header>
+      <TopNav subtitle="guided ANDS filing" extra={view && (
+        <>
+          <span className={`chip ${view.readiness.status === "READY" ? "ready" : "blocked"}`}>
+            {view.readiness.status === "READY" ? "Ready to file" : `${view.readiness.percent}% ready`}
+          </span>
+          <button className="ghost" onClick={restart}>Start over</button>
+        </>
+      )} />
 
       <div className="sr-only" aria-live="polite">
         {view && activeStage
