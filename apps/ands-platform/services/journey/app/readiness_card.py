@@ -31,9 +31,28 @@ def card(payload: dict) -> dict:
                       "reg": st.get("reg", "")})
 
     # READY to file once orient..sign (stages 0..8) are all done — transmit open.
+    # The 'validate' stage is 'done' only when the REAL eCTD validation ran with
+    # zero errors (see service.advance 'validate'), so READY is already gated on
+    # validation passing — the `validation` tier below makes that legible instead
+    # of leaving READY to read like a mere step-completion badge.
     ready_to_file = all(stages[k]["done"] for k in _TILE_KEYS)
     transmitted = pos["transmitted"]
     status = "READY" if (ready_to_file or transmitted) else "BLOCKED"
+
+    # A distinct 'eCTD technical validation' tier — separate from the filing
+    # checklist %. Round-7 #1 blocker: every persona read the green badge as a
+    # workflow checkbox, not a validation verdict. Surface the real report.
+    _v = payload.get("validation") or {}
+    validation = {
+        "ran": bool(_v.get("ran")),
+        "passed": bool(_v.get("ran")) and int(_v.get("errors", 0) or 0) == 0,
+        "errors": int(_v.get("errors", 0) or 0),
+        "warnings": int(_v.get("warnings", 0) or 0),
+        "checked": int(_v.get("checked", 0) or 0),
+        "real": bool(_v.get("real")),
+        "criteria": _v.get("criteria"),
+        "failing_rules": _v.get("failing_rules") or [],
+    }
 
     # The single thing standing between the user and 'ready to file' is the
     # current stage — surfaced in plain language (any stage, incl. orientation).
@@ -53,6 +72,7 @@ def card(payload: dict) -> dict:
         "percent": pos["percent"],
         "done": pos["done"], "total": pos["total"],
         "tiles": tiles,
+        "validation": validation,
         "blocking_items": blocking_items,
         "resume": pos["resume"],
     }

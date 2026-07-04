@@ -81,8 +81,13 @@ def test_validate_real_pass_marks_signal_real():
     r = _advance(m, "validate")
     assert r.status_code == 200
     sig = m.client.get(f"/api/journey/{m.sid}").json()["signals"]
-    assert sig["validation"] == {"ran": True, "errors": 0, "warnings": 0,
-                                 "checked": 3, "real": True}
+    # WS1-b enriched the signal with the named criteria + failing rule ids so
+    # the readiness 'validation' tier is legible; core fields unchanged.
+    assert {k: sig["validation"][k] for k in
+            ("ran", "errors", "warnings", "checked", "real")} == {
+        "ran": True, "errors": 0, "warnings": 0, "checked": 3, "real": True}
+    assert "criteria" in sig["validation"]
+    assert sig["validation"]["failing_rules"] == []
 
 
 def test_validate_without_dossier_uses_simulated_input():

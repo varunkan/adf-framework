@@ -304,7 +304,15 @@ class JourneyService:
                 signals["validation"] = {
                     "ran": True, "errors": len(errs),
                     "warnings": len(report.get("warnings") or []),
-                    "checked": report.get("checked", 0), "real": True}
+                    "checked": report.get("checked", 0), "real": True,
+                    # carry the named/versioned profile + the failing rule ids so
+                    # the readiness 'validation' tier is legible (round-7 blocker)
+                    "criteria": report.get("criteria"),
+                    "failing_rules": [
+                        {"rule_id": _s(e.get("rule_id")),
+                         "message": _s(e.get("message"))[:140]}
+                        for e in errs[:8]],
+                }
                 if errs:
                     raise ProblemError(
                         422, "validation found errors",

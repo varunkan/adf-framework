@@ -65,6 +65,26 @@ export interface BlockingItem {
   cta: string | null;
 }
 
+// The distinct 'eCTD technical validation' tier (WS1-b) — separate from the
+// filing-checklist %. Makes the green READY badge a validation verdict, not a
+// step-completion checkbox (round-7 #1 blocker, all 24 respondents).
+export interface ReadinessValidation {
+  ran: boolean;
+  passed: boolean;
+  errors: number;
+  warnings: number;
+  checked: number;
+  real: boolean;
+  criteria?: {
+    name: string;
+    version: string;
+    synced?: string;
+    modeled_on?: string;
+    disclaimer?: string;
+  } | null;
+  failing_rules: { rule_id: string; message: string }[];
+}
+
 export interface ReadinessCardData {
   status: "READY" | "BLOCKED";
   ready_to_file: boolean;
@@ -73,6 +93,7 @@ export interface ReadinessCardData {
   done: number;
   total: number;
   tiles: Tile[];
+  validation: ReadinessValidation;
   blocking_items: BlockingItem[];
   resume: { n: number; key: string; label: string; route: string };
 }
