@@ -276,52 +276,137 @@ button:disabled{opacity:.45;cursor:not-allowed;transform:none}
 .bad-text{color:var(--bad);font-weight:600}
 .warn-text{color:var(--warn);font-weight:600}
 
-/* ── dossier header module tabs ───────────────────────────────────── */
-.module-tabs{display:flex;gap:4px;margin-left:18px}
-.mtab{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:9px;
-  font-size:13px;font-weight:600;color:var(--ink);border:1px solid transparent}
-.mtab:hover{background:rgba(255,255,255,.05)}
+/* ── dossier header module tabs (P0-4: per-module completeness) ────── */
+.module-tabs{display:flex;gap:5px;margin-left:18px}
+.mtab{position:relative;display:inline-flex;align-items:center;gap:7px;
+  padding:7px 13px 9px;border-radius:9px;font-size:13px;font-weight:600;
+  color:var(--mut);border:1px solid transparent;overflow:hidden}
+.mtab:hover{background:rgba(255,255,255,.05);color:var(--ink)}
 .mtab.active{background:linear-gradient(110deg,rgba(91,140,255,.22),rgba(155,107,255,.12));
-  border-color:rgba(91,140,255,.5)}
-.mtab .d{width:12px;text-align:center;font-size:11px;font-weight:800;color:var(--mut)}
-.mtab .d.pass{color:var(--ok)}.mtab .d.partial{color:var(--brand)}
-.mtab .d.na{color:rgba(255,255,255,.3)}
+  border-color:rgba(91,140,255,.5);color:var(--ink);font-weight:700}
+.mtab .mtab-label{letter-spacing:.02em}
+.mtab .mtab-frac{font-family:ui-monospace,monospace;font-size:11px;color:var(--mut);
+  font-weight:600}
+.mtab.active .mtab-frac{color:var(--ink)}
+.mtab .mtab-icon{display:inline-flex;align-items:center;justify-content:center;
+  width:15px;height:15px;color:var(--mut)}
+.mtab-icon.complete{color:var(--ok)}
+.mtab-icon.review{color:var(--warn)}
+.mtab-icon.partial .mtab-dot,.mtab-icon.todo .mtab-dot{width:8px;height:8px;
+  border-radius:50%;box-sizing:border-box}
+.mtab-icon.partial .mtab-dot{background:var(--warn)}
+.mtab-icon.todo .mtab-dot{border:1.5px solid var(--mut)}
+.mtab-icon.na{color:rgba(255,255,255,.3);font-weight:800}
+/* per-module completeness underline */
+.mtab-bar{position:absolute;left:0;right:0;bottom:0;height:2px;
+  background:rgba(255,255,255,.08)}
+.mtab-bar i{display:block;height:100%;background:var(--brand);border-radius:2px;
+  transition:width var(--prism-ease)}
+.mtab.complete .mtab-bar i{background:var(--ok)}
+.mtab.review .mtab-bar i{background:var(--warn)}
 
-/* ── module workspace ─────────────────────────────────────────────── */
-.workspace{max-width:1320px;margin:0 auto;padding:22px 24px 80px;display:grid;
-  grid-template-columns:290px 1fr 340px;gap:22px;align-items:start}
+/* ── module workspace (P1-1: the tree is the hero) ────────────────── */
+.workspace{max-width:1360px;margin:0 auto;padding:22px 24px 80px;display:grid;
+  grid-template-columns:336px minmax(0,1fr) 312px;gap:20px;align-items:start}
 @media (max-width:1100px){.workspace{grid-template-columns:1fr}
   .ws-aside{order:2}.ws-main{order:3}.section-tree{order:1;position:static}}
-.section-tree{position:sticky;top:80px;max-height:calc(100vh - 100px);overflow:auto}
-.section-tree h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;
-  color:var(--mut);margin:0 0 10px;font-weight:700}
+.section-tree{position:sticky;top:80px;max-height:calc(100vh - 100px);overflow:auto;
+  padding:14px 12px}
 .section-tree ul{list-style:none;margin:0;padding:0}
-.tree-legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin:0 0 12px;padding:8px 10px;
-  border:1px solid var(--line);border-radius:9px;background:rgba(0,0,0,.18);
-  font-size:11.5px;color:var(--mut)}
-.tree-legend li{display:inline-flex;align-items:center;gap:5px}
-.tree-legend .t-glyph{width:auto}
+
+/* tree module-completeness header (P1-6) */
+.tree-head{margin:0 0 10px;padding:0 2px}
+.tree-head-top{display:flex;align-items:baseline;gap:8px}
+.tree-mod{font-size:15px;font-weight:800;letter-spacing:.02em}
+.tree-mod-name{font-size:12px;color:var(--mut);line-height:1.3}
+.tree-head .progress{margin:8px 0 4px}
+.tree-head-count{font-size:11px}
+
+/* collapsed "Status key" (P2-3) */
+.tree-key-btn{display:inline-flex;align-items:center;gap:5px;font-size:11px;
+  padding:3px 8px;margin:0 0 10px;color:var(--mut)}
+.tt-legend{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:5px}
+.tt-legend li{display:flex;align-items:center;gap:7px;font-size:12px}
+
 .tree-group{font-size:11px;text-transform:uppercase;letter-spacing:.06em;
-  color:var(--mut);margin:12px 0 4px;font-weight:700}
-.tree-item{display:flex;align-items:center;gap:7px;padding:7px 9px;border-radius:9px;
-  cursor:pointer;font-size:13px;border:1px solid transparent}
-.tree-item.d2{padding-left:18px}.tree-item.d3{padding-left:26px}
+  color:var(--mut);margin:14px 0 5px;font-weight:700;
+  padding-left:8px;border-left:1px solid var(--line)}
+
+/* two-line leaf row with a 3px left status accent-bar (P0-2) */
+.tree-item{display:flex;align-items:flex-start;gap:9px;padding:8px 9px 8px 10px;
+  border-radius:9px;cursor:pointer;font-size:13px;border:1px solid transparent;
+  border-left:3px solid transparent}
+.tree-item.d2{margin-left:10px}.tree-item.d3{margin-left:20px}
 .tree-item:hover{background:rgba(255,255,255,.04)}
+.tree-item:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
+/* P2-2: the blue→violet gradient is reserved for selection ONLY */
 .tree-item.sel{background:linear-gradient(110deg,rgba(91,140,255,.2),rgba(155,107,255,.1));
-  border-color:rgba(91,140,255,.45)}
-.t-glyph{width:15px;text-align:center;font-weight:800;color:var(--mut);flex:0 0 auto}
-.t-glyph.complete{color:var(--ok)}.t-glyph.partial{color:var(--warn)}
-.t-glyph.na{color:rgba(255,255,255,.3)}
-.t-sec{font-family:ui-monospace,monospace;font-size:11px;color:var(--mut);flex:0 0 auto}
-.t-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.t-badge{font-size:9px;font-weight:800;text-transform:uppercase;padding:1px 5px;
-  border-radius:5px;flex:0 0 auto}
-.t-badge.required{background:rgba(91,140,255,.2);color:#bcd0ff}
-.t-badge.optional{background:rgba(255,255,255,.07);color:var(--mut)}
+  border-color:rgba(91,140,255,.45);border-left-color:var(--brand)}
+/* status accent-bar tint per state (the column reads as a status stripe) */
+.tree-item.s-complete{border-left-color:rgba(55,211,155,.55)}
+.tree-item.s-partial{border-left-color:rgba(255,209,102,.55)}
+.tree-item.s-review{border-left-color:rgba(255,209,102,.8)}
+.tree-item.s-empty{border-left-color:rgba(255,255,255,.12)}
+.tree-item.s-na{border-left-color:rgba(255,255,255,.1)}
+.tree-item.sel.s-review,.tree-item.sel.s-complete,.tree-item.sel.s-partial,
+.tree-item.sel.s-empty,.tree-item.sel.s-na{border-left-color:var(--brand)}
+
+/* the status icon (shape-distinct, colour is secondary) */
+.t-glyph{display:inline-flex;align-items:center;justify-content:center;
+  width:16px;height:16px;flex:0 0 auto;margin-top:1px;color:var(--mut)}
+.t-glyph.complete{color:var(--ok)}
+.t-glyph.partial,.t-glyph.review{color:var(--warn)}
+.t-glyph.na{color:rgba(255,255,255,.4)}
+.t-glyph.empty{color:var(--mut)}
+
+.t-body{flex:1;min-width:0}
+.t-line1{display:flex;align-items:baseline;gap:8px}
+.t-title{flex:1;min-width:0;line-height:1.35;
+  overflow-wrap:anywhere}
+.t-sec{font-family:ui-monospace,monospace;font-size:10.5px;color:var(--mut);
+  flex:0 0 auto}
+.t-line2{font-size:11px;margin-top:2px;line-height:1.3}
+.t-op{font-family:ui-monospace,monospace;font-size:10px;font-weight:700;
+  color:var(--mut);text-transform:uppercase}
+.t-op.warn{color:var(--warn)}
+/* P0-3/P2-2: AI affordance is a distinct violet axis, not required-blue */
+.t-ai{display:inline-flex;align-items:center;justify-content:center;
+  color:var(--violet);flex:0 0 auto;margin-top:1px}
+
 .tree-hidden{margin-top:14px}
-.tree-hidden summary{font-size:12px;color:var(--mut);cursor:pointer}
-.tree-na{font-size:12px;color:var(--mut);padding:5px 9px;opacity:.7}
+.tree-hidden summary{font-size:12px;color:var(--mut);cursor:pointer;padding:4px 2px}
+.tree-hidden ul{margin-top:4px}
+.tree-na{padding:3px 2px}
+.tree-na-btn{display:flex;align-items:center;gap:8px;width:100%;text-align:left;
+  background:transparent;border:0;padding:5px 8px;border-radius:8px;
+  font-size:12px;color:var(--mut);cursor:pointer}
+.tree-na-btn:hover{background:rgba(255,255,255,.04);color:var(--ink)}
+.tree-na-reason{font-size:11px;padding:0 8px 4px 32px;line-height:1.35}
+
 .ws-aside{position:sticky;top:80px;display:flex;flex-direction:column;gap:16px}
+
+/* ── shared Radix tooltip (Prism dark) ────────────────────────────── */
+.tt{max-width:280px;padding:9px 11px;border-radius:9px;font-size:12px;line-height:1.4;
+  background:rgba(18,26,42,.97);border:1px solid var(--line);color:var(--ink);
+  box-shadow:var(--prism-shadow-2);backdrop-filter:blur(10px);z-index:var(--prism-z-modal)}
+.tt .tt-sub{color:var(--mut);margin-top:3px;font-size:11.5px}
+.tt-arrow{fill:rgba(18,26,42,.97)}
+.tt-key{max-width:220px}
+
+/* ── gate card triad flags (P1-4: one status language) ────────────── */
+.gate-card .gate-head{display:flex;align-items:baseline;gap:8px}
+.gate-notice{display:flex;gap:8px;align-items:flex-start;margin-top:10px;font-size:12px}
+.gate-notice svg{flex:0 0 auto;margin-top:1px}
+.gate-flags{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px}
+.gate-flag{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;
+  font-weight:600;color:var(--mut)}
+.gate-flag.ok{color:var(--ok)}
+.gate-flag svg{flex:0 0 auto}
+
+/* review banner icon (P1-4) */
+.review-banner{display:flex;gap:9px;align-items:flex-start}
+.review-banner-ic{flex:0 0 auto;margin-top:1px;color:var(--warn)}
+.eyebrow-place{font-family:ui-monospace,monospace;font-size:11px}
 
 /* ── section panel ────────────────────────────────────────────────── */
 .section-panel .applic{text-transform:uppercase;font-size:11px;font-weight:800;

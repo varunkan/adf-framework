@@ -15,6 +15,8 @@ export function Disclosure({
   className,
   forceOpen = false,
   forceOpenNote,
+  open: controlledOpen,
+  onOpenChange,
 }: {
   // one-line summary (the single primary thing this row shows when collapsed)
   summary: ReactNode;
@@ -28,8 +30,18 @@ export function Disclosure({
   // be hidden behind a collapsed expander.
   forceOpen?: boolean;
   forceOpenNote?: ReactNode;
+  // Optional controlled open-state — lets a parent persist it (e.g. across
+  // module switches). Falls back to uncontrolled when omitted.
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [uncontrolled, setUncontrolled] = useState(defaultOpen);
+  const controlled = controlledOpen != null;
+  const open = controlled ? (controlledOpen as boolean) : uncontrolled;
+  const setOpen = (next: boolean) => {
+    if (!controlled) setUncontrolled(next);
+    onOpenChange?.(next);
+  };
   const shown = open || forceOpen;
   return (
     <div className={`disclosure${className ? ` ${className}` : ""}`}>
@@ -46,7 +58,7 @@ export function Disclosure({
             type="button"
             className="ghost disclosure-toggle"
             aria-expanded={open}
-            onClick={() => setOpen((o) => !o)}
+            onClick={() => setOpen(!open)}
           >
             {open ? hideLabel : showLabel}
           </button>

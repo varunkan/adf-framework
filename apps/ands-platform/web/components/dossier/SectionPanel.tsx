@@ -6,8 +6,10 @@ import { DraftChat } from "./DraftChat";
 import { EctdPrimer } from "./EctdPrimer";
 import { useDossier } from "./DossierContext";
 import { Disclosure } from "../Disclosure";
-import { Upload, Sparkles, Ban } from "lucide-react";
+import { Upload, Sparkles, Ban, AlertTriangle } from "lucide-react";
+import { toast } from "sonner";
 import { MODULE_4_NOTE, citeLine } from "@/lib/regCitations";
+import { opMeta } from "@/lib/leafStatus";
 
 function fmtSize(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -15,12 +17,31 @@ function fmtSize(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function SectionPanel({ node }: { node: SectionNode }) {
+export function SectionPanel({ node, op }: { node: SectionNode; op?: string }) {
   const { dossierId, content, setContent } = useDossier();
   const affs = node.affordances;
   const [tab, setTab] = useState<string>(affs[0] || "upload");
   const [err, setErr] = useState("");
   const [announce, setAnnounce] = useState("");
+  const stepTitleRef = useRef<HTMLHeadingElement>(null);
+
+  // P2-4: pull keyboard focus into the panel when the selected leaf changes so
+  // a keyboard user is not left back on the tree row — BUT never steal focus
+  // while the user is arrow-scanning the tree itself (that would break the
+  // continuous top-to-bottom scan). Only grab focus when it currently sits
+  // outside the section tree (e.g. after a click, or a programmatic select).
+  useEffect(() => {
+    const inTree = document.activeElement?.closest?.(".section-tree");
+    if (!inTree) stepTitleRef.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [node.section]);
+
+  // Route every failure through a toast as well as the inline notice (P1-3).
+  function fail(e: unknown) {
+    const msg = String(e);
+    setErr(msg);
+    toast.error(msg);
+  }
 
   useEffect(() => {
     // Reset the active tab to the section's first affordance ONLY when the
@@ -39,9 +60,11 @@ export function SectionPanel({ node }: { node: SectionNode }) {
         onProgress: () => {},
       });
       setContent(c);
-      setAnnounce(`${file.name} placed in ${node.section}`);
+      const msg = `${file.name} placed at leaf ${node.section}`;
+      setAnnounce(msg);
+      toast.success(msg);
     } catch (e) {
-      setErr(String(e));
+      fail(e);
     }
   };
 
@@ -51,8 +74,17 @@ export function SectionPanel({ node }: { node: SectionNode }) {
       <div className="eyebrow">
         Module {node.module} · Section {node.section} ·{" "}
         <span className={`applic ${node.applicability}`}>{node.applicability}</span>
+        {/* P1-5 — the concrete eCTD placement the reviewer actually opens */}
+        {(node.folder || node.leaf_id) && (
+          <span className="eyebrow-place mut">
+            {" · "}Placed at {node.folder || "—"}
+            {node.leaf_id ? ` · leaf ${node.leaf_id}` : ""}
+          </span>
+        )}
       </div>
-      <h2 className="step-title">{node.title}</h2>
+      <h2 className="step-title" ref={stepTitleRef} tabIndex={-1}>
+        {node.title}
+      </h2>
       <p className="lede">{node.purpose}</p>
 
       <div className="teach">
@@ -123,52 +155,66 @@ export function SectionPanel({ node }: { node: SectionNode }) {
             dossierId={dossierId}
             onConfirm={(c) => {
               setContent(c);
-              setAnnounce(`${node.section} confirmed as your reviewed content`);
+              const msg = `${node.section} confirmed as your content`;
+              setAnnounce(msg);
+              toast.success(msg);
             }}
-            onError={setErr}
+            onError={fail}
           />
 
-          <div className="affordance-bar" role="tablist" aria-label="Actions">
+          {/* P1-8 — real toggle-button group (not a false tablist): the panel
+              below is switched in place, so `aria-pressed` matches the keyboard
+              behaviour where `role=tab` would have promised arrow-key roving. */}
+          <div className="affordance-bar" role="group" aria-label="Choose how to complete this section">
             {affs.includes("upload") && (
-              <button role="tab" aria-selected={tab === "upload"}
+              <button type="button" aria-pressed={tab === "upload"}
                 className={tab === "upload" ? "on" : ""}
                 onClick={() => setTab("upload")}><Upload size={14} aria-hidden /> Upload</button>
             )}
             {affs.includes("generate") && (
-              <button role="tab" aria-selected={tab === "generate"}
+              <button type="button" aria-pressed={tab === "generate"}
                 className={tab === "generate" ? "on" : ""}
                 onClick={() => setTab("generate")}><Sparkles size={14} aria-hidden /> Author in-app</button>
             )}
             {affs.includes("mark_na") && (
-              <button role="tab" aria-selected={tab === "mark_na"}
+              <button type="button" aria-pressed={tab === "mark_na"}
                 className={tab === "mark_na" ? "on" : ""}
                 onClick={() => setTab("mark_na")}><Ban size={14} aria-hidden /> Mark N/A</button>
             )}
           </div>
 
-          {err && <div className="notice bad">{err}</div>}
+          {err && <div className="notice bad" role="alert">{err}</div>}
 
           {tab === "upload" &&
             (node.bilingual ? (
               <div className="field-row">
                 <Dropzone label="English (EN)" formats={node.formats}
+                  ariaLabel={`Upload English (EN) document for section ${node.section} — ${node.formats.map((f) => f.toUpperCase()).join("/")}`}
                   onFile={(f) => upload(f, "en")} />
                 <Dropzone label="Français (FR)" formats={node.formats}
+                  ariaLabel={`Upload French (FR) document for section ${node.section} — ${node.formats.map((f) => f.toUpperCase()).join("/")}`}
                   onFile={(f) => upload(f, "fr")} />
               </div>
             ) : (
-              <Dropzone formats={node.formats} onFile={(f) => upload(f)} />
+              <Dropzone formats={node.formats}
+                ariaLabel={`Upload document for section ${node.section} — ${node.formats.map((f) => f.toUpperCase()).join("/")}`}
+                onFile={(f) => upload(f)} />
             ))}
 
           {tab === "generate" && (
-            <AuthorForm node={node} onDone={(c, msg) => { setContent(c); setAnnounce(msg); }}
-              onError={setErr} dossierId={dossierId} />
+            <AuthorForm node={node} op={op}
+              onDone={(c, msg) => { setContent(c); setAnnounce(msg); toast.success(msg); }}
+              onError={fail} dossierId={dossierId} />
           )}
 
           {tab === "mark_na" && (
             <MarkNa node={node} dossierId={dossierId}
-              onDone={(c) => { setContent(c); setAnnounce(`${node.section} marked N/A`); }}
-              onError={setErr} />
+              onDone={(c) => {
+                setContent(c);
+                const msg = `${node.section} marked N/A`;
+                setAnnounce(msg); toast.success(msg);
+              }}
+              onError={fail} />
           )}
         </>
       )}
@@ -223,6 +269,7 @@ function AttachedDocs({
     setConfirming(true);
     try {
       onConfirm(await dossierApi.confirmContent(dossierId, node.section));
+      toast.success(`${node.section} confirmed as your reviewed content`);
     } catch (e) {
       onError(String(e));
     } finally {
@@ -233,9 +280,11 @@ function AttachedDocs({
   return (
     <div className="attached">
       {needsReview && (
-        <div className="notice bad" role="status"
+        <div className="notice bad review-banner" role="status"
           style={{ marginBottom: 10 }}>
-          <b>⚠ Not yet filable — review required.</b>{" "}
+          <AlertTriangle size={16} aria-hidden className="review-banner-ic" />
+          <span>
+          <b>Not yet filable — review required.</b>{" "}
           {isAi
             ? "This is an AI-assisted draft. It will "
             : "This section still shows worked-example (sample) values. It will "}
@@ -262,6 +311,7 @@ function AttachedDocs({
               worked example is still in place.
             </>
           )}
+          </span>
         </div>
       )}
       {docs.map(({ lang, meta }) => (
@@ -309,10 +359,12 @@ function Dropzone({
   label,
   formats,
   onFile,
+  ariaLabel,
 }: {
   label?: string;
   formats: string[];
   onFile: (f: File) => void | Promise<void>;
+  ariaLabel?: string;
 }) {
   const ref = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
@@ -344,6 +396,8 @@ function Dropzone({
         onClick={() => ref.current?.click()}
         role="button"
         tabIndex={0}
+        aria-label={ariaLabel}
+        aria-busy={busy}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") { e.preventDefault(); ref.current?.click(); }
         }}
@@ -413,11 +467,13 @@ function ReviewPanel({ review }: { review: any }) {
 
 function AuthorForm({
   node,
+  op,
   dossierId,
   onDone,
   onError,
 }: {
   node: SectionNode;
+  op?: string;
   dossierId: string;
   onDone: (c: any, msg: string) => void;
   onError: (e: string) => void;
@@ -503,7 +559,8 @@ function AuthorForm({
     <>
       <p className="mut" style={{ fontSize: 13 }}>
         <b>Author in-app</b> produces a PDF/A leaf placed at this section&apos;s
-        eCTD position (lifecycle operation: <i>new</i>). Your dossier&apos;s known
+        eCTD position (lifecycle operation:{" "}
+        <i>{opMeta(op)?.word ?? "new leaf"}</i>). Your dossier&apos;s known
         facts are pre-filled; fields marked <i>example — replace this</i> show
         greyed <b>example text you must replace</b> with your product&apos;s real
         data — the example is never saved as your content, and any left
@@ -550,11 +607,11 @@ function AuthorForm({
             the filer reviews in the mode they drafted in. Both save an
             unconfirmed draft that the review/confirm banner (on the saved-doc
             card above) then blocks until confirmed. */}
-        <div className="affordance-bar" role="tablist" aria-label="How to draft this section">
-          <button role="tab" aria-selected={mode === "ai"}
+        <div className="affordance-bar" role="group" aria-label="How to draft this section">
+          <button type="button" aria-pressed={mode === "ai"}
             className={mode === "ai" ? "on" : ""}
             onClick={() => setMode("ai")}>💬 Draft with AI</button>
-          <button role="tab" aria-selected={mode === "template"}
+          <button type="button" aria-pressed={mode === "template"}
             className={mode === "template" ? "on" : ""}
             onClick={() => setMode("template")}><Sparkles size={14} aria-hidden /> Fill the form</button>
         </div>
@@ -651,6 +708,13 @@ function FeesWidget({
     setBusy(true);
     try {
       onDone(await dossierApi.setFees(dossierId, nextPaid, nextSme));
+      toast.success(
+        `Fee status saved${nextPaid ? " — payment arranged" : ""}${
+          nextSme ? " · small-business granted" : ""
+        }`
+      );
+    } catch (e) {
+      toast.error(`Could not save fee status — ${String(e)}`);
     } finally {
       setBusy(false);
     }
