@@ -259,9 +259,40 @@ export function StepCard({
             gate, recorded with a tamper-evident audit trail (who signed, when).
             Signing unlocks transmission.
           </div>
+          {/* WS-JOURNEY (round-8 BLOCKER, n=4): make the e-signature CAPTURE
+              legible before it fires — QA / Part-11 personas need to see what
+              the signature attests to and what gets recorded, not just a green
+              tick afterwards. This frames the capture; it does not claim any
+              certification (e.g. Part-11 validation) the platform hasn't done. */}
+          {!sig.esign?.signed && (
+            <div className="notice" style={{ fontSize: 12.5 }}>
+              <b>E-signature capture.</b> Applying the signature records a
+              regulated attestation designed to align with{" "}
+              <b>21 CFR Part 11 / GxP</b> practice:
+              <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                <li>
+                  the <b>signer&apos;s identity</b> (tied to the authenticated
+                  user) and the <b>UTC timestamp</b>;
+                </li>
+                <li>
+                  the <b>meaning</b> of the signing — you attest this package is
+                  reviewed, complete and authorized to transmit;
+                </li>
+                <li>
+                  a <b>tamper-evident manifest</b> (a checksum over every
+                  artifact) so any later change to a signed leaf is detectable;
+                </li>
+                <li>
+                  an immutable entry on the append-only{" "}
+                  <b>audit trail</b> (who / what / when).
+                </li>
+              </ul>
+            </div>
+          )}
           {sig.esign?.signed && (
             <div className="notice ok">
               ✓ Signed by {sig.esign.signer || "authorized signer"}
+              {sig.esign.signed_at ? ` on ${sig.esign.signed_at}` : ""}
               {sig.esign.manifest_id
                 ? ` — tamper-evident manifest ${String(sig.esign.manifest_id).slice(0, 10)}… over ${sig.esign.artifact_count} artifact(s).`
                 : "."}
