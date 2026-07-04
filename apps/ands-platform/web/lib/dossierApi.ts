@@ -43,6 +43,8 @@ export const dossierApi = {
     title?: string;
     submission_type?: string;
     cs_be_only?: boolean;
+    sponsor?: string;
+    owner?: string;
   }) => j<any>("/dossiers", { method: "POST", body: JSON.stringify(body) }),
 
   getDossier: (id: string) => j<DossierFull>(`/dossiers/${encodeURIComponent(id)}`),

@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api, session } from "@/lib/api";
+import { dossierApi } from "@/lib/dossierApi";
 import { UserChip } from "@/components/UserChip";
 import type { JourneyView } from "@/lib/types";
 import { StepRail } from "@/components/StepRail";
@@ -23,6 +24,20 @@ export default function Page() {
   useEffect(() => {
     try { setPrereqAck(window.localStorage.getItem("ands.prereqAck") === "1"); }
     catch { setPrereqAck(true); }
+  }, []);
+
+  // R7 portfolio-awareness: a coordinator is never trapped in one linear
+  // journey — surface how many dossiers are in progress (and how many are
+  // still blocked) so they can jump to the portfolio roll-up at any time.
+  const [portfolio, setPortfolio] = useState<{ total: number; blocked: number }>(
+    { total: 0, blocked: 0 });
+  useEffect(() => {
+    dossierApi.listDossiers()
+      .then(({ dossiers }) => setPortfolio({
+        total: dossiers.length,
+        blocked: dossiers.filter((d) => !d.gate?.complete).length,
+      }))
+      .catch(() => { /* dossier service offline — link simply shows no count */ });
   }, []);
 
   // resume a saved session on load
@@ -98,7 +113,10 @@ export default function Page() {
         <UserChip />
         <Link className="chip" href="/help">Help</Link>
         <Link className="chip" href="/dossiers">My dossiers</Link>
-        <Link className="chip" href="/portfolio">Portfolio</Link>
+        <Link className="chip" href="/portfolio"
+          title="Portfolio roll-up — every dossier, owner, client and deadline on one screen">
+          Portfolio{portfolio.total ? ` · ${portfolio.total} in progress` : ""}
+        </Link>
         <Link className="chip" href="/registry">Registry</Link>
         <Link className="chip" href="/correspondence">Correspondence</Link>
         {view && (
@@ -125,7 +143,8 @@ export default function Page() {
         !booting && prereqAck === false ? (
           <PrereqChecklist onBegin={() => setPrereqAck(true)} />
         ) : (
-          <Hero booting={booting} busy={busy} error={error} onStart={start} />
+          <Hero booting={booting} busy={busy} error={error} onStart={start}
+            portfolio={portfolio} />
         )
       ) : (
         <div className="stage">
@@ -156,6 +175,24 @@ export default function Page() {
               missing={activeStage?.key === "content" ? view.content.gate?.missing : undefined}
             />
             <ReadinessCard data={view.readiness} onResume={setActiveKey} />
+            {/* R7: a labelling specialist looks for bilingual Module 1 / Product
+                Monograph status. The journey session isn't a real dossier, so
+                point them to the per-dossier panel where it actually lives. */}
+            {activeStage?.key === "content" && (
+              <div className="card glass" style={{ marginTop: 12, padding: 14 }}>
+                <div className="mut" style={{ fontSize: 12, marginBottom: 6 }}>
+                  Labelling / Product Monograph
+                </div>
+                <p className="mut" style={{ fontSize: 12, margin: "0 0 8px" }}>
+                  Bilingual Module 1 and the EN + FR Product Monograph (a
+                  transmission blocker if either is missing) are tracked per
+                  dossier.
+                </p>
+                <Link className="chip" href="/dossiers">
+                  Open a dossier’s Module 1 →
+                </Link>
+              </div>
+            )}
           </aside>
         </div>
       )}
@@ -168,11 +205,13 @@ function Hero({
   busy,
   error,
   onStart,
+  portfolio,
 }: {
   booting: boolean;
   busy: boolean;
   error: string;
   onStart: () => void;
+  portfolio: { total: number; blocked: number };
 }) {
   if (booting)
     return (
@@ -196,11 +235,24 @@ function Hero({
       <button className="start" onClick={onStart} disabled={busy}>
         {busy ? "Starting…" : "Start my submission →"}
       </button>
-      <div style={{ marginTop: 14 }}>
-        <Link className="chip" href="/dossiers">
-          Or open your dossiers — every product in submission →
+      {/* R7: the guided journey is one product's path — a coordinator managing
+          a portfolio enters here instead. Promoted from an afterthought link. */}
+      <div className="hero-portfolio" style={{ marginTop: 18, display: "flex",
+        gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
+        <Link className="chip" href="/dossiers"
+          style={{ fontWeight: 700 }}>
+          Managing several products? Open the dossier catalog
+          {portfolio.total ? ` (${portfolio.total})` : ""} →
+        </Link>
+        <Link className="chip" href="/portfolio">
+          Portfolio roll-up
+          {portfolio.blocked ? ` · ${portfolio.blocked} in progress` : ""} →
         </Link>
       </div>
+      <p className="sub" style={{ marginTop: 8 }}>
+        Labelling / regulatory: bilingual Module 1 and Product Monograph (EN + FR)
+        status live inside each dossier — open a dossier’s Module 1 to review it.
+      </p>
       {error && <div className="notice bad">{error}</div>}
       <div className="sub">
         Grounded in real Health Canada process · your progress is saved
