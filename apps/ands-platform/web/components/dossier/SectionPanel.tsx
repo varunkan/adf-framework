@@ -75,13 +75,10 @@ export function SectionPanel({ node, op }: { node: SectionNode; op?: string }) {
       <div className="eyebrow">
         Module {node.module} · Section {node.section} ·{" "}
         <span className={`applic ${node.applicability}`}>{node.applicability}</span>
-        {/* P1-5 — the concrete eCTD placement the reviewer actually opens */}
-        {(node.folder || node.leaf_id) && (
-          <span className="eyebrow-place mut">
-            {" · "}Placed at {node.folder || "—"}
-            {node.leaf_id ? ` · leaf ${node.leaf_id}` : ""}
-          </span>
-        )}
+        {/* R9 DENSITY: the concrete eCTD placement (folder / leaf id) is real
+            substance but not first-view chrome — it moved down into the "eCTD
+            placement" expander (Node placement + Leaf id rows), so the eyebrow
+            reads calm and the leaf/folder detail is one click away. */}
       </div>
       <h2 className="step-title" ref={stepTitleRef} tabIndex={-1}>
         {node.title}
@@ -121,15 +118,6 @@ export function SectionPanel({ node, op }: { node: SectionNode; op?: string }) {
         </Disclosure>
         <EctdPrimer compact dossierId={dossierId} />
       </div>
-
-      {/* MAJOR (n=8) wants real eCTD, not eye-candy: the actual leaf/operation +
-          node placement written to the backbone XML, surfaced right here in the
-          builder — not only inside a 3D tower. Lazily loaded on expand so it
-          never slows the primary form. Links back to the Application Viewer for
-          the full backbone/XML. */}
-      {node.leaf_id && (
-        <EctdPlacement node={node} op={op} dossierId={dossierId} />
-      )}
 
       {node.applicability === "na" || node.applicability === "suppressed" ? (
         <div className="notice">
@@ -227,6 +215,19 @@ export function SectionPanel({ node, op }: { node: SectionNode; op?: string }) {
               onError={fail} />
           )}
         </>
+      )}
+
+      {/* R9 DENSITY (builder_forms ease/trust regression): the real eCTD
+          substance — leaf id, href, node placement, lifecycle operation written
+          to the backbone XML, plus the honest PDF/A scope note — is kept in full
+          but sits BELOW the task and behind a collapsed "eCTD placement"
+          expander (closed by default). The first view now shows the task
+          (upload / author / mark N/A + the one-line purpose) first; the depth is
+          one click away. MAJOR (n=8) wants real eCTD, not eye-candy — it is all
+          still here, just not forced into the first view. Lazily loaded on
+          expand so it never slows the primary form. */}
+      {node.leaf_id && (
+        <EctdPlacement node={node} op={op} dossierId={dossierId} />
       )}
     </div>
   );
