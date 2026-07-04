@@ -43,6 +43,12 @@ evaluation cycles are expensive; spend them confirming completed work, not
 re-discovering asks you already hold. Keep a written backlog and check off each
 item against a code change + test so nothing is ignored.
 
+**Plan every fix with all data points possible before executing it.** Before
+writing any fix, gather the full evidence for THAT fix — the current source of
+every file it touches, the type/contract it must honor, the callers and tests,
+the failing signal, and the user/persona ask it answers — then state the approach,
+then implement. No fix starts from assumption; ground each one in the real code.
+
 **Root-cause before any fix; never blind-regenerate.** When a build/test/gate/
 review fails, read the error and trace the actual cause before changing code. No
 shotgun edits, no regenerating a whole file to dodge a diagnosis.
