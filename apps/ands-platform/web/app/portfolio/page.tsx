@@ -12,15 +12,28 @@ import { SummaryCards } from "@/components/portfolio/SummaryCards";
 import { noaClockFrom } from "@/lib/noaProvenance";
 import { collabApi, type DossierTaskSummary } from "@/lib/collabApi";
 import { dueMeta } from "@/lib/deadline";
+import {
+  SponsorScope,
+  ALL_SPONSORS,
+  UNASSIGNED_SPONSOR,
+  matchesSponsor,
+} from "@/components/SponsorScope";
 
 export default function PortfolioPage() {
-  const [items, setItems] = useState<DossierListItem[]>([]);
+  const [allItems, setAllItems] = useState<DossierListItem[]>([]);
   const [fees, setFees] = useState<Record<string, FeeState>>({});
   const [noas, setNoas] = useState<Record<string, NoaClock>>({});
   // WS7: open-task roll-up by dossier (assignees + blocked), one aggregate call.
   const [collab, setCollab] = useState<Record<string, DossierTaskSummary>>({});
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  // WS-OPS-TENANT: per-client/sponsor scope is the FIRST control on Portfolio.
+  const [sponsor, setSponsor] = useState<string>(ALL_SPONSORS);
+  // WS-OPS-TENANT (density): the dossier list can be a wall. Collapse it behind
+  // a progressive-disclosure toggle so the scope, totals and the deadline strip
+  // read first; the full grid opens on demand. Defaults open when the scope is
+  // small (≤ 6) so a focused sponsor view isn't hidden.
+  const [showList, setShowList] = useState(true);
 
   useEffect(() => {
     let alive = true;
@@ -28,7 +41,7 @@ export default function PortfolioPage() {
       try {
         const { dossiers } = await dossierApi.listDossiers();
         if (!alive) return;
-        setItems(dossiers);
+        setAllItems(dossiers);
         setLoading(false);
         // WS7: one aggregate call for the whole portfolio's open tasks →
         // assignees + blocked status per dossier (collaboration service).
@@ -89,6 +102,11 @@ export default function PortfolioPage() {
     };
   }, []);
 
+  // WS-OPS-TENANT: everything below the scope selector operates on the dossiers
+  // in the chosen sponsor scope only — totals, deadline strip, grid and the CSV
+  // export all honor it, so a PM reports on exactly one client at a time.
+  const items = allItems.filter((d) => matchesSponsor(d, sponsor));
+
   const ready = items.filter((d) => d.gate?.complete).length;
   const blocked = items.length - ready;
 
@@ -126,7 +144,10 @@ export default function PortfolioPage() {
     a.href = URL.createObjectURL(new Blob(
       [rows.map((r) => r.map(esc).join(",")).join("\n")],
       { type: "text/csv" }));
-    a.download = "portfolio-status.csv";
+    a.download =
+      sponsor === ALL_SPONSORS
+        ? "portfolio-status.csv"
+        : `portfolio-status-${sponsor.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
   }
@@ -145,10 +166,24 @@ export default function PortfolioPage() {
           audit trail — actor and workspace stamped, sequence-numbered,
           exportable for inspections (open a dossier → Audit).
         </p>
+        {/* WS-OPS-TENANT: per-client/sponsor scope + isolation statement — the
+            FIRST control on Portfolio, before the roll-up and grid. */}
+        {!loading && allItems.length > 0 && (
+          <div style={{ marginTop: 16 }}>
+            <SponsorScope
+              items={allItems}
+              value={sponsor}
+              onChange={setSponsor}
+              count={items.length}
+            />
+          </div>
+        )}
+
         {items.length > 0 && (
           <div className="affordance-bar">
             <button className="ghost" onClick={exportStatus}>
               Export client status report (CSV)
+              {sponsor !== ALL_SPONSORS ? " — this client only" : ""}
             </button>
           </div>
         )}
@@ -157,14 +192,30 @@ export default function PortfolioPage() {
 
         {loading ? (
           <div className="mut" style={{ marginTop: 20 }}>Loading portfolio…</div>
-        ) : items.length === 0 ? (
+        ) : allItems.length === 0 ? (
           <div className="notice" style={{ marginTop: 16 }}>
             No dossiers yet.{" "}
             <Link href="/dossiers">Create one in the dossier manager →</Link>
           </div>
+        ) : items.length === 0 ? (
+          <div className="notice" style={{ marginTop: 16 }}>
+            No dossiers for the selected client / sponsor. Choose a different
+            scope above, or “All sponsors in this workspace”.
+          </div>
         ) : (
           <>
-            <SummaryCards total={items.length} ready={ready} blocked={blocked} />
+            <SummaryCards
+              total={items.length}
+              ready={ready}
+              blocked={blocked}
+              scopeLabel={
+                sponsor === ALL_SPONSORS
+                  ? undefined
+                  : sponsor === UNASSIGNED_SPONSOR
+                    ? "Unassigned (no REP sponsor set)"
+                    : sponsor
+              }
+            />
 
             {upcoming.length > 0 && (
               <div className="card glass" style={{ marginTop: 16, padding: "12px 16px" }}
@@ -194,28 +245,54 @@ export default function PortfolioPage() {
               </div>
             )}
 
-            <ul
-              aria-label="Product dossiers"
-              style={{
-                listStyle: "none",
-                margin: "20px 0 0",
-                padding: 0,
-                display: "flex",
-                flexDirection: "column",
-                gap: 12,
-              }}
-            >
-              {items.map((d) => (
-                <li key={d.dossier_id}>
-                  <PortfolioRow
-                    d={d}
-                    fee={fees[d.dossier_id] ?? { kind: "loading" }}
-                    noa={noas[d.dossier_id]}
-                    collab={collab[d.dossier_id]}
-                  />
-                </li>
-              ))}
-            </ul>
+            {/* WS-OPS-TENANT (density / progressive disclosure): scope, totals
+                and the deadline strip read first; the full dossier grid opens
+                on demand so the four operations surfaces aren't a wall at once.
+                Nothing is removed — the grid is one click away and stays open. */}
+            <div style={{ margin: "20px 0 0" }}>
+              <button
+                className="ghost"
+                aria-expanded={showList}
+                aria-controls="portfolio-grid"
+                onClick={() => setShowList((v) => !v)}
+                style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <span>{showList ? "▾" : "▸"}</span>
+                {showList ? "Hide" : "Show"} dossier grid ({items.length})
+              </button>
+            </div>
+
+            {showList && (
+              <ul
+                id="portfolio-grid"
+                aria-label="Product dossiers"
+                style={{
+                  listStyle: "none",
+                  margin: "12px 0 0",
+                  padding: 0,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 12,
+                }}
+              >
+                {items.map((d) => (
+                  <li key={d.dossier_id}>
+                    <PortfolioRow
+                      d={d}
+                      fee={fees[d.dossier_id] ?? { kind: "loading" }}
+                      noa={noas[d.dossier_id]}
+                      collab={collab[d.dossier_id]}
+                    />
+                  </li>
+                ))}
+              </ul>
+            )}
           </>
         )}
       </main>

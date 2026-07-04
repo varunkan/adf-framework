@@ -11,11 +11,24 @@ import { Term } from "@/components/Term";
 import { CorrespondenceHub } from "@/components/correspondence/CorrespondenceHub";
 import { NoticeInbox } from "@/components/correspondence/NoticeInbox";
 import { NoaRegister } from "@/components/correspondence/NoaRegister";
+import {
+  SponsorScope,
+  ALL_SPONSORS,
+  matchesSponsor,
+} from "@/components/SponsorScope";
 
 export default function CorrespondencePage() {
   const [dossiers, setDossiers] = useState<DossierListItem[]>([]);
   const [dossierId, setDossierId] = useState("");
   const [picked, setPicked] = useState("");
+  // WS-OPS-TENANT: per-client/sponsor scope is the FIRST control. Nothing is
+  // pre-selected to a single dossier — the filer chooses the scope explicitly,
+  // replacing the old "pre-fill to your first dossier" default.
+  const [sponsor, setSponsor] = useState<string>(ALL_SPONSORS);
+  // WS-OPS-TENANT (density): keep the litigation machinery (NOA / Form V
+  // register) behind an opt-in "Advanced" expander so the correspondence view
+  // isn't a wall of surfaces the moment a dossier opens.
+  const [showNoa, setShowNoa] = useState(false);
   // bump to re-load the hub after a notice ingest auto-logs correspondence
   const [corrKey, setCorrKey] = useState(0);
 
@@ -26,10 +39,6 @@ export default function CorrespondencePage() {
         const { dossiers: items } = await dossierApi.listDossiers();
         if (!alive) return;
         setDossiers(items);
-        if (items.length && !picked) {
-          setDossierId(items[0].dossier_id);
-          setPicked(items[0].dossier_id);
-        }
       } catch {
         // dossier service down — free-text entry still works
       }
@@ -39,6 +48,13 @@ export default function CorrespondencePage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // dossiers within the chosen sponsor scope — the picker only offers these,
+  // so a filer can never reach across into another client's dossier by accident.
+  const scoped = dossiers.filter((d) => matchesSponsor(d, sponsor));
+  // if the current selection falls outside the new scope, drop it (don't leak
+  // a previously-opened other-client dossier across a scope change).
+  const pickedInScope = scoped.some((d) => d.dossier_id === picked);
 
   return (
     <>
@@ -66,7 +82,22 @@ export default function CorrespondencePage() {
           guided journey&apos;s transmit step (CESG).
         </div>
 
-        <div className="card glass" style={{ padding: 16, maxWidth: 560 }}>
+        {/* WS-OPS-TENANT: per-client/sponsor scope + isolation statement — the
+            FIRST control, replacing the old auto-pick of dossier #1. */}
+        <SponsorScope
+          items={dossiers}
+          value={sponsor}
+          onChange={(s) => {
+            setSponsor(s);
+            // reset the open dossier so we never leak the previous client's
+            // dossier under a new sponsor scope; the filer re-picks explicitly.
+            setPicked("");
+            setDossierId("");
+          }}
+          count={scoped.length}
+        />
+
+        <div className="card glass" style={{ padding: 16, maxWidth: 560, marginTop: 14 }}>
           <label htmlFor="corr-dossier">Dossier</label>
           <div style={{ display: "flex", gap: 10 }}>
             <input
@@ -77,24 +108,38 @@ export default function CorrespondencePage() {
               placeholder="e123456"
             />
             <datalist id="corr-dossier-options">
-              {dossiers.map((d) => (
+              {scoped.map((d) => (
                 <option key={d.dossier_id} value={d.dossier_id}>
                   {d.title}
+                  {d.sponsor ? ` — ${d.sponsor}` : ""}
                 </option>
               ))}
             </datalist>
             <button
-              onClick={() => setPicked(dossierId.trim())}
-              disabled={!dossierId.trim() || dossierId.trim() === picked}
+              onClick={() => {
+                const id = dossierId.trim();
+                // only open dossiers inside the active sponsor scope
+                if (scoped.some((d) => d.dossier_id === id)) setPicked(id);
+              }}
+              disabled={
+                !dossierId.trim() ||
+                dossierId.trim() === picked ||
+                !scoped.some((d) => d.dossier_id === dossierId.trim())
+              }
             >
               Open
             </button>
           </div>
+          <p className="mut" style={{ margin: "6px 0 0", fontSize: 12 }}>
+            {scoped.length} dossier{scoped.length === 1 ? "" : "s"} in the current
+            scope. Only these are selectable.
+          </p>
         </div>
 
-        {!picked ? (
+        {!picked || !pickedInScope ? (
           <div className="notice" style={{ marginTop: 16 }}>
-            Pick a dossier to see its correspondence, notices and NOA clocks.
+            Pick a dossier in the selected client / sponsor scope to see its
+            correspondence, notices and NOA clocks.
           </div>
         ) : (
           <div
@@ -109,8 +154,43 @@ export default function CorrespondencePage() {
               dossierId={picked}
               onIngested={() => setCorrKey((k) => k + 1)}
             />
-            <CorrespondenceHub key={`${picked}:${corrKey}`} dossierId={picked} />
-            <NoaRegister dossierId={picked} />
+            <CorrespondenceHub
+              key={`${picked}:${corrKey}`}
+              dossierId={picked}
+              sponsor={scoped.find((d) => d.dossier_id === picked)?.sponsor}
+            />
+
+            {/* WS-OPS-TENANT (density / progressive disclosure): the Form V /
+                NOA litigation register is advanced machinery most sessions
+                don't need. Collapse it behind an opt-in toggle so the primary
+                correspondence view stays scannable; nothing is removed. */}
+            <div className="card glass" style={{ padding: 0 }}>
+              <button
+                className="ghost"
+                aria-expanded={showNoa}
+                onClick={() => setShowNoa((v) => !v)}
+                style={{
+                  width: "100%",
+                  textAlign: "left",
+                  padding: "12px 18px",
+                  fontWeight: 600,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <span>{showNoa ? "▾" : "▸"}</span>
+                Advanced — Form V / NOA litigation register
+                <span className="mut" style={{ fontWeight: 400, fontSize: 12 }}>
+                  PM(NOC) allegations &amp; statutory clocks
+                </span>
+              </button>
+              {showNoa && (
+                <div style={{ padding: "0 18px 18px" }}>
+                  <NoaRegister dossierId={picked} />
+                </div>
+              )}
+            </div>
           </div>
         )}
       </main>

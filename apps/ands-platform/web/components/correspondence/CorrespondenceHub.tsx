@@ -9,7 +9,16 @@ import {
   type CorrespondenceRecord,
 } from "./api";
 
-export function CorrespondenceHub({ dossierId }: { dossierId: string }) {
+export function CorrespondenceHub({
+  dossierId,
+  sponsor,
+}: {
+  dossierId: string;
+  // WS-OPS-TENANT: the client/sponsor this dossier belongs to. When set, a
+  // per-sponsor access indicator is shown so the filer always sees WHOSE
+  // correspondence they are logging/reading — never an ambiguous default.
+  sponsor?: string | null;
+}) {
   const [items, setItems] = useState<CorrespondenceRecord[]>([]);
   const [filter, setFilter] = useState("");
   const [loading, setLoading] = useState(true);
@@ -72,6 +81,15 @@ export function CorrespondenceHub({ dossierId }: { dossierId: string }) {
         <span className="mut" style={{ fontSize: 12 }}>
           {items.length} record{items.length === 1 ? "" : "s"}
         </span>
+        {sponsor && (
+          <span
+            className="chip ready"
+            title="These records are scoped to this client / sponsor"
+            style={{ fontSize: 11 }}
+          >
+            🛡 {sponsor}
+          </span>
+        )}
         <span className="spacer" style={{ marginLeft: "auto" }} />
         <select
           aria-label="Filter by kind"

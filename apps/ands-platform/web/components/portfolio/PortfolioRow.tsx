@@ -6,6 +6,7 @@ import type { DossierTaskSummary } from "@/lib/collabApi";
 import { MiniTower } from "./MiniTower";
 import { ProvenancePopover, type Provenance } from "@/components/ProvenancePopover";
 import { dueMeta } from "@/lib/deadline";
+import { ShieldCheck } from "lucide-react";
 
 export type FeeState =
   | { kind: "loading" }
@@ -73,9 +74,20 @@ function PmColumns({ owner, sponsor, due }: {
         <span className="mut">Owner </span>
         <b>{owner || "—"}</b>
       </div>
-      <div title="Client / sponsor company (REP identity)">
+      {/* WS-OPS-TENANT: per-sponsor access indicator at the row level — a
+          shield beside the client name makes the per-sponsor data boundary
+          legible while scanning. Honest scope: workspace isolation is the
+          API-enforced wall; this marks which client the row belongs to. */}
+      <div title="Client / sponsor company (REP identity) — records scoped to this sponsor">
         <span className="mut">Client </span>
-        {sponsor || <span className="mut">—</span>}
+        {sponsor ? (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+            <ShieldCheck size={11} aria-hidden style={{ opacity: 0.7 }} />
+            {sponsor}
+          </span>
+        ) : (
+          <span className="mut">—</span>
+        )}
       </div>
       <div title="Soonest content-plan deadline">
         <span className="mut">Due </span>
