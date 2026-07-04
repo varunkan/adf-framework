@@ -505,3 +505,7 @@ button.user-chip:hover{background:rgba(255,255,255,.09);border-color:rgba(255,25
   width:30px;height:30px;padding:0;border-radius:8px}
 .modal-x:hover{background:rgba(255,255,255,.08)}
 .modal-foot{margin-top:16px;display:flex;gap:10px;justify-content:flex-end}
+
+/* Icon + label alignment for action buttons (lucide icons in affordances) */
+.affordance-bar button{display:inline-flex;align-items:center;gap:6px}
+.affordance-bar button svg{opacity:.85;flex:0 0 auto}

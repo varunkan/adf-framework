@@ -6,6 +6,7 @@ import { DraftChat } from "./DraftChat";
 import { EctdPrimer } from "./EctdPrimer";
 import { useDossier } from "./DossierContext";
 import { Disclosure } from "../Disclosure";
+import { Upload, Sparkles, Ban } from "lucide-react";
 import { MODULE_4_NOTE, citeLine } from "@/lib/regCitations";
 
 function fmtSize(n: number): string {
@@ -131,17 +132,17 @@ export function SectionPanel({ node }: { node: SectionNode }) {
             {affs.includes("upload") && (
               <button role="tab" aria-selected={tab === "upload"}
                 className={tab === "upload" ? "on" : ""}
-                onClick={() => setTab("upload")}>⬆ Upload</button>
+                onClick={() => setTab("upload")}><Upload size={14} aria-hidden /> Upload</button>
             )}
             {affs.includes("generate") && (
               <button role="tab" aria-selected={tab === "generate"}
                 className={tab === "generate" ? "on" : ""}
-                onClick={() => setTab("generate")}>✦ Author in-app</button>
+                onClick={() => setTab("generate")}><Sparkles size={14} aria-hidden /> Author in-app</button>
             )}
             {affs.includes("mark_na") && (
               <button role="tab" aria-selected={tab === "mark_na"}
                 className={tab === "mark_na" ? "on" : ""}
-                onClick={() => setTab("mark_na")}>⊘ Mark N/A</button>
+                onClick={() => setTab("mark_na")}><Ban size={14} aria-hidden /> Mark N/A</button>
             )}
           </div>
 
@@ -555,7 +556,7 @@ function AuthorForm({
             onClick={() => setMode("ai")}>💬 Draft with AI</button>
           <button role="tab" aria-selected={mode === "template"}
             className={mode === "template" ? "on" : ""}
-            onClick={() => setMode("template")}>✦ Fill the form</button>
+            onClick={() => setMode("template")}><Sparkles size={14} aria-hidden /> Fill the form</button>
         </div>
         {mode === "ai" ? (
           <DraftChat node={node} dossierId={dossierId} onDone={onDone} onError={onError} />
