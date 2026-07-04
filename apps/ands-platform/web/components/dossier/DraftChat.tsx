@@ -96,45 +96,21 @@ export function DraftChat({
 
   return (
     <div className="chat-panel">
-      {/* WS-AIDRAFT MAJOR — the control/guardrails, stated plainly and kept
-          UNMISSABLE above the chat (not buried in a paragraph). These four
-          facts are the trust foundation the panel praised; each is one line. */}
+      {/* WS-AIDRAFT MAJOR — the control/guardrails. Round-9 DENSITY REDUCTION:
+          the always-visible note is ONE compact line; the four detail points
+          plus the AI-skeptic reassurance live behind the expander (closed by
+          default). No substance removed, no guardrail weakened — only the
+          first-view verbosity is reduced. */}
       <div className="notice" role="note" style={{ padding: "12px 15px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
-          <ShieldCheck size={16} aria-hidden style={{ color: "var(--ok)", flex: "0 0 auto" }} />
-          How this AI draft is controlled
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13 }}>
+          <ShieldCheck size={16} aria-hidden style={{ color: "var(--ok)", flex: "0 0 auto", marginTop: 1 }} />
+          <span>
+            AI drafts are <b>not filable on their own</b> — you sign off by name;
+            modeled on HC criteria, <b>not</b> HC&apos;s eValidator.
+          </span>
         </div>
-        <ul style={{ margin: "8px 0 0", paddingLeft: 20, display: "grid", gap: 5, fontSize: 13 }}>
-          <li>
-            <b>Not filable on its own.</b> Every AI draft stays{" "}
-            <b>&ldquo;not yet filable — review required&rdquo;</b> and the
-            submission cannot be exported until a person signs off.
-          </li>
-          <li>
-            <b>You sign off, by name.</b> Nothing counts as complete until you
-            click <b>&ldquo;I have reviewed this AI draft — it is my
-            content&rdquo;</b> on the saved-document card. The AI never
-            auto-submits.
-          </li>
-          <li>
-            <b>Provenance is recorded.</b> The draft is tagged as
-            AI-assisted and written to the audit trail with a file fingerprint —
-            who/what produced it travels with the document.
-          </li>
-          <li>
-            <b>Modeled on HC criteria — not HC&apos;s eValidator.</b> ANDS
-            Studio&apos;s structural completeness check is a technical checker{" "}
-            <b>modeled on Health Canada criteria</b>; it is <b>not</b> Health
-            Canada&apos;s official eValidator. Run eValidator before you
-            transmit.{" "}
-            <span className="mut" style={{ fontSize: 12 }}>
-              (Criteria last verified against HC guidance {LAST_VERIFIED}.)
-            </span>
-          </li>
-        </ul>
-        {/* WS-AIDRAFT MINOR (AI-skeptic reassurance, veteran_contractor):
-            stated plainly and kept quiet behind an expander so it adds
-            reassurance without density. */}
+        {/* Depth is one click away: the four control facts + the AI-skeptic
+            reassurance, collapsed by default. */}
         <Disclosure
           showLabel="More on how the AI is kept accountable"
           hideLabel="Hide"
@@ -144,7 +120,36 @@ export function DraftChat({
             </span>
           }
         >
-          <ul style={{ margin: "4px 0 0", paddingLeft: 20, display: "grid", gap: 5, fontSize: 12 }}>
+          <ul style={{ margin: "4px 0 0", paddingLeft: 20, display: "grid", gap: 5, fontSize: 13 }}>
+            <li>
+              <b>Not filable on its own.</b> Every AI draft stays{" "}
+              <b>&ldquo;not yet filable — review required&rdquo;</b> and the
+              submission cannot be exported until a person signs off.
+            </li>
+            <li>
+              <b>You sign off, by name.</b> Nothing counts as complete until you
+              click <b>&ldquo;I have reviewed this AI draft — it is my
+              content&rdquo;</b> on the saved-document card. The AI never
+              auto-submits.
+            </li>
+            <li>
+              <b>Provenance is recorded.</b> The draft is tagged as
+              AI-assisted and written to the audit trail with a file fingerprint —
+              who/what produced it travels with the document.
+            </li>
+            <li>
+              <b>Modeled on HC criteria — not HC&apos;s eValidator.</b> ANDS
+              Studio&apos;s structural completeness check is a technical checker{" "}
+              <b>modeled on Health Canada criteria</b>; it is <b>not</b> Health
+              Canada&apos;s official eValidator. Run eValidator before you
+              transmit.{" "}
+              <span className="mut" style={{ fontSize: 12 }}>
+                (Criteria last verified against HC guidance {LAST_VERIFIED}.)
+              </span>
+            </li>
+          </ul>
+          {/* WS-AIDRAFT MINOR (AI-skeptic reassurance, veteran_contractor). */}
+          <ul style={{ margin: "8px 0 0", paddingLeft: 20, display: "grid", gap: 5, fontSize: 12 }}>
             <li>
               <b>It never auto-submits.</b> The AI only proposes text into this
               chat. Nothing reaches Health Canada — filing happens only through
