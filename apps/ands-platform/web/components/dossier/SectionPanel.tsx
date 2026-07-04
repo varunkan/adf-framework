@@ -875,7 +875,8 @@ function AuthorForm({
             onClick={() => setMode("template")}><Sparkles size={14} aria-hidden /> Fill the form</button>
         </div>
         {mode === "ai" ? (
-          <DraftChat node={node} dossierId={dossierId} onDone={onDone} onError={onError} />
+          <DraftChat node={node} dossierId={dossierId} onDone={onDone}
+            onError={onError} onFallback={() => setMode("template")} />
         ) : (
           formBody
         )}
