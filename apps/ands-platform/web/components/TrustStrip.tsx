@@ -16,6 +16,14 @@
 // Detail collapses behind an expander (progressive disclosure) so the strip
 // stays scannable; the expander is the "one-page security summary" the panel
 // asked to link to, with a pointer to the honest /roadmap for the roadmap items.
+//
+// R9 density fix (round-8 CLARITY/EASE regression): round-7 added the full
+// per-pillar `short` grid to the always-visible hero face, which read as a
+// dense wall and cost clarity/trust/ease. The face is now a single compact
+// chip-row — four one-word live pillars + a "roadmap" chip — and EVERY piece
+// of per-pillar prose (the `short` one-liners AND the full `detail`) moved
+// into the expander, which stays CLOSED by default. No claim or disclaimer is
+// removed; only what is visible-at-a-glance vs one-click-away changed.
 import { useState } from "react";
 import Link from "next/link";
 import {
@@ -31,7 +39,9 @@ import {
 interface TrustItem {
   icon: LucideIcon;
   label: string;
-  // one-line summary shown on the strip face
+  // one-word pillar shown on the calm chip-row face
+  pillar: string;
+  // one-line summary — now shown inside the expander, not on the face
   short: string;
   // the honest, expanded explanation
   detail: React.ReactNode;
@@ -43,6 +53,7 @@ const ITEMS: TrustItem[] = [
   {
     icon: MapPin,
     label: "Data residency",
+    pillar: "Canada",
     short: "Self-hosted — can stay in Canada",
     status: "live",
     detail:
@@ -54,6 +65,7 @@ const ITEMS: TrustItem[] = [
   {
     icon: ShieldCheck,
     label: "Tenant isolation",
+    pillar: "Isolation",
     short: "Per-client data walls, refused at the API",
     status: "live",
     detail:
@@ -65,6 +77,7 @@ const ITEMS: TrustItem[] = [
   {
     icon: Users,
     label: "Roles & segregation of duties",
+    pillar: "Roles",
     short: "Scoped roles: who can create / archive / sign",
     status: "live",
     detail:
@@ -75,6 +88,7 @@ const ITEMS: TrustItem[] = [
   {
     icon: ScrollText,
     label: "Audit-trail tamper controls",
+    pillar: "Audit",
     short: "Append-only, actor + UTC stamped, exportable",
     status: "live",
     detail:
@@ -87,6 +101,7 @@ const ITEMS: TrustItem[] = [
   {
     icon: ShieldCheck,
     label: "SOC 2 / SSO / SCIM",
+    pillar: "SOC 2 / SSO",
     short: "On the roadmap — not certified / not built yet",
     status: "roadmap",
     detail: (
@@ -105,8 +120,10 @@ const ITEMS: TrustItem[] = [
 
 // A persistent, honest "Trust & security" strip mounted on the hero. Replaces
 // the vague "progress saved automatically" footnote. Progressive disclosure:
-// the four live pillars + one honest roadmap pillar read at a glance; the
-// one-page security summary opens on demand.
+// the FACE is one calm line — a short summary + a compact chip-row of four
+// one-word live pillars and a "roadmap" chip — so the hero reads calm at a
+// glance. Every per-pillar one-liner and the full auditor-detail live in the
+// expander below, which is CLOSED by default; depth is one click away.
 export function TrustStrip() {
   const [open, setOpen] = useState(false);
   return (
@@ -115,23 +132,41 @@ export function TrustStrip() {
       aria-label="Trust and security"
       style={{
         marginTop: 22,
-        padding: "14px 18px",
+        padding: "12px 18px",
         textAlign: "left",
         maxWidth: 760,
         marginInline: "auto",
       }}
     >
+      {/* Calm face: one label + a compact chip-row, no dense grid. */}
       <div
         style={{
           display: "flex",
-          alignItems: "baseline",
+          alignItems: "center",
           gap: 8,
           flexWrap: "wrap",
         }}
       >
-        <b style={{ fontSize: 14 }}>Trust &amp; security</b>
-        <span className="mut" style={{ fontSize: 12 }}>
-          the questions your auditor asks first — answered plainly
+        <b style={{ fontSize: 13, display: "inline-flex", alignItems: "center",
+          gap: 5 }}>
+          <ShieldCheck size={14} aria-hidden />
+          Trust &amp; security
+        </b>
+        {/* four one-word live pillars + one honest roadmap chip */}
+        <span
+          style={{ display: "inline-flex", gap: 5, flexWrap: "wrap",
+            alignItems: "center" }}
+        >
+          {ITEMS.map(({ pillar, status }) => (
+            <span
+              key={pillar}
+              className={`chip${status === "roadmap" ? " blocked" : ""}`}
+              style={{ fontSize: 11, padding: "1px 9px" }}
+            >
+              {pillar}
+              {status === "roadmap" ? " · roadmap" : ""}
+            </span>
+          ))}
         </span>
         <span className="spacer" style={{ marginLeft: "auto" }} />
         <button
@@ -148,53 +183,24 @@ export function TrustStrip() {
         </button>
       </div>
 
-      {/* the four live pillars + one honest roadmap pillar, scannable */}
-      <ul
-        style={{
-          listStyle: "none",
-          margin: "10px 0 0",
-          padding: 0,
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
-          gap: 8,
-        }}
-      >
-        {ITEMS.map(({ icon: Icon, label, short, status }) => (
-          <li
-            key={label}
-            style={{ display: "flex", gap: 8, alignItems: "flex-start" }}
-          >
-            <Icon size={15} aria-hidden />
-            <span style={{ fontSize: 12.5, lineHeight: 1.35 }}>
-              <b>{label}</b>
-              {status === "roadmap" && (
-                <span
-                  className="chip"
-                  style={{ marginLeft: 6, fontSize: 10, padding: "0 6px" }}
-                >
-                  roadmap
-                </span>
-              )}
-              <br />
-              <span className="mut">{short}</span>
-            </span>
-          </li>
-        ))}
-      </ul>
-
       {open && (
         <div
           className="disclosure-body"
           style={{ marginTop: 12, display: "grid", gap: 10 }}
         >
           <p className="mut" style={{ fontSize: 12, margin: 0 }}>
-            This is a plain-language summary of how ANDS Studio handles your
-            data and controls. It is not a certification. Where a control is not
-            yet built we say so.
+            The questions your auditor asks first, answered plainly. This is a
+            plain-language summary of how ANDS Studio handles your data and
+            controls. It is not a certification. Where a control is not yet
+            built we say so.
           </p>
-          {ITEMS.map(({ label, detail, status }) => (
+          {ITEMS.map(({ icon: Icon, label, short, detail, status }) => (
             <div key={label} style={{ fontSize: 12.5, lineHeight: 1.45 }}>
-              <b>{label}</b>
+              <b style={{ display: "inline-flex", alignItems: "center",
+                gap: 6 }}>
+                <Icon size={14} aria-hidden />
+                {label}
+              </b>
               {status === "roadmap" && (
                 <span
                   className="chip"
@@ -203,6 +209,7 @@ export function TrustStrip() {
                   roadmap
                 </span>
               )}
+              <div style={{ marginTop: 2, fontWeight: 600 }}>{short}</div>
               <div className="mut" style={{ marginTop: 2 }}>
                 {detail}
               </div>
