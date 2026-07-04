@@ -1,0 +1,497 @@
+{
+  "task": "t2_validate_fix_export",
+  "goal": "File an ANDS: assemble Module 1, hit the eCTD validation gate, run into the fail-closed export block on a placeholder Dossier ID, set the real Health Canada Dossier ID, and export the transmissible package once validation genuinely passes.",
+  "generated_from": "REAL in-process dossier service (FastAPI TestClient), not hand-authored",
+  "steps": [
+    {
+      "step": 1,
+      "action": "Create dossier (placeholder ID, before HC issues the real one)",
+      "method": "POST",
+      "path": "/api/dossier/dossiers",
+      "request_summary": "dossier_id=d4821 (placeholder), title='Metformin HCl 500 mg Tablets — ANDS', type=ANDS",
+      "status": 201,
+      "what_the_user_sees": "A new dossier 'Metformin HCl 500 mg Tablets — ANDS' opens under the working ID d4821. A banner notes this is a placeholder until Health Canada issues the real Dossier ID via a REP Dossier ID Request.",
+      "response_excerpt": {
+        "dossier_id": "d4821",
+        "uid": "10d7143d33354d87919aa55125b43b87",
+        "title": "Metformin HCl 500 mg Tablets — ANDS",
+        "submission_type": "ANDS",
+        "cs_be_only": true,
+        "din": null,
+        "company_id": "12345",
+        "sponsor": "Acme Generics Inc.",
+        "drug_product": "Metformin HCl 500 mg",
+        "owner": null,
+        "fee_paid": false,
+        "sme_granted": false,
+        "tenant_id": null,
+        "active_sequence": "0000",
+        "archived_at": null,
+        "archived_by": null,
+        "archive_reason": null,
+        "created_at": "2026-07-04T22:15:15.120144+00:00",
+        "updated_at": "2026-07-04T22:15:15.120144+00:00",
+        "archived": false
+      }
+    },
+    {
+      "step": 2,
+      "action": "Open Module 1 (Administrative & regional) — see required leaves",
+      "method": "GET",
+      "path": "/api/dossier/dossiers/d4821/content",
+      "request_summary": "Load the guided module builder for Module 1",
+      "status": 200,
+      "what_the_user_sees": "The Module 1 checklist lists 8 required documents (1.0 Cover Letter, 1.2.1 Drug Submission Application Form, 1.2.2 Fees & Small-business, 1.2.3 Certification & Attestation (ANDS Sponsor Attestation), ...), each empty, module progress 0% (0/8).",
+      "response_excerpt": {
+        "module1": {
+          "title": "Module 1 — Administrative & regional (Canada)",
+          "progress": {
+            "required_total": 8,
+            "required_filled": 0,
+            "percent": 0,
+            "complete": false
+          },
+          "required_documents": [
+            {
+              "section": "1.0",
+              "title": "Cover Letter",
+              "status": "empty",
+              "affordances": [
+                "generate",
+                "upload"
+              ],
+              "bilingual": false
+            },
+            {
+              "section": "1.2.1",
+              "title": "Drug Submission Application Form",
+              "status": "empty",
+              "affordances": [
+                "generate",
+                "upload"
+              ],
+              "bilingual": false
+            },
+            {
+              "section": "1.2.2",
+              "title": "Fees & Small-business",
+              "status": "empty",
+              "affordances": [
+                "upload"
+              ],
+              "bilingual": false
+            },
+            {
+              "section": "1.2.3",
+              "title": "Certification & Attestation (ANDS Sponsor Attestation)",
+              "status": "empty",
+              "affordances": [
+                "generate",
+                "upload"
+              ],
+              "bilingual": false
+            },
+            {
+              "section": "1.2.4",
+              "title": "Intellectual Property — Form V Declaration (PM(NOC))",
+              "status": "empty",
+              "affordances": [
+                "generate",
+                "upload"
+              ],
+              "bilingual": false
+            },
+            {
+              "section": "1.3.1",
+              "title": "Product Monograph (bilingual, incl. PMI)",
+              "status": "empty",
+              "affordances": [
+                "upload"
+              ],
+              "bilingual": true
+            },
+            {
+              "section": "1.3.3",
+              "title": "Labelling",
+              "status": "empty",
+              "affordances": [
+                "upload"
+              ],
+              "bilingual": true
+            },
+            {
+              "section": "1.6",
+              "title": "Regional Clinical Information — Comprehensive Summary–Bioequivalence (CS-BE)",
+              "status": "empty",
+              "affordances": [
+                "generate",
+                "upload"
+              ],
+              "bilingual": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": 3,
+      "action": "Author 1.0 Cover Letter (portal generates it)",
+      "method": "POST",
+      "path": "/api/dossier/ectd/d4821/section/1.0/generate",
+      "request_summary": "Generate 'Cover Letter' from the dossier's single set of identifiers (generator=cover_letter)",
+      "status": 200,
+      "what_the_user_sees": "Section 1.0 'Cover Letter' fills in from the company/product details and turns complete (confirmed as your content).",
+      "response_excerpt": {
+        "section": "1.0",
+        "status": "complete",
+        "content_origin": "generated",
+        "content_confirmed": true,
+        "needs_review": false,
+        "languages": null,
+        "module1_progress": {
+          "required_total": 8,
+          "required_filled": 1,
+          "percent": 12,
+          "complete": false
+        }
+      }
+    },
+    {
+      "step": 4,
+      "action": "Author 1.2.1 Drug Submission Application Form (portal generates it)",
+      "method": "POST",
+      "path": "/api/dossier/ectd/d4821/section/1.2.1/generate",
+      "request_summary": "Generate 'Drug Submission Application Form' from the dossier's single set of identifiers (generator=rep_application_form)",
+      "status": 200,
+      "what_the_user_sees": "Section 1.2.1 'Drug Submission Application Form' fills in from the company/product details and turns complete (confirmed as your content).",
+      "response_excerpt": {
+        "section": "1.2.1",
+        "status": "complete",
+        "content_origin": "generated",
+        "content_confirmed": true,
+        "needs_review": false,
+        "languages": null,
+        "module1_progress": {
+          "required_total": 8,
+          "required_filled": 2,
+          "percent": 25,
+          "complete": false
+        }
+      }
+    },
+    {
+      "step": 5,
+      "action": "Author 1.2.3 Certification & Attestation (ANDS Sponsor Attestation) (portal generates it)",
+      "method": "POST",
+      "path": "/api/dossier/ectd/d4821/section/1.2.3/generate",
+      "request_summary": "Generate 'Certification & Attestation (ANDS Sponsor Attestation)' from the dossier's single set of identifiers (generator=ands_attestation)",
+      "status": 200,
+      "what_the_user_sees": "Section 1.2.3 'Certification & Attestation (ANDS Sponsor Attestation)' fills in from the company/product details and turns complete (confirmed as your content).",
+      "response_excerpt": {
+        "section": "1.2.3",
+        "status": "complete",
+        "content_origin": "generated",
+        "content_confirmed": true,
+        "needs_review": false,
+        "languages": null,
+        "module1_progress": {
+          "required_total": 8,
+          "required_filled": 3,
+          "percent": 38,
+          "complete": false
+        }
+      }
+    },
+    {
+      "step": 6,
+      "action": "Author 1.2.4 Intellectual Property — Form V Declaration (PM(NOC)) (portal generates it)",
+      "method": "POST",
+      "path": "/api/dossier/ectd/d4821/section/1.2.4/generate",
+      "request_summary": "Generate 'Intellectual Property — Form V Declaration (PM(NOC))' from the dossier's single set of identifiers (generator=patent_form_v)",
+      "status": 200,
+      "what_the_user_sees": "Section 1.2.4 'Intellectual Property — Form V Declaration (PM(NOC))' fills in from the company/product details and turns complete (confirmed as your content).",
+      "response_excerpt": {
+        "section": "1.2.4",
+        "status": "complete",
+        "content_origin": "generated",
+        "content_confirmed": true,
+        "needs_review": false,
+        "languages": null,
+        "module1_progress": {
+          "required_total": 8,
+          "required_filled": 4,
+          "percent": 50,
+          "complete": false
+        }
+      }
+    },
+    {
+      "step": 7,
+      "action": "Author 1.6 Regional Clinical Information — Comprehensive Summary–Bioequivalence (CS-BE) (portal generates it)",
+      "method": "POST",
+      "path": "/api/dossier/ectd/d4821/section/1.6/generate",
+      "request_summary": "Generate 'Regional Clinical Information — Comprehensive Summary–Bioequivalence (CS-BE)' from the dossier's single set of identifiers (generator=cs_be)",
+      "status": 200,
+      "what_the_user_sees": "Section 1.6 'Regional Clinical Information — Comprehensive Summary–Bioequivalence (CS-BE)' fills in from the company/product details and turns complete (confirmed as your content).",
+      "response_excerpt": {
+        "section": "1.6",
+        "status": "complete",
+        "content_origin": "generated",
+        "content_confirmed": true,
+        "needs_review": false,
+        "languages": null,
+        "module1_progress": {
+          "required_total": 8,
+          "required_filled": 5,
+          "percent": 62,
+          "complete": false
+        }
+      }
+    },
+    {
+      "step": 8,
+      "action": "Upload 1.2.2 Fees & Small-business",
+      "method": "POST",
+      "path": "/api/dossier/ectd/d4821/section/1.2.2/upload",
+      "request_summary": "Upload a real PDF file for 1.2.2",
+      "status": 200,
+      "what_the_user_sees": "Section 1.2.2 'Fees & Small-business' shows the uploaded file and turns complete.",
+      "response_excerpt": {
+        "section": "1.2.2",
+        "status": "complete",
+        "content_origin": "uploaded",
+        "content_confirmed": true,
+        "needs_review": false,
+        "languages": null,
+        "module1_progress": {
+          "required_total": 8,
+          "required_filled": 6,
+          "percent": 75,
+          "complete": false
+        }
+      }
+    },
+    {
+      "step": 9,
+      "action": "Upload 1.3.1 Product Monograph (bilingual, incl. PMI) (bilingual — EN + FR)",
+      "method": "POST",
+      "path": "/api/dossier/ectd/d4821/section/1.3.1/upload",
+      "request_summary": "Upload real EN and FR PDF files for the bilingual section 1.3.1",
+      "status": 200,
+      "what_the_user_sees": "Section 1.3.1 'Product Monograph (bilingual, incl. PMI)' shows both EN and FR files attached and turns complete.",
+      "response_excerpt": {
+        "section": "1.3.1",
+        "status": "complete",
+        "content_origin": "uploaded",
+        "content_confirmed": true,
+        "needs_review": false,
+        "languages": [
+          "en",
+          "fr"
+        ],
+        "module1_progress": {
+          "required_total": 8,
+          "required_filled": 7,
+          "percent": 88,
+          "complete": false
+        }
+      }
+    },
+    {
+      "step": 10,
+      "action": "Upload 1.3.3 Labelling (bilingual — EN + FR)",
+      "method": "POST",
+      "path": "/api/dossier/ectd/d4821/section/1.3.3/upload",
+      "request_summary": "Upload real EN and FR PDF files for the bilingual section 1.3.3",
+      "status": 200,
+      "what_the_user_sees": "Section 1.3.3 'Labelling' shows both EN and FR files attached and turns complete.",
+      "response_excerpt": {
+        "section": "1.3.3",
+        "status": "complete",
+        "content_origin": "uploaded",
+        "content_confirmed": true,
+        "needs_review": false,
+        "languages": [
+          "en",
+          "fr"
+        ],
+        "module1_progress": {
+          "required_total": 8,
+          "required_filled": 8,
+          "percent": 100,
+          "complete": true
+        }
+      }
+    },
+    {
+      "step": 11,
+      "action": "Run eCTD validation on the (still-placeholder) dossier",
+      "method": "GET",
+      "path": "/api/dossier/dossiers/d4821/validate",
+      "request_summary": "Run the structural eCTD validator over what's placed",
+      "status": 200,
+      "what_the_user_sees": "The validation report (ANDS Studio structural eCTD validator v1.2, synced 2026-05 (HC eCTD Validation Criteria v5.3)) comes back NOT PASSED with 1 blocking finding(s): CA-REP-0001. The top finding CA-REP-0001 says the dossier still uses a placeholder ID and must get its real HC Dossier ID before filing.",
+      "response_excerpt": {
+        "passed": false,
+        "errors": [
+          {
+            "rule": "placeholder_dossier_id",
+            "rule_id": "CA-REP-0001",
+            "message": "This dossier still uses a placeholder ID (d4821). File a Dossier ID Request through REP, then set the real Health Canada ID (Rename) before filing.",
+            "leaf": null
+          }
+        ],
+        "warnings": [],
+        "checked": 10,
+        "criteria": {
+          "name": "ANDS Studio structural eCTD validator",
+          "version": "1.2",
+          "synced": "2026-05 (HC eCTD Validation Criteria v5.3)",
+          "modeled_on": "Health Canada eCTD Validation Criteria v5.3 rule scheme (CA-<severity>-<block> ids), CA Module 1 v2.2 regional backbone and the ICH eCTD 3.2.2 index",
+          "disclaimer": "Structural and technical checks only. This is NOT Health Canada's official eValidator and does not replace it — run eValidator (or your publisher's validator) before you transmit.",
+          "coverage": {
+            "checked": [
+              "Document payload conformance",
+              "File & folder naming hygiene",
+              "Leaf inventory integrity",
+              "Lifecycle operation legality",
+              "Sequence numbering",
+              "Transmissible ICH eCTD 3.2.2 sequence backbone",
+              "ca-regional.xml structure (CA Module 1 v2.2)",
+              "index.xml backbone structure"
+            ],
+            "not_checked": [
+              "Scientific, clinical or quality adequacy of the content",
+              "Full PDF/A-1 conformance (only the %PDF header and encryption are checked, not the ISO profile)",
+              "Cross-document hyperlink target resolution",
+              "Health Canada screening or review acceptance"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "step": 12,
+      "action": "Attempt to export the transmissible package (placeholder ID)",
+      "method": "GET",
+      "path": "/api/dossier/ectd/d4821/export/0000",
+      "request_summary": "Export sequence 0000 for transmission",
+      "status": 409,
+      "what_the_user_sees": "Export is BLOCKED (HTTP 409 — 'validation_not_passed'). The portal fails closed: it refuses to emit a package while validation has not passed, and shows the exact blocking finding(s) ['CA-REP-0001'] instead of a misleading download. To proceed you must resolve the findings (set the real Dossier ID), or export with an explicit, reasoned, audited override.",
+      "response_excerpt": {
+        "type": "about:blank",
+        "title": "validation_not_passed",
+        "status": 409,
+        "detail": "Export is blocked — eCTD validation did not pass. Resolve the findings below, or export with an explicit override and a reason.",
+        "validation": {
+          "passed": false,
+          "ran": true,
+          "errors": [
+            {
+              "rule": "placeholder_dossier_id",
+              "rule_id": "CA-REP-0001",
+              "message": "This dossier still uses a placeholder ID (d4821). File a Dossier ID Request through REP, then set the real Health Canada ID (Rename) before filing.",
+              "leaf": null
+            }
+          ],
+          "criteria": {
+            "name": "ANDS Studio structural eCTD validator",
+            "version": "1.2",
+            "synced": "2026-05 (HC eCTD Validation Criteria v5.3)",
+            "modeled_on": "Health Canada eCTD Validation Criteria v5.3 rule scheme (CA-<severity>-<block> ids), CA Module 1 v2.2 regional backbone and the ICH eCTD 3.2.2 index",
+            "disclaimer": "Structural and technical checks only. This is NOT Health Canada's official eValidator and does not replace it — run eValidator (or your publisher's validator) before you transmit.",
+            "coverage": {
+              "checked": [
+                "Document payload conformance",
+                "File & folder naming hygiene",
+                "Leaf inventory integrity",
+                "Lifecycle operation legality",
+                "Sequence numbering",
+                "Transmissible ICH eCTD 3.2.2 sequence backbone",
+                "ca-regional.xml structure (CA Module 1 v2.2)",
+                "index.xml backbone structure"
+              ],
+              "not_checked": [
+                "Scientific, clinical or quality adequacy of the content",
+                "Full PDF/A-1 conformance (only the %PDF header and encryption are checked, not the ISO profile)",
+                "Cross-document hyperlink target resolution",
+                "Health Canada screening or review acceptance"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": 13,
+      "action": "Set the real Health Canada Dossier ID (re-key placeholder -> real)",
+      "method": "POST",
+      "path": "/api/dossier/dossiers/d4821/rename",
+      "request_summary": "Rename d4821 -> e478210 with a reason-for-change (lands on the Part-11 audit trail)",
+      "status": 200,
+      "what_the_user_sees": "The dossier is re-keyed from the placeholder d4821 to the real HC Dossier ID e478210; the change and reason are written to the audit trail, and all placed content carries over unchanged.",
+      "response_excerpt": {
+        "renamed": "d4821",
+        "dossier_id": "e478210"
+      }
+    },
+    {
+      "step": 14,
+      "action": "Re-run eCTD validation after the fix",
+      "method": "GET",
+      "path": "/api/dossier/dossiers/e478210/validate",
+      "request_summary": "Re-run the structural eCTD validator on the real ID",
+      "status": 200,
+      "what_the_user_sees": "The validation report now comes back PASSED — 0 blocking finding(s) (none — the placeholder-ID block is cleared). The submission is clear of the structural blocker.",
+      "response_excerpt": {
+        "passed": true,
+        "errors": [],
+        "warnings": [],
+        "checked": 10,
+        "criteria": {
+          "name": "ANDS Studio structural eCTD validator",
+          "version": "1.2",
+          "synced": "2026-05 (HC eCTD Validation Criteria v5.3)",
+          "modeled_on": "Health Canada eCTD Validation Criteria v5.3 rule scheme (CA-<severity>-<block> ids), CA Module 1 v2.2 regional backbone and the ICH eCTD 3.2.2 index",
+          "disclaimer": "Structural and technical checks only. This is NOT Health Canada's official eValidator and does not replace it — run eValidator (or your publisher's validator) before you transmit.",
+          "coverage": {
+            "checked": [
+              "Document payload conformance",
+              "File & folder naming hygiene",
+              "Leaf inventory integrity",
+              "Lifecycle operation legality",
+              "Sequence numbering",
+              "Transmissible ICH eCTD 3.2.2 sequence backbone",
+              "ca-regional.xml structure (CA Module 1 v2.2)",
+              "index.xml backbone structure"
+            ],
+            "not_checked": [
+              "Scientific, clinical or quality adequacy of the content",
+              "Full PDF/A-1 conformance (only the %PDF header and encryption are checked, not the ISO profile)",
+              "Cross-document hyperlink target resolution",
+              "Health Canada screening or review acceptance"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "step": 15,
+      "action": "Export the transmissible eCTD package (after the fix)",
+      "method": "GET",
+      "path": "/api/dossier/ectd/e478210/export/0000",
+      "request_summary": "Export sequence 0000 for transmission",
+      "status": 200,
+      "what_the_user_sees": "Export SUCCEEDS (HTTP 200). A real 9308-byte eCTD zip package downloads ('e478210-seq-0000-ectd.zip'), stamped X-Export-Validation='passed' with 0 missing leaves — the package only emitted because validation genuinely passed.",
+      "response_excerpt": {
+        "content_type": "application/zip",
+        "content_disposition": "attachment; filename=\"e478210-seq-0000-ectd.zip\"",
+        "bytes": 9308,
+        "headers": {
+          "x-export-missing": "0",
+          "x-export-validation": "passed"
+        }
+      }
+    }
+  ]
+}
