@@ -58,6 +58,12 @@ header.topbar{display:flex;align-items:center;gap:14px;padding:14px 26px;
   background:rgba(91,140,255,.16)}
 .chip.ready{background:rgba(55,211,155,.18);color:#bdf3df}
 .chip.blocked{background:rgba(255,209,102,.16);color:#ffe3a3}
+/* WS5: placeholder Dossier ID — deliberately NOT a rounded status pill. A
+   squared, red, uppercase warning so a draft "d…" id can never be mistaken for
+   a real Health-Canada-issued e-number anywhere it appears. */
+.chip.placeholder-id{background:rgba(255,107,107,.20);color:#ffb4b4;
+  border:1px solid rgba(255,107,107,.55);border-radius:5px;font-weight:700;
+  letter-spacing:.02em;text-transform:uppercase;font-size:10px}
 
 /* ── layout ───────────────────────────────────────────────────────── */
 .stage{max-width:1240px;margin:0 auto;padding:26px 24px 80px;

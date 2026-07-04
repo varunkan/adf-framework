@@ -397,10 +397,10 @@ export default function DossiersHome() {
                       <div className="d-id">
                         {d.dossier_id}
                         {d.dossier_id.startsWith("d") && (
-                          <button className="chip blocked" title="Placeholder ID — set the real Health Canada Dossier ID"
+                          <button className="chip placeholder-id" title="Placeholder ID — NOT a Health Canada Dossier ID. Export and transmission are blocked until you set the real ID (issued via REP)."
                             style={{ marginLeft: 8, fontSize: 11 }}
                             onClick={(e) => openRename(e, d.dossier_id)}>
-                            draft ID — set real ✎
+                            ⚠ placeholder — set real ID ✎
                           </button>
                         )}
                       </div>
@@ -411,8 +411,17 @@ export default function DossiersHome() {
                       </div>
                       <div className="progress"><i style={{
                         width: `${applic ? (passed / applic) * 100 : 0}%` }} /></div>
-                      <span className={`chip ${d.gate?.complete ? "ready" : "blocked"}`}>
-                        {d.gate?.complete ? "Ready to file" : `${passed}/${applic} modules`}
+                      {/* WS1-c: completeness is NOT a filing verdict. Never render
+                          "Ready to file" from module-completion — that green badge
+                          must come from a real eCTD validation pass (in the builder/
+                          journey), not this catalog roll-up. */}
+                      <span className={`chip ${d.gate?.complete ? "" : "blocked"}`}
+                        title={d.gate?.complete
+                          ? "All required modules built — structural completeness only, NOT a validation pass. Open the module builder and run eCTD validation before filing."
+                          : "Some required modules are not yet built"}>
+                        {d.gate?.complete
+                          ? `${passed}/${applic} modules built — validate to file`
+                          : `${passed}/${applic} modules built`}
                       </span>
                       <button className="tile-delete" title={`Delete ${d.dossier_id}`}
                         aria-label={`Delete dossier ${d.dossier_id}`}
@@ -459,14 +468,17 @@ export default function DossiersHome() {
                           <td style={{ fontFamily: "ui-monospace,monospace" }}>
                             {d.dossier_id}
                             {d.dossier_id.startsWith("d") && (
-                              <span className="chip blocked" style={{ marginLeft: 6,
-                                fontSize: 10 }} title="Placeholder ID">draft</span>
+                              <span className="chip placeholder-id" style={{ marginLeft: 6,
+                                fontSize: 10 }} title="Placeholder ID — NOT a Health Canada Dossier ID; export/transmission blocked until the real ID is set">⚠ placeholder</span>
                             )}
                           </td>
                           <td>{d.title}</td>
                           <td>
-                            <span className={`chip ${d.gate?.complete ? "ready" : "blocked"}`}>
-                              {d.gate?.complete ? "Ready" : `${passed}/${applic}`}
+                            <span className={`chip ${d.gate?.complete ? "" : "blocked"}`}
+                              title={d.gate?.complete
+                                ? "Modules built (structural completeness) — not a validation pass; validate before filing"
+                                : "Some required modules not yet built"}>
+                              {d.gate?.complete ? `${passed}/${applic} built` : `${passed}/${applic}`}
                             </span>
                           </td>
                           <td>{typeLabel(d)}</td>
