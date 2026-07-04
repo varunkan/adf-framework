@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useDossier } from "@/components/dossier/DossierContext";
 import { dossierApi } from "@/lib/dossierApi";
+import { EvalidatorHandoff } from "@/components/dossier/EvalidatorHandoff";
 import type { OutlineView } from "@/lib/dossierTypes";
 
 export default function ViewerPage() {
@@ -9,6 +10,9 @@ export default function ViewerPage() {
   const [tab, setTab] = useState<"files" | "outline">("files");
   const [outline, setOutline] = useState<OutlineView | null>(null);
   const [exportMsg, setExportMsg] = useState("");
+  // WS-VALIDATE: on a SUCCESSFUL export, pin the eValidator handoff so the
+  // filer never mistakes "package downloaded" for "eValidator-passed".
+  const [exportedOk, setExportedOk] = useState(false);
   const [exporting, setExporting] = useState(false);
 
   // Export fails CLOSED: fetch (not a bare download link) so a 409 shows the
@@ -17,6 +21,7 @@ export default function ViewerPage() {
   async function exportPackage() {
     setExporting(true);
     setExportMsg("");
+    setExportedOk(false);
     try {
       const out = await dossierApi.exportSequence(dossierId, "0000");
       if (out.ok) {
@@ -28,6 +33,7 @@ export default function ViewerPage() {
         a.click();
         a.remove();
         URL.revokeObjectURL(url);
+        setExportedOk(true);
       } else {
         const n = out.validation?.errors?.length ?? 0;
         setExportMsg(
@@ -79,6 +85,19 @@ export default function ViewerPage() {
       {exportMsg && (
         <div className="notice bad" style={{ marginTop: 8, fontSize: 12 }}>
           {exportMsg}
+        </div>
+      )}
+      {/* WS-VALIDATE (round-8 blocker, n=12): on export success, pin the
+          eValidator handoff — the persistent "run HC eValidator before
+          transmission" banner + the parity-gap table — so downloading the
+          package is never mistaken for passing HC's official validator. */}
+      {exportedOk && (
+        <div className="card glass" style={{ marginTop: 10 }}>
+          <div className="mut" style={{ fontSize: 12 }}>
+            eCTD package exported. One required step remains before you can
+            transmit:
+          </div>
+          <EvalidatorHandoff criteria={content?.validation?.criteria} />
         </div>
       )}
       <p className="mut" style={{ fontSize: 12 }}>

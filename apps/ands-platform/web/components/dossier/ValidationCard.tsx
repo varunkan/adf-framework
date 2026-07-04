@@ -4,6 +4,7 @@ import { dossierApi } from "@/lib/dossierApi";
 import { Disclosure } from "../Disclosure";
 import { RuleCatalogue } from "./RuleCatalogue";
 import { EctdPrimer } from "./EctdPrimer";
+import { EvalidatorHandoff } from "./EvalidatorHandoff";
 import type {
   ValidationCriteria,
   ValidationFinding,
@@ -72,6 +73,14 @@ function CriteriaHeader({ criteria }: { criteria?: ValidationCriteria }) {
           (structural; not HC eValidator)
         </span>
       </div>
+      {/* WS-VALIDATE: the ruleset SYNC DATE travels on the face so provenance
+          (name + version + when it was last reconciled to HC criteria) is
+          legible without opening the expander or an exported report. */}
+      {criteria.synced && (
+        <div className="mut" style={{ fontSize: 11, marginTop: 2 }}>
+          Ruleset synced: {criteria.synced}
+        </div>
+      )}
       <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>
         {criteria.disclaimer}
       </div>
@@ -145,12 +154,35 @@ function csvCell(v: unknown): string {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
+// WS-VALIDATE: the ruleset provenance (name + version + synced date) must be
+// STAMPED into every exported report so it travels with the evidence, not just
+// live in the UI. One helper renders that stamp as a human line reused across
+// CSV/JSON/PDF exports.
+function criteriaStamp(c?: ValidationCriteria): string {
+  if (!c) return "Ruleset: (unnamed structural check)";
+  return (
+    `Ruleset: ${c.name} v${c.version}` +
+    (c.synced ? ` · synced ${c.synced}` : "") +
+    " · structural/technical only — NOT Health Canada's official eValidator"
+  );
+}
+
 function report(v: ValidationResult, dossierId: string) {
   const rows: { severity: string; finding: ValidationFinding }[] = [
     ...v.errors.map((finding) => ({ severity: "error", finding })),
     ...v.warnings.map((finding) => ({ severity: "warning", finding })),
   ];
+  const generatedAt = new Date().toISOString();
+  const c = v.criteria;
+  // CSV: stamp the ruleset provenance into leading comment lines (# …) so the
+  // criteria name/version/sync date travels with the file even when opened in a
+  // spreadsheet. Then the normal header row + findings.
   const csv = [
+    `# ${criteriaStamp(c)}`,
+    `# Dossier: ${dossierId} · generated ${generatedAt} · result: ${
+      v.passed ? "no structural issues" : `${v.errors.length} error(s)`
+    }`,
+    "# You must still run HC eValidator before transmission.",
     ["severity", "rule_id", "rule", "leaf", "message"].join(","),
     ...rows.map((r) =>
       [
@@ -167,12 +199,19 @@ function report(v: ValidationResult, dossierId: string) {
   const json = JSON.stringify(
     {
       dossier_id: dossierId,
-      generated_at: new Date().toISOString(),
+      generated_at: generatedAt,
       passed: v.passed,
-      criteria: v.criteria || null,
+      // WS-VALIDATE: explicit provenance block so the ruleset name/version/sync
+      // date is machine-readable at the top of the report, in addition to the
+      // full criteria object.
+      ruleset: c
+        ? { name: c.name, version: c.version, synced: c.synced || null }
+        : null,
+      criteria: c || null,
       note:
         "Structural/format completeness check only — NOT Health Canada " +
-        "review and NOT full eCTD technical validation.",
+        "review and NOT full eCTD technical validation. You must still run " +
+        "HC eValidator before transmission.",
       errors: v.errors,
       warnings: v.warnings,
     },
@@ -180,6 +219,74 @@ function report(v: ValidationResult, dossierId: string) {
     2
   );
   return { csv, json };
+}
+
+// WS-VALIDATE: a print-friendly PDF export. We do NOT claim PDF/A conformance —
+// this opens a stamped, print-ready report the filer can "Save as PDF" from the
+// browser print dialog. The ruleset name/version/synced date is stamped in the
+// header so provenance travels with the printed evidence.
+function reportPdf(v: ValidationResult, dossierId: string) {
+  const c = v.criteria;
+  const generatedAt = new Date().toISOString();
+  const rows = [
+    ...v.errors.map((f) => ({ severity: "error", f })),
+    ...v.warnings.map((f) => ({ severity: "warning", f })),
+  ];
+  const esc = (s: unknown) =>
+    String(s == null ? "" : s).replace(
+      /[&<>]/g,
+      (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[ch] as string)
+    );
+  const body = rows.length
+    ? rows
+        .map(
+          (r) =>
+            `<tr><td>${esc(r.severity)}</td><td><code>${esc(
+              r.f.rule_id || ""
+            )}</code></td><td><code>${esc(r.f.leaf || "")}</code></td><td>${esc(
+              r.f.message
+            )}</td></tr>`
+        )
+        .join("")
+    : `<tr><td colspan="4">No presence/format issues found. This does not confirm scientific adequacy or full eCTD validity.</td></tr>`;
+  const html =
+    `<!doctype html><html><head><meta charset="utf-8"><title>` +
+    `${esc(dossierId)} — completeness check</title><style>` +
+    `body{font:13px system-ui,sans-serif;padding:24px;color:#111}` +
+    `h1{font-size:18px;margin:0 0 4px}` +
+    `.stamp{font-size:11px;color:#555;margin:2px 0}` +
+    `.banner{border:1px solid #b45309;background:#fffbeb;color:#7c2d12;` +
+    `padding:8px 10px;border-radius:6px;margin:12px 0;font-size:12px}` +
+    `table{border-collapse:collapse;width:100%;margin-top:12px;font-size:12px}` +
+    `th,td{border:1px solid #ddd;padding:4px 6px;text-align:left;vertical-align:top}` +
+    `code{font-size:11px}` +
+    `@media print{button{display:none}}` +
+    `</style></head><body>` +
+    `<h1>eCTD structural completeness check</h1>` +
+    `<div class="stamp">${esc(criteriaStamp(c))}</div>` +
+    `<div class="stamp">Dossier: ${esc(dossierId)} · generated ${esc(
+      generatedAt
+    )} · result: ${
+      v.passed ? "no structural issues" : `${v.errors.length} error(s)`
+    }</div>` +
+    (c?.modeled_on
+      ? `<div class="stamp">Modeled on: ${esc(c.modeled_on)}</div>`
+      : "") +
+    `<div class="banner"><b>You must still run Health Canada's official ` +
+    `eValidator before transmission.</b> A clean result here means the sequence ` +
+    `is structurally plausible — it does NOT mean it will pass HC's eValidator ` +
+    `or be accepted on screening. This is NOT full eCTD technical validation ` +
+    `and does NOT claim PDF/A conformance.</div>` +
+    `<table><thead><tr><th>Severity</th><th>Rule id</th><th>Leaf/file</th>` +
+    `<th>Message</th></tr></thead><tbody>${body}</tbody></table>` +
+    `<button onclick="window.print()">Print / Save as PDF</button>` +
+    `</body></html>`;
+  const w = window.open("", "_blank");
+  if (w) {
+    w.document.write(html);
+    w.document.close();
+    w.focus();
+  }
 }
 
 // Draft completeness check — the structural/format check run from content
@@ -259,6 +366,14 @@ export function ValidationCard({
         )}
       </div>
 
+      {/* WS-VALIDATE (round-8 blocker, n=12): the eValidator handoff surface is
+          PINNED to the validation success state (no structural errors) — the
+          exact point a filer might mistake a green result for an eValidator
+          pass. It carries the persistent "run HC eValidator before transmission"
+          banner + the parity-gap table, extending (never removing) the honesty
+          disclaimers into an actionable next step. */}
+      {v.passed && <EvalidatorHandoff criteria={v.criteria} />}
+
       {/* Round-6 WS-A (density reduction): the pass/fail result + findings above
           are the GATING signal — always visible. The extra technical sub-check,
           report exports and the coverage footnote are non-gating detail, so they
@@ -294,6 +409,14 @@ export function ValidationCard({
             }
           >
             Download report (JSON)
+          </button>
+          <button
+            className="ghost"
+            style={{ fontSize: 12, padding: "6px 10px" }}
+            onClick={() => reportPdf(v, dossierId)}
+            title="Opens a print-ready, ruleset-stamped report — use your browser's Save as PDF. Not a PDF/A conformance claim."
+          >
+            Download report (PDF)
           </button>
         </div>
 

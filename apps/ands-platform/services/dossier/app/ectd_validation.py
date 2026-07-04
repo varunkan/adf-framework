@@ -262,6 +262,98 @@ def rule_catalog() -> dict:
     return {"count": len(rules), "rules": rules, "criteria": criteria()}
 
 
+# WS-VALIDATE (round-8 blocker, n=12): the eValidator PARITY / HANDOFF surface.
+# This is ADDED alongside criteria()/rule_catalog() — it does not rewrite them.
+# It answers the one question every regulatory-ops persona asked: "does a green
+# result here mean my sequence would pass Health Canada's official eValidator?"
+# The honest answer is NO — this is a structural/technical checker, and even the
+# rules that DO overlap a real eValidator rule are not a 1:1 numeric-parity claim.
+# So parity() states, per rule FAMILY, whether HC's eValidator checks the same
+# class of defect (an overlap, not equivalence) or does not, and always carries
+# the "run eValidator before you transmit" next step.
+#
+# hc_evalidator_covered = True  -> HC's eValidator also checks this defect class
+#                                  (our structural check is a useful pre-flight,
+#                                  but eValidator remains authoritative)
+#              = False -> this is an ANDS Studio convenience/structural check
+#                         with NO direct HC eValidator counterpart.
+_FAMILY_PARITY = {
+    # family key -> (hc_evalidator_covered, plain-English note)
+    "1": (True, "HC eValidator also checks leaf inventory integrity (href, "
+                "checksum presence and MD5 format). Overlaps, not 1:1 parity — "
+                "eValidator remains authoritative."),
+    "2": (True, "HC eValidator validates eCTD life-cycle operations "
+                "(new/replace/append/delete) against the cumulative dossier."),
+    "3": (True, "HC eValidator flags file/folder naming defects (case, spaces, "
+                "module folder placement)."),
+    "4": (True, "HC eValidator checks sequence numbering (four-digit, from "
+                "0000, contiguity)."),
+    "5": (True, "HC eValidator validates the index.xml backbone against the "
+                "ICH eCTD DTD."),
+    "55": (True, "HC eValidator validates the transmissible per-sequence "
+                 "<ectd:ectd> backbone (operation attrs, lifecycle "
+                 "back-pointers, live hrefs)."),
+    "6": (True, "HC eValidator validates the CA Module 1 v2.2 regional "
+                "backbone (ca-regional.xml)."),
+    "7": (False, "ANDS Studio checks only the %PDF header and encryption. HC "
+                 "eValidator (and your publisher) verify full PDF/A-1 "
+                 "conformance, which this tool does NOT — run it before you "
+                 "transmit."),
+    "REP": (False, "The Dossier ID is issued by Health Canada via the "
+                   "Regulatory Enrolment Process (REP); no validator mints or "
+                   "confirms it. This is an ANDS Studio filing guardrail, not "
+                   "an eValidator rule."),
+}
+
+
+def _parity_family_key(rule_id: str) -> str:
+    """Map a rule id to its parity family key (mirrors rule_catalog)."""
+    if rule_id.startswith("CA-REP"):
+        return "REP"
+    digits = rule_id.split("-")[2]
+    return "55" if digits.startswith("55") else digits[0]
+
+
+def parity() -> dict:
+    """The eValidator parity-gap table + a persistent, ACTIONABLE next step.
+
+    For every rule the catalogue exposes, declare whether Health Canada's
+    official eValidator checks the same class of defect (``hc_evalidator_covered``
+    — an OVERLAP, never a 1:1 numeric-parity claim) with a plain-English note.
+    Always carries the versioned :func:`criteria` and the persistent
+    "you must still run HC eValidator before transmission" next step so the
+    honesty disclaimer becomes an actionable hand-off, not just a caveat.
+    """
+    rules = []
+    for r in rule_catalog()["rules"]:
+        covered, note = _FAMILY_PARITY[_parity_family_key(r["rule_id"])]
+        rules.append({
+            "rule": r["rule"], "rule_id": r["rule_id"], "family": r["family"],
+            "severity": r["severity"],
+            "hc_evalidator_covered": covered, "note": note,
+        })
+    covered_count = sum(1 for r in rules if r["hc_evalidator_covered"])
+    return {
+        "criteria": criteria(),
+        "rules": rules,
+        "covered_count": covered_count,
+        "not_covered_count": len(rules) - covered_count,
+        "next_step": {
+            "banner": "You must still run Health Canada's official eValidator "
+                      "before transmission. A clean result here means the "
+                      "sequence is structurally plausible — it does NOT mean it "
+                      "will pass HC's eValidator or be accepted on screening.",
+            "action": "Export the eCTD package, then validate it in HC's "
+                      "eValidator (or your publisher's validator, e.g. "
+                      "docuBridge / Lorenz eValidator) and resolve any findings "
+                      "before you upload through CESG WebTrader.",
+            "why": "The rows below marked 'no HC eValidator counterpart' are "
+                   "ANDS Studio convenience checks; the rows marked 'overlaps' "
+                   "cover the same defect class but are not a 1:1 parity claim.",
+        },
+    }
+
+
 def _s(v) -> str:
     return str(v if v is not None else "").strip()
 

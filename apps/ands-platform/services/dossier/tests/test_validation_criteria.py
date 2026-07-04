@@ -70,3 +70,56 @@ def test_web_endpoint_surfaces_rule_source(client):
     rules = r.json()["rules"]
     assert rules and all(rule.get("source") for rule in rules)
     assert r.json()["criteria"].get("synced")
+
+
+# --- WS-VALIDATE: eValidator parity/handoff surface (round-8 blocker, n=12) ---
+# The structural checker must NOT pass itself off as HC's official eValidator.
+# parity() is the honest, actionable handoff: a per-rule parity-gap table (which
+# of our CA-E/CA-W rules map to a real HC eValidator rule vs. not-covered) plus
+# a persistent "run eValidator before transmission" next-step. It ADDS to (never
+# rewrites) the existing criteria()/rule_catalog() source-and-version surface.
+
+
+def test_parity_reports_every_catalog_rule():
+    # every rule the catalogue exposes must appear in the parity table so no
+    # rule silently reads as "eValidator-equivalent" by omission.
+    par = ectd_validation.parity()
+    cat = ectd_validation.rule_catalog()
+    par_ids = {r["rule_id"] for r in par["rules"]}
+    cat_ids = {r["rule_id"] for r in cat["rules"]}
+    assert cat_ids <= par_ids, cat_ids - par_ids
+
+
+def test_parity_rules_declare_coverage_honestly():
+    par = ectd_validation.parity()
+    for r in par["rules"]:
+        # each rule states whether a real HC eValidator rule covers the same
+        # defect (a boolean), plus a plain-English note.
+        assert "hc_evalidator_covered" in r
+        assert isinstance(r["hc_evalidator_covered"], bool)
+        assert r.get("note")
+    # honesty gate: at least one rule must be declared NOT covered, otherwise the
+    # table would falsely imply full eValidator parity.
+    assert any(not r["hc_evalidator_covered"] for r in par["rules"]), \
+        "parity table must not claim full eValidator coverage"
+
+
+def test_parity_carries_criteria_and_actionable_next_step():
+    par = ectd_validation.parity()
+    # the versioned criteria travels with the parity evidence
+    _assert_criteria(par["criteria"])
+    # the persistent, actionable next-step banner
+    banner = par["next_step"]
+    assert "evalidator" in banner["banner"].lower()
+    # it must not merely disclaim — it must name a concrete next action
+    assert banner.get("action")
+    # summary counts so a report can print "N of M rules eValidator-covered"
+    assert par["covered_count"] + par["not_covered_count"] == len(par["rules"])
+    assert par["not_covered_count"] >= 1
+
+
+def test_parity_summary_matches_rule_flags():
+    par = ectd_validation.parity()
+    covered = sum(1 for r in par["rules"] if r["hc_evalidator_covered"])
+    assert par["covered_count"] == covered
+    assert par["not_covered_count"] == len(par["rules"]) - covered
