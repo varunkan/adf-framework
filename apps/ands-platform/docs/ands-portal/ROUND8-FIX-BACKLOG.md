@@ -3,6 +3,20 @@
 Source: round-7 SSR panel (12 personas × 8 flows × 2 samples = 192 responses).
 Rule: implement EVERY item faithfully, check off against a code change + test, do not drop any. Re-run the panel only after the whole set ships.
 
+## STATUS (2026-07-04): IMPLEMENTED — 53/55 items shipped, verified, committed
+
+All 11 blockers + 34 majors + 8/10 minors done across commits `338eab3` (WS1-a),
+`790ebc6` (WS1-b), `1f9d1d4` (WS1-c/WS5), `2ad32e5` (WS-VALIDATE), `a02a791`
+(WS-OPS-PROV), `5b1cf95` (WS-ONBOARDING), `3afd46f` (WS-OVERALL), `2214328`
+(WS-OPS-TENANT), `f22930d` (WS-JOURNEY), `535a47e` (WS-BUILDER), `51a5f42`
+(WS-AIDRAFT). **777 mesh tests green, tsc clean, adversarial honesty review passed**
+(no overclaiming — Part-11/SOC2/PDF-A/eValidator all framed as alignment/roadmap,
+honesty disclaimers preserved verbatim). Two honest partials: (a) identity-service
+enforced-default MFA flip — mechanism + admin-configurable UI shipped, flipping the
+demo-signup default is a UX call left explicit; (b) full app-wide FR/EN localization —
+the persona ask (a sign-in bilingual cue) IS shipped; whole-app i18n is out of scope.
+Next: round-8 panel measurement over the re-transcribed stimuli.
+
 ## Guided Journey  (`journey`)
 **Highest-leverage:** Split the readiness badge into two explicit, provenance-bearing tiers — 'in-tool checks passed' vs a real 'eCTD validation' pass — where the validation row runs and names an actual validator ruleset + version and produces an exportable, rule-ID-level validation report that gates the green 'READY TO FILE' state. All 12 personas withhold trust for the identical reason: the badge scores app steps, not Health Canada technical validation. Making validation-parity legible (named ruleset, per-rule pass/fail, archivable report) is the single change that moves every persona on trust and directly addresses the round7 ease/trust regression.
 **DO NOT BREAK:** Preserve the honesty that every persona praised: (1) the upfront Company ID / Dossier ID prerequisites gate with real ~2-week lead time and REP request spelled out; (2) the dashed-underline plain-language term tooltips; (3) the locked-steps-with-reasons rail with 'You're here' marker; (4) 'the single thing standing between you and ready' single-blocker call-out with jump-to button; (5) the 'How is x% measured?' expander that shows its work; (6) auto-save; (7) the Health Canada guidance links / non-invented-rules provenance; and (8) the overall honest, non-overclaiming tone about external dependencies. Any fix must keep these intact — they are the trust foundation.
