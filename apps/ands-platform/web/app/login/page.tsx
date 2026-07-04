@@ -7,8 +7,44 @@ import { Term } from "@/components/Term";
 
 const PW_RULE = "At least 10 characters, with letters and numbers.";
 
+// WS-ONBOARDING (round-8) #7 — a visible FR/EN language cue on a Health Canada
+// tool. This toggles the card's leading copy between English and French so the
+// bilingual cue actually does something (not a dead decoration). The form
+// controls and honesty/isolation copy are left as-is; full app localisation is
+// out of scope for this workstream.
+type Lang = "en" | "fr";
+const L: Record<Lang, {
+  signIn: string; createWs: string; resetPw: string;
+  isolated: string; whatIsWs: string; wsDesc: string; residency: string;
+}> = {
+  en: {
+    signIn: "Sign in",
+    createWs: "Create your workspace",
+    resetPw: "Reset your password",
+    isolated: "Your clients' dossiers are isolated per workspace.",
+    whatIsWs: "What is a workspace?",
+    wsDesc: "a workspace is one isolated client company and its dossiers.",
+    residency:
+      "Self-hosted: run ANDS Studio in your own environment so your data can " +
+      "stay resident in Canada.",
+  },
+  fr: {
+    signIn: "Se connecter",
+    createWs: "Créer votre espace de travail",
+    resetPw: "Réinitialiser votre mot de passe",
+    isolated: "Les dossiers de vos clients sont isolés par espace de travail.",
+    whatIsWs: "Qu'est-ce qu'un espace de travail ?",
+    wsDesc:
+      "un espace de travail regroupe une seule société cliente et ses dossiers.",
+    residency:
+      "Auto-hébergé : exécutez ANDS Studio dans votre propre environnement " +
+      "pour que vos données puissent rester au Canada.",
+  },
+};
+
 export default function LoginPage() {
   const router = useRouter();
+  const [lang, setLang] = useState<Lang>("en");
   const [mode, setMode] = useState<"login" | "signup" | "reset">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -100,23 +136,36 @@ export default function LoginPage() {
   return (
     <main className="login-page">
       <div className="card glass login-card">
-        <div className="brand" style={{ marginBottom: 6 }}>
+        <div className="brand" style={{ marginBottom: 6, display: "flex",
+          alignItems: "center", gap: 8 }}>
           <span className="dot" aria-hidden /> ANDS&nbsp;Studio
+          <span className="spacer" style={{ marginLeft: "auto" }} />
+          {/* #7 — visible FR/EN language cue */}
+          <div role="group" aria-label="Language / Langue"
+            style={{ display: "inline-flex", gap: 2, fontSize: 12 }}>
+            <button type="button" aria-pressed={lang === "en"}
+              className={lang === "en" ? "" : "ghost"}
+              style={{ fontSize: 12, padding: "2px 8px" }}
+              onClick={() => setLang("en")}>EN</button>
+            <button type="button" aria-pressed={lang === "fr"}
+              className={lang === "fr" ? "" : "ghost"}
+              style={{ fontSize: 12, padding: "2px 8px" }}
+              onClick={() => setLang("fr")}>FR</button>
+          </div>
         </div>
         <h1 className="step-title" style={{ marginTop: 0 }}>
-          {mode === "login" ? "Sign in"
-            : mode === "signup" ? "Create your workspace"
-            : "Reset your password"}
+          {mode === "login" ? L[lang].signIn
+            : mode === "signup" ? L[lang].createWs
+            : L[lang].resetPw}
         </h1>
         {mode === "signup" && (
           <p className="mut" style={{ fontSize: 12, marginTop: -4 }}>
-            <Term k="workspace">What is a workspace?</Term> — a workspace is
-            one isolated client company and its dossiers.
+            <Term k="workspace">{L[lang].whatIsWs}</Term> — {L[lang].wsDesc}
           </p>
         )}
         <p className="mut" style={{ fontSize: 13 }}>
           {mode === "login"
-            ? "Your clients' dossiers are isolated per workspace."
+            ? L[lang].isolated
             : mode === "signup"
             ? (filingFor === "own"
               ? "One workspace for your company — dossiers, documents and " +
@@ -125,6 +174,12 @@ export default function LoginPage() {
                 "filings stay isolated between the clients you file for.")
             : "Enter your account email. We issue a one-time code (expires " +
               "in 15 minutes) to set a new password."}
+        </p>
+
+        {/* #7 — one-line data-residency clarifier: self-hosted can stay in
+            Canada (a gating question for HC filers). */}
+        <p className="mut" style={{ fontSize: 12, marginTop: -2 }}>
+          🍁 {L[lang].residency}
         </p>
 
         {mode === "signup" && (

@@ -2,6 +2,16 @@
 // WS4.2 — the 'Your role' section expands into a permission matrix for every
 // role, sourced from GET /rbac/matrix (which reads rbac.capabilities_for on the
 // server) so what a user sees can never drift from what authorize() enforces.
+//
+// WS-ONBOARDING (round-8) #3 — the three admin-ish names (owner /
+// workspace-admin / tenant-admin) confused 11 personas. Fix, UI-side only
+// (the server role KEYS are unchanged, so enforcement is untouched):
+//  - present plain PARALLEL display labels: Platform vendor / Workspace admin /
+//    Company member;
+//  - badge "Your role" at the top of the section (in addition to on the row);
+//  - move the vendor-only "owner" row behind a collapsed
+//    "Advanced / vendor roles" expander so a normal signup sees only the two
+//    roles that apply to them.
 import { useEffect, useState } from "react";
 import { auth, type RoleMatrixRow } from "@/lib/auth";
 
@@ -18,9 +28,54 @@ const CAP_LABELS: Record<string, string> = {
   "billing.read": "View billing & plan",
 };
 
+// #3 — plain PARALLEL display labels keyed by the server role id. These override
+// the server's `label` only for display; the role KEY (shown as a code chip and
+// used for enforcement) is untouched, so this can never drift from authorize().
+const DISPLAY_LABEL: Record<string, string> = {
+  owner: "Platform vendor",
+  "tenant-admin": "Workspace admin",
+  user: "Company member",
+};
+
+// which role keys are the vendor-only rows hidden behind the Advanced expander
+const VENDOR_ROLES = new Set(["owner"]);
+
+function label(row: RoleMatrixRow): string {
+  return DISPLAY_LABEL[row.role] || row.label;
+}
+
+function RoleCard({ row, myRole }: { row: RoleMatrixRow; myRole?: string }) {
+  return (
+    <div className="card" style={{ padding: "10px 12px",
+      outline: row.role === myRole ? "1px solid var(--accent, #6ea8fe)" : "none" }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "baseline",
+        flexWrap: "wrap" }}>
+        <b style={{ fontSize: 14 }}>{label(row)}</b>
+        <code className="mut" style={{ fontSize: 12 }}>{row.role}</code>
+        {row.role === myRole && (
+          <span className="chip ready" style={{ fontSize: 11 }}>Your role</span>
+        )}
+      </div>
+      <p className="mut" style={{ margin: "4px 0 6px", fontSize: 13 }}>
+        {row.summary}
+      </p>
+      <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13,
+        display: "grid", gap: 2 }}>
+        {row.capabilities.map((c) => (
+          <li key={c}>{CAP_LABELS[c] || c}</li>
+        ))}
+      </ul>
+      <div className="mut" style={{ marginTop: 6, fontSize: 12 }}>
+        <b>Who assigns it:</b> {row.assignable_by}
+      </div>
+    </div>
+  );
+}
+
 export function RoleMatrix({ myRole }: { myRole?: string }) {
   const [rows, setRows] = useState<RoleMatrixRow[] | null>(null);
   const [open, setOpen] = useState(false);
+  const [showVendor, setShowVendor] = useState(false);
   const [err, setErr] = useState("");
 
   useEffect(() => {
@@ -28,8 +83,19 @@ export function RoleMatrix({ myRole }: { myRole?: string }) {
     auth.roleMatrix().then((r) => setRows(r.roles)).catch((e) => setErr(String(e)));
   }, [open, rows]);
 
+  const myLabel = rows?.find((r) => r.role === myRole);
+
   return (
     <div style={{ marginTop: 10 }}>
+      {/* #3 — surface "Your role" as a plain parallel label right at the top,
+          not only buried in the expanded table. */}
+      {myLabel && (
+        <div style={{ display: "flex", gap: 8, alignItems: "baseline",
+          flexWrap: "wrap", marginBottom: 6 }}>
+          <span className="chip ready" style={{ fontSize: 11 }}>Your role</span>
+          <b style={{ fontSize: 13 }}>{label(myLabel)}</b>
+        </div>
+      )}
       <button className="ghost" style={{ fontSize: 13 }}
         aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         {open ? "Hide role permissions ▲" : "What can each role do? ▼"}
@@ -42,56 +108,42 @@ export function RoleMatrix({ myRole }: { myRole?: string }) {
           )}
           {rows && (
             <div style={{ display: "grid", gap: 10 }}>
-              {rows.map((row) => (
-                <div key={row.role} className="card"
-                  style={{ padding: "10px 12px",
-                    outline: row.role === myRole
-                      ? "1px solid var(--accent, #6ea8fe)" : "none" }}>
-                  <div style={{ display: "flex", gap: 8, alignItems: "baseline",
-                    flexWrap: "wrap" }}>
-                    <b style={{ fontSize: 14 }}>{row.label}</b>
-                    <code className="mut" style={{ fontSize: 12 }}>{row.role}</code>
-                    {row.role === myRole && (
-                      <span className="chip ready" style={{ fontSize: 11 }}>
-                        Your role
-                      </span>
-                    )}
-                  </div>
-                  <p className="mut" style={{ margin: "4px 0 6px", fontSize: 13 }}>
-                    {row.summary}
-                  </p>
-                  <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13,
-                    display: "grid", gap: 2 }}>
-                    {row.capabilities.map((c) => (
-                      <li key={c}>{CAP_LABELS[c] || c}</li>
-                    ))}
-                  </ul>
-                  <div className="mut" style={{ marginTop: 6, fontSize: 12 }}>
-                    <b>Who assigns it:</b> {row.assignable_by}
-                  </div>
-                </div>
+              {/* the two roles that apply to a customer signup, shown by default */}
+              {rows.filter((r) => !VENDOR_ROLES.has(r.role)).map((row) => (
+                <RoleCard key={row.role} row={row} myRole={myRole} />
               ))}
-              {/* R6-C: disambiguate the three admin-ish terms professionals
-                  conflated (owner / tenant-admin / workspace-admin). */}
-              <div className="mut" style={{ fontSize: 12, display: "grid",
-                gap: 3 }}>
-                <div><b>A note on the admin terms:</b></div>
+
+              {/* #3 — the vendor-only "owner" row behind a collapsed expander */}
+              {rows.some((r) => VENDOR_ROLES.has(r.role)) && (
                 <div>
-                  <b>Owner</b> — the platform operator who runs this deployment
-                  and can act across every workspace. This is the hosting /
-                  vendor role, not a customer role.
+                  <button className="ghost" style={{ fontSize: 12 }}
+                    aria-expanded={showVendor}
+                    onClick={() => setShowVendor((v) => !v)}>
+                    {showVendor
+                      ? "Hide advanced / vendor roles ▲"
+                      : "Advanced / vendor roles ▼"}
+                  </button>
+                  {showVendor && (
+                    <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
+                      <p className="mut" style={{ fontSize: 12, margin: 0 }}>
+                        This role belongs to the company that hosts the
+                        platform, not to your organisation — you will never be
+                        assigned it. Shown here for completeness.
+                      </p>
+                      {rows.filter((r) => VENDOR_ROLES.has(r.role)).map((row) => (
+                        <RoleCard key={row.role} row={row} myRole={myRole} />
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <div>
-                  <b>Workspace admin</b> (internally the <b>tenant admin</b> —
-                  &ldquo;tenant&rdquo; is just the code name for a workspace)
-                  administers one workspace: invites and removes its members and
-                  manages its settings, and can never see another workspace.
-                </div>
-              </div>
+              )}
+
               <p className="mut" style={{ fontSize: 12, margin: 0 }}>
                 This table is generated from the same capability sets the API
                 enforces on every request — it cannot drift from what is actually
-                allowed.
+                allowed. The role code beside each name (e.g.{" "}
+                <code>tenant-admin</code>) is the internal key; the plain name is
+                what it means for you.
               </p>
             </div>
           )}

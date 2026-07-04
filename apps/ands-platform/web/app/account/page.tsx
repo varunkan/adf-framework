@@ -12,6 +12,7 @@ import { WorkspaceAudit } from "@/components/account/WorkspaceAudit";
 import { RoleMatrix } from "@/components/account/RoleMatrix";
 import { WorkspaceMfaPolicy } from "@/components/account/WorkspaceMfaPolicy";
 import { RoadmapCard } from "@/components/account/RoadmapCard";
+import { SecurityCompliance } from "@/components/account/SecurityCompliance";
 
 type MfaFlow =
   | { step: "idle" }
@@ -217,6 +218,11 @@ export default function AccountPage() {
               your <Term k="SIEM" /> is on the roadmap).</li>
           </ul>
         </section>
+
+        {/* WS-ONBOARDING #2: named 21 CFR Part 11 / GxP statement, a security
+            event log (sign-ins / MFA-policy / role changes), and a PDF export of
+            the security settings + role table for an inspection binder. */}
+        <SecurityCompliance />
 
         {/* WS3: workspace-wide Part-11 audit viewer + inspection export.
             A NEW section only — the MFA/identity/data-residency sections above
