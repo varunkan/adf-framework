@@ -1,12 +1,13 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { dossierApi } from "@/lib/dossierApi";
-import type { DocMeta, FeesBlock, SectionNode } from "@/lib/dossierTypes";
+import type { CurrentViewLeaf, DocMeta, FeesBlock, SectionNode } from "@/lib/dossierTypes";
 import { DraftChat } from "./DraftChat";
 import { EctdPrimer } from "./EctdPrimer";
 import { useDossier } from "./DossierContext";
 import { Disclosure } from "../Disclosure";
-import { Upload, Sparkles, Ban, AlertTriangle } from "lucide-react";
+import { Upload, Sparkles, Ban, AlertTriangle, FileSearch } from "lucide-react";
 import { toast } from "sonner";
 import { MODULE_4_NOTE, citeLine } from "@/lib/regCitations";
 import { opMeta } from "@/lib/leafStatus";
@@ -118,8 +119,17 @@ export function SectionPanel({ node, op }: { node: SectionNode; op?: string }) {
             </a>
           </div>
         </Disclosure>
-        <EctdPrimer compact />
+        <EctdPrimer compact dossierId={dossierId} />
       </div>
+
+      {/* MAJOR (n=8) wants real eCTD, not eye-candy: the actual leaf/operation +
+          node placement written to the backbone XML, surfaced right here in the
+          builder — not only inside a 3D tower. Lazily loaded on expand so it
+          never slows the primary form. Links back to the Application Viewer for
+          the full backbone/XML. */}
+      {node.leaf_id && (
+        <EctdPlacement node={node} op={op} dossierId={dossierId} />
+      )}
 
       {node.applicability === "na" || node.applicability === "suppressed" ? (
         <div className="notice">
@@ -219,6 +229,218 @@ export function SectionPanel({ node, op }: { node: SectionNode; op?: string }) {
         </>
       )}
     </div>
+  );
+}
+
+// one label/value row inside the eCTD placement grid.
+function PlaceRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <>
+      <dt className="mut" style={{ margin: 0 }}>{label}</dt>
+      <dd style={{ margin: 0, wordBreak: "break-all" }}>{children}</dd>
+    </>
+  );
+}
+
+// MAJOR (n=8): real eCTD substance in the builder — the leaf id, href, and
+// lifecycle operation as WRITTEN TO THE BACKBONE XML for this section, plus an
+// explicit statement of the operation against the prior active sequence. Also
+// carries the honest PDF/A scope note (MAJOR): what the tool checks vs. what it
+// does NOT. Loaded lazily on expand from the live current-view so it reflects
+// the same operators the eValidator handoff / Application Viewer show.
+function EctdPlacement({
+  node,
+  op,
+  dossierId,
+}: {
+  node: SectionNode;
+  op?: string;
+  dossierId: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [leaf, setLeaf] = useState<CurrentViewLeaf | null>(null);
+  const [history, setHistory] = useState<CurrentViewLeaf[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    if (!open || loaded) return;
+    let live = true;
+    dossierApi
+      .currentView(dossierId)
+      .then((cv) => {
+        if (!live) return;
+        setLeaf(cv.live.find((l) => l.leaf_id === node.leaf_id) || null);
+        setHistory(cv.history.filter((l) => l.leaf_id === node.leaf_id));
+        setLoaded(true);
+      })
+      .catch((e) => {
+        if (!live) return;
+        setErr(String(e));
+        setLoaded(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, [open, loaded, dossierId, node.leaf_id]);
+
+  // The operation this leaf carries (from the live view once loaded, else the
+  // parent-supplied hint). replace/append/delete act against a prior active
+  // sequence — spell that out explicitly (MAJOR: replace/append clarity).
+  const operation = leaf?.operation || op || "new";
+  const om = opMeta(operation);
+  const actsOnPrior = operation === "replace" || operation === "append" || operation === "delete";
+
+  return (
+    <Disclosure
+      className="ectd-placement"
+      showLabel="Show eCTD placement & lifecycle"
+      hideLabel="Hide eCTD placement & lifecycle"
+      open={open}
+      onOpenChange={setOpen}
+      summary={
+        <span>
+          <FileSearch size={13} aria-hidden style={{ verticalAlign: "-2px", marginRight: 5 }} />
+          <b>eCTD placement</b> — leaf, href &amp; lifecycle operation
+          {om ? (
+            <span className={om.risk ? "t-op warn" : "t-op"} style={{ marginLeft: 8 }}>
+              {om.label}
+            </span>
+          ) : null}
+        </span>
+      }
+    >
+      {!loaded ? (
+        <div className="mut" style={{ fontSize: 12 }}>Loading placement…</div>
+      ) : err ? (
+        <div className="notice bad" style={{ fontSize: 12 }}>{err}</div>
+      ) : (
+        <div className="ectd-place-body">
+          <dl
+            style={{
+              display: "grid",
+              gridTemplateColumns: "auto 1fr",
+              gap: "4px 12px",
+              margin: 0,
+              fontSize: 12,
+              alignItems: "baseline",
+            }}
+          >
+            <PlaceRow label="Leaf id"><code>{node.leaf_id}</code></PlaceRow>
+            <PlaceRow label="Node placement">{node.folder || "—"}</PlaceRow>
+            <PlaceRow label="href (path in package)">
+              {leaf?.href ? (
+                <code>{leaf.href}</code>
+              ) : (
+                <span className="mut">
+                  not written yet — placed into the backbone once a document is
+                  attached at this leaf
+                </span>
+              )}
+            </PlaceRow>
+            <PlaceRow label="Sequence">
+              <code>{leaf?.sequence || "0000"}</code>{" "}
+              <span className="mut">
+                {(leaf?.sequence || "0000") === "0000"
+                  ? "(original working sequence)"
+                  : "(amendment / response sequence)"}
+              </span>
+            </PlaceRow>
+            <PlaceRow label="Lifecycle operation">
+              <span className={om?.risk ? "t-op warn" : "t-op"}>{om?.label || operation.toUpperCase()}</span>{" "}
+              <b>{om?.word || operation}</b>
+            </PlaceRow>
+            <PlaceRow label="File fingerprint (md5)">
+              {leaf?.checksum ? (
+                <code title="md5 is a content fingerprint that matches the placed leaf — document control, NOT validation or acceptance.">
+                  {leaf.checksum.slice(0, 12)}…
+                </code>
+              ) : (
+                <span className="mut">—</span>
+              )}
+            </PlaceRow>
+          </dl>
+
+          {/* MAJOR: make the operation against a prior active sequence explicit
+              per leaf — new (nothing to supersede) vs replace/append/delete
+              acting on an earlier transmitted document. */}
+          <div className={`notice ${actsOnPrior ? "warn" : ""}`} style={{ fontSize: 12, marginTop: 8 }}>
+            {operation === "new" && (
+              <>This leaf is filed <b>new</b> — there is no prior active
+              sequence it supersedes.</>
+            )}
+            {operation === "replace" && (
+              <><b>Replace</b> — this leaf supersedes an earlier document
+              already transmitted in an active sequence. The backbone XML records
+              the replace operation so Health Canada&apos;s reviewer sees the new
+              document in place of the old one.
+              {leaf?.modified_leaf ? (
+                <> Replaces leaf <code>{leaf.modified_leaf}</code>.</>
+              ) : null}</>
+            )}
+            {operation === "append" && (
+              <><b>Append</b> — this leaf is added <i>alongside</i> a prior
+              active leaf, not replacing it; both remain part of the record.
+              {leaf?.modified_leaf ? (
+                <> Appends to leaf <code>{leaf.modified_leaf}</code>.</>
+              ) : null}</>
+            )}
+            {operation === "delete" && (
+              <><b>Delete</b> — this withdraws a document from a prior active
+              sequence. It stays in the audit history but is removed from the
+              current view.
+              {leaf?.modified_leaf ? (
+                <> Withdraws leaf <code>{leaf.modified_leaf}</code>.</>
+              ) : null}</>
+            )}
+          </div>
+
+          {history.length > 0 && (
+            <div className="mut" style={{ fontSize: 12, marginTop: 6 }}>
+              Prior versions of this leaf in the lifecycle history:{" "}
+              {history.map((h) => (
+                <code key={`${h.sequence}-${h.leaf_id}`} style={{ marginRight: 6 }}>
+                  {h.operation}@{h.sequence}
+                </code>
+              ))}
+            </div>
+          )}
+
+          {/* MAJOR (PDF/A honesty): state EXACTLY what is checked vs. not. This
+              mirrors the server-side rule (CA-E-7001 %PDF header, CA-E-7002 not
+              /Encrypt) and never claims full PDF/A-1b conformance. */}
+          <div className="teach" style={{ fontSize: 12, marginTop: 8 }}>
+            <b>PDF/A — what this tool actually checks</b>
+            <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+              <li>
+                ✓ the file really is a PDF (starts with the <code>%PDF</code>{" "}
+                header)
+              </li>
+              <li>
+                ✓ the PDF is <b>not encrypted / password-protected</b> (Health
+                Canada rejects <code>/Encrypt</code>)
+              </li>
+              <li>
+                ✗ <b>Full PDF/A-1b conformance is NOT verified here.</b> Font
+                embedding, colour profiles and the rest of the archival profile
+                are checked by HC eValidator and your publisher — not by ANDS
+                Studio. Run eValidator before you transmit.
+              </li>
+            </ul>
+          </div>
+
+          <div style={{ marginTop: 8 }}>
+            <Link
+              href={`/dossiers/${encodeURIComponent(dossierId)}/viewer`}
+              className="chip"
+              title="Open the read-only Application Viewer: index.xml / ca-regional.xml backbone and every leaf at its href with checksums."
+            >
+              Inspect the backbone &amp; XML — Application Viewer
+            </Link>
+          </div>
+        </div>
+      )}
+    </Disclosure>
   );
 }
 
@@ -555,6 +777,13 @@ function AuthorForm({
     }
   }
 
+  // IDIOT-PROOF (MAJOR): the greyed "example — replace this" placeholder must
+  // not let a rushed junior file example text. A sample field left blank falls
+  // back to its worked example on author — so an EMPTY sample field is exactly
+  // the danger. Compute the still-unreplaced sample fields so we can flag each
+  // one inline and warn, loudly, before authoring.
+  const unreplaced = [...sampleKeys].filter((k) => !((fields[k] || "").trim()));
+
   const formBody = (
     <>
       <p className="mut" style={{ fontSize: 13 }}>
@@ -566,24 +795,54 @@ function AuthorForm({
         data — the example is never saved as your content, and any left
         unreplaced keeps this section blocked until you confirm it.
       </p>
+      {/* An unmissable, sighted-visible warning that names the exact fields still
+          carrying example text, so the placeholder cannot be silently filed. */}
+      {unreplaced.length > 0 && (
+        <div className="notice warn" role="status" style={{ fontSize: 12 }}>
+          <AlertTriangle size={14} aria-hidden style={{ verticalAlign: "-2px", marginRight: 4 }} />
+          <b>{unreplaced.length} field{unreplaced.length > 1 ? "s" : ""} still
+          show the example</b> and will fall back to the greyed example text if
+          you author now: {unreplaced.map(prettyLabel).join(", ")}. Replace{" "}
+          {unreplaced.length > 1 ? "them" : "it"} with your product&apos;s real
+          data — until you do, this section stays <b>not filable</b>.
+        </div>
+      )}
       {order.map((k) => {
         const multiline = k === "allegation" || k === "study_design";
         const isSample = sampleKeys.has(k);
+        const stillExample = isSample && !((fields[k] || "").trim());
         const ph = isSample ? `e.g. ${ghosts[k] || ""}` : undefined;
         return (
           <div key={k}>
             <label>
               {prettyLabel(k)}{" "}
               {isSample && (
-                <span className="applic optional">example — replace this</span>
+                <span
+                  className="applic optional"
+                  style={
+                    stillExample
+                      ? { color: "var(--warn)", borderColor: "var(--warn)" }
+                      : { color: "var(--ok)" }
+                  }
+                >
+                  {stillExample ? "example — replace this" : "example replaced ✓"}
+                </span>
               )}
             </label>
             {multiline ? (
               <textarea rows={2} value={fields[k] || ""} placeholder={ph}
+                aria-invalid={stillExample || undefined}
                 onChange={(e) => set(k, e.target.value)} />
             ) : (
               <input value={fields[k] || ""} placeholder={ph}
+                aria-invalid={stillExample || undefined}
                 onChange={(e) => set(k, e.target.value)} />
+            )}
+            {stillExample && (
+              <div className="mut" style={{ fontSize: 11, marginTop: 2 }}>
+                Greyed example: <i>{ghosts[k]}</i> — this is <b>not</b> your
+                content until you type over it.
+              </div>
             )}
           </div>
         );

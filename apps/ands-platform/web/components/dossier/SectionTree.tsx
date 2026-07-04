@@ -12,6 +12,21 @@ import {
   type LeafState,
 } from "@/lib/leafStatus";
 
+// Plain-language help for the lifecycle operation chip — makes explicit whether
+// the operation acts against a prior active (transmitted) sequence.
+function opHelp(op?: string): string {
+  switch (op) {
+    case "replace":
+      return "Replaces an earlier document already transmitted in an active sequence — it supersedes the old leaf in the official record.";
+    case "append":
+      return "Adds alongside a document in a prior active sequence — both remain part of the record.";
+    case "delete":
+      return "Withdraws a document from a prior active sequence — kept in history, removed from the current view.";
+    default:
+      return "Filed new — there is no prior active sequence this leaf supersedes.";
+  }
+}
+
 // A small inline status icon + Radix tooltip, reused for the legend and every
 // leaf row so the icon/word/colour vocabulary is identical everywhere.
 function StatusIcon({
@@ -287,7 +302,29 @@ function TreeItem({
           {om ? (
             <>
               {" · "}
-              <span className={om.risk ? "t-op warn" : "t-op"}>{om.label}</span>
+              {/* MAJOR: make the lifecycle operation legible per leaf — the
+                  chip is the same NEW/REPL/APP/DEL vocabulary as everywhere,
+                  and the tooltip spells out whether it acts on a prior active
+                  sequence (replace/append/delete) or is filed new. */}
+              <Tooltip.Root>
+                <Tooltip.Trigger asChild>
+                  <span
+                    className={om.risk ? "t-op warn" : "t-op"}
+                    role="img"
+                    aria-label={`Lifecycle operation: ${om.word}`}
+                    tabIndex={-1}
+                  >
+                    {om.label}
+                  </span>
+                </Tooltip.Trigger>
+                <Tooltip.Portal>
+                  <Tooltip.Content className="tt" sideOffset={6}>
+                    <b>{om.word}</b>
+                    <div className="tt-sub">{opHelp(op)}</div>
+                    <Tooltip.Arrow className="tt-arrow" />
+                  </Tooltip.Content>
+                </Tooltip.Portal>
+              </Tooltip.Root>
             </>
           ) : null}
           {" · "}

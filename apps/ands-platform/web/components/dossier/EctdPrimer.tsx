@@ -5,9 +5,25 @@
 // operators. Reused on the draft, validate/export and journey surfaces. Detail
 // stays behind a quiet <details> so the primary surface reads clean (R6-A
 // progressive disclosure).
+//
+// Round-8 WS-BUILDER (MAJOR, MAJOR wants real eCTD, not eye-candy): the primer
+// now points to where the *real* backbone/XML and leaf hrefs can actually be
+// inspected — the Application Viewer — so the plain-language glossary is a door
+// to the substance, not a replacement for it.
+import Link from "next/link";
+import { FileSearch } from "lucide-react";
 import { Term } from "../Term";
 
-export function EctdPrimer({ compact = false }: { compact?: boolean }) {
+export function EctdPrimer({
+  compact = false,
+  dossierId,
+}: {
+  compact?: boolean;
+  // when provided, the primer links straight to this dossier's Application
+  // Viewer, where the real index.xml / ca-regional.xml backbone and every
+  // leaf's href + checksum can be inspected.
+  dossierId?: string;
+}) {
   return (
     <details className="teach" style={{ fontSize: 13, marginTop: compact ? 6 : 10 }}>
       <summary style={{ cursor: "pointer" }}>
@@ -17,7 +33,9 @@ export function EctdPrimer({ compact = false }: { compact?: boolean }) {
       <ul style={{ margin: "8px 0 0", paddingLeft: 18, display: "grid", gap: 4 }}>
         <li>
           A <Term k="leaf" /> is one document at its exact place in the eCTD
-          folder tree — the smallest thing the submission tracks.
+          folder tree — the smallest thing the submission tracks. Each leaf has
+          a <b>leaf id</b> and an <b>href</b> (its real path inside the
+          package), both written into the backbone XML.
         </li>
         <li>
           A <Term k="sequence" /> is one numbered package in the dossier&apos;s
@@ -36,6 +54,21 @@ export function EctdPrimer({ compact = false }: { compact?: boolean }) {
           (withdraws it). The app writes the backbone XML that records this.
         </li>
       </ul>
+      {/* MAJOR: the primer is a door to the real backbone/XML, not a substitute
+          for it — link to the Application Viewer where index.xml /
+          ca-regional.xml and every leaf href + checksum can be inspected. */}
+      {dossierId && (
+        <div style={{ marginTop: 10 }}>
+          <Link
+            href={`/dossiers/${encodeURIComponent(dossierId)}/viewer`}
+            className="chip"
+            title="Open the read-only Application Viewer: the real index.xml / ca-regional.xml backbone and every leaf at its href, with checksums."
+          >
+            <FileSearch size={13} aria-hidden style={{ marginRight: 4, verticalAlign: "-2px" }} />
+            Inspect the real backbone &amp; XML — Application Viewer
+          </Link>
+        </div>
+      )}
     </details>
   );
 }
