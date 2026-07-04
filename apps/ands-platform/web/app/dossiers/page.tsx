@@ -9,6 +9,7 @@ import { TopNav } from "@/components/TopNav";
 import { Modal } from "@/components/Modal";
 import { auth } from "@/lib/auth";
 import { dueMeta } from "@/lib/deadline";
+import { toast } from "sonner";
 
 // The three Health Canada abbreviated/supplemental pathways this tool models.
 // comparative-BE (cs_be_only) is an ANDS-only property, not a submission type.
@@ -110,6 +111,7 @@ export default function DossiersHome() {
       // (a direct API DELETE cannot bypass this typed-confirmation gate).
       await dossierApi.deleteDossier(delTarget, delReason.trim(),
         delTyped.trim());
+      toast.success(`${delTarget} archived — recoverable from Trash`);
       setDelTarget(null);
       await load();
       if (showArchived) await loadArchived();
@@ -124,6 +126,7 @@ export default function DossiersHome() {
     setErr("");
     try {
       await dossierApi.restoreDossier(dossierId, "restored from dossier manager");
+      toast.success(`${dossierId} restored`);
       await Promise.all([load(), loadArchived()]);
     } catch (er) {
       setErr(String(er));
@@ -156,6 +159,7 @@ export default function DossiersHome() {
     setModalErr("");
     try {
       await dossierApi.renameDossier(renameTarget, next, renameReason.trim());
+      toast.success(`Dossier ID set to ${next}`);
       setRenameTarget(null);
       await load();
     } catch (er) {
@@ -182,6 +186,7 @@ export default function DossiersHome() {
         sponsor: sponsor.trim() || undefined,
         owner: owner.trim() || undefined,
       });
+      toast.success(`Dossier ${did.trim()} created`);
       router.push(`/dossiers/${encodeURIComponent(did.trim())}/m/1`);
     } catch (e) {
       setErr(String(e));
