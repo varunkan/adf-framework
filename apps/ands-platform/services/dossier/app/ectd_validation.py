@@ -142,7 +142,13 @@ _FAMILIES = {
 # ANDS Studio's own STRUCTURAL/TECHNICAL checker modeled on Health Canada's
 # eCTD Validation Criteria rule scheme — it is NOT Health Canada's official
 # eValidator and does not replace it.
-CRITERIA_VERSION = "1.1"
+# v1.2 (round-7 validate_export blocker, 13 respondents): every rule now names
+# the HC/ICH source clause it is modeled on, and the profile declares the date it
+# was last reconciled against the published HC criteria.
+CRITERIA_VERSION = "1.2"
+# When the rule set was last reconciled against the published HC eCTD Validation
+# Criteria. Bump this whenever HC republishes and the mapping is re-checked.
+CRITERIA_SYNCED = "2026-05 (HC eCTD Validation Criteria v5.3)"
 
 
 def criteria() -> dict:
@@ -150,6 +156,7 @@ def criteria() -> dict:
     return {
         "name": "ANDS Studio structural eCTD validator",
         "version": CRITERIA_VERSION,
+        "synced": CRITERIA_SYNCED,
         "modeled_on": "Health Canada eCTD Validation Criteria v5.3 rule scheme "
                       "(CA-<severity>-<block> ids), CA Module 1 v2.2 regional "
                       "backbone and the ICH eCTD 3.2.2 index",
@@ -205,16 +212,43 @@ _RULE_DESCRIPTIONS = {
 }
 
 
+# The governing HC/ICH source each rule family is modeled on. Regulatory-
+# operations personas (regops_publisher, consultant_ex_hc, ra_officer_generic)
+# evaluate a validator by whether every rule cites a real, checkable clause —
+# not a vague "structural check". These reference the modeled-on specifications;
+# they are NOT a claim of 1:1 numeric parity with HC's official eValidator (see
+# the eValidator handoff / parity-gap surface).
+_FAMILY_SOURCE = {
+    "1": "ICH eCTD Spec v3.2.2 §2.3 (leaf: xlink:href, checksum, checksum-type) "
+         "· HC eCTD Validation Criteria v5.3 (leaf inventory & MD5)",
+    "2": "ICH eCTD Spec v3.2.2 §2.4 (life-cycle management: "
+         "new/replace/append/delete) · HC eCTD Validation Criteria v5.3",
+    "3": "ICH eCTD Spec v3.2.2 §4 & appendices (folder/file naming: lowercase, "
+         "no spaces) · HC eCTD Validation Criteria v5.3",
+    "4": "ICH eCTD Spec v3.2.2 §3 (sequence numbering — four-digit, from 0000) "
+         "· HC eCTD Validation Criteria v5.3",
+    "5": "ICH eCTD DTD ich-ectd-3-2.dtd (index.xml backbone) "
+         "· HC eCTD Validation Criteria v5.3",
+    "55": "ICH eCTD Spec v3.2.2 §2 + util/dtd (transmissible 3.2.2 sequence "
+          "backbone: operation attrs, lifecycle back-pointers, live hrefs)",
+    "6": "HC 'Preparation of Regulatory Activities in eCTD Format' — CA Module 1 "
+         "v2.2 & ca-regional.dtd (Canadian regional backbone)",
+    "7": "ICH eCTD Spec v3.2.2 Appendix 7 (PDF) · HC document payload requirements",
+}
+
+
 def rule_catalog() -> dict:
     """The queryable registry of every technical validation rule."""
     rules = []
     for rule, rule_id in RULE_IDS.items():
         digits = rule_id.split("-")[2]
-        family = _FAMILIES["55" if digits.startswith("55") else digits[0]]
+        fam_key = "55" if digits.startswith("55") else digits[0]
+        family = _FAMILIES[fam_key]
         rules.append({
             "rule": rule, "rule_id": rule_id, "family": family,
             "severity": "warning" if "-W-" in rule_id else "error",
             "description": _RULE_DESCRIPTIONS.get(rule, ""),
+            "source": _FAMILY_SOURCE[fam_key],
         })
     rules.append({
         "rule": "placeholder_dossier_id", "rule_id": "CA-REP-0001",
@@ -222,6 +256,8 @@ def rule_catalog() -> dict:
         "severity": "error",
         "description": "Filing is blocked while the dossier uses a placeholder "
                        "ID instead of the Health Canada-issued one (REP).",
+        "source": "HC Dossier Identifier guidance — Regulatory Enrolment "
+                  "Process (REP); Dossier ID issued on request via the REP",
     })
     return {"count": len(rules), "rules": rules, "criteria": criteria()}
 

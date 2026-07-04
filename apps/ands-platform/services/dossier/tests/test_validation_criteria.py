@@ -42,3 +42,31 @@ def test_rule_catalog_carries_criteria():
     cat = ectd_validation.rule_catalog()
     assert "criteria" in cat
     _assert_criteria(cat["criteria"])
+
+
+def test_criteria_carries_sync_date():
+    # validate_export blocker (13 respondents): the modeled-on criteria must
+    # state its version AND a sync date so the ruleset provenance is legible.
+    c = ectd_validation.criteria()
+    assert c.get("synced"), "criteria must declare when it was last synced to HC"
+    # a year must appear so it reads as a real date, not a placeholder
+    assert any(ch.isdigit() for ch in c["synced"])
+
+
+def test_every_rule_maps_to_an_hc_ich_source():
+    # validate_export blocker: every CA-E/CA-W id must name the HC/ICH source
+    # clause it is modeled on — regops/consultant personas spot-check this.
+    cat = ectd_validation.rule_catalog()
+    for r in cat["rules"]:
+        assert r.get("source"), f"rule {r['rule_id']} has no HC/ICH source clause"
+        # the source must cite a governing document, not be a vague blurb
+        assert any(tok in r["source"] for tok in ("ICH", "HC", "CA Module", "REP")), \
+            f"rule {r['rule_id']} source does not cite a governing spec: {r['source']}"
+
+
+def test_web_endpoint_surfaces_rule_source(client):
+    r = client.get("/api/dossier/validation/rules")
+    assert r.status_code == 200
+    rules = r.json()["rules"]
+    assert rules and all(rule.get("source") for rule in rules)
+    assert r.json()["criteria"].get("synced")

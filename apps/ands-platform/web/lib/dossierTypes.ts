@@ -109,6 +109,8 @@ export interface ValidationFinding {
 export interface ValidationCriteria {
   name: string;
   version: string;
+  // When the rule set was last reconciled against the published HC criteria.
+  synced?: string;
   modeled_on: string;
   disclaimer: string;
   coverage: {
@@ -133,6 +135,8 @@ export interface ValidationRule {
   family: string;
   severity: "error" | "warning";
   description: string;
+  // The HC/ICH source clause this rule is modeled on (v1.2+).
+  source?: string;
 }
 
 export interface ValidationRuleCatalog {

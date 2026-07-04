@@ -37,7 +37,9 @@ export function RuleCatalogue({ criteria }: { criteria?: ValidationCriteria }) {
       </div>
       {criteria && (
         <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>
-          Modeled on: {criteria.modeled_on}
+          Profile: <b>{criteria.name} v{criteria.version}</b>
+          {criteria.synced ? ` · synced ${criteria.synced}` : ""}. Modeled on:{" "}
+          {criteria.modeled_on}
         </div>
       )}
       {err && <div className="notice bad" style={{ marginTop: 6 }}>{err}</div>}
@@ -52,9 +54,14 @@ export function RuleCatalogue({ criteria }: { criteria?: ValidationCriteria }) {
             </summary>
             <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
               {rs.map((r) => (
-                <li key={r.rule_id} style={{ margin: "3px 0" }}>
+                <li key={r.rule_id} style={{ margin: "5px 0" }}>
                   <code>{r.rule_id}</code>
                   {r.severity === "warning" ? " (warning)" : ""} — {r.description}
+                  {r.source && (
+                    <div className="mut" style={{ fontSize: 10, marginTop: 1 }}>
+                      Source: {r.source}
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>
