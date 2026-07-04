@@ -9,6 +9,44 @@ import { ProvenancePopover, type Provenance } from "@/components/ProvenancePopov
 import { Term } from "@/components/Term";
 import { actionProvenance, stayProvenance } from "@/lib/noaProvenance";
 
+// WS-OPS-PROV (Round-8 BLOCKER, n=14): the base provenance helpers already carry
+// the counting rule + citation; here we enrich them, per clock, with (a) the
+// governing INSTRUMENT and (b) the source CORRESPONDENCE/date the value derives
+// from — read straight off the NOA record (served_date, action_date, court_file).
+// Nothing is fabricated: absent a date, the field is simply omitted.
+const PMNOC_INSTRUMENT =
+  "Patented Medicines (Notice of Compliance) Regulations (SOR/93-133)";
+
+// The 45-day s.6 action window derives from the NOA the sponsor served on the
+// innovator (operator-recorded on /noa/{id}/serve).
+function actionProvenanceFull(n: NoaRecord): Provenance {
+  return {
+    ...actionProvenance(n),
+    instrument: PMNOC_INSTRUMENT,
+    derivedFrom: {
+      label: "Notice of Allegation served on the innovator",
+      date: n.served_date ?? null,
+      source: "operator-recorded service (Serve NOA) — not transmitted to HC",
+    },
+  };
+}
+
+// The 24-month stay derives from the s.6 action the sponsor recorded as
+// commenced (with its court file, if entered).
+function stayProvenanceFull(n: NoaRecord): Provenance {
+  return {
+    ...stayProvenance(n),
+    instrument: PMNOC_INSTRUMENT,
+    derivedFrom: {
+      label:
+        "s.6 action recorded as commenced" +
+        (n.court_file ? ` (court file ${n.court_file})` : ""),
+      date: n.action_date ?? n.stay_start ?? null,
+      source: "operator-recorded action (Record s.6 action) — not transmitted to HC",
+    },
+  };
+}
+
 const STATUS_LABEL: Record<NoaRecord["status"], string> = {
   draft: "Draft — NOA not yet served",
   served: "NOA served — 45-day action window open",
@@ -40,6 +78,15 @@ function Clock({ label, days, end, prov }: {
     <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
       <span className={`notice ${tone}`} style={{ padding: "4px 10px", fontSize: 12 }}>
         <b>{days}</b> day{days === 1 ? "" : "s"} left · {label} ends {end}
+        {/* WS-OPS-PROV: the calculated-aid caveat, stamped on the clock face
+            itself — the full source citation + derivation are in the popover. */}
+        <span
+          className="mut"
+          style={{ marginLeft: 6, fontSize: 10 }}
+          title="Calculated aid — verify against the HC record"
+        >
+          · calculated aid
+        </span>
       </span>
       <ProvenancePopover prov={prov} />
     </span>
@@ -247,7 +294,7 @@ export function NoaRegister({ dossierId }: { dossierId: string }) {
                     label="45-day action window"
                     days={n.action_days_remaining}
                     end={n.action_window_end}
-                    prov={actionProvenance(n)}
+                    prov={actionProvenanceFull(n)}
                   />
                 )}
                 {(n.status === "stay_running" ||
@@ -256,7 +303,7 @@ export function NoaRegister({ dossierId }: { dossierId: string }) {
                     label="24-month stay"
                     days={n.stay_days_remaining}
                     end={n.stay_end}
-                    prov={stayProvenance(n)}
+                    prov={stayProvenanceFull(n)}
                   />
                 )}
                 {n.status === "draft" && n.noa_required && (

@@ -1,9 +1,45 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { lifecycleApi } from "@/lib/lifecycleApi";
-import type { LifecycleState, ServiceStandard } from "@/lib/lifecycleApi";
+import type { LifecycleState, LifecycleTimer, ServiceStandard } from "@/lib/lifecycleApi";
 import { dueMeta } from "@/lib/deadline";
 import { DEFICIENCY_WINDOWS, citeLine } from "@/lib/regCitations";
+import { ProvenancePopover, type Provenance } from "@/components/ProvenancePopover";
+
+// WS-OPS-PROV (Round-8 BLOCKER, n=14): the deficiency-response clock is a
+// COMPUTED statutory clock too, and previously carried a citation footnote but
+// no provenance popover and no "calculated aid" caveat. Build the same
+// Provenance shape the NOA/RTS clocks use, straight from the lifecycle timer
+// (start = the HC notice date, basis, due) and the honest DEFICIENCY_WINDOWS
+// citation — nothing fabricated.
+const DEFICIENCY_TITLE: Record<string, string> = {
+  SDN: "Screening Deficiency Notice (SDN)",
+  NOD: "Notice of Deficiency (NOD)",
+  NON: "Notice of Non-compliance (NON)",
+};
+
+function deficiencyProvenance(
+  kind: "SDN" | "NOD" | "NON",
+  timer: LifecycleTimer,
+): Provenance {
+  const cite = DEFICIENCY_WINDOWS[kind];
+  return {
+    anchorLabel: `${DEFICIENCY_TITLE[kind]} issued by Health Canada`,
+    anchorDate: timer.start ?? null,
+    anchorSource: "ingested",
+    basis: timer.basis === "business" ? "business" : "calendar",
+    rule: cite.claim,
+    citation: cite.source,
+    instrument:
+      "Food and Drug Regulations (C.R.C., c. 870) — as applied through HC's " +
+      "Management of Drug Submissions and Applications guidance",
+    derivedFrom: {
+      label: `${DEFICIENCY_TITLE[kind]} recorded on the dossier`,
+      date: timer.start ?? null,
+      source: "ingested from the HC notice into the lifecycle service",
+    },
+  };
+}
 
 // WS7 — LIFECYCLE & DEFICIENCY (addresses regops_publisher "lifecycle blindness").
 // Surfaces the DSTS submission lifecycle for this dossier from the lifecycle
@@ -149,13 +185,31 @@ export function LifecyclePanel({ dossierId }: { dossierId: string }) {
                 Deficiency response required — {DEFICIENCY[defKind].title}
               </div>
               <div style={{ marginTop: 3 }}>{DEFICIENCY[defKind].path}</div>
-              <div style={{ marginTop: 6, display: "flex", gap: 6, alignItems: "baseline" }}>
+              <div style={{ marginTop: 6, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                 <span
                   className={`chip ${dm && (dm.overdue || dm.days <= 7) ? "blocked" : ""}`}
                   style={{ fontSize: 11 }}
                 >
                   ⏱ {defTimer.days}-day clock · due {defTimer.due}
                   {dm ? ` · ${dm.label}` : ""}
+                </span>
+                {/* WS-OPS-PROV: full source citation + derivation for this
+                    computed clock, via the shared provenance popover. */}
+                {DEFICIENCY_WINDOWS[defKind as "SDN" | "NOD" | "NON"] && (
+                  <ProvenancePopover
+                    prov={deficiencyProvenance(
+                      defKind as "SDN" | "NOD" | "NON",
+                      defTimer,
+                    )}
+                  />
+                )}
+                {/* WS-OPS-PROV: the calculated-aid caveat stamped on the clock. */}
+                <span
+                  className="mut"
+                  style={{ fontSize: 10 }}
+                  title="Calculated aid — verify against the HC record"
+                >
+                  · calculated aid
                 </span>
                 {defTimer.adjusted && (
                   <span className="mut" style={{ fontSize: 11 }}>
