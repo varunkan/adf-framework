@@ -25,6 +25,14 @@ which routes straight to `api.anthropic.com`) cannot switch it on mid-run.
 Confirm it is active by checking `ANTHROPIC_BASE_URL = http://127.0.0.1:8787` and
 that the proxy `/health` responds.
 
+**Compact context every ~1M tokens.** Over a long session, trigger context
+compaction at roughly every 1,000,000 tokens of cumulative usage so the working
+context stays lean and cheap — don't let it bloat unbounded. Compact proactively
+at those boundaries (and at natural phase breaks), and rely on the harness's
+auto-compaction as the window fills. (Hard enforcement is a harness/hook concern,
+not something the model can self-trigger reliably — so treat the 1M-token mark as
+a standing checkpoint to compact.)
+
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph
 
