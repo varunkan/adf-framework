@@ -1,16 +1,19 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Compass, FolderOpen, LayoutGrid, ClipboardList, Mail, LifeBuoy } from "lucide-react";
+import { Compass, FolderTree, LayoutGrid, BadgeCheck, Mail, BookOpen } from "lucide-react";
 import { UserChip } from "./UserChip";
 
+// eCTD-native nav: a dossier IS the Module 1-5 tree (FolderTree); the registry
+// tracks DIN / marketed status (BadgeCheck); correspondence is HC notices
+// (Mail); Help is the regulatory reference (BookOpen).
 const NAV = [
   { href: "/", label: "Journey", icon: Compass, exact: true },
-  { href: "/dossiers", label: "Dossiers", icon: FolderOpen },
+  { href: "/dossiers", label: "Dossiers", icon: FolderTree },
   { href: "/portfolio", label: "Portfolio", icon: LayoutGrid },
-  { href: "/registry", label: "Registry", icon: ClipboardList },
+  { href: "/registry", label: "Registry", icon: BadgeCheck },
   { href: "/correspondence", label: "Correspondence", icon: Mail },
-  { href: "/help", label: "Help", icon: LifeBuoy },
+  { href: "/help", label: "Help", icon: BookOpen },
 ];
 
 // Shared, iconified top nav used on every authenticated page — single source of
