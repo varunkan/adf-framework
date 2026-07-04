@@ -10,6 +10,7 @@ import { StepCard } from "@/components/StepCard";
 import { ReadinessCard } from "@/components/ReadinessCard";
 import { SubmissionTower } from "@/components/SubmissionTower";
 import { PrereqChecklist } from "@/components/PrereqChecklist";
+import { TrustStrip } from "@/components/TrustStrip";
 
 export default function Page() {
   const [view, setView] = useState<JourneyView | null>(null);
@@ -236,7 +237,14 @@ function Hero({
         status live inside each dossier — open a dossier’s Module 1 to review it.
       </p>
       {error && <div className="notice bad">{error}</div>}
-      <div className="sub">
+      {/* WS-OVERALL (round-8) BLOCKER — replace the vague "progress saved
+          automatically" footnote with a persistent, honest Trust & security
+          strip answering the auditor's first questions (residency, tenant
+          isolation, roles/SoD, audit-trail tamper controls) and stating
+          SOC2/SSO plainly as roadmap. Progress auto-save is folded into the
+          quieter line below so we don't lose that reassurance. */}
+      <TrustStrip />
+      <div className="sub" style={{ marginTop: 8 }}>
         Grounded in real Health Canada process · your progress is saved
         automatically
       </div>

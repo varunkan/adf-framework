@@ -4,7 +4,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { TopNav } from "@/components/TopNav";
 import Link from "next/link";
+import { ShieldCheck } from "lucide-react";
 import { Term } from "@/components/Term";
+import { auth } from "@/lib/auth";
 import {
   registryApi,
   type Registration,
@@ -21,6 +23,18 @@ export default function RegistryPage() {
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  // WS-OVERALL (round-8) BLOCKER — a visible per-tenant boundary indicator so a
+  // CRO/CDMO can SEE, on this record surface, which client workspace they are
+  // acting in and that the data is walled off per workspace. Honest: this reads
+  // the signed-in workspace; it does not claim isolation the API doesn't enforce
+  // (cross-workspace reads are refused server-side — see the Trust & security
+  // summary on the home page).
+  const [workspace, setWorkspace] = useState<string | null>(null);
+  useEffect(() => {
+    auth.me()
+      .then((p) => setWorkspace(p.tenant_name || null))
+      .catch(() => setWorkspace(null));
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -58,8 +72,19 @@ export default function RegistryPage() {
     <>
       <TopNav subtitle="registry" />
       <main className="dossier-home">
-        <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 12,
+          flexWrap: "wrap" }}>
           <h1>Product registry</h1>
+          {/* per-tenant boundary indicator — which client workspace am I in? */}
+          <span
+            className="chip"
+            title="You are working inside a single client workspace. Data is walled off per workspace — cross-workspace reads are refused at the API. See the Trust & security summary on the home page."
+            style={{ display: "inline-flex", alignItems: "center", gap: 5,
+              fontSize: 11.5 }}
+          >
+            <ShieldCheck size={13} aria-hidden />
+            Workspace: <b>{workspace || "this client"}</b> · isolated
+          </span>
           <span className="spacer" />
           <button onClick={() => setCreating((v) => !v)}>
             {creating ? "Cancel" : "Register product +"}
