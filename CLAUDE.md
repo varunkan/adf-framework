@@ -1,3 +1,30 @@
+## Working principles (standing directives — apply to EVERY task)
+
+**Plan before executing.** Before acting on any non-trivial instruction, gather
+and weigh all data points that bear on it (code, tests, git history, memory,
+prior results, live process/env/config state), form an explicit plan, then
+execute. Never blind-fire, and never re-derive facts already established.
+
+**Look at all data points that can influence the decision.** Base every call on
+the full evidence, not the first signal found. Cross-check independent sources
+before asserting a conclusion — e.g. a claim about a running tool is verified via
+process + env var + config + health endpoint together, not any one alone.
+
+**Frugal on tokens, never on quality.** Quality, correctness and thoroughness are
+non-negotiable and come first — never trade them to save tokens. Within that,
+minimize token WASTE: no redundant reads, no re-running finished work, no
+re-explaining settled points, no bloated output. Frugality cuts waste, not the
+work that produces a correct, complete result. Prefer the graph / token-efficient
+tools below; delegate wide searches to subagents and keep only the conclusions.
+
+**Use headroom (token-compression proxy).** Run Claude Code through headroom so
+its compression proxy (`127.0.0.1:8787`, ~50% context savings) sits in the
+request path — launch from a terminal with `headroom wrap claude`. This is a
+LAUNCH-TIME choice: a session already started (e.g. from the Claude desktop app,
+which routes straight to `api.anthropic.com`) cannot switch it on mid-run.
+Confirm it is active by checking `ANTHROPIC_BASE_URL = http://127.0.0.1:8787` and
+that the proxy `/health` responds.
+
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph
 
