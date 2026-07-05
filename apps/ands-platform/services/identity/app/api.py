@@ -9,7 +9,8 @@ from ands_shared import ProblemError, create_app
 from . import rbac
 from .models import (AssignPlanIn, AuthorizeIn, BillingIn, CreatePlanIn,
                      LoginIn, MfaVerifyIn, OverrideIn, ProvisionTenantIn,
-                     RequireMfaIn, ResetCompleteIn, ResetRequestIn, SignupIn)
+                     RequireMfaIn, RequireSodIn, ResetCompleteIn,
+                     ResetRequestIn, SignupIn)
 from .service import IdentityService
 
 
@@ -72,6 +73,23 @@ def build_app(service: IdentityService) -> FastAPI:
                         authorization: str = Header(default="")):
         return service.set_require_mfa(_bearer(authorization),
                                        body.model_dump())
+
+    # TIER3-SOD-ENFORCE: the per-workspace 'enforce segregation of duties'
+    # policy. An admin flips it; when on, the sign path hard-blocks a
+    # signer-is-author e-signature. Enforcement lives server-side on the sign
+    # path (dossier record_esign), not just in this UI toggle.
+    @router.post("/tenant/security/require-sod")
+    def set_require_sod(body: RequireSodIn,
+                        authorization: str = Header(default="")):
+        return service.set_require_sod(_bearer(authorization),
+                                       body.model_dump())
+
+    # Service-to-service policy read: the sign path (dossier) consults a
+    # workspace's require_sod for a tenant. Guarded by the internal-token gate
+    # in production (X-Internal-Auth); in-process/tests it is reachable directly.
+    @router.get("/internal/workspace-policy")
+    def workspace_policy(tenant_id: str = Query(default="")):
+        return service.workspace_policy(tenant_id)
 
     @router.get("/rbac/matrix")
     def rbac_matrix(authorization: str = Header(default="")):

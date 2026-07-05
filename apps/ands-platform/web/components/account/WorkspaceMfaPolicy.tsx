@@ -63,6 +63,18 @@ export function WorkspaceMfaPolicy() {
     setBusy(false);
   }
 
+  // TIER3-SOD-ENFORCE: flip the 'enforce segregation of duties' policy. When on,
+  // an e-signature whose signer is also an author of the signed content is
+  // HARD-BLOCKED on the sign path (server-enforced), not just warned.
+  async function toggleSod(next: boolean) {
+    setBusy(true); setErr("");
+    try {
+      const r = await auth.setRequireSod(next);
+      setSec((s) => (s ? { ...s, require_sod: r.require_sod } : s));
+    } catch (e) { setErr(String(e)); }
+    setBusy(false);
+  }
+
   const canManage = !!sec?.can_manage;
 
   return (
@@ -107,6 +119,38 @@ export function WorkspaceMfaPolicy() {
                 "this on to block password-only sign-in — members are then " +
                 "required to enrol TOTP MFA before they can continue. Enforced " +
                 "server-side on every login."}
+          </p>
+
+          {/* ---- Segregation of duties (server-enforced sign policy) ---- */}
+          <h3 style={{ margin: "14px 0 6px", fontSize: 13 }}>
+            Segregation of duties
+          </h3>
+          <div style={{ display: "flex", gap: 8, alignItems: "center",
+            flexWrap: "wrap" }}>
+            <span className={sec.require_sod ? "chip ready" : "chip"}>
+              {sec.require_sod ? "Enforced on signing ✓"
+                : "Advisory (warn only)"}
+            </span>
+            {canManage && (
+              <button disabled={busy} onClick={() => toggleSod(!sec.require_sod)}>
+                {busy ? "Saving…"
+                  : sec.require_sod ? "Make segregation advisory"
+                  : "Enforce segregation of duties →"}
+              </button>
+            )}
+          </div>
+          <p className="mut" style={{ marginTop: 8 }}>
+            {sec.require_sod
+              ? "An e-signature is blocked when the signer is also an author of " +
+                "the content being signed — a distinct authorized approver must " +
+                "apply it. Enforced server-side on the sign path (the dossier " +
+                "service), recorded on the Part-11 manifest and audit trail — " +
+                "not just a UI warning."
+              : "Today the sign step WARNS when the signer is also an author but " +
+                "still lets them sign. Turn this on to BLOCK that signature and " +
+                "require a distinct authorized approver — enforced server-side, " +
+                "recorded on the Part-11 record. This is a workspace control " +
+                "over signing; it is not an SSO/IdP identity check."}
           </p>
 
           {/* ---- Session length + idle lockout (documented policy) ---- */}
@@ -177,7 +221,9 @@ export function OnboardingSecuritySummary() {
       <b>Security here:</b> sign-in valid for {sessionHrs}h · idle lockout{" "}
       {idleLabel} · workspace MFA{" "}
       {sec ? (sec.require_mfa ? "Required ✓" : "Optional (Required recommended)")
-        : "—"}.
+        : "—"}
+      {" "}· segregation of duties{" "}
+      {sec ? (sec.require_sod ? "Enforced ✓" : "Advisory") : "—"}.
     </div>
   );
 }

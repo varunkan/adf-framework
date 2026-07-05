@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { auth } from "@/lib/auth";
 import { dossierApi } from "@/lib/dossierApi";
 import type {
   ContentAuthors,
@@ -491,12 +492,16 @@ function SegregationOfDutiesNotice({
   conflicting,
   conflict,
   signer,
+  enforced,
 }: {
   authors: string[];
   authorshipKnown: boolean;
   conflicting: string[];
   conflict: boolean;
   signer: string;
+  // TIER3-SOD-ENFORCE: does this workspace ENFORCE separation? When it does, a
+  // conflict is a hard block, not merely advisory.
+  enforced: boolean;
 }) {
   const tone = conflict ? "warn" : authorshipKnown ? "ok" : "mut";
   const bg =
@@ -520,6 +525,12 @@ function SegregationOfDutiesNotice({
         style={{ display: "flex", gap: 6, alignItems: "center" }}
       >
         <Icon size={14} aria-hidden color={iconColor} /> Segregation of duties
+        <span
+          className={enforced ? "chip ready" : "chip"}
+          style={{ fontSize: 10, marginLeft: "auto" }}
+        >
+          {enforced ? "Enforced by workspace" : "Advisory"}
+        </span>
       </div>
       <div style={{ fontSize: 13, marginTop: 6 }}>
         <div style={{ display: "grid", gridTemplateColumns: "auto 1fr",
@@ -555,7 +566,17 @@ function SegregationOfDutiesNotice({
           </span>
         </div>
       </div>
-      {conflict ? (
+      {conflict && enforced ? (
+        <div style={{ fontSize: 12.5, marginTop: 8, color: "#9a3412" }}>
+          <b>
+            Blocked — the signer is also an author of this content.
+          </b>{" "}
+          Your workspace <b>enforces segregation of duties</b>: this signature
+          cannot be applied. A <b>distinct authorized approver</b> (not one of
+          the author(s)) must sign, so the approval is an independent check. The
+          block is enforced server-side and recorded on the Part-11 audit trail.
+        </div>
+      ) : conflict ? (
         <div style={{ fontSize: 12.5, marginTop: 8, color: "#9a3412" }}>
           <b>Heads up — the signer is also an author of this content.</b> A 21
           CFR Part 11 e-signature is most defensible when the person who
@@ -631,6 +652,19 @@ function EsignStep({
       .then(setAuthors)
       .catch(() => setAuthors(null));
   }, [signed, dossierId]);
+  // TIER3-SOD-ENFORCE: does THIS workspace enforce segregation of duties? When
+  // it does, a signer-is-author conflict is a HARD BLOCK (the server rejects the
+  // signature) — so the sign button is disabled and the notice says "blocked",
+  // not "heads up". Best-effort: if the policy read fails we fall back to
+  // advisory (the server remains the authority either way).
+  const [enforceSod, setEnforceSod] = useState(false);
+  useEffect(() => {
+    if (signed) return;
+    auth
+      .tenantSecurity()
+      .then((s) => setEnforceSod(!!s.require_sod))
+      .catch(() => setEnforceSod(false));
+  }, [signed]);
   // same-identity comparison mirrors the server: case/whitespace-insensitive.
   const norm = (s: string) => (s || "").trim().toLowerCase();
   const authorList = authors?.authors ?? [];
@@ -695,6 +729,7 @@ function EsignStep({
             conflicting={conflicting}
             conflict={sodConflict}
             signer={signer}
+            enforced={enforceSod}
           />
 
           <label
@@ -723,15 +758,29 @@ function EsignStep({
               onClick={() =>
                 onSign({ signer: signer.trim(), reason: reason.trim(), meaning })
               }
-              disabled={busy || !signer.trim() || !reason.trim() || !attested}
+              disabled={
+                busy ||
+                !signer.trim() ||
+                !reason.trim() ||
+                !attested ||
+                (enforceSod && sodConflict)
+              }
             >
               {busy ? "Signing…" : "Apply e-signature →"}
             </button>
-            {(!signer.trim() || !reason.trim() || !attested) && (
+            {/* TIER3-SOD-ENFORCE: when the workspace enforces separation, a
+                signer-is-author conflict is a hard block — the server rejects it
+                too, so we disable the button and say so up front. */}
+            {enforceSod && sodConflict ? (
+              <span className="nexthint">
+                Blocked by workspace policy: a distinct authorized approver
+                (not an author) must sign
+              </span>
+            ) : (!signer.trim() || !reason.trim() || !attested) ? (
               <span className="nexthint">
                 Enter your name, a reason, and confirm the attestation to sign
               </span>
-            )}
+            ) : null}
           </div>
         </div>
       )}

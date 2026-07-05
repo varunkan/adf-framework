@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS tenants (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, plan_id TEXT NOT NULL,
     status TEXT NOT NULL, created_at TEXT NOT NULL,
     billing_status TEXT NOT NULL DEFAULT 'active', grace_until TEXT,
-    require_mfa INTEGER NOT NULL DEFAULT 0);
+    require_mfa INTEGER NOT NULL DEFAULT 0,
+    require_sod INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS plans (
     id TEXT PRIMARY KEY, name TEXT UNIQUE NOT NULL, features TEXT NOT NULL,
     created_at TEXT NOT NULL);
@@ -57,6 +58,10 @@ class SqliteIdentityRepository:
         cols = {r["name"] for r in self.db.fetchall("PRAGMA table_info(tenants)")}
         if "require_mfa" not in cols:
             self.db.execute("ALTER TABLE tenants ADD COLUMN require_mfa "
+                            "INTEGER NOT NULL DEFAULT 0")
+        # TIER3-SOD-ENFORCE: per-workspace 'enforce segregation of duties' policy
+        if "require_sod" not in cols:
+            self.db.execute("ALTER TABLE tenants ADD COLUMN require_sod "
                             "INTEGER NOT NULL DEFAULT 0")
         scols = {r["name"] for r in self.db.fetchall(
             "PRAGMA table_info(sessions)")}
@@ -200,6 +205,11 @@ class SqliteIdentityRepository:
     def set_require_mfa(self, tenant_id, require_mfa) -> dict | None:
         self.db.execute("UPDATE tenants SET require_mfa = ? WHERE id = ?",
                         (1 if require_mfa else 0, tenant_id))
+        return self.get_tenant(tenant_id)
+
+    def set_require_sod(self, tenant_id, require_sod) -> dict | None:
+        self.db.execute("UPDATE tenants SET require_sod = ? WHERE id = ?",
+                        (1 if require_sod else 0, tenant_id))
         return self.get_tenant(tenant_id)
 
     # -- plans + overrides --------------------------------------------------

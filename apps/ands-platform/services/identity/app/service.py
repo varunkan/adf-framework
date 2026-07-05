@@ -203,6 +203,10 @@ class IdentityService:
                   if principal["tenant_id"] else None) or {}
         return {"tenant_id": principal["tenant_id"],
                 "require_mfa": bool(tenant.get("require_mfa")),
+                # TIER3-SOD-ENFORCE: the workspace 'enforce segregation of
+                # duties' policy — when on, a signer-is-author e-signature is
+                # HARD-BLOCKED on the sign path (not merely warned).
+                "require_sod": bool(tenant.get("require_sod")),
                 "can_manage": principal["role"] in (rbac.OWNER_ROLE,
                                                     rbac.TENANT_ADMIN_ROLE)}
 
@@ -221,6 +225,33 @@ class IdentityService:
             self.repo.delete_sessions_for_tenant_without_mfa(tenant_id)
         return {"tenant_id": tenant_id,
                 "require_mfa": bool(tenant.get("require_mfa"))}
+
+    def set_require_sod(self, token: str, data: dict) -> dict:
+        """TIER3-SOD-ENFORCE: an OWNER/tenant-admin flips the per-workspace
+        'enforce segregation of duties' policy. When on, the sign path
+        HARD-BLOCKS an e-signature whose signer is also an author of the signed
+        content. Default OFF (advisory). This is a real workspace control over
+        the sign path — NOT an SSO/IdP identity claim."""
+        principal = self._require_tenant_admin(token)
+        tenant_id = principal["tenant_id"]
+        if not tenant_id:
+            raise ProblemError(422, "the platform owner has no workspace to "
+                               "configure", rule="no_tenant")
+        want = bool(data.get("require_sod"))
+        tenant = self.repo.set_require_sod(tenant_id, want) or {}
+        return {"tenant_id": tenant_id,
+                "require_sod": bool(tenant.get("require_sod"))}
+
+    def workspace_policy(self, tenant_id: str) -> dict:
+        """Service-to-service read of a workspace's security policy (the sign
+        path consults ``require_sod``). An unknown/blank tenant resolves to the
+        safe default (no enforcement) so the caller degrades to advisory rather
+        than erroring."""
+        tenant = (self.repo.get_tenant(_s(tenant_id)) if _s(tenant_id)
+                  else None) or {}
+        return {"tenant_id": _s(tenant_id),
+                "require_mfa": bool(tenant.get("require_mfa")),
+                "require_sod": bool(tenant.get("require_sod"))}
 
     # -- role permission matrix (WS4.2) -------------------------------------
     def role_matrix(self, token: str) -> dict:

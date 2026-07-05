@@ -23,3 +23,7 @@ class Settings:
         # open-weight LLM (Groq-hosted) for interactive document drafting
         self.groq_api_key = os.environ.get("GROQ_API_KEY", "")
         self.groq_model = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+        # TIER3-SOD-ENFORCE: identity service base URL — the sign path reads a
+        # workspace's require_sod policy from it. Unset => no policy client wired
+        # (the sign path honors only the manifest's own enforce flag).
+        self.identity_url = os.environ.get("IDENTITY_URL", "").strip()

@@ -71,9 +71,15 @@ def mesh():
     identity = i["app.service"].IdentityService(
         _mem(i["app.repository_sqlite"].SqliteIdentityRepository), bus).register()
 
-    d = _load("dossier", ["app.service", "app.repository_sqlite"])
+    # TIER3-SOD-ENFORCE: wire the dossier's workspace-policy port to the live
+    # identity service, so the sign path's segregation-of-duties enforcement is
+    # driven by the real per-workspace require_sod policy end-to-end.
+    d = _load("dossier", ["app.service", "app.repository_sqlite",
+                          "app.policy_client"])
     dossier = d["app.service"].DossierService(
-        _mem(d["app.repository_sqlite"].SqliteDossierRepository), bus).register()
+        _mem(d["app.repository_sqlite"].SqliteDossierRepository), bus,
+        policy=d["app.policy_client"].InProcessWorkspacePolicyClient(identity)
+        ).register()
 
     lc = _load("lifecycle", ["app.service", "app.repository_sqlite"])
     lifecycle = lc["app.service"].LifecycleService(

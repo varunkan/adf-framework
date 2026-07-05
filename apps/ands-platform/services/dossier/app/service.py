@@ -40,11 +40,17 @@ def _seq4(v) -> str:
 
 class DossierService:
     def __init__(self, repo: DossierRepository, bus,
-                 *, source: str = "dossier", store=None) -> None:
+                 *, source: str = "dossier", store=None, policy=None) -> None:
         self.repo = repo
         self.bus = bus
         self.source = source
         self.store = store or SqliteBlobStore(repo)
+        # TIER3-SOD-ENFORCE: an optional workspace-policy port. When wired, the
+        # sign path (record_esign) reads a tenant's ``require_sod`` and, when on,
+        # FORCES segregation-of-duties enforcement — the block no longer depends
+        # on the signer opting into it via the manifest. Best-effort: an
+        # unreachable port degrades to the manifest flag (advisory), never crashes.
+        self.policy = policy
 
     def register(self) -> "DossierService":
         # No upstream subscriptions yet; reserved for sequence/assembly events.
@@ -955,6 +961,20 @@ class DossierService:
                 "authors": list(by_key.values()), "author_count": len(by_key),
                 "conflicting_authors": conflicting, "reason": reason}
 
+    def _workspace_requires_sod(self, tenant_id: str) -> bool:
+        """TIER3-SOD-ENFORCE: does this workspace's policy REQUIRE segregation of
+        duties? Read best-effort from the injected identity policy port. No
+        tenant context (in-process mesh / owner) or no port wired => False.
+        Any read error degrades to False (advisory) — a policy read that fails
+        must never break the sign path."""
+        if not tenant_id or self.policy is None:
+            return False
+        try:
+            pol = self.policy.workspace_policy(tenant_id) or {}
+            return bool(pol.get("require_sod"))
+        except Exception:
+            return False
+
     def record_esign(self, dossier_id: str, manifest: dict, *,
                      actor: str = "", tenant_id: str | None = None) -> dict:
         """Persist a signed e-signature manifest and write its durable Part-11
@@ -991,7 +1011,16 @@ class DossierService:
         derived = self.content_authors(_s(dossier_id),
                                        tenant_id=tenant_id)["authors"]
         supplied = [a for a in (manifest.get("authors") or [])]
-        enforce_sod = bool(manifest.get("enforce_segregation"))
+        # TIER3-SOD-ENFORCE: effective enforcement is the OR of the manifest's
+        # own opt-in flag (TIER2) and the per-WORKSPACE policy (require_sod). The
+        # workspace policy is the single source of truth an admin toggles once;
+        # the manifest flag remains an honored per-signature opt-in for callers
+        # that already know. We record WHICH source drove enforcement.
+        manifest_enforce = bool(manifest.get("enforce_segregation"))
+        policy_enforce = self._workspace_requires_sod(_s(tenant_id))
+        enforce_sod = manifest_enforce or policy_enforce
+        sod_policy_source = ("workspace_policy" if policy_enforce
+                             else "manifest" if manifest_enforce else "off")
         sod = self._sod_check(signer, list(derived) + list(supplied))
         sod["enforced"] = enforce_sod
         if enforce_sod and sod["conflict"]:
@@ -1012,6 +1041,10 @@ class DossierService:
             "sod_conflict": sod["conflict"], "sod_separated": sod["separated"],
             "sod_conflicting_authors": sod["conflicting_authors"],
             "sod_enforced": enforce_sod,
+            # TIER3-SOD-ENFORCE: what drove enforcement — the immutable Part-11
+            # record shows whether the workspace policy or a manifest opt-in
+            # (or nothing) governed this signing.
+            "sod_policy_source": sod_policy_source,
         }
         self.repo.set_esign_with_event(
             _s(dossier_id), manifest, actor=_s(actor) or signer,

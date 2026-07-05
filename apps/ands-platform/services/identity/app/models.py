@@ -70,3 +70,7 @@ class BillingIn(BaseModel):
 
 class RequireMfaIn(BaseModel):
     require_mfa: bool = False
+
+
+class RequireSodIn(BaseModel):
+    require_sod: bool = False

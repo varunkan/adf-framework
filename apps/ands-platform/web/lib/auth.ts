@@ -24,6 +24,9 @@ export interface RoleMatrixRow {
 export interface TenantSecurity {
   tenant_id: string;
   require_mfa: boolean;
+  // TIER3-SOD-ENFORCE: when true, a signer-is-author e-signature is HARD-BLOCKED
+  // on the sign path (server-enforced by the dossier service), not just warned.
+  require_sod: boolean;
   can_manage: boolean;
 }
 
@@ -88,6 +91,13 @@ export const auth = {
     j<{ tenant_id: string; require_mfa: boolean }>(
       "/tenant/security/require-mfa",
       { method: "POST", body: JSON.stringify({ require_mfa }) }),
+  // TIER3-SOD-ENFORCE: flip the per-workspace 'enforce segregation of duties'
+  // policy. Enforcement lives server-side on the sign path — this only records
+  // the workspace's intent.
+  setRequireSod: (require_sod: boolean) =>
+    j<{ tenant_id: string; require_sod: boolean }>(
+      "/tenant/security/require-sod",
+      { method: "POST", body: JSON.stringify({ require_sod }) }),
   resetRequest: (email: string) =>
     j<{ ok: boolean; message: string; reset_code?: string; delivery?: string }>(
       "/auth/reset/request",
