@@ -24,7 +24,7 @@ def _now() -> str:
 class GovernanceClient(Protocol):
     def qa_review(self, *, reviewer: str, comment: str = "") -> dict | None: ...
     def sign(self, *, signer: str, artifacts: list[dict],
-             meaning: str = "approved") -> dict | None: ...
+             meaning: str = "approved", reason: str = "") -> dict | None: ...
 
 
 class TransmissionClient(Protocol):
@@ -52,12 +52,18 @@ class HttpGovernanceClient:
             pass
         return None
 
-    def sign(self, *, signer, artifacts, meaning="approved") -> dict | None:
+    def sign(self, *, signer, artifacts, meaning="approved",
+             reason="") -> dict | None:
         try:
-            r = self._c.post("/api/governance/esign/sign", json={
+            payload = {
                 "signer": signer, "role": "authorized_signer",
                 "auth_method": "mfa", "meaning": meaning, "at": _now(),
-                "artifacts": artifacts})
+                "artifacts": artifacts}
+            # only forward reason when the signer supplied one — otherwise the
+            # governance domain defaults it from the meaning (Part-11 statement)
+            if reason:
+                payload["reason"] = reason
+            r = self._c.post("/api/governance/esign/sign", json=payload)
             if r.status_code in (200, 422):
                 return r.json()
         except Exception:
@@ -127,13 +133,16 @@ class FakeGovernanceClient:
         return {"valid": True, "review": {"reviewer": reviewer,
                                           "audit_trail_reviewed": True}}
 
-    def sign(self, *, signer, artifacts, meaning="approved") -> dict | None:
+    def sign(self, *, signer, artifacts, meaning="approved",
+             reason="") -> dict | None:
         self.calls.append(("sign", signer, len(artifacts)))
         if not self.sign_valid:
             return {"valid": False, "errors": [{"rule": "artifacts_required"}]}
         return {"valid": True, "manifest": {
-            "signer": signer, "meaning": meaning, "artifacts": artifacts,
-            "manifest_id": "fake-manifest-1"}}
+            "signer": signer, "meaning": meaning,
+            "reason": reason or "I approve and authorize transmission.",
+            "at": _now(), "tz": "UTC", "artifacts": artifacts,
+            "leaf_count": len(artifacts), "manifest_id": "fake-manifest-1"}}
 
 
 class FakeTransmissionClient:

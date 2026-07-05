@@ -119,6 +119,73 @@ export interface ValidationCriteria {
   };
 }
 
+// ADOPT-EVALIDATOR: a USER-ATTESTED external validator result. ANDS Studio
+// cannot run Health Canada's official eValidator, so this is the filer's real
+// outcome of running eValidator (or their publisher's validator) on the
+// EXPORTED package, attached as external evidence. `source` is fixed to
+// "user_attested_external" — it is NEVER a tool self-claim of parity.
+export interface EvalidatorAttestation {
+  source: "user_attested_external";
+  result: "pass" | "fail";
+  validator_name: string;
+  validator_version?: string | null;
+  validated_on?: string | null;
+  attested_by?: string | null;
+  notes?: string | null;
+  report_filename?: string | null;
+  disclaimer: string;
+  recorded_at?: string;
+  updated_at?: string;
+}
+
+export interface EvalidatorAttestationResponse {
+  dossier_id: string;
+  attestation: EvalidatorAttestation | null;
+}
+
+// ADOPT-PART11-ESIGN: a REAL 21 CFR Part 11-aligned e-signature manifest — the
+// signer identity, the meaning + human REASON, a UTC timestamp, and a
+// tamper-evident hash bound over the exact checksummed eCTD leaf set.
+export interface EsignManifestLeaf {
+  id: string;
+  kind?: string;
+  checksum: string;
+  checksum_type?: string;
+}
+export interface EsignManifest {
+  signer: string;
+  role?: string;
+  auth_method?: string;
+  meaning?: string;
+  reason?: string;
+  at?: string;
+  tz?: string;
+  manifest_id: string;
+  leaf_count?: number;
+  artifacts?: EsignManifestLeaf[];
+  policy?: string;
+  immutable?: boolean;
+  updated_at?: string;
+}
+export interface EsignVerificationFinding {
+  rule: string;
+  artifact: string;
+  signed_checksum?: string;
+  current_checksum?: string;
+  message: string;
+}
+export interface EsignVerification {
+  signed: boolean;
+  verified: boolean;
+  tampered: boolean;
+  findings: EsignVerificationFinding[];
+  manifest_id: string;
+  signer?: string;
+  reason?: string;
+  signed_at?: string;
+  leaf_count?: number;
+}
+
 export interface ValidationResult {
   passed: boolean;
   errors: ValidationFinding[];
@@ -126,6 +193,10 @@ export interface ValidationResult {
   checked: number;
   // present on the full validate() result and export-block bodies
   criteria?: ValidationCriteria;
+  // ADOPT-EVALIDATOR: the user-attested external eValidator result, surfaced
+  // ALONGSIDE the structural check (it never drives `passed`). null/absent when
+  // the filer has not attached one yet.
+  external_attestation?: EvalidatorAttestation | null;
 }
 
 // One rule in the queryable catalogue (GET /api/dossier/validation/rules).

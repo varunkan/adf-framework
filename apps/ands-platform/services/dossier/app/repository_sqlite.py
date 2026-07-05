@@ -138,6 +138,25 @@ CREATE TABLE IF NOT EXISTS dossier_rename_chain (
     old_id      TEXT NOT NULL,
     created_at  TEXT NOT NULL
 );
+-- ADOPT-EVALIDATOR: a USER-ATTESTED external validator result recorded against a
+-- dossier. ANDS Studio cannot run Health Canada's official eValidator, so this
+-- is where the filer attaches the REAL outcome of running eValidator (or their
+-- publisher's validator) on the exported package. It is external evidence the
+-- user supplies — NOT a tool self-claim. One current attestation per dossier
+-- (the latest); the full JSON payload (result, validator name/version, date,
+-- notes, optional report filename) lives in ``data``.
+CREATE TABLE IF NOT EXISTS evalidator_attestations (
+    dossier_id  TEXT PRIMARY KEY,
+    result      TEXT NOT NULL,
+    data        TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS esign_manifests (
+    dossier_id   TEXT PRIMARY KEY,
+    manifest_id  TEXT NOT NULL,
+    data         TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
 """
 
 # columns a caller may patch on a plan item
@@ -183,6 +202,14 @@ class SqliteDossierRepository:
         "CREATE TABLE IF NOT EXISTS dossier_rename_chain ("
         " new_id TEXT PRIMARY KEY, old_id TEXT NOT NULL,"
         " created_at TEXT NOT NULL)",
+        # ADOPT-EVALIDATOR: user-attested external eValidator result store
+        "CREATE TABLE IF NOT EXISTS evalidator_attestations ("
+        " dossier_id TEXT PRIMARY KEY, result TEXT NOT NULL,"
+        " data TEXT NOT NULL, updated_at TEXT NOT NULL)",
+        # ADOPT-PART11-ESIGN: current signed e-signature manifest per dossier
+        "CREATE TABLE IF NOT EXISTS esign_manifests ("
+        " dossier_id TEXT PRIMARY KEY, manifest_id TEXT NOT NULL,"
+        " data TEXT NOT NULL, updated_at TEXT NOT NULL)",
     )
 
     def __init__(self, db: SqliteDb | None = None) -> None:
@@ -542,6 +569,83 @@ class SqliteDossierRepository:
             (utcnow_iso(), dossier_id))
         return True
 
+    # -- ADOPT-EVALIDATOR: user-attested external validator result ---------
+    def set_evalidator_attestation(self, dossier_id: str,
+                                   attestation: dict) -> dict:
+        """Upsert the CURRENT (latest) user-attested external eValidator result
+        for a dossier. Stores the full payload as JSON; ``result`` is denormalized
+        for quick filtering. Returns the stored attestation dict."""
+        self.db.execute(
+            "INSERT INTO evalidator_attestations (dossier_id, result, data, "
+            "updated_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(dossier_id) DO UPDATE SET result=excluded.result, "
+            "data=excluded.data, updated_at=excluded.updated_at",
+            (dossier_id, str(attestation.get("result") or ""),
+             json.dumps(attestation), utcnow_iso()))
+        return self.get_evalidator_attestation(dossier_id)
+
+    def get_evalidator_attestation(self, dossier_id: str) -> dict | None:
+        row = self.db.fetchone(
+            "SELECT data, updated_at FROM evalidator_attestations "
+            "WHERE dossier_id = ?", (dossier_id,))
+        if not row:
+            return None
+        rec = json.loads(row["data"])
+        rec["updated_at"] = row["updated_at"]
+        return rec
+
+    # -- ADOPT-PART11-ESIGN: signed e-signature manifest -------------------
+    def set_esign_manifest(self, dossier_id: str, manifest: dict) -> dict:
+        """Upsert the CURRENT signed manifest for a dossier. Stores the full
+        signature payload as JSON; ``manifest_id`` is denormalized for quick
+        lookup. Returns the stored manifest dict."""
+        self.db.execute(
+            "INSERT INTO esign_manifests (dossier_id, manifest_id, data, "
+            "updated_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(dossier_id) DO UPDATE SET manifest_id=excluded.manifest_id, "
+            "data=excluded.data, updated_at=excluded.updated_at",
+            (dossier_id, str(manifest.get("manifest_id") or ""),
+             json.dumps(manifest), utcnow_iso()))
+        return self.get_esign_manifest(dossier_id)
+
+    def get_esign_manifest(self, dossier_id: str) -> dict | None:
+        row = self.db.fetchone(
+            "SELECT data, updated_at FROM esign_manifests "
+            "WHERE dossier_id = ?", (dossier_id,))
+        if not row:
+            return None
+        rec = json.loads(row["data"])
+        rec["updated_at"] = row["updated_at"]
+        return rec
+
+    def set_esign_with_event(self, dossier_id: str, manifest: dict, *,
+                             actor: str, event_type: str, tenant_id: str,
+                             data: dict) -> dict:
+        """Persist the signed manifest AND write its durable Part-11 audit-ledger
+        event in ONE transaction (both commit or neither) — applying an
+        e-signature is the most Part-11-relevant act in the workflow, so it lands
+        on the same authoritative, immutable local ledger as the destructive
+        lifecycle events."""
+        with self.db.transaction():
+            saved = self.set_esign_manifest(dossier_id, manifest)
+            self.append_event(event_type, dossier_id, actor=actor,
+                              reason=str(data.get("reason") or ""),
+                              tenant_id=tenant_id, data=data)
+            return saved
+
+    def set_attestation_with_event(self, dossier_id: str, attestation: dict, *,
+                                   actor: str, event_type: str, tenant_id: str,
+                                   data: dict) -> dict:
+        """Persist the attestation AND write its durable audit-ledger event in
+        ONE transaction (both commit or neither) — recording an external
+        validator result is Part-11-relevant evidence, so it lands on the same
+        authoritative local ledger as the destructive lifecycle events."""
+        with self.db.transaction():
+            saved = self.set_evalidator_attestation(dossier_id, attestation)
+            self.append_event(event_type, dossier_id, actor=actor,
+                              tenant_id=tenant_id, data=data)
+            return saved
+
     # -- WS3 DURABLE append-only audit ledger ------------------------------
     def append_event(self, event_type: str, dossier_id: str, *,
                      actor: str = "", reason: str = "",
@@ -674,7 +778,7 @@ class SqliteDossierRepository:
                     (str(r["p"]).replace(old_id, new_id), r["k"]))
         for table in ("dossier_index", "dossiers", "section_state", "documents",
                       "binders", "pm_leaves", "content_plans",
-                      "content_plan_items"):
+                      "content_plan_items", "evalidator_attestations"):
             self.db.execute(
                 f"UPDATE {table} SET dossier_id = ? WHERE dossier_id = ?",
                 (new_id, old_id))
@@ -687,7 +791,8 @@ class SqliteDossierRepository:
             or self.db.fetchone("SELECT 1 FROM dossiers WHERE dossier_id = ?",
                                 (dossier_id,)))
         for table in ("dossier_index", "dossiers", "section_state", "documents",
-                      "binders", "pm_leaves", "content_plans"):
+                      "binders", "pm_leaves", "content_plans",
+                      "evalidator_attestations"):
             self.db.execute(f"DELETE FROM {table} WHERE dossier_id = ?",
                             (dossier_id,))
         # plan items key off plan_id, not dossier_id — clear orphans

@@ -7,6 +7,7 @@ signature manifest gate transmission (REQ-039/053/068).
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime, timezone
 
 HPFB_POLICY = {
     "name": "HPFB Electronic Signatures Policy", "acceptance": "case-by-case",
@@ -19,9 +20,24 @@ ROLE_QA_REVIEWER = "qa_reviewer"
 ROLE_SIGNER = "authorized_signer"
 SIGNATURE_MEANINGS = ("approved", "reviewed", "authored", "authorized")
 
+# Human, meaning-of-signature statements per controlled meaning — used as the
+# default signing REASON when a caller (e.g. the in-process mesh) does not
+# supply its own attestation text. A 21 CFR Part 11 e-signature must carry the
+# MEANING of the signing; this makes that meaning explicit and legible.
+_MEANING_STATEMENTS = {
+    "approved": "I approve this submission package and authorize its transmission.",
+    "reviewed": "I have reviewed this submission package.",
+    "authored": "I am the author of this submission content.",
+    "authorized": "I authorize the transmission of this submission package.",
+}
+
 
 def _norm(value) -> str:
     return str(value if value is not None else "").strip()
+
+
+def _utcnow_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def artifact_checksum(content) -> str:
@@ -96,6 +112,19 @@ def sign(data: dict) -> dict:
     role = _norm(data.get("role")) or ROLE_SIGNER
     meaning = _norm(data.get("meaning")) or "approved"
     auth_method = _norm(data.get("auth_method"))
+    # The signing REASON is the human meaning-of-signature statement (Part-11).
+    # When the caller omits the key entirely we default it from the controlled
+    # meaning (keeps the in-process mesh working); when the caller SUPPLIES the
+    # key but leaves it blank, that is a rejected signature — an explicit
+    # e-signature must carry its meaning.
+    if "reason" in data:
+        reason = _norm(data.get("reason"))
+        if not reason:
+            errors.append({"rule": "reason_required",
+                           "message": "A signing reason (the meaning of the "
+                                      "signature) is required"})
+    else:
+        reason = _MEANING_STATEMENTS.get(meaning, _MEANING_STATEMENTS["approved"])
     if not signer:
         errors.append({"rule": "signer_required",
                        "message": "An authorized signer identity is required"})
@@ -138,8 +167,12 @@ def sign(data: dict) -> dict:
         return {"valid": False, "errors": errors}
     manifest = {
         "signer": signer, "role": ROLE_SIGNER, "auth_method": auth_method,
-        "meaning": meaning, "at": _norm(data.get("at")),
+        "meaning": meaning, "reason": reason,
+        # server-stamped UTC when the caller does not supply one, so the
+        # signing time is a trustworthy record and never blank
+        "at": _norm(data.get("at")) or _utcnow_iso(),
         "tz": _norm(data.get("tz")) or "UTC", "artifacts": bound,
+        "leaf_count": len(bound),
         "policy": HPFB_POLICY["name"], "basis": HPFB_POLICY["basis"],
         "immutable": True}
     digest_src = "|".join(sorted(f"{a['id']}:{a['checksum']}" for a in bound))

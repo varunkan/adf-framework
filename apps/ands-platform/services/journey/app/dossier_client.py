@@ -24,6 +24,8 @@ class DossierClient(Protocol):
     def validate(self, dossier_id: str) -> dict | None: ...
     def set_fees(self, dossier_id: str, fee_paid: bool,
                  sme_granted: bool) -> dict | None: ...
+    def record_esign(self, dossier_id: str, manifest: dict,
+                     *, actor: str = "") -> dict | None: ...
 
 
 class HttpDossierClient:
@@ -76,6 +78,18 @@ class HttpDossierClient:
             pass
         return None
 
+    def record_esign(self, dossier_id, manifest, *, actor="") -> dict | None:
+        """Persist the signed manifest + write its durable Part-11 event."""
+        try:
+            headers = {"X-User-Email": actor} if actor else {}
+            r = self._c.post(f"/api/dossier/dossiers/{dossier_id}/esign",
+                             json={"manifest": manifest}, headers=headers)
+            if r.status_code in (200, 201):
+                return r.json()
+        except Exception:
+            pass
+        return None
+
 
 class InProcessDossierClient:
     """Wraps a live ``DossierService`` — for the integration mesh + unit tests."""
@@ -110,5 +124,11 @@ class InProcessDossierClient:
     def set_fees(self, dossier_id, fee_paid, sme_granted) -> dict | None:
         try:
             return self.service.set_fee_status(dossier_id, fee_paid, sme_granted)
+        except Exception:
+            return None
+
+    def record_esign(self, dossier_id, manifest, *, actor="") -> dict | None:
+        try:
+            return self.service.record_esign(dossier_id, manifest, actor=actor)
         except Exception:
             return None

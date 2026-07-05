@@ -5,6 +5,10 @@ import type {
   CurrentView,
   DossierFull,
   DossierListItem,
+  EsignManifest,
+  EsignVerification,
+  EvalidatorAttestation,
+  EvalidatorAttestationResponse,
   ExportOutcome,
   MonographStatus,
   OutlineView,
@@ -137,6 +141,46 @@ export const dossierApi = {
   // criteria block. Powers the "what do we actually check" surface.
   validationRules: () =>
     j<ValidationRuleCatalog>(`/validation/rules`),
+
+  // ADOPT-EVALIDATOR: read the current USER-ATTESTED external eValidator result
+  // for a dossier (or null). ANDS Studio cannot run HC's official eValidator —
+  // this is the filer's real outcome of running it on the exported package.
+  getEvalidatorAttestation: (id: string) =>
+    j<EvalidatorAttestationResponse>(
+      `/dossiers/${encodeURIComponent(id)}/evalidator-attestation`),
+
+  // Record the user-attested external result (pass/fail + validator + date +
+  // notes/file name). The backend labels it as external evidence, never a tool
+  // self-claim, and writes a durable audit event.
+  setEvalidatorAttestation: (
+    id: string,
+    body: {
+      result: "pass" | "fail";
+      validator_name: string;
+      validator_version?: string;
+      validated_on?: string;
+      notes?: string;
+      report_filename?: string;
+    }
+  ) =>
+    j<EvalidatorAttestation>(
+      `/dossiers/${encodeURIComponent(id)}/evalidator-attestation`,
+      { method: "POST", body: JSON.stringify(body) }),
+
+  // ADOPT-PART11-ESIGN: the current signed e-signature manifest for a dossier
+  // (signer, UTC, reason, manifest hash, leaf count) — or null when unsigned.
+  getEsign: (id: string) =>
+    j<{ dossier_id: string; manifest: EsignManifest | null }>(
+      `/dossiers/${encodeURIComponent(id)}/esign`),
+
+  // Re-verify the signature: re-compute the current leaf checksums and compare
+  // against the signed manifest. `tampered` is true if any signed leaf changed
+  // or was removed — the honest, demonstrable tamper-evidence check.
+  verifyEsign: (id: string, current?: Record<string, string>) =>
+    j<EsignVerification>(
+      `/dossiers/${encodeURIComponent(id)}/esign/verify`,
+      { method: "POST",
+        body: JSON.stringify(current !== undefined ? { current } : {}) }),
 
   outline: (id: string, sequence = "0000") =>
     j<OutlineView>(

@@ -2,7 +2,10 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { dossierApi } from "@/lib/dossierApi";
+import type { EsignManifest, EsignVerification } from "@/lib/dossierTypes";
 import type { JourneyView, Stage } from "@/lib/types";
+import { toast } from "sonner";
+import { PenLine, ShieldCheck, ShieldAlert, FileCheck2 } from "lucide-react";
 import { Term } from "./Term";
 import { DrugIntake } from "./DrugIntake";
 import { TrackView } from "./TrackView";
@@ -253,52 +256,14 @@ export function StepCard({
       )}
 
       {stage.key === "sign" && (
-        <>
-          <div className="teach">
-            An authorized person applies the regulated e-signature behind a QA
-            gate, recorded with a tamper-evident audit trail (who signed, when).
-            Signing unlocks transmission.
-          </div>
-          {/* WS-JOURNEY (round-8 BLOCKER, n=4): make the e-signature CAPTURE
-              legible before it fires — QA / Part-11 personas need to see what
-              the signature attests to and what gets recorded, not just a green
-              tick afterwards. This frames the capture; it does not claim any
-              certification (e.g. Part-11 validation) the platform hasn't done. */}
-          {!sig.esign?.signed && (
-            <div className="notice" style={{ fontSize: 12.5 }}>
-              <b>E-signature capture.</b> Applying the signature records a
-              regulated attestation designed to align with{" "}
-              <b>21 CFR Part 11 / GxP</b> practice:
-              <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
-                <li>
-                  the <b>signer&apos;s identity</b> (tied to the authenticated
-                  user) and the <b>UTC timestamp</b>;
-                </li>
-                <li>
-                  the <b>meaning</b> of the signing — you attest this package is
-                  reviewed, complete and authorized to transmit;
-                </li>
-                <li>
-                  a <b>tamper-evident manifest</b> (a checksum over every
-                  artifact) so any later change to a signed leaf is detectable;
-                </li>
-                <li>
-                  an immutable entry on the append-only{" "}
-                  <b>audit trail</b> (who / what / when).
-                </li>
-              </ul>
-            </div>
-          )}
-          {sig.esign?.signed && (
-            <div className="notice ok">
-              ✓ Signed by {sig.esign.signer || "authorized signer"}
-              {sig.esign.signed_at ? ` on ${sig.esign.signed_at}` : ""}
-              {sig.esign.manifest_id
-                ? ` — tamper-evident manifest ${String(sig.esign.manifest_id).slice(0, 10)}… over ${sig.esign.artifact_count} artifact(s).`
-                : "."}
-            </div>
-          )}
-        </>
+        <EsignStep
+          sig={sig}
+          dossierId={view.journey.dossier_id}
+          form={form}
+          set={set}
+          busy={busy}
+          onSign={(d) => go(d)}
+        />
       )}
 
       {stage.key === "transmit" && <TransmitStep sig={sig} />}
@@ -312,8 +277,10 @@ export function StepCard({
 
       {(localErr || false) && <div className="notice bad">{localErr}</div>}
 
-      {/* one primary CTA + a Next: pointer */}
-      {stage.cta && (
+      {/* one primary CTA + a Next: pointer. The sign step owns its own primary
+          action (the e-signature capture below), so we suppress the generic CTA
+          button there and show only the Next pointer. */}
+      {stage.cta && stage.key !== "sign" && (
         <div className="cta-row">
           <button
             onClick={() => go()}
@@ -334,6 +301,13 @@ export function StepCard({
                 Next: <b>{stage.next_label}</b>
               </span>
             )}
+        </div>
+      )}
+      {stage.key === "sign" && stage.next_label && sig.esign?.signed && (
+        <div className="cta-row">
+          <span className="nexthint">
+            Next: <b>{stage.next_label}</b>
+          </span>
         </div>
       )}
     </div>
@@ -480,6 +454,270 @@ function TrackStep() {
       decisions: <Term k="NOC" /> (approved — you get a DIN), <Term k="NOD" />,
       or <Term k="NON" />. Remember the <Term k="clock">review clock</Term> counts
       only Health Canada&apos;s time and pauses while they wait on you.
+    </div>
+  );
+}
+
+// ADOPT-PART11-ESIGN: a REAL 21 CFR Part 11-aligned e-signature, demonstrated —
+// capture (signer identity + meaning + explicit REASON + attest), then the
+// signed manifest (signer, UTC, reason, tamper-evident hash, leaf count) and a
+// live "verify signature" affordance that re-checks the checksummed leaves.
+// Honesty: this is Part-11-ALIGNED and verifiable — NOT an external
+// certification / eValidator claim.
+function fmtWhen(at?: string): string {
+  if (!at) return "";
+  const d = new Date(at);
+  return isNaN(d.getTime()) ? at : d.toISOString().replace(".000", "");
+}
+
+function EsignStep({
+  sig,
+  dossierId,
+  form,
+  set,
+  busy,
+  onSign,
+}: {
+  sig: Record<string, any>;
+  dossierId: string;
+  form: Record<string, any>;
+  set: (k: string, v: any) => void;
+  busy: boolean;
+  onSign: (data: Record<string, any>) => Promise<void>;
+}) {
+  const signed = !!sig.esign?.signed;
+  const suggestedSigner = sig.applicant || sig.esign?.signer || "";
+  const signer = form.signer ?? suggestedSigner;
+  const reason = form.reason ?? "";
+  const meaning = form.meaning ?? "approved";
+  const attested = !!form.attest;
+
+  // the durable signed manifest (full detail: hash, leaves, UTC) — loaded once
+  // the signature exists so the panel shows the REAL recorded record.
+  const [manifest, setManifest] = useState<EsignManifest | null>(null);
+  useEffect(() => {
+    if (!signed || !dossierId) return;
+    dossierApi
+      .getEsign(dossierId)
+      .then((r) => setManifest(r.manifest))
+      .catch(() => setManifest(null));
+  }, [signed, dossierId]);
+
+  const meanings: { k: string; label: string }[] = [
+    { k: "approved", label: "Approved — I approve this package" },
+    { k: "reviewed", label: "Reviewed — I have reviewed this package" },
+    { k: "authored", label: "Authored — I am the author of this content" },
+    { k: "authorized", label: "Authorized — I authorize its transmission" },
+  ];
+
+  return (
+    <>
+      <div className="teach">
+        An authorized person applies the regulated e-signature behind a QA gate.
+        This is a real <b>21 CFR Part 11-aligned</b> e-signature: it records your
+        identity, a UTC timestamp, the <b>meaning</b> of the signing, and a{" "}
+        <b>tamper-evident hash</b> bound over every checksummed{" "}
+        <Term k="eCTD" /> leaf — written immutably to the audit trail. Signing
+        unlocks transmission.
+      </div>
+
+      {!signed && (
+        <div className="card" style={{ padding: 14, marginTop: 4 }}>
+          <div className="eyebrow" style={{ display: "flex", gap: 6,
+            alignItems: "center" }}>
+            <PenLine size={14} aria-hidden /> E-signature capture
+          </div>
+          <label style={{ marginTop: 8 }}>Signer (your name / identity)</label>
+          <input
+            value={signer}
+            onChange={(e) => set("signer", e.target.value)}
+            placeholder="e.g. Dr. Vera Signer, VP Regulatory Affairs"
+          />
+          <label style={{ marginTop: 10 }}>Meaning of signature</label>
+          <select
+            value={meaning}
+            onChange={(e) => set("meaning", e.target.value)}
+          >
+            {meanings.map((m) => (
+              <option key={m.k} value={m.k}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+          <label style={{ marginTop: 10 }}>
+            Reason for signing (your attestation, in your words)
+          </label>
+          <textarea
+            value={reason}
+            rows={2}
+            onChange={(e) => set("reason", e.target.value)}
+            placeholder="I attest this ANDS is complete, reviewed, and authorized to transmit to Health Canada."
+          />
+          <label
+            style={{ display: "flex", gap: 8, alignItems: "flex-start",
+              marginTop: 10 }}
+          >
+            <input
+              type="checkbox"
+              style={{ width: "auto", marginTop: 3 }}
+              checked={attested}
+              onChange={(e) => set("attest", e.target.checked)}
+            />
+            <span style={{ fontSize: 13 }}>
+              I understand that applying my electronic signature is the legal
+              equivalent of my handwritten signature, that it carries the meaning
+              above, and that it is recorded immutably with my identity and a UTC
+              timestamp.
+            </span>
+          </label>
+          <div className="mut" style={{ fontSize: 11.5, marginTop: 8 }}>
+            Part-11 <b>aligned</b> and verifiable — immutable, meaning-bearing,
+            re-checkable. ANDS Studio does not claim external certification.
+          </div>
+          <div className="cta-row" style={{ marginTop: 12 }}>
+            <button
+              onClick={() =>
+                onSign({ signer: signer.trim(), reason: reason.trim(), meaning })
+              }
+              disabled={busy || !signer.trim() || !reason.trim() || !attested}
+            >
+              {busy ? "Signing…" : "Apply e-signature →"}
+            </button>
+            {(!signer.trim() || !reason.trim() || !attested) && (
+              <span className="nexthint">
+                Enter your name, a reason, and confirm the attestation to sign
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {signed && (
+        <SignedManifestPanel
+          sig={sig}
+          dossierId={dossierId}
+          manifest={manifest}
+        />
+      )}
+    </>
+  );
+}
+
+function SignedManifestPanel({
+  sig,
+  dossierId,
+  manifest,
+}: {
+  sig: Record<string, any>;
+  dossierId: string;
+  manifest: EsignManifest | null;
+}) {
+  const [verify, setVerify] = useState<EsignVerification | null>(null);
+  const [verifying, setVerifying] = useState(false);
+
+  const signer = manifest?.signer || sig.esign?.signer || "authorized signer";
+  const at = manifest?.at || sig.esign?.signed_at;
+  const reason = manifest?.reason || sig.esign?.reason;
+  const meaning = manifest?.meaning || sig.esign?.meaning;
+  const hash = manifest?.manifest_id || sig.esign?.manifest_id;
+  const leafCount =
+    manifest?.leaf_count ?? sig.esign?.leaf_count ?? sig.esign?.artifact_count;
+
+  async function runVerify() {
+    if (!dossierId) return;
+    setVerifying(true);
+    try {
+      const r = await dossierApi.verifyEsign(dossierId);
+      setVerify(r);
+      if (r.tampered) {
+        toast.error("Signature invalidated — signed content changed.");
+      } else if (r.verified) {
+        toast.success("Signature verified — no signed leaf has changed.");
+      }
+    } catch (e) {
+      toast.error(String((e as Error)?.message || e));
+    } finally {
+      setVerifying(false);
+    }
+  }
+
+  return (
+    <div className="card" style={{ padding: 14, marginTop: 4 }}>
+      <div
+        className="eyebrow"
+        style={{ display: "flex", gap: 6, alignItems: "center" }}
+      >
+        <FileCheck2 size={14} aria-hidden /> Signed e-signature manifest
+      </div>
+      <dl className="kv" style={{ margin: "8px 0 0", display: "grid",
+        gridTemplateColumns: "auto 1fr", gap: "4px 12px", fontSize: 13 }}>
+        <dt className="mut">Signer</dt>
+        <dd style={{ margin: 0 }}><b>{signer}</b></dd>
+        <dt className="mut">Signed (UTC)</dt>
+        <dd style={{ margin: 0 }}>{fmtWhen(at) || "—"}</dd>
+        <dt className="mut">Meaning</dt>
+        <dd style={{ margin: 0 }}>{meaning || "approved"}</dd>
+        <dt className="mut">Reason</dt>
+        <dd style={{ margin: 0 }}>{reason || "—"}</dd>
+        <dt className="mut">Manifest hash</dt>
+        <dd style={{ margin: 0, fontFamily: "monospace", wordBreak: "break-all" }}>
+          {hash || "—"}
+        </dd>
+        <dt className="mut">Leaves signed</dt>
+        <dd style={{ margin: 0 }}>
+          {leafCount ?? 0} checksummed leaf
+          {(leafCount ?? 0) === 1 ? "" : "s"}
+        </dd>
+      </dl>
+
+      <div className="mut" style={{ fontSize: 11.5, marginTop: 10 }}>
+        This signature and the immutable audit event (who / what / when / why)
+        are recorded on the dossier&apos;s durable{" "}
+        <a href={`/dossiers/${encodeURIComponent(dossierId)}/audit`}>
+          Part-11 audit trail
+        </a>
+        . The hash binds the exact leaf set above — any later change to a signed
+        leaf is detectable below.
+      </div>
+
+      <div className="cta-row" style={{ marginTop: 12 }}>
+        <button className="ghost" onClick={runVerify} disabled={verifying}>
+          {verifying ? "Verifying…" : "Verify signature"}
+        </button>
+      </div>
+
+      {verify && verify.signed && !verify.tampered && (
+        <div
+          className="notice ok"
+          style={{ marginTop: 10, display: "flex", gap: 8,
+            alignItems: "flex-start" }}
+        >
+          <ShieldCheck size={16} aria-hidden style={{ marginTop: 1 }} />
+          <span>
+            Signature verified. All {verify.leaf_count} signed leaf
+            {(verify.leaf_count ?? 0) === 1 ? "" : "s"} still match the
+            checksums bound at signing — the package is unmodified since{" "}
+            {signer} signed.
+          </span>
+        </div>
+      )}
+      {verify && verify.tampered && (
+        <div
+          className="notice bad"
+          style={{ marginTop: 10, display: "flex", gap: 8,
+            alignItems: "flex-start" }}
+        >
+          <ShieldAlert size={16} aria-hidden style={{ marginTop: 1 }} />
+          <div>
+            <b>Signature invalidated.</b> A signed leaf changed after signing:
+            <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+              {verify.findings.map((f, i) => (
+                <li key={i}>{f.message}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

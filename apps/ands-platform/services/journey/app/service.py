@@ -367,10 +367,13 @@ class JourneyService:
         elif step == "sign":
             signer = (_s(data.get("signer"))
                       or _s(signals.get("applicant")) or "authorized-signer")
+            meaning = _s(data.get("meaning")) or "approved"
+            reason = _s(data.get("reason"))
             manifest = None
             if self.governance is not None:
                 artifacts = self._sign_artifacts(signals)
-                res = (self.governance.sign(signer=signer, artifacts=artifacts)
+                res = (self.governance.sign(signer=signer, artifacts=artifacts,
+                                            meaning=meaning, reason=reason)
                        if artifacts else None)
                 if res is not None and not res.get("valid"):
                     raise ProblemError(
@@ -379,11 +382,22 @@ class JourneyService:
                                             else e)
                                          for e in res.get("errors", [])[:4]))
                 manifest = (res or {}).get("manifest")
-            signals["esign"] = {"signed": True, "signer": signer,
-                                "manifest_id": (manifest or {}).get("manifest_id"),
-                                "artifact_count": len((manifest or {})
-                                                      .get("artifacts") or []),
-                                "real": manifest is not None}
+            # DURABLE Part-11 record: persist the signed manifest + write the
+            # immutable esign_signed audit event on the dossier's own ledger
+            # (who / what / when / why + the manifest hash) — the same trail the
+            # audit page reads, so the signature is verifiably recorded.
+            did = _s(signals.get("dossier_id"))
+            if manifest and self.dossier is not None and did:
+                self.dossier.record_esign(did, manifest, actor=signer)
+            signals["esign"] = {
+                "signed": True, "signer": signer, "meaning": meaning,
+                "reason": (manifest or {}).get("reason") or reason,
+                "signed_at": (manifest or {}).get("at"),
+                "manifest_id": (manifest or {}).get("manifest_id"),
+                "leaf_count": (manifest or {}).get("leaf_count",
+                               len((manifest or {}).get("artifacts") or [])),
+                "artifact_count": len((manifest or {}).get("artifacts") or []),
+                "real": manifest is not None}
             if manifest:
                 signals["esign_manifest"] = manifest
         elif step == "transmit":

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ands_shared import EventEnvelope, EventType, ProblemError
+from ands_shared import EventEnvelope, EventType, ProblemError, utcnow_iso
 
 import re
 import secrets
@@ -618,12 +618,212 @@ class DossierService:
         self.repo.set_fee_status(_s(dossier_id), bool(fee_paid), bool(sme_granted))
         return self.content_state(dossier_id)
 
+    # -- ADOPT-EVALIDATOR: user-attested external validator result ---------
+    # We cannot run Health Canada's official eValidator here, so the honest
+    # loop-closer is a USER-ATTESTED external result: the filer runs HC
+    # eValidator (or their publisher's validator) on the EXPORTED package and
+    # attaches the real outcome. ANDS Studio records it and surfaces it as
+    # external, user-attested evidence — NEVER a tool self-claim of parity.
+    _ATTESTATION_RESULTS = ("pass", "fail")
+    _ATTESTATION_DISCLAIMER = (
+        "This is a USER-ATTESTED external result. ANDS Studio did NOT run "
+        "Health Canada's eValidator — the filer ran it (or their publisher's "
+        "validator) on the exported package and attached the outcome. ANDS "
+        "Studio records the attestation; it does not verify or reproduce it."
+    )
+
+    def set_evalidator_attestation(self, dossier_id: str, data: dict,
+                                   *, actor: str = "",
+                                   tenant_id: str | None = None) -> dict:
+        """Record the current user-attested external eValidator result. Validates
+        the payload, stamps it as external/user-attested (never a tool claim),
+        persists it and writes a durable audit-ledger event."""
+        self._tenant_guard(dossier_id, tenant_id)
+        if not self.repo.get_dossier_index(_s(dossier_id)):
+            raise ProblemError(404, "no such dossier", detail=_s(dossier_id))
+        result = _s(data.get("result")).lower()
+        if result not in self._ATTESTATION_RESULTS:
+            raise ProblemError(
+                422, "result must be 'pass' or 'fail'",
+                rule="attestation_result_invalid", detail=result or "(empty)")
+        validator_name = _s(data.get("validator_name"))
+        if not validator_name:
+            raise ProblemError(
+                422, "the validator name is required (e.g. 'HC eValidator', "
+                     "'Lorenz eValidator', 'docuBridge')",
+                rule="attestation_validator_required")
+        attestation = {
+            # honesty: this is external evidence the USER supplies, not a tool
+            # self-claim. The source label is fixed and is what the UI keys off
+            # to render "(external result)".
+            "source": "user_attested_external",
+            "result": result,
+            "validator_name": validator_name,
+            "validator_version": _s(data.get("validator_version")) or None,
+            "validated_on": _s(data.get("validated_on")) or None,
+            "attested_by": _s(actor) or _s(data.get("attested_by")) or None,
+            "notes": _s(data.get("notes")) or None,
+            "report_filename": _s(data.get("report_filename")) or None,
+            "disclaimer": self._ATTESTATION_DISCLAIMER,
+            "recorded_at": utcnow_iso(),
+        }
+        event_data = {"result": result, "validator_name": validator_name,
+                      "validator_version": attestation["validator_version"],
+                      "validated_on": attestation["validated_on"],
+                      "attested_by": attestation["attested_by"]}
+        # DURABLE Part-11 record + persistence commit atomically (same local DB).
+        saved = self.repo.set_attestation_with_event(
+            _s(dossier_id), attestation, actor=_s(actor),
+            event_type="dossier.evalidator_attestation_recorded",
+            tenant_id=_s(tenant_id), data=event_data)
+        # SECONDARY best-effort forward to governance (may fail silently).
+        audit_hook.record("dossier.evalidator_attestation_recorded",
+                          _s(dossier_id), event_data)
+        return saved
+
+    def get_evalidator_attestation(self, dossier_id: str,
+                                   tenant_id: str | None = None) -> dict:
+        """The current user-attested external eValidator result (or null)."""
+        self._tenant_guard(dossier_id, tenant_id)
+        if not self.repo.get_dossier_index(_s(dossier_id)):
+            raise ProblemError(404, "no such dossier", detail=_s(dossier_id))
+        return {"dossier_id": _s(dossier_id),
+                "attestation": self.repo.get_evalidator_attestation(
+                    _s(dossier_id))}
+
+    # -- ADOPT-PART11-ESIGN: a REAL 21 CFR Part 11 e-signature, end to end --
+    # The governance service owns the pure signature domain (identity + reason +
+    # UTC + a tamper-evident manifest hash over the checksummed eCTD leaves).
+    # This is the DURABLE, dossier-local side: it persists the resulting signed
+    # manifest and writes an immutable Part-11 audit-ledger event (who / what /
+    # when / why + the manifest hash), and re-verifies the manifest against the
+    # live leaf checksums to detect tampering. Honesty: this is Part-11-ALIGNED
+    # and verifiable — it is NOT an external certification claim.
+    def _current_leaf_checksums(self, dossier_id: str) -> dict:
+        """The live leaf_id -> checksum map for a dossier, from the real
+        assembled files view — the exact set a manifest is verified against."""
+        fv = self.files_view(_s(dossier_id)) or {}
+        out: dict = {}
+        for node in fv.get("nodes") or []:
+            for leaf in node.get("leaves") or []:
+                lid = _s(leaf.get("leaf_id")) or _s(leaf.get("href"))
+                cs = _s(leaf.get("checksum"))
+                if lid and cs:
+                    out[lid] = cs
+        return out
+
+    def record_esign(self, dossier_id: str, manifest: dict, *,
+                     actor: str = "", tenant_id: str | None = None) -> dict:
+        """Persist a signed e-signature manifest and write its durable Part-11
+        audit-ledger event atomically. The manifest is produced by the
+        governance e-sign domain (bound over the checksummed eCTD leaves); here
+        we make it a durable, verifiable, immutably-recorded signing act."""
+        self._tenant_guard(dossier_id, tenant_id)
+        if not self.repo.get_dossier_index(_s(dossier_id)):
+            raise ProblemError(404, "no such dossier", detail=_s(dossier_id))
+        manifest = dict(manifest or {})
+        artifacts = manifest.get("artifacts") or []
+        if not artifacts:
+            raise ProblemError(
+                422, "a signed manifest must bind at least one checksummed leaf",
+                rule="esign_artifacts_required")
+        manifest_id = _s(manifest.get("manifest_id"))
+        if not manifest_id:
+            raise ProblemError(422, "the manifest hash is required",
+                               rule="esign_manifest_id_required")
+        signer = _s(manifest.get("signer"))
+        reason = _s(manifest.get("reason"))
+        signed_at = _s(manifest.get("at")) or utcnow_iso()
+        manifest["at"] = signed_at
+        # who/what/when/why on the immutable trail — the Part-11 signing record
+        event_data = {
+            "signer": signer, "meaning": _s(manifest.get("meaning")),
+            "reason": reason, "manifest_id": manifest_id,
+            "leaf_count": len(artifacts), "signed_at": signed_at,
+            "auth_method": _s(manifest.get("auth_method")),
+        }
+        self.repo.set_esign_with_event(
+            _s(dossier_id), manifest, actor=_s(actor) or signer,
+            event_type="dossier.esign_signed", tenant_id=_s(tenant_id),
+            data=event_data)
+        # SECONDARY best-effort forward to the central governance audit trail.
+        audit_hook.record("dossier.esign_signed", _s(dossier_id), event_data)
+        return {
+            "dossier_id": _s(dossier_id), "signer": signer, "reason": reason,
+            "meaning": _s(manifest.get("meaning")), "manifest_id": manifest_id,
+            "leaf_count": len(artifacts), "signed_at": signed_at,
+            "tz": _s(manifest.get("tz")) or "UTC",
+            "policy": _s(manifest.get("policy")),
+            # honesty guardrail surfaced with the record itself
+            "alignment": ("21 CFR Part 11 / GxP aligned — immutable, "
+                          "meaning-bearing, verifiable. Not an external "
+                          "certification."),
+        }
+
+    def get_esign(self, dossier_id: str,
+                  tenant_id: str | None = None) -> dict:
+        """The current signed manifest for a dossier (or null)."""
+        self._tenant_guard(dossier_id, tenant_id)
+        if not self.repo.get_dossier_index(_s(dossier_id)):
+            raise ProblemError(404, "no such dossier", detail=_s(dossier_id))
+        return {"dossier_id": _s(dossier_id),
+                "manifest": self.repo.get_esign_manifest(_s(dossier_id))}
+
+    def verify_esign(self, dossier_id: str, *, current: dict | None = None,
+                     tenant_id: str | None = None) -> dict:
+        """Re-verify the signed manifest by comparing each signed leaf checksum
+        against the CURRENT checksum — a modified or removed leaf invalidates the
+        signature. ``current`` may be supplied (the exact set to check against);
+        when omitted it is re-derived from the live assembled files view."""
+        self._tenant_guard(dossier_id, tenant_id)
+        if not self.repo.get_dossier_index(_s(dossier_id)):
+            raise ProblemError(404, "no such dossier", detail=_s(dossier_id))
+        manifest = self.repo.get_esign_manifest(_s(dossier_id))
+        if not manifest:
+            return {"signed": False, "verified": False, "tampered": False,
+                    "findings": [], "manifest_id": ""}
+        live = current if current is not None else \
+            self._current_leaf_checksums(dossier_id)
+        live = {str(k): _s(v) for k, v in (live or {}).items()}
+        findings = []
+        for art in manifest.get("artifacts") or []:
+            lid = _s(art.get("id"))
+            signed = _s(art.get("checksum"))
+            now = live.get(lid)
+            if now is None:
+                findings.append({
+                    "rule": "signed_artifact_missing", "artifact": lid,
+                    "message": f"Signed artifact '{lid}' is no longer present — "
+                               "the signature is invalidated"})
+            elif now != signed:
+                findings.append({
+                    "rule": "signed_content_modified", "artifact": lid,
+                    "signed_checksum": signed, "current_checksum": now,
+                    "message": f"Artifact '{lid}' was modified after signing — "
+                               "the signature is invalidated"})
+        tampered = bool(findings)
+        return {
+            "signed": True, "verified": not tampered, "tampered": tampered,
+            "findings": findings, "manifest_id": _s(manifest.get("manifest_id")),
+            "signer": _s(manifest.get("signer")),
+            "reason": _s(manifest.get("reason")),
+            "signed_at": _s(manifest.get("at")),
+            "leaf_count": len(manifest.get("artifacts") or []),
+        }
+
     def validate_submission(self, dossier_id: str) -> dict:
         """Full eCTD technical validation — includes PDF conformance on the
         stored bytes (heavier than the structural check in content_state)."""
+        # ADOPT-EVALIDATOR: the user-attested external eValidator result travels
+        # ALONGSIDE the structural check as a distinct, clearly-labeled signal.
+        # It NEVER drives the structural `passed` flag — it is external evidence
+        # the filer supplied, surfaced so the UI can show
+        # "HC eValidator: PASSED — attested by <user> on <date> (external result)".
+        external = self.repo.get_evalidator_attestation(_s(dossier_id))
         model = self.repo.get_dossier(_s(dossier_id))
         if not model:
-            return {"passed": True, "errors": [], "warnings": [], "checked": 0}
+            return {"passed": True, "errors": [], "warnings": [], "checked": 0,
+                    "external_attestation": external}
         documents = {}
         for state in self.repo.list_section_state(_s(dossier_id)).values():
             for meta in ([state.get("document")]
@@ -661,6 +861,7 @@ class DossierService:
                            "through REP, then set the real Health Canada ID "
                            "(Rename) before filing.", "leaf": None})
             result["passed"] = False
+        result["external_attestation"] = external
         return result
 
     def content_state(self, dossier_id: str) -> dict:

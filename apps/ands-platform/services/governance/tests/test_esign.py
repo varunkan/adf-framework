@@ -21,6 +21,31 @@ def test_sign_binds_artifact_checksum():
     assert man["artifacts"][0]["checksum"] == esign.artifact_checksum("hello")
 
 
+def test_sign_captures_reason_utc_and_leaf_count():
+    # ADOPT-PART11-ESIGN: a real e-signature records an explicit signing REASON
+    # (the human meaning-of-signature statement), a server-stamped UTC timestamp
+    # when none is supplied, and the exact count of checksummed leaves signed.
+    res = esign.sign({
+        "signer": "Dr. Vera Signer", "auth_method": "mfa", "meaning": "approved",
+        "reason": "I attest this ANDS is complete and authorized to transmit.",
+        "artifacts": [{"id": "l1", "content": "a"}, {"id": "l2", "content": "b"}]})
+    assert res["valid"]
+    man = res["manifest"]
+    assert man["reason"] == \
+        "I attest this ANDS is complete and authorized to transmit."
+    assert man["leaf_count"] == 2
+    # no 'at' provided => the domain stamps a real UTC ISO timestamp itself
+    assert man["at"].endswith("+00:00") or man["at"].endswith("Z")
+    assert man["tz"] == "UTC"
+
+
+def test_sign_requires_a_reason():
+    res = esign.sign({"signer": "vp", "auth_method": "mfa", "meaning": "approved",
+                      "reason": "", "artifacts": [{"id": "l1", "content": "a"}]})
+    assert not res["valid"]
+    assert "reason_required" in {e["rule"] for e in res["errors"]}
+
+
 def test_sign_rejects_wrong_role_and_meaning():
     res = esign.sign({"signer": "x", "role": "qa_reviewer", "auth_method": "",
                       "meaning": "vibes", "artifacts": []})

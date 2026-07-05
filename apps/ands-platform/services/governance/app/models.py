@@ -20,6 +20,9 @@ class SignIn(BaseModel):
     role: str = ""
     auth_method: str = ""
     meaning: str = ""
+    # None => caller omitted it, so the domain defaults the signing reason from
+    # the meaning. An explicit "" (from the web capture) is a rejected signature.
+    reason: str | None = None
     at: str = ""
     tz: str = ""
     artifacts: list[dict] = Field(default_factory=list)

@@ -22,6 +22,7 @@ class FakeDossierClient:
         self.errors = errors or []
         self.warnings = warnings or []
         self.fees_set: list[tuple] = []
+        self.esigned: list[tuple] = []
 
     def ensure_dossier(self, dossier_id, **kw) -> None: ...
 
@@ -40,6 +41,13 @@ class FakeDossierClient:
                          "review_fee": {"fiscal_year": "2026-27",
                                         "amount": 71953.0},
                          "mitigation": {"payable": 35976.5}}}
+
+    def record_esign(self, dossier_id, manifest, *, actor=""):
+        self.esigned.append((dossier_id, manifest.get("manifest_id"), actor))
+        return {"dossier_id": dossier_id, "signer": manifest.get("signer"),
+                "manifest_id": manifest.get("manifest_id"),
+                "leaf_count": manifest.get("leaf_count"),
+                "signed_at": manifest.get("at")}
 
 
 def _mesh(dossier=None, governance=None, transmission=None):
@@ -140,6 +148,26 @@ def test_sign_builds_manifest_from_dossier_leaves():
     sig = m.client.get(f"/api/journey/{m.sid}").json()["signals"]
     assert sig["esign"]["real"] is True
     assert sig["esign"]["manifest_id"] == "fake-manifest-1"
+
+
+def test_sign_threads_reason_and_records_durable_part11_event():
+    # ADOPT-PART11-ESIGN: the signer's explicit REASON reaches the manifest, and
+    # the signed manifest is recorded to the dossier's durable Part-11 ledger.
+    gov = FakeGovernanceClient()
+    dc = FakeDossierClient()
+    m = _mesh(dossier=dc, governance=gov)
+    for s in ("validate", "fees", "review"):
+        _advance(m, s)
+    r = _advance(m, "sign", {"signer": "Dr. Vera Signer",
+                             "reason": "I authorize transmission of this ANDS."})
+    assert r.status_code == 200
+    sig = m.client.get(f"/api/journey/{m.sid}").json()["signals"]
+    assert sig["esign"]["signer"] == "Dr. Vera Signer"
+    assert sig["esign"]["reason"] == "I authorize transmission of this ANDS."
+    assert sig["esign"]["signed_at"]           # a UTC stamp is surfaced
+    assert sig["esign"]["leaf_count"] == 1
+    # the durable Part-11 record was written to the dossier ledger
+    assert dc.esigned == [("e123456", "fake-manifest-1", "Dr. Vera Signer")]
 
 
 # -- transmit: real state machine ---------------------------------------------

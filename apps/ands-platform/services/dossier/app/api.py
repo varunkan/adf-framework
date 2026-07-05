@@ -227,6 +227,43 @@ def build_app(service: DossierService) -> FastAPI:
         service.assert_access(dossier_id, x_tenant_id or None)
         return service.validate_submission(dossier_id)
 
+    # ADOPT-EVALIDATOR: record / read the USER-ATTESTED external eValidator
+    # result. ANDS Studio cannot run HC's official eValidator, so this is where
+    # the filer attaches the REAL outcome of running it on the exported package.
+    @router.get("/dossiers/{dossier_id}/evalidator-attestation")
+    def get_evalidator_attestation(dossier_id: str, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        return service.get_evalidator_attestation(dossier_id, x_tenant_id or None)
+
+    @router.post("/dossiers/{dossier_id}/evalidator-attestation")
+    def set_evalidator_attestation(dossier_id: str, body: dict,
+                                   x_tenant_id: str = Header(default="", alias="X-Tenant-Id"),
+                                   x_user_email: str = Header(default="", alias="X-User-Email")):
+        return service.set_evalidator_attestation(
+            dossier_id, body or {}, actor=x_user_email or "",
+            tenant_id=x_tenant_id or None)
+
+    # ADOPT-PART11-ESIGN: record a REAL e-signature manifest (bound over the
+    # checksummed eCTD leaves) as a durable, verifiable Part-11 signing act, and
+    # re-verify it against the live leaf checksums to detect tampering.
+    @router.post("/dossiers/{dossier_id}/esign")
+    def record_esign(dossier_id: str, body: dict,
+                     x_tenant_id: str = Header(default="", alias="X-Tenant-Id"),
+                     x_user_email: str = Header(default="", alias="X-User-Email")):
+        return service.record_esign(
+            dossier_id, (body or {}).get("manifest") or {},
+            actor=x_user_email or "", tenant_id=x_tenant_id or None)
+
+    @router.get("/dossiers/{dossier_id}/esign")
+    def get_esign(dossier_id: str, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        return service.get_esign(dossier_id, x_tenant_id or None)
+
+    @router.post("/dossiers/{dossier_id}/esign/verify")
+    def verify_esign(dossier_id: str, body: dict = None,
+                     x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        current = (body or {}).get("current")
+        return service.verify_esign(dossier_id, current=current,
+                                    tenant_id=x_tenant_id or None)
+
     @router.get("/dossiers/{dossier_id}/sequences")
     def list_sequences(dossier_id: str, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
         service.assert_access(dossier_id, x_tenant_id or None)

@@ -28,7 +28,9 @@ def build_app(service: GovernanceService) -> FastAPI:
 
     @router.post("/esign/sign")
     def sign(body: SignIn):
-        return service.sign(body.model_dump())
+        # drop reason when omitted (None) so the domain defaults it from the
+        # meaning; a supplied "" is kept and correctly rejected as no-meaning.
+        return service.sign(body.model_dump(exclude_none=True))
 
     @router.post("/esign/verify")
     def verify(body: VerifyIn):
