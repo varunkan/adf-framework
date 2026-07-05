@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { dossierApi } from "@/lib/dossierApi";
+import { opMeta } from "@/lib/leafStatus";
 import type {
   CurrentView,
   CurrentViewLeaf,
@@ -359,21 +360,61 @@ export function SequencePanel({
                 {n}× {OP_LABEL[op] || op}
               </span>
             ))}
-            {ops
-              .filter((l) => l.modified_leaf)
-              .slice(0, 3)
-              .map((l) => (
-                <span
-                  key={l.leaf_id}
-                  className="mut"
-                  style={{ fontSize: 10 }}
-                  title={`${l.operation} ${l.leaf_id} → modifies ${l.modified_leaf}`}
-                >
-                  {l.operation} → {l.modified_leaf}
-                </span>
-              ))}
           </div>
         )}
+        {/* ADOPT-LIFECYCLE-0001: a follow-up sequence (0001+) carries the
+            lifecycle a response/supplement transaction must ship — every leaf
+            that acts on a prior transmitted leaf, with its operation and the
+            back-pointer to the leaf it modifies. Render the FULL per-leaf map
+            (not a truncated sample) so a publisher can SEE lifecycle
+            correctness before transmission, straight from the eCTD backbone. */}
+        {(() => {
+          const lifecycleLeaves = ops.filter((l) => l.modified_leaf);
+          if (lifecycleLeaves.length === 0) return null;
+          return (
+            <div
+              style={{ marginTop: 6, display: "grid", gap: 3 }}
+              aria-label={`Lifecycle back-pointers in sequence ${s.sequence}`}
+            >
+              {lifecycleLeaves.map((l) => {
+                const om = opMeta(l.operation);
+                return (
+                  <div
+                    key={l.leaf_id}
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: 6,
+                      fontSize: 10,
+                    }}
+                    title={
+                      `${l.operation} — this sequence's leaf ${l.leaf_id} ` +
+                      `acts on prior leaf ${l.modified_leaf}. The backbone XML ` +
+                      `records a <modified-file> back-pointer at the prior ` +
+                      `leaf's relative path, so Health Canada's reviewer ` +
+                      `replays the lifecycle against the right document.`
+                    }
+                  >
+                    <span className={om?.risk ? "t-op warn" : "t-op"}>
+                      {om?.label || l.operation.toUpperCase()}
+                    </span>
+                    <code style={{ fontSize: 10 }}>{l.leaf_id}</code>
+                    <span className="mut" aria-hidden>
+                      →
+                    </span>
+                    <code
+                      className="mut"
+                      style={{ fontSize: 10 }}
+                      title={`prior leaf superseded: ${l.modified_leaf}`}
+                    >
+                      {l.modified_leaf}
+                    </code>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
         </div>
         );
       })}

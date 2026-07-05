@@ -83,7 +83,16 @@ export interface OutlineView {
   dossier_id: string;
   sequence: string;
   backbone: { "index.xml": string; "ca-regional.xml": string };
-  lifecycle_operations: { leaf_id: string; operation: string; sequence: string }[];
+  // Each op carries the prior-leaf back-pointer (``modified_leaf``) for
+  // replace/append/delete so a publisher can see lifecycle correctness — the
+  // backbone (build_outline_view) has always returned it; the type now reflects
+  // that (ADOPT-LIFECYCLE-0001).
+  lifecycle_operations: {
+    leaf_id: string;
+    operation: string;
+    sequence: string;
+    modified_leaf: string | null;
+  }[];
 }
 
 export interface FeesBlock {
