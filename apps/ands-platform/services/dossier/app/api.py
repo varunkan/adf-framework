@@ -430,6 +430,24 @@ def build_app(service: DossierService) -> FastAPI:
         return service.import_compatibility(dossier_id, sequence,
                                             x_tenant_id or None)
 
+    # CAMP-SHADOW: shadow / parallel-run affordance. Points the tool at a
+    # prior/known-good sequence, runs the SAME structural validator + import-
+    # compat self-check over the real package bytes, and returns a STRUCTURED
+    # comparison (structural findings, leaf inventory, lifecycle ops, package
+    # inventory) so the filer can diff the tool's view against their validated
+    # publisher's output. An optional known-good ``reference`` (leaf list) in
+    # the body drives a leaf-level diff. HONEST — a confidence-building
+    # comparison, never a guarantee, and it never drives the filing gate.
+    @router.post("/dossiers/{dossier_id}/shadow-run/{sequence}")
+    def shadow_run(dossier_id: str, sequence: str, body: dict = None,
+                   x_tenant_id: str = Header(default="", alias="X-Tenant-Id"),
+                   x_user_email: str = Header(default="", alias="X-User-Email")):
+        service.assert_access(dossier_id, x_tenant_id or None)
+        reference = (body or {}).get("reference")
+        return service.shadow_run(dossier_id, sequence, reference,
+                                  actor=x_user_email or "",
+                                  tenant_id=x_tenant_id or None)
+
     @router.get("/documents/{doc_id}")
     def download_document(doc_id: str, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
         doc = service.get_document(doc_id, x_tenant_id or None)

@@ -11,7 +11,8 @@ from datetime import date
 from . import (admin_sequence, archive, assembly, content_model, content_plan,
                dossier_state, drafting, ectd_validation, export_pkg, fees,
                form_review, form_samples, generators, import_compat,
-               llm_provider, monograph, pm_xml, pm_xref, section_tree)
+               llm_provider, monograph, pm_xml, pm_xref, section_tree,
+               shadow_run)
 from . import audit_hook
 from .document_store import SqliteBlobStore
 from .ports import DossierRepository
@@ -838,6 +839,54 @@ class DossierService:
         # a filing-gate verdict and not an HC eValidator parity claim.
         result["scope"] = "sequence"
         return result
+
+    # CAMP-SHADOW: shadow / parallel-run affordance (de-risk the trial). 16/24
+    # task-eval personas said they would run the tool in parallel against a
+    # filing they KNOW passed eValidator and diff the output before trusting it
+    # live. This makes that first-class: it grounds on the SAME structural
+    # sequence validation (TIER2-PARITY-UX) + the transmissible package + the
+    # import-compat self-check (CAMP-INTEROP), and emits a STRUCTURED shadow-run
+    # comparison (structural findings, leaf inventory, lifecycle ops, package
+    # inventory) so the filer can diff the tool's view against their validated
+    # publisher's output. When a known-good REFERENCE (leaf_id/href/checksum) is
+    # supplied it computes a leaf-level diff. HONEST: a confidence-building
+    # comparison, NOT a guarantee — it never drives the filing gate. Read-only.
+    def shadow_run(self, dossier_id: str, sequence: str,
+                   reference: list | None = None, *, actor: str = "",
+                   tenant_id: str | None = None) -> dict:
+        self._tenant_guard(dossier_id, tenant_id)
+        # _sequence_scoped_model 404s an unknown dossier/sequence and returns the
+        # single-sequence copy the structural validator replays.
+        scoped, key = self._sequence_scoped_model(dossier_id, sequence)
+        model = self.repo.get_dossier(_s(dossier_id))   # full model for package
+        validation = ectd_validation.validate(scoped)
+        validation.setdefault("criteria", ectd_validation.criteria())
+        pkg = self._build_sequence_package(dossier_id, model, key)
+        # normalize a supplied reference (only leaf_id/href/checksum are used)
+        ref = None
+        if reference is not None:
+            ref = [{"leaf_id": _s((r or {}).get("leaf_id")),
+                    "href": _s((r or {}).get("href")),
+                    "checksum": _s((r or {}).get("checksum"))}
+                   for r in reference]
+        report = shadow_run.build_shadow_report(
+            model, key, pkg, validation, reference=ref)
+        report["dossier_id"] = _s(dossier_id)
+        event_data = {"sequence": key,
+                      "validation_passed": report["validation"]["passed"],
+                      "import_compatible": report["import_compat"]["compatible"],
+                      "leaf_count": report["leaf_count"],
+                      "has_reference": report["has_reference"],
+                      "diff_identical": (report["diff"] or {}).get("identical")
+                      if report["has_reference"] else None}
+        # DURABLE local Part-11 ledger entry (survives a governance outage) — a
+        # shadow run is a legible, archivable trial-de-risking act.
+        self.repo.append_event("dossier.shadow_run", _s(dossier_id),
+                               actor=_s(actor), tenant_id=_s(tenant_id),
+                               data=event_data)
+        # SECONDARY best-effort forward to governance.
+        audit_hook.record("dossier.shadow_run", _s(dossier_id), event_data)
+        return report
 
     # TIER2-PARITY-UX: file the REP (Regulatory Enrolment Process) Dossier-ID
     # Request from inside the placeholder banner. HONEST: this PREPARES and

@@ -13,6 +13,8 @@ import type {
   EvalidatorReportResponse,
   ExportOutcome,
   ImportCompatReport,
+  ShadowRunReport,
+  ShadowReferenceLeaf,
   RepRequest,
   RepRequestResponse,
   SequenceValidationResult,
@@ -230,6 +232,25 @@ export const dossierApi = {
   importCompat: (id: string, sequence: string) =>
     j<ImportCompatReport>(
       `/ectd/${encodeURIComponent(id)}/import-compat/${encodeURIComponent(sequence)}`),
+
+  // CAMP-SHADOW: run a shadow / parallel run over a prior/known-good sequence —
+  // the tool's OWN structural validator + import-compat self-check laid out
+  // diff-friendly. An optional known-good `reference` (leaf_id/href/checksum,
+  // e.g. exported from the filer's validated publisher) drives a leaf-level
+  // diff. HONEST: a confidence-building comparison, never a guarantee, and it
+  // never drives the filing gate.
+  shadowRun: (
+    id: string,
+    sequence: string,
+    reference?: ShadowReferenceLeaf[]
+  ) =>
+    j<ShadowRunReport>(
+      `/dossiers/${encodeURIComponent(id)}/shadow-run/${encodeURIComponent(sequence)}`,
+      {
+        method: "POST",
+        body: JSON.stringify(reference ? { reference } : {}),
+      }
+    ),
 
   // TIER2-PARITY-UX: read the current PREPARED (not transmitted) REP Dossier-ID
   // Request for a dossier (or null).

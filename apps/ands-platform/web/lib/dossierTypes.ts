@@ -220,6 +220,84 @@ export interface ImportCompatReport {
   disclaimer: string;
 }
 
+// CAMP-SHADOW — the shadow / parallel-run comparison. The tool runs its OWN
+// structural validator + import-compat self-check over a prior/known-good
+// sequence and lays the result out diff-friendly so a filer can line it up
+// against a filing they KNOW passed eValidator. HONEST: a confidence-building
+// comparison of structural output, NOT a guarantee, and it never drives the
+// filing gate.
+export interface ShadowLeafRow {
+  leaf_id: string;
+  href: string;
+  md5: string;
+  operation: string;
+  title: string;
+  heading: string;
+}
+
+export interface ShadowLifecycleOp {
+  leaf_id: string;
+  operation: string;
+  modified_leaf: string | null;
+}
+
+export interface ShadowMatchedRow {
+  leaf_id: string;
+  tool_href: string;
+  reference_href: string | null;
+  tool_md5: string | null;
+  reference_checksum: string | null;
+  checksum_match: "match" | "mismatch" | "unknown";
+  operation: string;
+}
+
+export interface ShadowDiff {
+  identical: boolean;
+  matched: ShadowMatchedRow[];
+  checksum_mismatch: ShadowMatchedRow[];
+  only_in_tool: {
+    leaf_id: string;
+    href: string;
+    md5: string;
+    operation: string;
+  }[];
+  only_in_reference: {
+    leaf_id: string;
+    href: string | null;
+    checksum: string | null;
+  }[];
+  matched_count: number;
+  tool_leaf_count: number;
+  reference_leaf_count: number;
+}
+
+export interface ShadowRunReport {
+  mode: "shadow";
+  dossier_id: string;
+  sequence: string;
+  validation: {
+    passed: boolean;
+    errors: { code?: string; message?: string; [k: string]: unknown }[];
+    warnings: { code?: string; message?: string; [k: string]: unknown }[];
+    criteria: Record<string, unknown> & { disclaimer?: string };
+  };
+  import_compat: ImportCompatReport;
+  leaf_inventory: ShadowLeafRow[];
+  leaf_count: number;
+  lifecycle_operations: ShadowLifecycleOp[];
+  has_reference: boolean;
+  diff: ShadowDiff | null;
+  disclaimer: string;
+}
+
+// A publisher-style known-good reference leaf the filer supplies to diff
+// against (only leaf_id / href / checksum are used).
+export interface ShadowReferenceLeaf {
+  leaf_id: string;
+  href?: string;
+  checksum?: string;
+}
+
 // TIER2-PARITY-UX: a PREPARED (not transmitted) REP Dossier-ID Request.
 export interface RepRequest {
   transmitted: false;

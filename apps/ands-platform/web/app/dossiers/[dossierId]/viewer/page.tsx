@@ -4,6 +4,7 @@ import { useDossier } from "@/components/dossier/DossierContext";
 import { dossierApi } from "@/lib/dossierApi";
 import { EvalidatorHandoff } from "@/components/dossier/EvalidatorHandoff";
 import { ImportCompat } from "@/components/dossier/ImportCompat";
+import { ShadowRun } from "@/components/dossier/ShadowRun";
 import { PreflightReport } from "@/components/dossier/PreflightReport";
 import type { OutlineView } from "@/lib/dossierTypes";
 
@@ -99,6 +100,12 @@ export default function ViewerPage() {
               Vault RIM / docuBridge?". On export success, self-check the exact
               package that was built and show what a compliant importer finds. */}
           <ImportCompat dossierId={dossierId} sequence="0000" />
+          {/* CAMP-SHADOW: the trial-de-risking ask — "before I trust it live
+              I'd run it in parallel against a filing we KNOW passed eValidator
+              and diff the output." A first-class shadow / parallel-run
+              affordance over the same known-good sequence. Honest: a
+              confidence-building comparison, not a guarantee. */}
+          <ShadowRun dossierId={dossierId} sequence="0000" />
           <div className="card glass" style={{ marginTop: 10 }}>
             <div className="mut" style={{ fontSize: 12 }}>
               eCTD package exported. One required step remains before you can
