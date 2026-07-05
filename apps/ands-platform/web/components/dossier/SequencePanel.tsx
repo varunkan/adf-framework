@@ -177,9 +177,9 @@ export function SequencePanel({
   return (
     <div className="card glass">
       <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-        <div className="mut" style={{ fontSize: 12 }}>Sequences</div>
+        <h3 style={{ margin: 0 }}>Sequences</h3>
         {data && (
-          <span className="mut" style={{ marginLeft: "auto", fontSize: 11 }}>
+          <span className="mut" style={{ marginLeft: "auto", fontSize: 12 }}>
             working: {data.active_sequence}
           </span>
         )}
@@ -286,14 +286,21 @@ export function SequencePanel({
         </div>
       )}
 
-      {data?.sequences.map((s) => {
+      {data?.sequences.map((s, si) => {
         const ops = opsForSequence(view, s.sequence);
         const counts = ops.reduce<Record<string, number>>((acc, l) => {
           acc[l.operation] = (acc[l.operation] || 0) + 1;
           return acc;
         }, {});
         return (
-        <div key={s.sequence} style={{ marginTop: 8 }}>
+        <div
+          key={s.sequence}
+          style={{
+            marginTop: si === 0 ? 12 : 12,
+            paddingTop: si === 0 ? 0 : 12,
+            borderTop: si === 0 ? "none" : "1px solid var(--line)",
+          }}
+        >
         <div
           style={{
             display: "flex",

@@ -524,15 +524,15 @@ function ShadowRunHelper({ dossierId }: { dossierId?: string }) {
     <div style={{ marginTop: 8 }}>
       <button
         className="ghost"
-        style={{ fontSize: 11, padding: "2px 6px" }}
+        style={{ fontSize: 12, padding: "3px 8px" }}
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
       >
         {open ? "Hide known-good sequence check" : "Validate a known-good sequence (build trust first)"}
       </button>
       {open && (
-        <div className="notice" style={{ marginTop: 6, fontSize: 11 }}>
-          <div className="mut" style={{ marginBottom: 4 }}>
+        <div className="notice" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.55 }}>
+          <div className="mut" style={{ marginBottom: 6 }}>
             Prove parity to yourself: run ANDS Studio&apos;s OWN structural checks on
             a sequence you already know Health Canada accepted, and confirm it
             passes here too — before trusting a new export on a live filing.
@@ -629,8 +629,9 @@ export function EvalidatorBanner({ criteria }: { criteria?: ValidationCriteria }
       className="notice"
       role="status"
       style={{
-        marginTop: 10,
-        fontSize: 12,
+        marginTop: 12,
+        fontSize: 12.5,
+        lineHeight: 1.55,
         display: "flex",
         gap: 8,
         alignItems: "flex-start",
@@ -641,13 +642,13 @@ export function EvalidatorBanner({ criteria }: { criteria?: ValidationCriteria }
         <b>You must still run Health Canada&apos;s official eValidator before transmission.</b>{" "}
         A clean result here means the sequence is structurally plausible — it does{" "}
         <b>not</b> mean it will pass HC&apos;s eValidator or be accepted on screening.
-        <div className="mut" style={{ marginTop: 4 }}>
+        <div className="mut" style={{ marginTop: 6 }}>
           Next step: export the eCTD package, validate it in HC&apos;s eValidator (or
           your publisher&apos;s validator — e.g. Lorenz eValidator / docuBridge),
           resolve any findings, then upload through CESG WebTrader.
         </div>
         {criteria?.synced && (
-          <div className="mut" style={{ marginTop: 4, fontSize: 11 }}>
+          <div className="mut" style={{ marginTop: 6, fontSize: 12 }}>
             Ruleset: {criteria.name} v{criteria.version} · synced {criteria.synced}
           </div>
         )}
@@ -746,12 +747,12 @@ export function EvalidatorHandoff({
   const clearedState = cleared ?? clearedFromAttestation(att);
 
   return (
-    <div style={{ marginTop: 8 }}>
-      <div style={{ fontSize: 12, fontWeight: 600, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-          <ShieldAlert size={14} aria-hidden />
+    <div style={{ marginTop: 14 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <h3 style={{ margin: 0, display: "inline-flex", gap: 6, alignItems: "center" }}>
+          <ShieldAlert size={16} aria-hidden />
           eValidator handoff
-        </span>
+        </h3>
         {/* POLISH-EVAL-CLEARED: the first-class cleared / not-yet-cleared chip,
             pinned to the handoff header so the filing's eValidator standing is
             legible at a glance — honestly labeled user-attested-external. */}
@@ -768,7 +769,7 @@ export function EvalidatorHandoff({
         <>
           <button
             className="ghost"
-            style={{ fontSize: 11, padding: "2px 6px", marginTop: 6 }}
+            style={{ fontSize: 12, padding: "3px 8px", marginTop: 10 }}
             aria-expanded={open}
             onClick={() => setOpen((o) => !o)}
           >
@@ -779,8 +780,8 @@ export function EvalidatorHandoff({
                 })`}
           </button>
           {open && (
-            <div style={{ marginTop: 6, fontSize: 11 }}>
-              <div className="mut" style={{ marginBottom: 6 }}>
+            <div style={{ marginTop: 8, fontSize: 12 }}>
+              <div className="mut" style={{ marginBottom: 8, lineHeight: 1.55 }}>
                 &ldquo;Overlaps&rdquo; means HC&apos;s eValidator checks the same class of
                 defect — it is <b>not</b> a claim of 1:1 numeric parity. Rows marked
                 &ldquo;no HC counterpart&rdquo; are ANDS Studio convenience checks only.
@@ -818,8 +819,8 @@ export function EvalidatorHandoff({
                   </tbody>
                 </table>
               </div>
-              <div className="mut" style={{ marginTop: 6, display: "flex", gap: 4, alignItems: "center" }}>
-                <ExternalLink size={11} aria-hidden />
+              <div className="mut" style={{ marginTop: 8, fontSize: 12, display: "flex", gap: 5, alignItems: "center", lineHeight: 1.5 }}>
+                <ExternalLink size={12} aria-hidden style={{ flexShrink: 0 }} />
                 HC eValidator and the eCTD validation criteria are published at
                 canada.ca (Health Canada — &ldquo;Preparation of Regulatory Activities in
                 eCTD Format&rdquo;).

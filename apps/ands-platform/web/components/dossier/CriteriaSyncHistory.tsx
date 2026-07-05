@@ -32,8 +32,8 @@ export function CriteriaSyncHistory({ open = false }: { open?: boolean }) {
 
   const rev = data.review;
   return (
-    <div style={{ fontSize: 12 }}>
-      <div className="mut" style={{ fontSize: 11 }}>
+    <div style={{ fontSize: 12.5 }}>
+      <div className="mut" style={{ fontSize: 12, lineHeight: 1.55 }}>
         How this structural ruleset is kept current with Health Canada&apos;s
         published eCTD Validation Criteria — the maintenance trail, so you can
         audit that the rules are maintained, not stale. This tracks the ANDS
@@ -42,7 +42,7 @@ export function CriteriaSyncHistory({ open = false }: { open?: boolean }) {
       </div>
 
       {/* the last-reviewed / next-review cadence commitment */}
-      <div className="card glass" style={{ padding: "10px 12px", marginTop: 8 }}>
+      <div className="card glass" style={{ padding: "12px 14px", marginTop: 10 }}>
         <div style={{ fontWeight: 600 }}>Review cadence</div>
         <div className="mut" style={{ marginTop: 2 }}>{rev.cadence}</div>
         <div style={{ display: "flex", gap: 18, marginTop: 6, flexWrap: "wrap" }}>
@@ -54,14 +54,14 @@ export function CriteriaSyncHistory({ open = false }: { open?: boolean }) {
           </span>
         </div>
         {rev.process && (
-          <div className="mut" style={{ fontSize: 11, marginTop: 6 }}>
+          <div className="mut" style={{ fontSize: 12, marginTop: 8, lineHeight: 1.55 }}>
             {rev.process}
           </div>
         )}
       </div>
 
       {/* the append-only version history — what changed at each sync */}
-      <div style={{ fontWeight: 600, marginTop: 12 }}>
+      <div style={{ fontWeight: 600, marginTop: 16 }}>
         Criteria version history
       </div>
       <div style={{ display: "grid", gap: 8, marginTop: 6 }}>

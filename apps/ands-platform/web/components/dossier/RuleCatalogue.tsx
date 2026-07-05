@@ -29,15 +29,15 @@ export function RuleCatalogue({ criteria }: { criteria?: ValidationCriteria }) {
   }, []);
 
   return (
-    <div style={{ fontSize: 12 }}>
-      <div className="mut" style={{ fontSize: 11 }}>
+    <div style={{ fontSize: 12.5 }}>
+      <div className="mut" style={{ fontSize: 12, lineHeight: 1.55 }}>
         The complete list of structural rules this checker applies
         {rules ? ` (${rules.length} rules, live from the engine)` : ""}. A rule
         id like <code>CA-E-1001</code> is an error (blocks the completeness
         gate); <code>CA-W-…</code> is an advisory warning.
       </div>
       {criteria && (
-        <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>
+        <div className="mut" style={{ fontSize: 12, marginTop: 6, lineHeight: 1.55 }}>
           Profile: <b>{criteria.name} v{criteria.version}</b>
           {criteria.synced ? ` · synced ${criteria.synced}` : ""}
           {criteria.review
@@ -68,13 +68,13 @@ export function RuleCatalogue({ criteria }: { criteria?: ValidationCriteria }) {
             <summary style={{ cursor: "pointer" }}>
               {fam} — {rs.length} rule{rs.length === 1 ? "" : "s"}
             </summary>
-            <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+            <ul style={{ margin: "8px 0 0", paddingLeft: 18, lineHeight: 1.5 }}>
               {rs.map((r) => (
-                <li key={r.rule_id} style={{ margin: "5px 0" }}>
+                <li key={r.rule_id} style={{ margin: "7px 0" }}>
                   <code>{r.rule_id}</code>
                   {r.severity === "warning" ? " (warning)" : ""} — {r.description}
                   {r.source && (
-                    <div className="mut" style={{ fontSize: 10, marginTop: 1 }}>
+                    <div className="mut" style={{ fontSize: 11, marginTop: 2 }}>
                       Source: {r.source}
                     </div>
                   )}

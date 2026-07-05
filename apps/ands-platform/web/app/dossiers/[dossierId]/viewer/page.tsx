@@ -65,31 +65,34 @@ export default function ViewerPage() {
 
   return (
     <main className="viewer">
+      <p className="eyebrow">Application Viewer · Validation &amp; export</p>
       <h1>Application Viewer</h1>
-      <p className="mut">
+      <p className="lede">
         A read-only view of your assembled eCTD — the documents placed under each
         Canadian Module folder, and the backbone outline.
       </p>
-      <div className="affordance-bar" role="tablist" aria-label="Viewer">
-        <button role="tab" aria-selected={tab === "files"}
-          className={tab === "files" ? "on" : ""} onClick={() => setTab("files")}>
-          Files
-        </button>
-        <button role="tab" aria-selected={tab === "outline"}
-          className={tab === "outline" ? "on" : ""} onClick={() => setTab("outline")}>
-          Outline
-        </button>
-        <span className="spacer" />
-        <button className="chip" onClick={exportPackage} disabled={exporting}
-          title="Download the transmissible eCTD package (sequence 0000) — upload it via CESG WebTrader">
-          {exporting ? "Exporting…" : "⬇ Export eCTD package"}
-        </button>
-      </div>
-      {exportMsg && (
-        <div className="notice bad" style={{ marginTop: 8, fontSize: 12 }}>
-          {exportMsg}
+
+      <section aria-label="Export the eCTD package" style={{ marginTop: 8 }}>
+        <div className="affordance-bar" role="tablist" aria-label="Viewer">
+          <button role="tab" aria-selected={tab === "files"}
+            className={tab === "files" ? "on" : ""} onClick={() => setTab("files")}>
+            Files
+          </button>
+          <button role="tab" aria-selected={tab === "outline"}
+            className={tab === "outline" ? "on" : ""} onClick={() => setTab("outline")}>
+            Outline
+          </button>
+          <span className="spacer" />
+          <button className="chip" onClick={exportPackage} disabled={exporting}
+            title="Download the transmissible eCTD package (sequence 0000) — upload it via CESG WebTrader">
+            {exporting ? "Exporting…" : "⬇ Export eCTD package"}
+          </button>
         </div>
-      )}
+        {exportMsg && (
+          <div className="notice bad" style={{ marginTop: 10, fontSize: 13 }}>
+            {exportMsg}
+          </div>
+        )}
       {/* WS-VALIDATE (round-8 blocker, n=12): on export success, pin the
           eValidator handoff — the persistent "run HC eValidator before
           transmission" banner + the parity-gap table — so downloading the
@@ -107,7 +110,7 @@ export default function ViewerPage() {
               confidence-building comparison, not a guarantee. */}
           <ShadowRun dossierId={dossierId} sequence="0000" />
           <div className="card glass" style={{ marginTop: 10 }}>
-            <div className="mut" style={{ fontSize: 12 }}>
+            <div className="mut" style={{ fontSize: 13 }}>
               eCTD package exported. One required step remains before you can
               transmit:
             </div>
@@ -115,11 +118,12 @@ export default function ViewerPage() {
           </div>
         </>
       )}
-      <p className="mut" style={{ fontSize: 12 }}>
+      <p className="mut" style={{ fontSize: 13, marginTop: 10 }}>
         The export is the spec folder tree (index.xml, ca-regional.xml, REP RT
         XML, every leaf at its href with checksums) zipped — what you upload
         through the CESG/FDA-ESG WebTrader.
       </p>
+      </section>
 
       {/* TIER3-PREFLIGHT: ONE consolidated pre-flight / QA hand-off report —
           the whole filing-readiness picture (structural validation + attested
@@ -129,10 +133,17 @@ export default function ViewerPage() {
       {/* POLISH-SIGN-BANNER: the ambient "not cleanly signed — re-sign
           required" header banner jumps here (the pre-flight carries the full
           Part-11 signature status + re-sign action). */}
-      <div id="signature-readiness" style={{ marginTop: 12, scrollMarginTop: 72 }}>
+      <section
+        id="signature-readiness"
+        aria-label="Pre-flight readiness"
+        style={{ marginTop: 24, scrollMarginTop: 72 }}
+      >
+        <h2>Pre-flight readiness</h2>
         <PreflightReport dossierId={dossierId} />
-      </div>
+      </section>
 
+      <section aria-label="Assembled documents" style={{ marginTop: 24 }}>
+        <h2>Assembled documents</h2>
       {tab === "files" && (
         <div className="viewer-files card glass">
           {filled.length === 0 ? (
@@ -156,7 +167,7 @@ export default function ViewerPage() {
               </div>
             ))
           )}
-          <div className="mut" style={{ marginTop: 10, fontSize: 12 }}>
+          <div className="mut" style={{ marginTop: 10, fontSize: 13 }}>
             {files?.live_leaf_count || 0} live leaves · placement{" "}
             {files?.placement_version}
           </div>
@@ -188,6 +199,7 @@ export default function ViewerPage() {
           )}
         </div>
       )}
+      </section>
     </main>
   );
 }

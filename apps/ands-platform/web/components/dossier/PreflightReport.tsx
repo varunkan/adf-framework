@@ -365,10 +365,8 @@ export function PreflightReport({ dossierId }: { dossierId: string }) {
   return (
     <div className="card glass">
       <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-        <ClipboardCheck size={15} aria-hidden />
-        <div style={{ fontSize: 13, fontWeight: 600 }}>
-          Pre-flight / QA hand-off report
-        </div>
+        <ClipboardCheck size={16} aria-hidden />
+        <h3 style={{ margin: 0 }}>Pre-flight / QA hand-off report</h3>
         {rep && (
           <span
             style={{ marginLeft: "auto" }}
@@ -380,7 +378,7 @@ export function PreflightReport({ dossierId }: { dossierId: string }) {
           </span>
         )}
       </div>
-      <div className="mut" style={{ fontSize: 12, marginTop: 4 }}>
+      <div className="mut" style={{ fontSize: 12.5, marginTop: 6, lineHeight: 1.55 }}>
         One consolidated document a QA reviewer or client can archive — the whole
         filing-readiness picture in one place, instead of re-running validate at
         each step. This is a <b>structural</b> readiness snapshot, not a Health
@@ -453,26 +451,26 @@ export function PreflightReport({ dossierId }: { dossierId: string }) {
 
           {/* SoD detail — honest role-separation, not an SSO/IdP claim */}
           {rep.esign.signed && rep.esign.segregation_of_duties && (
-            <div className="mut" style={{ fontSize: 11, marginTop: 8 }}>
+            <div className="mut" style={{ fontSize: 12, marginTop: 10 }}>
               <ShieldCheck size={12} aria-hidden />{" "}
               {rep.esign.segregation_of_duties.reason}
             </div>
           )}
 
           {/* the consolidated honesty disclaimers, inline with the report */}
-          <details style={{ marginTop: 10 }}>
+          <details style={{ marginTop: 14 }}>
             <summary
               className="mut"
-              style={{ fontSize: 12, cursor: "pointer" }}
+              style={{ fontSize: 12.5, cursor: "pointer" }}
             >
               Honest scope — what this report is and is NOT
             </summary>
             <ul
               className="mut"
-              style={{ margin: "6px 0 0 16px", padding: 0, fontSize: 11 }}
+              style={{ margin: "8px 0 0 18px", padding: 0, fontSize: 12, lineHeight: 1.6 }}
             >
               {Object.entries(rep.disclaimers).map(([k, v]) => (
-                <li key={k}>{v}</li>
+                <li key={k} style={{ marginTop: 4 }}>{v}</li>
               ))}
             </ul>
           </details>

@@ -125,9 +125,7 @@ export function LifecyclePanel({ dossierId }: { dossierId: string }) {
   return (
     <div className="card glass">
       <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-        <div className="mut" style={{ fontSize: 12 }}>
-          Submission lifecycle
-        </div>
+        <h3 style={{ margin: 0 }}>Submission lifecycle</h3>
         {state && (
           <span
             className={`chip ${statusTone(state.status)}`}
@@ -145,7 +143,7 @@ export function LifecyclePanel({ dossierId }: { dossierId: string }) {
       )}
 
       {notStarted && (
-        <div className="mut" style={{ marginTop: 8, fontSize: 12 }}>
+        <div className="mut" style={{ marginTop: 10, fontSize: 12.5, lineHeight: 1.55 }}>
           No Health Canada lifecycle yet — this dossier has not been filed. The
           DSTS clock (screening, review, deficiency windows) starts once HC
           records receipt.
@@ -226,7 +224,7 @@ export function LifecyclePanel({ dossierId }: { dossierId: string }) {
           )}
 
           {state.fee_credit && (
-            <div className="mut" style={{ fontSize: 11 }}>
+            <div className="mut" style={{ fontSize: 12, lineHeight: 1.5 }}>
               A 25% service-standard fee credit applies — HC decided after the
               review target.
             </div>

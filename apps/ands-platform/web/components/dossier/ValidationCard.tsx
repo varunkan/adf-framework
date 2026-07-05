@@ -23,25 +23,25 @@ function Row({ f, warn }: { f: ValidationFinding; warn?: boolean }) {
     <div
       className="mut"
       style={{
-        fontSize: 12,
-        marginTop: 4,
+        fontSize: 12.5,
+        marginTop: 6,
         display: "flex",
-        gap: 6,
+        gap: 8,
         alignItems: "baseline",
       }}
     >
-      <code style={{ fontSize: 10, opacity: 0.85, whiteSpace: "nowrap" }}>
+      <code style={{ fontSize: 11, opacity: 0.85, whiteSpace: "nowrap" }}>
         {f.rule_id || (warn ? "CA-W" : "CA-E")}
       </code>
       <span
         className={`chip ${warn ? "" : "bad"}`}
-        style={{ fontSize: 9, padding: "0 5px", textTransform: "uppercase" }}
+        style={{ fontSize: 10, padding: "0 6px", textTransform: "uppercase" }}
       >
         {warn ? "warning" : "error"}
       </span>
       <span>
         {f.leaf ? (
-          <code style={{ fontSize: 10, opacity: 0.8 }}>{f.leaf}: </code>
+          <code style={{ fontSize: 11, opacity: 0.8 }}>{f.leaf}: </code>
         ) : null}
         {f.message}
       </span>
@@ -155,7 +155,7 @@ function CriteriaHeader({ criteria }: { criteria?: ValidationCriteria }) {
   const [showRules, setShowRules] = useState(false);
   if (!criteria) {
     return (
-      <div className="mut" style={{ fontSize: 11, marginTop: 6 }}>
+      <div className="mut" style={{ fontSize: 12, marginTop: 6 }}>
         Draft completeness check — checks presence and format only, not
         scientific adequacy or full eCTD technical validation. Run Health
         Canada&apos;s eValidator before you transmit.
@@ -168,7 +168,7 @@ function CriteriaHeader({ criteria }: { criteria?: ValidationCriteria }) {
           in the expander), with the honest "structural; not HC eValidator"
           qualifier inline so the green result is never mistaken for the
           official validator. */}
-      <div style={{ fontSize: 12, fontWeight: 600 }}>
+      <div style={{ fontSize: 13, fontWeight: 600 }}>
         {criteria.name}{" "}
         <span className="mut" style={{ fontWeight: 400 }}>
           v{criteria.version}
@@ -181,17 +181,17 @@ function CriteriaHeader({ criteria }: { criteria?: ValidationCriteria }) {
           (name + version + when it was last reconciled to HC criteria) is
           legible without opening the expander or an exported report. */}
       {criteria.synced && (
-        <div className="mut" style={{ fontSize: 11, marginTop: 2 }}>
+        <div className="mut" style={{ fontSize: 12, marginTop: 3 }}>
           Ruleset synced: {criteria.synced}
         </div>
       )}
-      <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>
+      <div className="mut" style={{ fontSize: 12, marginTop: 4 }}>
         {criteria.disclaimer}
       </div>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <button
           className="ghost"
-          style={{ fontSize: 11, padding: "2px 6px", marginTop: 6 }}
+          style={{ fontSize: 12, padding: "3px 8px", marginTop: 8 }}
           aria-expanded={open}
           onClick={() => setOpen((o) => !o)}
         >
@@ -199,7 +199,7 @@ function CriteriaHeader({ criteria }: { criteria?: ValidationCriteria }) {
         </button>
         <button
           className="ghost"
-          style={{ fontSize: 11, padding: "2px 6px", marginTop: 6 }}
+          style={{ fontSize: 12, padding: "3px 8px", marginTop: 8 }}
           aria-expanded={showRules}
           onClick={() => setShowRules((o) => !o)}
         >
@@ -207,22 +207,22 @@ function CriteriaHeader({ criteria }: { criteria?: ValidationCriteria }) {
         </button>
       </div>
       {open && (
-        <div style={{ marginTop: 6, fontSize: 11 }}>
+        <div style={{ marginTop: 8, fontSize: 12 }}>
           <div className="mut" style={{ opacity: 0.9 }}>
             Modeled on: {criteria.modeled_on}
           </div>
-          <div style={{ marginTop: 6, fontWeight: 600 }}>Checks (structure &amp; format):</div>
-          <ul style={{ margin: "3px 0 0 16px", padding: 0 }}>
+          <div style={{ marginTop: 10, fontWeight: 600 }}>Checks (structure &amp; format):</div>
+          <ul style={{ margin: "4px 0 0 18px", padding: 0, lineHeight: 1.55 }}>
             {criteria.coverage.checked.map((c) => (
               <li key={c} className="mut">
                 {c}
               </li>
             ))}
           </ul>
-          <div style={{ marginTop: 8, fontWeight: 600 }}>
+          <div style={{ marginTop: 12, fontWeight: 600 }}>
             Does NOT check:
           </div>
-          <ul style={{ margin: "3px 0 0 16px", padding: 0 }}>
+          <ul style={{ margin: "4px 0 0 18px", padding: 0, lineHeight: 1.55 }}>
             {criteria.coverage.not_checked.map((c) => (
               <li key={c} className="mut">
                 {c}
@@ -430,9 +430,7 @@ export function ValidationCard({
   return (
     <div className="card glass">
       <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-        <div className="mut" style={{ fontSize: 12 }}>
-          Draft completeness check
-        </div>
+        <h3 style={{ margin: 0 }}>Draft completeness check</h3>
         <span
           style={{ marginLeft: "auto" }}
           className={`ready-status ${v.passed ? "READY" : "BLOCKED"}`}
@@ -446,7 +444,7 @@ export function ValidationCard({
       <CriteriaHeader criteria={v.criteria} />
       <EctdPrimer compact />
 
-      <div style={{ marginTop: 10 }}>
+      <div style={{ marginTop: 14 }}>
         {errs.map((e, i) => (
           <Row key={i} f={e} />
         ))}
@@ -556,7 +554,7 @@ export function ValidationCard({
           </button>
         </div>
 
-        <div className="mut" style={{ fontSize: 10, marginTop: 8 }}>
+        <div className="mut" style={{ fontSize: 11.5, marginTop: 10, lineHeight: 1.55 }}>
           Findings carry structural-rule ids (CA-E-…/CA-W-…) covering leaf
           integrity, lifecycle legality, naming, sequence numbering, XML backbone
           and the document payload: PDF header, encryption, and PDF/A-1b{" "}

@@ -53,9 +53,7 @@ export function MonographPanel({ dossierId }: { dossierId: string }) {
   return (
     <div className="card glass">
       <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-        <div className="mut" style={{ fontSize: 12 }}>
-          Product Monograph (1.3.1)
-        </div>
+        <h3 style={{ margin: 0 }}>Product Monograph (1.3.1)</h3>
         {status && (
           <span
             className={`chip ${status.blocking ? "blocked" : "ready"}`}
@@ -120,7 +118,7 @@ export function MonographPanel({ dossierId }: { dossierId: string }) {
         </button>
         {showXml && (
           <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
-            <div className="mut" style={{ fontSize: 11 }}>
+            <div className="mut" style={{ fontSize: 12, lineHeight: 1.55 }}>
               Health Canada is phasing in a mandatory structured XML Product
               Monograph. Paste the built XML PM to validate it against the
               schema/stylesheet rules before transmission.

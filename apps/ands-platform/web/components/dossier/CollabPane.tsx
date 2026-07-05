@@ -145,10 +145,10 @@ export function CollabPane({ dossierId }: { dossierId: string }) {
   return (
     <div className="card glass">
       <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-        <div className="mut" style={{ fontSize: 12 }}>Collaboration</div>
+        <h3 style={{ margin: 0 }}>Collaboration</h3>
         <button
           className="ghost"
-          style={{ marginLeft: "auto", fontSize: 11, padding: "3px 9px" }}
+          style={{ marginLeft: "auto", fontSize: 12, padding: "3px 9px" }}
           onClick={() => setShowInbox((s) => !s)}
         >
           Inbox{unread > 0 ? ` · ${unread}` : ""}
@@ -258,6 +258,12 @@ export function CollabPane({ dossierId }: { dossierId: string }) {
         )}
       </div>
 
+      <div
+        className="mut"
+        style={{ fontSize: 12, fontWeight: 600, marginTop: 14 }}
+      >
+        Add a task
+      </div>
       <input
         style={input}
         placeholder="New task title"

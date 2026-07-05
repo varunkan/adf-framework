@@ -94,15 +94,16 @@ export default function AuditPage() {
 
   return (
     <main className="viewer">
+      <p className="eyebrow">Audit · Part-11 record</p>
       <h1>Audit Trail</h1>
-      <p className="mut">
+      <p className="lede">
         The durable, append-only Part-11 record for this dossier — written
         synchronously alongside each change and preserved even if the central
         governance service is unreachable. Newest first; chained across a
         Dossier ID re-key so history for the prior ID still resolves.
       </p>
       {/* the guarantees, stated where QA looks for them */}
-      <div className="notice" style={{ fontSize: 12 }}>
+      <div className="notice" style={{ fontSize: 13 }}>
         Append-only, gap-detectable sequence numbers · every event stamped
         with actor and workspace · covers document creation/upload/AI-draft,
         review, e-signature, validation, fees and transmission events ·
@@ -139,18 +140,18 @@ export default function AuditPage() {
               >
                 <span className="chip">{e.category || "unknown"}</span>
                 <b>{e.action}</b>
-                <span className="mut" style={{ fontSize: 12 }}>
+                <span className="mut" style={{ fontSize: 12.5 }}>
                   #{e.seq} · {when(e.at)}
                 </span>
                 {typeof e.detail?.actor === "string" && e.detail.actor && (
-                  <span className="chip" style={{ fontSize: 11 }}>
+                  <span className="chip" style={{ fontSize: 12 }}>
                     by {e.detail.actor as string}
                   </span>
                 )}
                 {compact(e.detail) && (
                   <span
                     className="mut"
-                    style={{ fontSize: 12, flexBasis: "100%" }}
+                    style={{ fontSize: 12.5, flexBasis: "100%" }}
                   >
                     {compact(e.detail)}
                   </span>
@@ -160,7 +161,7 @@ export default function AuditPage() {
           </ul>
         )}
         {events !== null && !error && (
-          <div className="mut" style={{ marginTop: 10, fontSize: 12 }}>
+          <div className="mut" style={{ marginTop: 10, fontSize: 13 }}>
             {events.length} event{events.length === 1 ? "" : "s"} · durable
             dossier-local ledger, mirrored to the central governance trail
           </div>

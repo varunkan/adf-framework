@@ -59,7 +59,7 @@ export function ImportCompat({
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <PackageCheck size={18} aria-hidden />
-          <b>Import compatibility</b>
+          <h3 style={{ margin: 0 }}>Import compatibility</h3>
           {report && (
             <span
               className={`notice ${report.compatible ? "ok" : "bad"}`}
@@ -217,7 +217,7 @@ export function ImportCompat({
               <FolderTree size={14} aria-hidden />
               What a compliant importer will find ({report.file_count} files)
             </summary>
-            <div className="mut" style={{ fontSize: 11, marginTop: 6, lineHeight: 1.6 }}>
+            <div className="mut" style={{ fontSize: 12, marginTop: 8, lineHeight: 1.7 }}>
               <div>
                 <b>Sequence root:</b> <code>{report.inventory.root || "—"}</code>
               </div>
@@ -256,7 +256,7 @@ export function ImportCompat({
           {/* honesty: standard contract, NOT a vendor certification */}
           <div
             className="mut"
-            style={{ marginTop: 10, fontSize: 11, opacity: 0.85, lineHeight: 1.5 }}
+            style={{ marginTop: 12, fontSize: 12, opacity: 0.85, lineHeight: 1.6 }}
           >
             {report.disclaimer}
           </div>
