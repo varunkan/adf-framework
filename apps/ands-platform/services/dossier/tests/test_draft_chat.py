@@ -52,10 +52,21 @@ def test_section_tree_flags_prose_generators_as_ai_draftable():
 # -- draft-chat endpoint: eager validation ----------------------------------
 def test_draft_chat_422_on_upload_only_section(client):
     did = _dossier(client)
-    r = client.post(f"/api/dossier/ectd/{did}/section/1.3.1/draft-chat",
+    # 1.2.2 (fees) is upload-only by design — no in-app authoring at all.
+    r = client.post(f"/api/dossier/ectd/{did}/section/1.2.2/draft-chat",
                     json={"messages": [{"role": "user", "content": "hi"}]})
     assert r.status_code == 422
     assert r.json()["rule"] == "section_not_generatable"
+
+
+def test_draft_chat_422_on_product_monograph_form(client):
+    # 1.3.1 (Product Monograph) is now authorable, but via the structured
+    # pm_xml FORM (per-field AI draft), not whole-document chat drafting.
+    did = _dossier(client)
+    r = client.post(f"/api/dossier/ectd/{did}/section/1.3.1/draft-chat",
+                    json={"messages": [{"role": "user", "content": "hi"}]})
+    assert r.status_code == 422
+    assert r.json()["rule"] == "section_not_ai_draftable"
 
 
 def test_draft_chat_422_on_structured_form(client):

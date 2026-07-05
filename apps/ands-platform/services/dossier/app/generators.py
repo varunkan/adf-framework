@@ -13,7 +13,7 @@ Keyed by the section tree's ``generator_key``.
 
 from __future__ import annotations
 
-from . import pdfgen
+from . import pdfgen, pm_xml
 
 _ACTIVITY_LABELS = {
     "ANDS": "Abbreviated New Drug Submission (ANDS)",
@@ -280,6 +280,140 @@ def structured_document(schema: dict, form: dict, ctx: dict | None = None) -> di
     return _pdf(title, body, stem)
 
 
+# --- Product Monograph 1.3.1 — the bilingual XML PM builder -----------------
+
+# Map each PM form field onto a pm_xml controlled-vocabulary section code and a
+# human title. The clinical narratives + PMI parts become <section> elements;
+# proper/brand name + DIN drive the XML PM's required identity elements. The
+# tuple order is the order sections appear in the built XML. Each entry is
+# (form_field, section_code, EN section title). ``patient-information`` is a
+# single rolled-up Part III section (its four PMI parts are concatenated).
+_PM_SECTION_MAP = (
+    ("indications", "indications", "Indications and Clinical Use"),
+    ("contraindications", "contraindications", "Contraindications"),
+    ("serious_warnings", "warnings", "Serious Warnings and Precautions"),
+    ("dosage_administration", "dosage", "Dosage and Administration"),
+    ("adverse_reactions", "adverse-reactions", "Adverse Reactions"),
+    ("drug_interactions", "warnings", "Drug Interactions"),
+    ("action_clinical_pharmacology", "pharmacology",
+     "Action and Clinical Pharmacology"),
+    ("storage_stability", "storage", "Storage and Stability"),
+    ("dosage_forms_composition", "supply",
+     "Dosage Forms, Composition and Packaging"),
+)
+# Part III PMI parts (rolled into the single ``patient-information`` section).
+_PM_PMI_PARTS = (
+    ("pmi_what_it_is_for", "What it is used for"),
+    ("pmi_how_to_take", "How to take it"),
+    ("pmi_warnings", "Warnings and precautions"),
+    ("pmi_side_effects", "Possible side effects"),
+)
+
+
+def _pm_bilingual_text(form: dict, field: str) -> str:
+    """The EN value of a PM field, with its ``<field>_fr`` French value
+    appended (labelled) when present — HC PM sections are bilingual."""
+    en = _s((form or {}).get(field))
+    fr = _s((form or {}).get(f"{field}_fr"))
+    if en and fr:
+        return f"[EN] {en}\n[FR] {fr}"
+    return en or fr
+
+
+def _pm_data_from_form(form: dict, lang: str) -> dict:
+    """Map a filled PM form onto :func:`pm_xml.build_monograph_xml` input.
+
+    ``product_name`` is the brand name (falling back to the proper name); the
+    clinical narratives become controlled-vocabulary <section>s and the four
+    Part III PMI parts roll up into one ``patient-information`` section. Blank
+    fields are dropped (they would only render as '—' placeholders)."""
+    form = form or {}
+    product_name = _s(form.get("brand_name")) or _s(form.get("proper_name")) \
+        or _s(form.get("drug_product"))
+    sections = []
+    for field, code, title in _PM_SECTION_MAP:
+        text = _pm_bilingual_text(form, field)
+        if text:
+            sections.append({"code": code, "title": title, "text": text})
+    pmi_blocks = []
+    for field, label in _PM_PMI_PARTS:
+        text = _pm_bilingual_text(form, field)
+        if text:
+            pmi_blocks.append(f"{label}:\n{text}")
+    if pmi_blocks:
+        sections.append({"code": "patient-information",
+                         "title": "Patient Medication Information (Part III)",
+                         "text": "\n\n".join(pmi_blocks)})
+    return {"lang": _s(lang).lower() or "en",
+            "product_name": product_name,
+            "din": _s(form.get("din")),
+            "sections": sections}
+
+
+def _pm_pdf_body(form: dict, pm_data: dict) -> str:
+    """A readable text rendering of the PM for the PDF artifact."""
+    form = form or {}
+    lines = [
+        f"Proper name:               {_g(form, 'proper_name')}",
+        f"Brand name:                {_g(form, 'brand_name')}",
+        f"DIN:                       {_g(form, 'din')}",
+        f"Therapeutic classification:{' '}"
+        f"{_g(form, 'therapeutic_classification')}",
+        "",
+        "PART I — HEALTH PROFESSIONAL INFORMATION",
+        "",
+    ]
+    for sec in pm_data["sections"]:
+        if sec["code"] == "patient-information":
+            continue
+        lines.append(sec["title"] + ":")
+        for para in sec["text"].split("\n"):
+            lines.append(f"  {para}")
+        lines.append("")
+    lines.append("PART III — PATIENT MEDICATION INFORMATION")
+    lines.append("")
+    pmi = next((s for s in pm_data["sections"]
+                if s["code"] == "patient-information"), None)
+    if pmi:
+        for para in pmi["text"].split("\n"):
+            lines.append(f"  {para}")
+    else:
+        lines.append("  (not provided)")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def product_monograph(ctx: dict) -> dict:
+    """Author 1.3.1 from a filled bilingual PM form: build a VALIDATED XML PM
+    (:func:`pm_xml.build_monograph_xml`) AND a readable PDF rendering.
+
+    The top-level dict is the XML PM (the machine-readable artifact HC's XML PM
+    mandate targets); a ``artifacts`` list carries BOTH the XML (with its
+    validation result) and the PDF so the caller can persist each. Honest: the
+    PDF carries the ``_DRAFT`` watermark and the XML is only ever a draft the
+    filer reviews — nothing here is claimed HC-accepted."""
+    ctx = ctx or {}
+    form = ctx.get("form")
+    if not isinstance(form, dict):
+        form = ctx
+    lang = _s(ctx.get("lang")) or _s(form.get("lang")) or "en"
+    pm_data = _pm_data_from_form(form, lang)
+    xml = pm_xml.build_monograph_xml(pm_data)
+    validation = pm_xml.validate_monograph_xml(xml)
+    product = pm_data["product_name"] or "Product Monograph"
+    xml_artifact = {
+        "title": f"Product Monograph — XML ({product})",
+        "filename": f"product-monograph-{lang}.xml",
+        "content_type": "application/xml",
+        "body": xml.encode("utf-8"),
+        "validation": validation,
+    }
+    pdf = _pdf("Product Monograph (bilingual, incl. PMI)",
+               _pm_pdf_body(form, pm_data), f"product-monograph-{lang}")
+    pdf_artifact = {**pdf, "validation": None}
+    # primary = the XML PM; both artifacts travel in ``artifacts``.
+    return {**xml_artifact, "artifacts": [xml_artifact, pdf_artifact]}
+
+
 GENERATORS = {
     "cover_letter": cover_letter,
     "rep_application_form": rep_application_form,
@@ -290,6 +424,7 @@ GENERATORS = {
     "ands_attestation": ands_attestation,
     "qos_ce_scaffold": qos_ce_scaffold,
     "cs_be": cs_be,
+    "pm_xml": product_monograph,
 }
 
 # Prose-PDF documents the interactive (LLM chat) drafting flow can author.

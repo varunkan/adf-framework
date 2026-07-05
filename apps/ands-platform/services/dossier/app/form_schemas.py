@@ -401,28 +401,97 @@ def _cmc(section: str, title: str, help: str,
 # the section is authorable as a structured cover/description).
 # ---------------------------------------------------------------------------
 def _product_monograph() -> dict:
-    """Stub schema for 1.3.1 — the full XML Product Monograph builder is
-    workstream 2 (:mod:`pm_xml`, generator ``pm_xml``). This declares the
-    top-level bilingual PM fields so the form UI is uniform; the bespoke
-    ``pm_xml`` generator (not ``structured``) owns the real rendering.
+    """The RICH bilingual Product Monograph form (1.3.1) — workstream 2.
+
+    Follows the real HC Product Monograph Master Template structure:
+    Part I Health Professional Information (proper/brand name, DIN, therapeutic
+    classification, indications & clinical use, contraindications, serious
+    warnings & precautions, dosage & administration, adverse reactions, drug
+    interactions, action & clinical pharmacology, storage & stability, dosage
+    forms/composition/packaging) and Part III Patient Medication Information
+    (what it is for, how to take it, warnings, side effects). Every clinical
+    narrative + PMI part is ``prose:true`` (per-field AI-draftable) and the
+    HC-required parts are marked ``bilingual`` (EN + FR). The bespoke
+    ``pm_xml`` generator (NOT ``structured``) maps this filled form onto
+    :func:`pm_xml.build_monograph_xml` (validated XML PM) AND a readable PDF.
     """
     return _schema(
         "1.3.1", "Product Monograph (bilingual, incl. PMI)",
         "The Product Monograph in English AND French, following the HC Master "
-        "Template. The Patient Medication Information (Part III) sits inside.",
+        "Template. Part I is the Health Professional Information; Part III is "
+        "the plain-language Patient Medication Information.",
         "pm_xml", [
-            _field("drug_product", "Drug product", required=True, bilingual=True,
-                   help="Proposed brand name + strength/dosage form."),
-            _field("indications", "Indications", type="textarea", prose=True,
+            # -- Part I — identity ------------------------------------------
+            _field("proper_name", "Proper (non-proprietary) name", required=True,
+                   help="The medicinal ingredient's proper/common name "
+                        "(e.g. 'Metformin hydrochloride')."),
+            _field("brand_name", "Brand (proprietary) name", required=True,
                    bilingual=True,
-                   help="The approved indication(s) (EN + FR)."),
-            _field("dosage", "Dosage & administration", type="textarea",
+                   help="The proposed brand name under which the product is "
+                        "marketed."),
+            _field("din", "DIN",
+                   help="Drug Identification Number — blank until HC assigns it "
+                        "at NOC."),
+            _field("therapeutic_classification", "Therapeutic classification",
+                   help="The pharmacotherapeutic class (e.g. 'Oral "
+                        "antihyperglycemic agent')."),
+            _field("dosage_forms_composition",
+                   "Dosage forms, composition & packaging", type="textarea",
+                   prose=True,
+                   help="Each dosage form, strength, non-medicinal ingredients "
+                        "and packaging (PM 'Dosage Forms, Strengths, "
+                        "Composition and Packaging')."),
+            # -- Part I — clinical narratives (AI-draftable, bilingual) ------
+            _field("indications", "Indications & clinical use", type="textarea",
                    prose=True, bilingual=True,
-                   help="Recommended dose and administration (EN + FR)."),
-            _field("patient_information", "Patient Medication Information",
+                   help="The approved indication(s) and clinical use — for a "
+                        "generic, mirror the Canadian Reference Product (EN + FR)."),
+            _field("contraindications", "Contraindications", type="textarea",
+                   prose=True, bilingual=True,
+                   help="Situations where the drug must not be used, including "
+                        "known hypersensitivity (EN + FR)."),
+            _field("serious_warnings", "Serious warnings & precautions",
                    type="textarea", prose=True, bilingual=True,
-                   help="Part III plain-language PMI, Grade 6-8 reading level "
+                   help="The boxed Serious Warnings and Precautions plus key "
+                        "warnings/precautions (EN + FR)."),
+            _field("dosage_administration", "Dosage & administration",
+                   type="textarea", prose=True, bilingual=True,
+                   help="Recommended dose, titration, administration and "
+                        "missed-dose guidance (EN + FR)."),
+            _field("adverse_reactions", "Adverse reactions", type="textarea",
+                   prose=True, bilingual=True,
+                   help="Clinical-trial and post-market adverse reactions "
                         "(EN + FR)."),
+            _field("drug_interactions", "Drug interactions", type="textarea",
+                   prose=True, bilingual=True,
+                   help="Drug-drug, drug-food and drug-lab interactions "
+                        "(EN + FR)."),
+            _field("action_clinical_pharmacology",
+                   "Action & clinical pharmacology", type="textarea",
+                   prose=True, bilingual=True,
+                   help="Mechanism of action, pharmacodynamics and "
+                        "pharmacokinetics (EN + FR)."),
+            _field("storage_stability", "Storage & stability", type="textarea",
+                   prose=True,
+                   help="Storage conditions and shelf life "
+                        "(e.g. 'Store at 15-30 C')."),
+            # -- Part III — Patient Medication Information -------------------
+            _field("pmi_what_it_is_for", "PMI — What it is used for",
+                   type="textarea", prose=True, bilingual=True,
+                   help="Part III plain-language: what the medicine is for, "
+                        "Grade 6-8 reading level (EN + FR)."),
+            _field("pmi_how_to_take", "PMI — How to take it", type="textarea",
+                   prose=True, bilingual=True,
+                   help="Part III plain-language: how to take the medicine, "
+                        "dose and missed dose (EN + FR)."),
+            _field("pmi_warnings", "PMI — Warnings & precautions",
+                   type="textarea", prose=True, bilingual=True,
+                   help="Part III plain-language: what to tell your doctor "
+                        "before/while taking it (EN + FR)."),
+            _field("pmi_side_effects", "PMI — Possible side effects",
+                   type="textarea", prose=True, bilingual=True,
+                   help="Part III plain-language: common and serious side "
+                        "effects and when to seek help (EN + FR)."),
         ])
 
 

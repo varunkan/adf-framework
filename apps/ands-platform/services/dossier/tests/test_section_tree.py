@@ -27,10 +27,14 @@ def test_cover_letter_is_generatable_and_uploadable():
     assert n["folder"] == "m1/ca/10-cover-letter"
 
 
-def test_product_monograph_is_bilingual_pdf_and_docx():
+def test_product_monograph_is_bilingual_authorable_xml_pdf_docx():
     n = section_tree.node_for("1.3.1")
     assert n["bilingual"] is True
-    assert set(n["formats"]) == {"pdf", "docx"}
+    # FORMS-PM: the PM is now authorable in-app (validated XML PM + PDF draft),
+    # so the section carries the xml format alongside pdf/docx.
+    assert set(n["formats"]) == {"xml", "pdf", "docx"}
+    assert n["generator_key"] == "pm_xml"
+    assert "generate" in n["affordances"] and "upload" in n["affordances"]
     assert n["applicability"] == "required"
 
 

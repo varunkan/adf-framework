@@ -80,6 +80,42 @@ def _samples_for(key: str, b: dict) -> dict:
             "shelf_life": "24 months",
             "storage": "Store at 15–30°C",
         }
+    if key in ("pm_xml",):
+        return {
+            "proper_name": "Metformin hydrochloride",
+            "brand_name": product,
+            "therapeutic_classification": "Oral antihyperglycemic agent",
+            "dosage_forms_composition":
+                "500 mg film-coated tablet; non-medicinal ingredients per the "
+                "reference product.",
+            "indications": "For the management of type 2 diabetes mellitus as "
+                           "an adjunct to diet and exercise.",
+            "contraindications": "Renal impairment; acute or chronic metabolic "
+                                 "acidosis; known hypersensitivity.",
+            "serious_warnings": "Serious Warnings and Precautions — lactic "
+                                "acidosis is a rare but serious metabolic "
+                                "complication.",
+            "dosage_administration": "Initiate at 500 mg twice daily with "
+                                     "meals; titrate per tolerability and "
+                                     "glycemic response.",
+            "adverse_reactions": "Gastrointestinal (diarrhea, nausea, "
+                                 "abdominal discomfort) are most common.",
+            "drug_interactions": "Caution with cationic drugs eliminated by "
+                                 "renal tubular secretion.",
+            "action_clinical_pharmacology": "Decreases hepatic glucose "
+                                            "production and improves insulin "
+                                            "sensitivity.",
+            "storage_stability": "Store at 15–30°C.",
+            "pmi_what_it_is_for": "This medicine helps lower high blood sugar "
+                                  "in people with type 2 diabetes.",
+            "pmi_how_to_take": "Take it with food, exactly as your doctor "
+                               "tells you. Do not take extra to make up a "
+                               "missed dose.",
+            "pmi_warnings": "Tell your doctor if you have kidney problems or "
+                            "are having a test that uses dye.",
+            "pmi_side_effects": "Upset stomach and diarrhea are common. Get "
+                                "help right away for signs of lactic acidosis.",
+        }
     return {}
 
 

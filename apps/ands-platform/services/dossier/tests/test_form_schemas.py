@@ -103,9 +103,9 @@ def test_structured_generator_carries_draft_watermark():
 #   1.1 / 2.1 — the eCTD auto-backbone (index.xml / ca-regional.xml), no document
 #   1.2.2     — fees/small-business: you UPLOAD HC's fee form / payment proof;
 #               there is no honest prose document to author here
-#   1.3.1     — the XML Product Monograph is built in workstream 2 (pm_xml),
-#               which owns its own generate wiring
-_UPLOAD_ONLY_BY_DESIGN = {"1.1", "2.1", "1.2.2", "1.3.1"}
+#   (1.3.1 — the XML Product Monograph — is now authorable via the pm_xml
+#    generator (FORMS-PM workstream 2); it exposes generate like the rest.)
+_UPLOAD_ONLY_BY_DESIGN = {"1.1", "2.1", "1.2.2"}
 
 
 def test_every_content_section_exposes_generate():
@@ -127,10 +127,12 @@ def test_fees_section_stays_upload_only_by_design():
     assert n["affordances"] == ["upload"]
 
 
-def test_product_monograph_1_3_1_left_for_workstream2():
-    # 1.3.1's real (pm_xml) generator is workstream 2; the tree node is not
-    # rewired here, but a stub form schema exists so the form UI is uniform.
-    assert section_tree.node_for("1.3.1")["generator_key"] is None
+def test_product_monograph_1_3_1_authorable_via_pm_xml():
+    # FORMS-PM (workstream 2) landed: 1.3.1 is wired to the pm_xml generator
+    # and exposes generate + upload; its form schema uses the pm_xml generator.
+    n = section_tree.node_for("1.3.1")
+    assert n["generator_key"] == "pm_xml"
+    assert "generate" in n["affordances"] and "upload" in n["affordances"]
     assert form_schemas.form_schema("1.3.1")["generator"] == "pm_xml"
 
 
