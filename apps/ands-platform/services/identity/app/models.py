@@ -74,3 +74,22 @@ class RequireMfaIn(BaseModel):
 
 class RequireSodIn(BaseModel):
     require_sod: bool = False
+
+
+# -- CAMP-SSO-OIDC ----------------------------------------------------------
+class SsoConfigIn(BaseModel):
+    enabled: bool = False
+    issuer: str = ""
+    client_id: str = ""
+    client_secret: str = ""
+    redirect_uri: str = ""
+
+
+class SsoAuthorizeIn(BaseModel):
+    tenant_id: str = ""
+    redirect_uri: str = ""
+
+
+class SsoCallbackIn(BaseModel):
+    state: str = ""
+    code: str = ""

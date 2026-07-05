@@ -10,6 +10,9 @@ export function middleware(req: NextRequest) {
     pathname.startsWith("/api") ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/login") ||
+    // CAMP-SSO-OIDC: the OIDC redirect_uri landing page runs BEFORE a session
+    // exists (it is what mints the session), so it must be reachable unauthed.
+    pathname.startsWith("/auth/sso/callback") ||
     pathname === "/favicon.ico"
   ) {
     return NextResponse.next();

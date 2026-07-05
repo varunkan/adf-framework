@@ -21,6 +21,13 @@ CREATE TABLE IF NOT EXISTS sessions (
     role TEXT NOT NULL, email TEXT NOT NULL, created_at TEXT NOT NULL,
     expires_at TEXT NOT NULL, scope TEXT NOT NULL DEFAULT 'full');
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT 'full';
+-- CAMP-SSO-OIDC: the session carries whether the principal is IdP-VERIFIED.
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS identity_verified INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS identity_issuer TEXT NOT NULL DEFAULT '';
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS identity_subject TEXT NOT NULL DEFAULT '';
+-- CAMP-SSO-OIDC: a user bound to a verified IdP subject.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS idp_subject TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS idp_issuer TEXT NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS tenants (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, plan_id TEXT NOT NULL,
     status TEXT NOT NULL, created_at TEXT NOT NULL,
@@ -38,6 +45,16 @@ CREATE TABLE IF NOT EXISTS overrides (
 CREATE TABLE IF NOT EXISTS reset_codes (
     email TEXT PRIMARY KEY, code_salt TEXT NOT NULL, code_hash TEXT NOT NULL,
     expires_at TEXT NOT NULL);
+-- CAMP-SSO-OIDC: per-workspace OIDC client config + in-flight login state.
+CREATE TABLE IF NOT EXISTS sso_config (
+    tenant_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0,
+    issuer TEXT NOT NULL DEFAULT '', client_id TEXT NOT NULL DEFAULT '',
+    client_secret TEXT NOT NULL DEFAULT '', redirect_uri TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS sso_flows (
+    state TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, nonce TEXT NOT NULL,
+    code_verifier TEXT NOT NULL, redirect_uri TEXT NOT NULL,
+    created_at TEXT NOT NULL, expires_at TEXT NOT NULL);
 """
 
 _PUBLIC_USER = ("id", "tenant_id", "email", "role", "name", "created_at")
@@ -136,13 +153,29 @@ class PostgresIdentityRepository:
             "SELECT * FROM users WHERE tenant_id = %s ORDER BY created_at",
             (tenant_id,))]
 
+    # CAMP-SSO-OIDC: bind/lookup a user against a verified IdP subject
+    def get_user_by_idp(self, tenant_id, issuer, subject):
+        return self._one(
+            "SELECT * FROM users WHERE tenant_id = %s AND idp_issuer = %s AND "
+            "idp_subject = %s", (tenant_id, issuer, subject))
+
+    def bind_idp(self, user_id, issuer, subject):
+        self._exec("UPDATE users SET idp_issuer = %s, idp_subject = %s "
+                   "WHERE id = %s", (issuer, subject, user_id))
+
     # sessions
-    def create_session(self, token, user, expires_at, scope="full"):
+    def create_session(self, token, user, expires_at, scope="full",
+                       identity=None):
+        identity = identity or {}
         self._exec(
             "INSERT INTO sessions (token, user_id, tenant_id, role, email, "
-            "created_at, expires_at, scope) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+            "created_at, expires_at, scope, identity_verified, "
+            "identity_issuer, identity_subject) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (token, user["id"], user["tenant_id"], user["role"], user["email"],
-             utcnow_iso(), expires_at, scope))
+             utcnow_iso(), expires_at, scope,
+             1 if identity.get("verified") else 0,
+             identity.get("issuer") or "", identity.get("subject") or ""))
 
     def get_session(self, token):
         return self._one("SELECT * FROM sessions WHERE token = %s", (token,))
@@ -231,3 +264,41 @@ class PostgresIdentityRepository:
         return {r["feature"]: bool(r["enabled"]) for r in self._all(
             "SELECT feature, enabled FROM overrides WHERE tenant_id = %s",
             (tenant_id,))}
+
+    # CAMP-SSO-OIDC: workspace SSO config + in-flight OIDC login state
+    def set_sso_config(self, tenant_id, enabled, issuer, client_id,
+                       client_secret, redirect_uri):
+        self._exec(
+            "INSERT INTO sso_config (tenant_id, enabled, issuer, client_id, "
+            "client_secret, redirect_uri, updated_at) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (tenant_id) DO UPDATE SET "
+            "enabled = EXCLUDED.enabled, issuer = EXCLUDED.issuer, "
+            "client_id = EXCLUDED.client_id, "
+            "client_secret = EXCLUDED.client_secret, "
+            "redirect_uri = EXCLUDED.redirect_uri, "
+            "updated_at = EXCLUDED.updated_at",
+            (tenant_id, 1 if enabled else 0, issuer, client_id, client_secret,
+             redirect_uri, utcnow_iso()))
+        return self.get_sso_config(tenant_id)
+
+    def get_sso_config(self, tenant_id):
+        row = self._one("SELECT * FROM sso_config WHERE tenant_id = %s",
+                        (tenant_id,))
+        if row:
+            row["enabled"] = bool(row["enabled"])
+        return row
+
+    def create_sso_flow(self, state, tenant_id, nonce, code_verifier,
+                        redirect_uri, expires_at):
+        self._exec(
+            "INSERT INTO sso_flows (state, tenant_id, nonce, code_verifier, "
+            "redirect_uri, created_at, expires_at) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s)",
+            (state, tenant_id, nonce, code_verifier, redirect_uri,
+             utcnow_iso(), expires_at))
+
+    def get_sso_flow(self, state):
+        return self._one("SELECT * FROM sso_flows WHERE state = %s", (state,))
+
+    def delete_sso_flow(self, state):
+        self._exec("DELETE FROM sso_flows WHERE state = %s", (state,))

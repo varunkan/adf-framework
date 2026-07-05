@@ -10,7 +10,8 @@ from . import rbac
 from .models import (AssignPlanIn, AuthorizeIn, BillingIn, CreatePlanIn,
                      LoginIn, MfaVerifyIn, OverrideIn, ProvisionTenantIn,
                      RequireMfaIn, RequireSodIn, ResetCompleteIn,
-                     ResetRequestIn, SignupIn)
+                     ResetRequestIn, SignupIn, SsoAuthorizeIn, SsoCallbackIn,
+                     SsoConfigIn)
 from .service import IdentityService
 
 
@@ -62,6 +63,25 @@ def build_app(service: IdentityService) -> FastAPI:
     @router.get("/auth/mfa/status")
     def mfa_status(authorization: str = Header(default="")):
         return service.mfa_status(_bearer(authorization))
+
+    # -- CAMP-SSO-OIDC: standards-based SSO login (OIDC + PKCE) ----------
+    # Sign-in paths: unauthenticated on purpose (the user has no session yet).
+    @router.post("/auth/sso/authorize")
+    def sso_authorize(body: SsoAuthorizeIn):
+        return service.sso_authorize(body.model_dump())
+
+    @router.post("/auth/sso/callback")
+    def sso_callback(body: SsoCallbackIn):
+        return service.sso_callback(body.model_dump())
+
+    # Per-workspace SSO configuration (admin-gated inside the service).
+    @router.get("/tenant/sso")
+    def get_sso(authorization: str = Header(default="")):
+        return service.get_sso(_bearer(authorization))
+
+    @router.post("/tenant/sso")
+    def set_sso(body: SsoConfigIn, authorization: str = Header(default="")):
+        return service.set_sso(_bearer(authorization), body.model_dump())
 
     # -- workspace security policy + role matrix (WS4) -----------------
     @router.get("/tenant/security")

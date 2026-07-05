@@ -19,6 +19,12 @@ class SignIn(BaseModel):
     signer: str = ""
     role: str = ""
     auth_method: str = ""
+    # CAMP-SSO-OIDC: an SSO-verified signer is an authenticated principal — the
+    # signing session was minted by an OIDC login (issuer + IdP subject). When
+    # absent, the signature honestly records a *recorded email*.
+    identity_verified: bool = False
+    identity_issuer: str = ""
+    identity_subject: str = ""
     meaning: str = ""
     # None => caller omitted it, so the domain defaults the signing reason from
     # the meaning. An explicit "" (from the web capture) is a rejected signature.

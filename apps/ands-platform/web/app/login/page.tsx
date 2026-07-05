@@ -45,8 +45,11 @@ const L: Record<Lang, {
 export default function LoginPage() {
   const router = useRouter();
   const [lang, setLang] = useState<Lang>("en");
-  const [mode, setMode] = useState<"login" | "signup" | "reset">("login");
+  const [mode, setMode] = useState<"login" | "signup" | "reset" | "sso">("login");
   const [email, setEmail] = useState("");
+  // CAMP-SSO-OIDC — SSO is per-workspace, so the user names their workspace,
+  // then we redirect to that workspace's configured identity provider.
+  const [ssoWorkspace, setSsoWorkspace] = useState("");
   const [password, setPassword] = useState("");
   const [company, setCompany] = useState("");
   // WS4.5 — first-run CRO-vs-in-house: 'own' = filing for your own company,
@@ -65,7 +68,7 @@ export default function LoginPage() {
   const [needMfa, setNeedMfa] = useState(false);
   const [mfaCode, setMfaCode] = useState("");
 
-  function switchMode(m: "login" | "signup" | "reset") {
+  function switchMode(m: "login" | "signup" | "reset" | "sso") {
     setMode(m);
     setErr("");
     setNotice("");
@@ -73,6 +76,25 @@ export default function LoginPage() {
     setResetCode("");
     setDevCode("");
     setRevealCode(false);
+  }
+
+  // CAMP-SSO-OIDC — begin an OpenID Connect login for the named workspace: ask
+  // the identity service for the IdP authorization redirect, then send the
+  // browser there. The IdP returns to /auth/sso/callback with code + state.
+  async function startSso() {
+    setBusy(true);
+    setErr("");
+    try {
+      const next =
+        new URLSearchParams(window.location.search).get("next") || "/dossiers";
+      try { sessionStorage.setItem("ands_sso_next", next); } catch {}
+      const redirectUri = `${window.location.origin}/auth/sso/callback`;
+      const r = await auth.sso.authorize(ssoWorkspace.trim(), redirectUri);
+      window.location.assign(r.authorization_url);
+    } catch (e) {
+      setErr(String(e));
+      setBusy(false);
+    }
   }
 
   async function go() {
@@ -156,6 +178,7 @@ export default function LoginPage() {
         <h1 className="step-title" style={{ marginTop: 0 }}>
           {mode === "login" ? L[lang].signIn
             : mode === "signup" ? L[lang].createWs
+            : mode === "sso" ? "Sign in with your organization"
             : L[lang].resetPw}
         </h1>
         {mode === "signup" && (
@@ -172,6 +195,10 @@ export default function LoginPage() {
                 "filings stay isolated to your organisation."
               : "One workspace per client company — dossiers, documents and " +
                 "filings stay isolated between the clients you file for.")
+            : mode === "sso"
+            ? "Use your organisation's identity provider (OpenID Connect). " +
+              "You are redirected to your IdP to authenticate, then returned " +
+              "here signed in as a verified principal."
             : "Enter your account email. We issue a one-time code (expires " +
               "in 15 minutes) to set a new password."}
         </p>
@@ -220,11 +247,40 @@ export default function LoginPage() {
             </div>
           </>
         )}
-        <div>
-          <label>Email</label>
-          <input value={email} onChange={(e) => setEmail(e.target.value)}
-            type="email" placeholder="ra@company.example" autoComplete="email" />
-        </div>
+        {/* CAMP-SSO-OIDC — organization SSO panel (per-workspace OIDC). */}
+        {mode === "sso" && (
+          <>
+            <div>
+              <label>Workspace ID</label>
+              <input value={ssoWorkspace}
+                onChange={(e) => setSsoWorkspace(e.target.value)}
+                placeholder="your-workspace-id"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && ssoWorkspace.trim()) startSso();
+                }} />
+              <div className="mut" style={{ fontSize: 12, marginTop: 4 }}>
+                Single sign-on is configured per workspace by your admin. Enter
+                the workspace ID your admin gave you, then continue to your
+                organisation&apos;s identity provider.
+              </div>
+            </div>
+            <p className="mut" style={{ fontSize: 12, marginTop: 4 }}>
+              Standard supported: <b>OpenID Connect</b> (Authorization Code +
+              PKCE, RS256 id-token validation). SAML, SCIM provisioning and SIEM
+              streaming are on the <Link href="/roadmap#sso">roadmap</Link> — not
+              claimed here.
+            </p>
+          </>
+        )}
+
+        {mode !== "sso" && (
+          <div>
+            <label>Email</label>
+            <input value={email} onChange={(e) => setEmail(e.target.value)}
+              type="email" placeholder="ra@company.example"
+              autoComplete="email" />
+          </div>
+        )}
 
         {mode === "reset" && resetSent && (
           <>
@@ -258,7 +314,7 @@ export default function LoginPage() {
           </>
         )}
 
-        {(mode !== "reset" || resetSent) && (
+        {mode !== "sso" && (mode !== "reset" || resetSent) && (
           <div>
             <label>{mode === "reset" ? "New password" : "Password"}</label>
             <input value={password} onChange={(e) => setPassword(e.target.value)}
@@ -316,6 +372,15 @@ export default function LoginPage() {
               Back to sign in
             </button>
           </div>
+        ) : mode === "sso" ? (
+          <div className="cta-row">
+            <button onClick={startSso} disabled={busy || !ssoWorkspace.trim()}>
+              {busy ? "Redirecting…" : "Continue to your identity provider →"}
+            </button>
+            <button className="ghost" onClick={() => switchMode("login")}>
+              Back to sign in
+            </button>
+          </div>
         ) : (
           <>
             <div className="cta-row">
@@ -333,14 +398,16 @@ export default function LoginPage() {
                   onClick={() => switchMode("reset")}>
                   Forgot password?
                 </button>
-                {/* Round-6 WS-A (front door must feel finished): the SSO teaser
-                    and "not available yet" roadmap copy are removed from the
-                    sign-in card. SSO stays discoverable via a single small
-                    roadmap link — nothing on the front door promises a flow
-                    that isn't built. */}
-                <div className="mut" style={{ fontSize: 12, marginTop: 10,
+                {/* CAMP-SSO-OIDC — real, built organization SSO (OpenID Connect).
+                    This is now a working flow, not a teaser: it opens the SSO
+                    panel where the user names their workspace and is redirected
+                    to that workspace's IdP. SAML/SCIM/SIEM remain honest roadmap. */}
+                <div style={{ marginTop: 10,
                   borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 10 }}>
-                  <Link href="/roadmap#sso">Enterprise SSO on the roadmap →</Link>
+                  <button className="ghost" style={{ width: "100%" }}
+                    onClick={() => switchMode("sso")}>
+                    Sign in with your organization (SSO) →
+                  </button>
                 </div>
               </>
             )}

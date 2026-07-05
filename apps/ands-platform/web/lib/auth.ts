@@ -11,6 +11,24 @@ export interface Principal {
   email: string;
   name?: string;         // display name from the account record
   tenant_name?: string;  // workspace name — server-side, not a browser cache
+  // CAMP-SSO-OIDC: whether this principal is an IdP-VERIFIED identity (signed in
+  // via the workspace's OIDC provider) vs a recorded email (password login).
+  identity_verified?: boolean;
+  identity_issuer?: string;
+  identity_subject?: string;
+}
+
+// CAMP-SSO-OIDC: per-workspace SSO (OpenID Connect) configuration.
+export interface SsoConfig {
+  tenant_id: string;
+  enabled: boolean;
+  issuer: string;
+  client_id: string;
+  redirect_uri: string;
+  has_secret: boolean;   // whether a client secret is stored (never the secret)
+  configured: boolean;
+  can_manage: boolean;
+  protocol: string;
 }
 
 export interface RoleMatrixRow {
@@ -84,6 +102,28 @@ export const auth = {
     verify: (code: string) =>
       j<{ enabled: boolean }>("/auth/mfa/verify",
         { method: "POST", body: JSON.stringify({ code }) }),
+  },
+  // CAMP-SSO-OIDC: standards-based SSO (OpenID Connect Authorization Code + PKCE)
+  sso: {
+    // read the workspace SSO config (secret never returned — only has_secret)
+    get: () => j<SsoConfig>("/tenant/sso"),
+    // admin-only: enable + set issuer / client_id (+ optional secret/redirect)
+    set: (cfg: { enabled: boolean; issuer: string; client_id: string;
+                 client_secret?: string; redirect_uri?: string }) =>
+      j<SsoConfig>("/tenant/sso",
+        { method: "POST", body: JSON.stringify(cfg) }),
+    // begin an OIDC login: get the IdP authorization redirect + opaque state
+    authorize: (tenant_id: string, redirect_uri: string) =>
+      j<{ authorization_url: string; state: string }>(
+        "/auth/sso/authorize",
+        { method: "POST",
+          body: JSON.stringify({ tenant_id, redirect_uri }) }),
+    // complete the login after the IdP redirects back with code + state
+    callback: (state: string, code: string) =>
+      j<{ user: any; token: string;
+          identity: { verified: boolean; issuer: string; subject: string } }>(
+        "/auth/sso/callback",
+        { method: "POST", body: JSON.stringify({ state, code }) }),
   },
   roleMatrix: () => j<{ roles: RoleMatrixRow[] }>("/rbac/matrix"),
   tenantSecurity: () => j<TenantSecurity>("/tenant/security"),

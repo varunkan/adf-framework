@@ -46,6 +46,48 @@ def test_sign_requires_a_reason():
     assert "reason_required" in {e["rule"] for e in res["errors"]}
 
 
+def test_sign_records_recorded_email_by_default():
+    # CAMP-SSO-OIDC: with no verified principal, the signature honestly records a
+    # *recorded email* — NOT an SSO-verified identity.
+    man = esign.sign({"signer": "vera@acme.io", "auth_method": "mfa",
+                      "meaning": "approved",
+                      "artifacts": [{"id": "l1", "content": "a"}]})["manifest"]
+    assert man["identity"]["assurance"] == "recorded_email"
+    assert man["identity"]["verified"] is False
+    assert "not SSO-verified" in man["identity"]["statement"]
+
+
+def test_sign_records_sso_verified_principal():
+    # CAMP-SSO-OIDC: when the signing session is SSO-backed (issuer + IdP
+    # subject), the signature is an AUTHENTICATED PRINCIPAL and the Part-11
+    # manifest reflects 'identity: SSO-verified (issuer)'. The signer no longer
+    # needs a separate auth_method — the OIDC login IS the (re-)authentication.
+    res = esign.sign({
+        "signer": "vera@acme.io", "meaning": "approved",
+        "identity_verified": True,
+        "identity_issuer": "https://idp.acme.io",
+        "identity_subject": "idp-sub-77",
+        "artifacts": [{"id": "l1", "content": "a"}]})
+    assert res["valid"], res.get("errors")
+    ident = res["manifest"]["identity"]
+    assert ident["assurance"] == "sso_verified"
+    assert ident["verified"] is True
+    assert ident["issuer"] == "https://idp.acme.io"
+    assert ident["subject"] == "idp-sub-77"
+    assert ident["statement"] == "identity: SSO-verified (https://idp.acme.io)"
+    # the SSO login satisfies the re-authenticate-at-signing requirement
+    assert res["manifest"]["auth_method"] == "sso_oidc"
+
+
+def test_sso_claim_requires_both_issuer_and_subject():
+    # honesty guardrail: 'verified' alone (no issuer/subject) must NOT be
+    # allowed to claim SSO — it degrades to the truthful recorded-email posture.
+    man = esign.sign({"signer": "x@y.io", "auth_method": "mfa",
+                      "meaning": "approved", "identity_verified": True,
+                      "artifacts": [{"id": "l1", "content": "a"}]})["manifest"]
+    assert man["identity"]["assurance"] == "recorded_email"
+
+
 def test_sign_rejects_wrong_role_and_meaning():
     res = esign.sign({"signer": "x", "role": "qa_reviewer", "auth_method": "",
                       "meaning": "vibes", "artifacts": []})

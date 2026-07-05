@@ -11,6 +11,7 @@ import { Disclosure } from "@/components/Disclosure";
 import { WorkspaceAudit } from "@/components/account/WorkspaceAudit";
 import { RoleMatrix } from "@/components/account/RoleMatrix";
 import { WorkspaceMfaPolicy } from "@/components/account/WorkspaceMfaPolicy";
+import { WorkspaceSsoPolicy } from "@/components/account/WorkspaceSsoPolicy";
 import { RoadmapCard } from "@/components/account/RoadmapCard";
 import { SecurityCompliance } from "@/components/account/SecurityCompliance";
 
@@ -75,6 +76,32 @@ export default function AccountPage() {
                   dossier, document and filing here is isolated to this
                   workspace)</small></div>
               <div><span className="mut">Role</span> {me.role}</div>
+              {/* CAMP-SSO-OIDC — how this identity is assured RIGHT NOW: an
+                  SSO-verified principal (signed in via the workspace IdP) vs a
+                  recorded email (password login). The e-sign / Part-11 record
+                  reflects the same distinction. */}
+              <div>
+                <span className="mut">Identity</span>{" "}
+                {me.identity_verified ? (
+                  <>
+                    <span className="chip ready">SSO-verified ✓</span>{" "}
+                    <small className="mut">
+                      authenticated principal via{" "}
+                      {me.identity_issuer || "your identity provider"} — your
+                      e-signatures record a verified identity, not just an email
+                    </small>
+                  </>
+                ) : (
+                  <>
+                    <span className="chip">Recorded email</span>{" "}
+                    <small className="mut">
+                      password sign-in — honestly a recorded email. With
+                      workspace SSO configured (below), sign-in becomes a
+                      verified principal.
+                    </small>
+                  </>
+                )}
+              </div>
               <RoleMatrix myRole={me.role} />
             </div>
           ) : (
@@ -163,6 +190,9 @@ export default function AccountPage() {
             enrol section above is left untouched. */}
         <WorkspaceMfaPolicy />
 
+        {/* CAMP-SSO-OIDC: per-workspace OpenID Connect single sign-on config. */}
+        <WorkspaceSsoPolicy />
+
         <section className="card glass" style={{ padding: "14px 18px",
           maxWidth: 720, marginTop: 14 }}>
           <h2 style={{ margin: 0, fontSize: 15 }}>Password &amp; sessions</h2>
@@ -210,12 +240,15 @@ export default function AccountPage() {
             <li>Every record is scoped to this workspace at every service —
               cross-workspace reads are refused at the API, not just hidden
               in the UI.</li>
-            <li>Honest limits: single sign-on (<Term k="SSO" />: <Term k="SAML" />
-              {" / "}<Term k="OIDC" />) and automated provisioning (<Term k="SCIM" />)
-              are not yet available — accounts are per-workspace, with{" "}
-              <Term k="TOTP" /> MFA above as the second factor. Every state
-              change lands on the append-only audit event stream (streaming to
-              your <Term k="SIEM" /> is on the roadmap).</li>
+            <li>Single sign-on via <Term k="OIDC" /> (OpenID Connect,
+              Authorization Code + PKCE) is available and configured per
+              workspace above — SSO members sign in as IdP-verified principals.
+              Being honest about what is <i>not</i> yet built:{" "}
+              <Term k="SAML" />, automated provisioning (<Term k="SCIM" />) and{" "}
+              <Term k="SIEM" /> streaming remain on the roadmap. Password
+              accounts (with <Term k="TOTP" /> MFA above) stay available
+              alongside SSO. Every state change lands on the append-only audit
+              event stream.</li>
           </ul>
         </section>
 

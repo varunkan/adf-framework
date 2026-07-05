@@ -1004,6 +1004,13 @@ class DossierService:
         reason = _s(manifest.get("reason"))
         signed_at = _s(manifest.get("at")) or utcnow_iso()
         manifest["at"] = signed_at
+        # CAMP-SSO-OIDC: the signer's identity assurance travels on the manifest
+        # (stamped by the governance sign domain). Default to the honest
+        # 'recorded_email' posture when a caller signs a bare manifest.
+        identity = manifest.get("identity") or {
+            "assurance": "recorded_email", "verified": False,
+            "statement": "identity: recorded email (not SSO-verified)"}
+        manifest["identity"] = identity
         # TIER2-ROLE-SEP: re-derive the authors from the durable record (a caller
         # may also supply them inline on the manifest; the union is checked so a
         # signer cannot dodge SoD by withholding one). Then run the check and
@@ -1037,6 +1044,12 @@ class DossierService:
             "reason": reason, "manifest_id": manifest_id,
             "leaf_count": len(artifacts), "signed_at": signed_at,
             "auth_method": _s(manifest.get("auth_method")),
+            # CAMP-SSO-OIDC: the identity assurance on the immutable Part-11
+            # record — 'sso_verified (issuer)' vs 'recorded_email'.
+            "identity_assurance": _s(identity.get("assurance")),
+            "identity_verified": bool(identity.get("verified")),
+            "identity_issuer": _s(identity.get("issuer")),
+            "identity_statement": _s(identity.get("statement")),
             # SoD outcome is part of the Part-11 record — who authored vs signed
             "sod_conflict": sod["conflict"], "sod_separated": sod["separated"],
             "sod_conflicting_authors": sod["conflicting_authors"],

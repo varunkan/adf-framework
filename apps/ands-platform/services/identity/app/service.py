@@ -6,11 +6,14 @@ from datetime import datetime, timedelta, timezone
 
 from ands_shared import EventEnvelope, EventType, ProblemError, new_id
 
-from . import billing, entitlements, rbac, security
+from . import billing, entitlements, oidc, rbac, security
 from .ports import IdentityRepository
 
 PLATFORM_TENANT = ""          # owner accounts live outside any tenant
 SESSION_TTL = timedelta(hours=12)
+# CAMP-SSO-OIDC: an in-flight OIDC login round-trip is short-lived — the browser
+# should complete the /authorize → callback hop promptly.
+SSO_FLOW_TTL = timedelta(minutes=10)
 # a member locked out by a workspace MFA mandate gets a short-lived token that
 # only carries them through enrolment; they must re-login with a code after.
 MFA_SETUP_TTL = timedelta(minutes=15)
@@ -41,10 +44,14 @@ def _check_password_policy(password: str) -> None:
 
 class IdentityService:
     def __init__(self, repo: IdentityRepository, bus,
-                 *, source: str = "identity") -> None:
+                 *, source: str = "identity", oidc_provider=None) -> None:
         self.repo = repo
         self.bus = bus
         self.source = source
+        # CAMP-SSO-OIDC: the IdentityProvider port. Defaults to the real,
+        # standards-based OIDC adapter (production); tests/local dev inject the
+        # in-process fake issuer — the SQLite/in-memory analogue.
+        self.oidc = oidc_provider or oidc.StandardOidcProvider()
 
     def register(self) -> "IdentityService":
         return self
@@ -181,10 +188,11 @@ class IdentityService:
         return {"enabled": bool(user.get("mfa_enabled"))}
 
     def _start_session(self, user: dict, *, ttl: timedelta = SESSION_TTL,
-                       scope: str = "full") -> str:
+                       scope: str = "full", identity: dict | None = None) -> str:
         token = security.new_session_token()
         expires = (datetime.now(timezone.utc) + ttl).isoformat()
-        self.repo.create_session(token, user, expires, scope=scope)
+        self.repo.create_session(token, user, expires, scope=scope,
+                                 identity=identity)
         return token
 
     # -- workspace security policy (WS4.1) ----------------------------------
@@ -253,6 +261,148 @@ class IdentityService:
                 "require_mfa": bool(tenant.get("require_mfa")),
                 "require_sod": bool(tenant.get("require_sod"))}
 
+    # -- CAMP-SSO-OIDC: per-workspace SSO config ----------------------------
+    def get_sso(self, token: str) -> dict:
+        """Read this workspace's SSO configuration. The client_secret is NEVER
+        echoed back to the browser — only whether one is set."""
+        principal = self.me(token)
+        tenant_id = principal["tenant_id"]
+        cfg = (self.repo.get_sso_config(tenant_id) if tenant_id else None) or {}
+        return {
+            "tenant_id": tenant_id,
+            "enabled": bool(cfg.get("enabled")),
+            "issuer": cfg.get("issuer") or "",
+            "client_id": cfg.get("client_id") or "",
+            "redirect_uri": cfg.get("redirect_uri") or "",
+            # honest: report whether a secret is stored, not the secret itself
+            "has_secret": bool(cfg.get("client_secret")),
+            "configured": bool(cfg.get("issuer") and cfg.get("client_id")),
+            "can_manage": principal["role"] in (rbac.OWNER_ROLE,
+                                                rbac.TENANT_ADMIN_ROLE),
+            "protocol": "OpenID Connect (Authorization Code + PKCE, RS256)"}
+
+    def set_sso(self, token: str, data: dict) -> dict:
+        """An OWNER/tenant-admin configures workspace SSO: enable + issuer +
+        client_id (+ optional client_secret / redirect_uri). Enabling requires a
+        real issuer and client_id — we never advertise SSO with no IdP behind
+        it. A blank client_secret submission KEEPS the stored secret (so an admin
+        editing the issuer does not have to re-enter it)."""
+        principal = self._require_tenant_admin(token)
+        tenant_id = principal["tenant_id"]
+        if not tenant_id:
+            raise ProblemError(422, "the platform owner has no workspace to "
+                               "configure", rule="no_tenant")
+        enabled = bool(data.get("enabled"))
+        issuer = _s(data.get("issuer"))
+        client_id = _s(data.get("client_id"))
+        redirect_uri = _s(data.get("redirect_uri"))
+        if enabled and (not issuer or not client_id):
+            raise ProblemError(
+                422, "an OIDC issuer URL and client id are required to enable "
+                "SSO", rule="sso_config_incomplete")
+        if issuer and not (issuer.startswith("https://")
+                           or issuer.startswith("http://")):
+            raise ProblemError(422, "the OIDC issuer must be an https URL",
+                               rule="sso_issuer_invalid")
+        existing = self.repo.get_sso_config(tenant_id) or {}
+        # blank secret on update = keep the stored one; explicit value replaces it
+        secret = _s(data.get("client_secret")) or existing.get("client_secret", "")
+        cfg = self.repo.set_sso_config(tenant_id, enabled, issuer, client_id,
+                                       secret, redirect_uri)
+        return self.get_sso(token)
+
+    def _sso_client_config(self, tenant_id: str,
+                           redirect_uri: str = "") -> "oidc.OidcClientConfig":
+        cfg = self.repo.get_sso_config(tenant_id) or {}
+        if not cfg.get("enabled") or not cfg.get("issuer") \
+                or not cfg.get("client_id"):
+            raise ProblemError(
+                400, "single sign-on is not enabled for this workspace",
+                rule="sso_not_enabled")
+        return oidc.OidcClientConfig(
+            issuer=cfg["issuer"], client_id=cfg["client_id"],
+            client_secret=cfg.get("client_secret") or "",
+            redirect_uri=redirect_uri or cfg.get("redirect_uri") or "")
+
+    def sso_authorize(self, data: dict) -> dict:
+        """Begin an OIDC login: build the /authorize redirect for a workspace's
+        IdP and persist the state/nonce/PKCE-verifier so the callback can finish
+        the round-trip. Unauthenticated on purpose — this is a sign-in path."""
+        tenant_id = _s(data.get("tenant_id"))
+        if not tenant_id or not self.repo.get_tenant(tenant_id):
+            raise ProblemError(404, "unknown workspace", rule="tenant_unknown")
+        client_cfg = self._sso_client_config(tenant_id,
+                                             _s(data.get("redirect_uri")))
+        req = self.oidc.build_authorization_request(client_cfg)
+        expires = (datetime.now(timezone.utc) + SSO_FLOW_TTL).isoformat()
+        self.repo.create_sso_flow(req.state, tenant_id, req.nonce,
+                                  req.code_verifier, client_cfg.redirect_uri,
+                                  expires)
+        # the underscore-prefixed fields let an in-process test complete the hop;
+        # a real browser only needs authorization_url + state.
+        return {"authorization_url": req.authorization_url, "state": req.state,
+                "_nonce": req.nonce, "_code_verifier": req.code_verifier}
+
+    def sso_callback(self, data: dict) -> dict:
+        """Complete an OIDC login: validate ``state``, exchange ``code`` for a
+        verified id_token, bind/create the workspace user to the IdP subject and
+        mint the existing opaque session as an SSO-VERIFIED principal."""
+        state = _s(data.get("state"))
+        code = _s(data.get("code"))
+        flow = self.repo.get_sso_flow(state) if state else None
+        if not flow or not code:
+            raise ProblemError(400, "invalid or expired sign-in request",
+                               rule="sso_state_invalid")
+        self.repo.delete_sso_flow(state)  # one-time use
+        try:
+            expires = datetime.fromisoformat(flow["expires_at"])
+        except ValueError:
+            raise ProblemError(400, "invalid or expired sign-in request",
+                               rule="sso_state_invalid")
+        if expires < datetime.now(timezone.utc):
+            raise ProblemError(400, "this sign-in request has expired — please "
+                               "start again", rule="sso_state_expired")
+        tenant_id = flow["tenant_id"]
+        client_cfg = self._sso_client_config(tenant_id, flow["redirect_uri"])
+        try:
+            ident = self.oidc.exchange_code(
+                client_cfg, code=code, code_verifier=flow["code_verifier"],
+                nonce=flow["nonce"])
+        except oidc.jwt_rs256.JwtError as exc:
+            raise ProblemError(401, f"SSO sign-in failed: {exc}",
+                               rule="sso_token_invalid")
+        if not ident.subject:
+            raise ProblemError(401, "the identity provider returned no subject",
+                               rule="sso_no_subject")
+        user = self._bind_sso_user(tenant_id, ident)
+        identity = {"verified": True, "issuer": ident.issuer,
+                    "subject": ident.subject}
+        token = self._start_session(user, identity=identity)
+        return {"user": user, "token": token,
+                "identity": {"verified": True, "issuer": ident.issuer,
+                             "subject": ident.subject}}
+
+    def _bind_sso_user(self, tenant_id: str,
+                       ident: "oidc.VerifiedIdentity") -> dict:
+        """Resolve the workspace user for a verified IdP identity: match on the
+        stable IdP subject first, else adopt an existing same-email account
+        (binding it to the subject), else JIT-provision a new member."""
+        row = self.repo.get_user_by_idp(tenant_id, ident.issuer, ident.subject)
+        if row:
+            return self.repo._public(row)
+        existing = self.repo.get_by_email_raw(tenant_id, _email(ident.email)) \
+            if ident.email else None
+        if existing:
+            self.repo.bind_idp(existing["id"], ident.issuer, ident.subject)
+            return self.repo._public(existing)
+        # JIT provisioning: a new member from the IdP. No local password is set
+        # (SSO is their credential); they get the baseline member role.
+        user = self.repo.create_user(
+            tenant_id, _email(ident.email) or f"{ident.subject}@sso.local",
+            "", "", rbac.USER_ROLE, ident.name or ident.email)
+        self.repo.bind_idp(user["id"], ident.issuer, ident.subject)
+        return user
+
     # -- role permission matrix (WS4.2) -------------------------------------
     def role_matrix(self, token: str) -> dict:
         self.me(token)  # any authenticated principal may read it
@@ -277,7 +427,12 @@ class IdentityService:
             raise ProblemError(403, "this token is only valid for MFA setup",
                                rule="mfa_setup_scope")
         principal = {"user_id": row["user_id"], "tenant_id": row["tenant_id"],
-                     "role": row["role"], "email": row["email"]}
+                     "role": row["role"], "email": row["email"],
+                     # CAMP-SSO-OIDC: whether this principal is an IdP-VERIFIED
+                     # identity (SSO login) vs a recorded email (password login).
+                     "identity_verified": bool(row.get("identity_verified")),
+                     "identity_issuer": row.get("identity_issuer") or "",
+                     "identity_subject": row.get("identity_subject") or ""}
         # (ii) enforce the workspace mandate on the SESSION-VALIDATION path so it
         # also locks out sessions minted BEFORE the mandate was turned on. The
         # enrolment path (for_mfa_setup) skips this so a blocked member can enrol.

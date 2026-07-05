@@ -38,6 +38,17 @@ CREATE TABLE IF NOT EXISTS overrides (
 CREATE TABLE IF NOT EXISTS reset_codes (
     email TEXT PRIMARY KEY, code_salt TEXT NOT NULL, code_hash TEXT NOT NULL,
     expires_at TEXT NOT NULL);
+-- CAMP-SSO-OIDC: per-workspace OIDC client config (one row per tenant).
+CREATE TABLE IF NOT EXISTS sso_config (
+    tenant_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0,
+    issuer TEXT NOT NULL DEFAULT '', client_id TEXT NOT NULL DEFAULT '',
+    client_secret TEXT NOT NULL DEFAULT '', redirect_uri TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT '');
+-- CAMP-SSO-OIDC: in-flight OIDC login round-trips (state → nonce/verifier).
+CREATE TABLE IF NOT EXISTS sso_flows (
+    state TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, nonce TEXT NOT NULL,
+    code_verifier TEXT NOT NULL, redirect_uri TEXT NOT NULL,
+    created_at TEXT NOT NULL, expires_at TEXT NOT NULL);
 """
 
 _PUBLIC_USER = ("id", "tenant_id", "email", "role", "name", "created_at")
@@ -69,6 +80,24 @@ class SqliteIdentityRepository:
             # WS4 fix: existing sessions predate scoping — treat them as full.
             self.db.execute("ALTER TABLE sessions ADD COLUMN scope TEXT "
                             "NOT NULL DEFAULT 'full'")
+        # CAMP-SSO-OIDC: sessions carry whether the principal is IdP-VERIFIED
+        # (SSO login) vs a recorded email (password login), + the issuer/subject.
+        if "identity_verified" not in scols:
+            self.db.execute("ALTER TABLE sessions ADD COLUMN identity_verified "
+                            "INTEGER NOT NULL DEFAULT 0")
+            self.db.execute("ALTER TABLE sessions ADD COLUMN identity_issuer "
+                            "TEXT NOT NULL DEFAULT ''")
+            self.db.execute("ALTER TABLE sessions ADD COLUMN identity_subject "
+                            "TEXT NOT NULL DEFAULT ''")
+        # CAMP-SSO-OIDC: a user bound to an IdP subject carries it durably, so
+        # the SoD/e-sign records can name an authenticated principal.
+        ucols = {r["name"] for r in self.db.fetchall(
+            "PRAGMA table_info(users)")}
+        if "idp_subject" not in ucols:
+            self.db.execute("ALTER TABLE users ADD COLUMN idp_subject TEXT "
+                            "NOT NULL DEFAULT ''")
+            self.db.execute("ALTER TABLE users ADD COLUMN idp_issuer TEXT "
+                            "NOT NULL DEFAULT ''")
 
     # -- users --------------------------------------------------------------
     @staticmethod
@@ -141,12 +170,18 @@ class SqliteIdentityRepository:
         return [self._public(dict(r)) for r in rows]
 
     # -- sessions -----------------------------------------------------------
-    def create_session(self, token, user, expires_at, scope="full") -> None:
+    def create_session(self, token, user, expires_at, scope="full",
+                       identity=None) -> None:
+        identity = identity or {}
         self.db.execute(
             "INSERT INTO sessions (token, user_id, tenant_id, role, email, "
-            "created_at, expires_at, scope) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "created_at, expires_at, scope, identity_verified, "
+            "identity_issuer, identity_subject) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (token, user["id"], user["tenant_id"], user["role"], user["email"],
-             utcnow_iso(), expires_at, scope))
+             utcnow_iso(), expires_at, scope,
+             1 if identity.get("verified") else 0,
+             identity.get("issuer") or "", identity.get("subject") or ""))
 
     def get_session(self, token) -> dict | None:
         row = self.db.fetchone(
@@ -248,3 +283,56 @@ class SqliteIdentityRepository:
             "SELECT feature, enabled FROM overrides WHERE tenant_id = ?",
             (tenant_id,))
         return {r["feature"]: bool(r["enabled"]) for r in rows}
+
+    # -- CAMP-SSO-OIDC: workspace SSO config + in-flight login state ---------
+    def set_sso_config(self, tenant_id, enabled, issuer, client_id,
+                       client_secret, redirect_uri) -> dict:
+        self.db.execute(
+            "INSERT INTO sso_config (tenant_id, enabled, issuer, client_id, "
+            "client_secret, redirect_uri, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(tenant_id) DO UPDATE SET "
+            "enabled = excluded.enabled, issuer = excluded.issuer, "
+            "client_id = excluded.client_id, "
+            "client_secret = excluded.client_secret, "
+            "redirect_uri = excluded.redirect_uri, "
+            "updated_at = excluded.updated_at",
+            (tenant_id, 1 if enabled else 0, issuer, client_id, client_secret,
+             redirect_uri, utcnow_iso()))
+        return self.get_sso_config(tenant_id)
+
+    def get_sso_config(self, tenant_id) -> dict | None:
+        row = self.db.fetchone(
+            "SELECT * FROM sso_config WHERE tenant_id = ?", (tenant_id,))
+        if not row:
+            return None
+        rec = dict(row)
+        rec["enabled"] = bool(rec["enabled"])
+        return rec
+
+    def create_sso_flow(self, state, tenant_id, nonce, code_verifier,
+                        redirect_uri, expires_at) -> None:
+        self.db.execute(
+            "INSERT INTO sso_flows (state, tenant_id, nonce, code_verifier, "
+            "redirect_uri, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (state, tenant_id, nonce, code_verifier, redirect_uri,
+             utcnow_iso(), expires_at))
+
+    def get_sso_flow(self, state) -> dict | None:
+        row = self.db.fetchone(
+            "SELECT * FROM sso_flows WHERE state = ?", (state,))
+        return dict(row) if row else None
+
+    def delete_sso_flow(self, state) -> None:
+        self.db.execute("DELETE FROM sso_flows WHERE state = ?", (state,))
+
+    # -- CAMP-SSO-OIDC: bind a user to a verified IdP subject ----------------
+    def get_user_by_idp(self, tenant_id, issuer, subject) -> dict | None:
+        row = self.db.fetchone(
+            "SELECT * FROM users WHERE tenant_id = ? AND idp_issuer = ? AND "
+            "idp_subject = ?", (tenant_id, issuer, subject))
+        return dict(row) if row else None
+
+    def bind_idp(self, user_id, issuer, subject) -> None:
+        self.db.execute(
+            "UPDATE users SET idp_issuer = ?, idp_subject = ? WHERE id = ?",
+            (issuer, subject, user_id))

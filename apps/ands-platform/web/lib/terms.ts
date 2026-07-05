@@ -170,14 +170,16 @@ export const TERMS: Record<string, string> = {
   SSO:
     "Single sign-on — signing in through your organisation's own identity " +
     "provider (Azure AD/Entra, Okta, Google Workspace) instead of a separate " +
-    "password here. Not built yet; on the roadmap.",
+    "password here. Available via OpenID Connect (OIDC): an admin configures it " +
+    "per workspace on the Account & security page.",
   SAML:
     "Security Assertion Markup Language — one of the two standard protocols an " +
-    "identity provider uses to do single sign-on. The other is OIDC. (An " +
-    "enterprise SSO detail; not required to use the app today.)",
+    "identity provider uses to do single sign-on. The other is OIDC. (Here SSO " +
+    "is implemented over OIDC; SAML is on the roadmap.)",
   OIDC:
-    "OpenID Connect — the modern single-sign-on protocol built on OAuth 2.0 " +
-    "(the alternative to SAML). An enterprise SSO detail; not required today.",
+    "OpenID Connect — the modern single-sign-on protocol built on OAuth 2.0. " +
+    "This app implements SSO over OIDC (Authorization Code + PKCE, with RS256 " +
+    "id-token validation); an admin configures the issuer + client per workspace.",
   SCIM:
     "System for Cross-domain Identity Management — the standard that lets your " +
     "identity provider automatically create and remove user accounts here " +

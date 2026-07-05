@@ -164,13 +164,47 @@ def segregation_of_duties(signer, authors) -> dict:
     }
 
 
+def signer_identity(data: dict) -> dict:
+    """CAMP-SSO-OIDC: describe the SIGNER's identity assurance for the Part-11
+    record. When the caller supplies an SSO-verified principal (the signing
+    session was minted by an OIDC login — issuer + IdP subject), the signature
+    is an AUTHENTICATED PRINCIPAL and the manifest says so. Without it, the
+    signature honestly records a *recorded email* — trustworthy as a captured
+    attestation but not an IdP-verified principal.
+
+    Honesty guardrail: we never claim 'SSO-verified' unless an issuer + subject
+    were actually presented; the two states are distinct and both truthful."""
+    d = data or {}
+    verified = bool(d.get("identity_verified"))
+    issuer = _norm(d.get("identity_issuer"))
+    subject = _norm(d.get("identity_subject"))
+    if verified and issuer and subject:
+        return {
+            "assurance": "sso_verified",
+            "verified": True,
+            "issuer": issuer,
+            "subject": subject,
+            "statement": f"identity: SSO-verified ({issuer})"}
+    return {
+        "assurance": "recorded_email",
+        "verified": False,
+        "issuer": "",
+        "subject": "",
+        "statement": ("identity: recorded email (not SSO-verified — configure "
+                      "workspace SSO to bind an authenticated principal)")}
+
+
 def sign(data: dict) -> dict:
     data = data or {}
     errors = []
     signer = _norm(data.get("signer"))
     role = _norm(data.get("role")) or ROLE_SIGNER
     meaning = _norm(data.get("meaning")) or "approved"
-    auth_method = _norm(data.get("auth_method"))
+    # CAMP-SSO-OIDC: when the signer is an SSO-verified principal, that IS the
+    # (re-)authentication at signing; fall back to the caller-supplied method.
+    identity = signer_identity(data)
+    auth_method = _norm(data.get("auth_method")) or (
+        "sso_oidc" if identity["verified"] else "")
     # The signing REASON is the human meaning-of-signature statement (Part-11).
     # When the caller omits the key entirely we default it from the controlled
     # meaning (keeps the in-process mesh working); when the caller SUPPLIES the
@@ -241,6 +275,9 @@ def sign(data: dict) -> dict:
     manifest = {
         "segregation_of_duties": sod,
         "signer": signer, "role": ROLE_SIGNER, "auth_method": auth_method,
+        # CAMP-SSO-OIDC: the signer's identity assurance on the Part-11 record —
+        # 'sso_verified' (authenticated principal + issuer) or 'recorded_email'.
+        "identity": identity,
         "meaning": meaning, "reason": reason,
         # server-stamped UTC when the caller does not supply one, so the
         # signing time is a trustworthy record and never blank

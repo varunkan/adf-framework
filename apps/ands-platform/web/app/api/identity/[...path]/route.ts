@@ -44,7 +44,14 @@ async function forward(req: NextRequest, path: string[]) {
     });
     const route = path.join("/");
     // set the HttpOnly session cookie from a successful auth response
-    if (upstream.ok && (route === "auth/login" || route === "auth/signup")) {
+    // (CAMP-SSO-OIDC: the SSO callback mints a session token exactly like a
+    // password login, so the same cookie is set here).
+    if (
+      upstream.ok &&
+      (route === "auth/login" ||
+        route === "auth/signup" ||
+        route === "auth/sso/callback")
+    ) {
       try {
         const token = JSON.parse(buf.toString("utf8"))?.token;
         if (token)
