@@ -127,3 +127,13 @@ Fall back to Grep/Glob/Read **only** when the graph doesn't cover what you need.
 2. Use `detect_changes` for code review.
 3. Use `get_affected_flows` to understand impact.
 4. Use `query_graph` pattern="tests_for" to check coverage.
+
+### RULE: update the knowledge graph after every commit
+
+**After every `git commit`, update the knowledge graph so it reflects the new
+HEAD** — call `mcp__code-review-graph__build_or_update_graph_tool` (incremental;
+it re-parses only what changed). Do this once per commit, right after committing.
+This keeps `detect_changes`, `query_graph`, `get_impact_radius`, and semantic
+search accurate for the next task; a stale graph gives wrong callers/dependents/
+coverage. When a batch of commits lands together, one update after the last is
+fine. (The auto-update hook is best-effort — this rule guarantees it.)
