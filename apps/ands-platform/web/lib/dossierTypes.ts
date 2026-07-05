@@ -161,6 +161,20 @@ export interface EsignManifestLeaf {
   checksum: string;
   checksum_type?: string;
 }
+// TIER2-ROLE-SEP: the segregation-of-duties outcome recorded with a signature —
+// whether the signer is a DISTINCT authorized approver from the author(s) of
+// the signed content. Honesty: a role-separation check, NOT an SSO/IdP claim.
+export interface SegregationOfDuties {
+  separated: boolean;
+  conflict: boolean;
+  authorship_known: boolean;
+  signer: string;
+  authors: string[];
+  author_count: number;
+  conflicting_authors: string[];
+  reason: string;
+  enforced?: boolean;
+}
 export interface EsignManifest {
   signer: string;
   role?: string;
@@ -175,6 +189,15 @@ export interface EsignManifest {
   policy?: string;
   immutable?: boolean;
   updated_at?: string;
+  segregation_of_duties?: SegregationOfDuties;
+}
+// The distinct author identities recorded for a dossier's content — the set a
+// signer is checked against for segregation of duties.
+export interface ContentAuthors {
+  dossier_id: string;
+  authors: string[];
+  author_count: number;
+  by_section: Record<string, string>;
 }
 export interface EsignVerificationFinding {
   rule: string;

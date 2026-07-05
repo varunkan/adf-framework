@@ -291,7 +291,8 @@ class DossierService:
 
     def _write_entry(self, dossier_id, section, node, *, action, meta=None,
                      lang=None, leaf_id=None, na_reason=None,
-                     content_origin=None, content_confirmed=None) -> dict:
+                     content_origin=None, content_confirmed=None,
+                     record_author=False) -> dict:
         entry = self.repo.get_section_state(_s(dossier_id), _s(section)) or {}
         entry["action"] = action
         if na_reason is not None:
@@ -303,6 +304,16 @@ class DossierService:
             entry["content_origin"] = content_origin
         if content_confirmed is not None:
             entry["content_confirmed"] = bool(content_confirmed)
+        # TIER2-ROLE-SEP: record WHO authored this section's content, so a later
+        # e-signature can be checked for segregation of duties (the signer must
+        # be a distinct authorized approver from the author). The acting user is
+        # the per-request actor set from X-User-Email. Only content-producing
+        # actions (upload/generate/confirm) pass record_author=True; an N/A mark
+        # or a status-only rewrite must not claim authorship.
+        if record_author:
+            who = _s(audit_hook._actor.get())
+            if who:
+                entry["content_author"] = who
         if node["bilingual"] and lang:
             docs = dict(entry.get("documents") or {})
             if meta:
@@ -348,7 +359,8 @@ class DossierService:
         # an upload is the filer's OWN content — origin uploaded, confirmed.
         self._write_entry(dossier_id, section, node, action="uploaded",
                           meta=meta, lang=lang, leaf_id=leaf_id,
-                          content_origin="uploaded", content_confirmed=True)
+                          content_origin="uploaded", content_confirmed=True,
+                          record_author=True)
         audit_hook.record("dossier.document_uploaded", _s(dossier_id),
                           {"section": _s(section), "filename": _s(filename),
                            "lang": lang or ""})
@@ -392,7 +404,8 @@ class DossierService:
         confirmed = not (is_ai or is_sample)
         self._write_entry(dossier_id, section, node, action="generated",
                           meta=meta, leaf_id=node["leaf_id"],
-                          content_origin=origin, content_confirmed=confirmed)
+                          content_origin=origin, content_confirmed=confirmed,
+                          record_author=True)
         audit_hook.record("dossier.document_generated", _s(dossier_id),
                           {"section": _s(section),
                            "generator": _s(node.get("generator_key")),
@@ -429,7 +442,7 @@ class DossierService:
                 rule="worked_example_not_replaced", detail=_s(section))
         self._write_entry(dossier_id, section, node,
                           action=entry.get("action") or "generated",
-                          content_confirmed=True)
+                          content_confirmed=True, record_author=True)
         audit_hook.record("dossier.content_confirmed", _s(dossier_id),
                           {"section": _s(section), "prior_origin": origin})
         return self.content_state(dossier_id)
@@ -712,12 +725,80 @@ class DossierService:
                     out[lid] = cs
         return out
 
+    def content_authors(self, dossier_id: str,
+                         tenant_id: str | None = None) -> dict:
+        """The distinct identities that AUTHORED this dossier's content — from
+        the ``content_author`` stamped on each section when it was uploaded /
+        generated / confirmed. This is the author set a Part-11 e-signature is
+        checked against for segregation of duties.
+
+        Honesty: these are the recorded author identity strings — NOT an
+        SSO/IdP-verified identity. Where no author was recorded (older content,
+        in-process mesh with no actor), the section simply contributes none."""
+        self._tenant_guard(dossier_id, tenant_id)
+        if not self.repo.get_dossier_index(_s(dossier_id)):
+            raise ProblemError(404, "no such dossier", detail=_s(dossier_id))
+        seen: dict[str, str] = {}
+        by_section: dict[str, str] = {}
+        for section, state in self.repo.list_section_state(
+                _s(dossier_id)).items():
+            who = _s((state or {}).get("content_author"))
+            if not who:
+                continue
+            by_section[_s(section)] = who
+            key = who.lower()
+            if key not in seen:
+                seen[key] = who
+        authors = list(seen.values())
+        return {"dossier_id": _s(dossier_id), "authors": authors,
+                "author_count": len(authors), "by_section": by_section}
+
+    @staticmethod
+    def _sod_check(signer: str, authors: list) -> dict:
+        """TIER2-ROLE-SEP: a segregation-of-duties check — the signer must be a
+        DISTINCT authorized approver from the author(s) of the signed content.
+        Mirrors the governance e-sign domain's semantics on the DURABLE side so
+        the record is authoritative even when the manifest was minted elsewhere.
+        Identity comparison is case/whitespace-insensitive (same person).
+
+        Honesty: a role-SEPARATION check ("the signer attests as a distinct
+        approver"), NOT an SSO/IdP identity assertion."""
+        signer_key = _s(signer).lower()
+        by_key: dict[str, str] = {}
+        for a in (authors or []):
+            key = _s(a).lower()
+            if key and key not in by_key:
+                by_key[key] = _s(a)
+        authorship_known = bool(by_key)
+        conflicting = [disp for k, disp in by_key.items() if k == signer_key]
+        conflict = bool(conflicting)
+        separated = authorship_known and not conflict
+        reason = (
+            "The signer is also an author of the content being signed — a "
+            "segregation-of-duties conflict. A 21 CFR Part 11 signature is most "
+            "defensible when the signer is a distinct authorized approver from "
+            "the author(s)." if conflict else
+            ("The signer is distinct from all recorded author(s) of the signed "
+             "content." if separated else
+             "No author identity is recorded for the signed content, so "
+             "separation of duties cannot be proven from the record."))
+        return {"separated": separated, "conflict": conflict,
+                "authorship_known": authorship_known, "signer": _s(signer),
+                "authors": list(by_key.values()), "author_count": len(by_key),
+                "conflicting_authors": conflicting, "reason": reason}
+
     def record_esign(self, dossier_id: str, manifest: dict, *,
                      actor: str = "", tenant_id: str | None = None) -> dict:
         """Persist a signed e-signature manifest and write its durable Part-11
         audit-ledger event atomically. The manifest is produced by the
         governance e-sign domain (bound over the checksummed eCTD leaves); here
-        we make it a durable, verifiable, immutably-recorded signing act."""
+        we make it a durable, verifiable, immutably-recorded signing act.
+
+        TIER2-ROLE-SEP: a segregation-of-duties check runs here too — the signer
+        is compared against the recorded author(s) of the dossier's content. The
+        default posture SURFACES + WARNS (recording the outcome on the manifest
+        and audit event); when the tenant enforces SoD (``enforce_segregation``
+        on the manifest) a signer who is also an author is REJECTED."""
         self._tenant_guard(dossier_id, tenant_id)
         if not self.repo.get_dossier_index(_s(dossier_id)):
             raise ProblemError(404, "no such dossier", detail=_s(dossier_id))
@@ -735,12 +816,34 @@ class DossierService:
         reason = _s(manifest.get("reason"))
         signed_at = _s(manifest.get("at")) or utcnow_iso()
         manifest["at"] = signed_at
+        # TIER2-ROLE-SEP: re-derive the authors from the durable record (a caller
+        # may also supply them inline on the manifest; the union is checked so a
+        # signer cannot dodge SoD by withholding one). Then run the check and
+        # stamp the outcome onto the manifest for the immutable Part-11 record.
+        derived = self.content_authors(_s(dossier_id),
+                                       tenant_id=tenant_id)["authors"]
+        supplied = [a for a in (manifest.get("authors") or [])]
+        enforce_sod = bool(manifest.get("enforce_segregation"))
+        sod = self._sod_check(signer, list(derived) + list(supplied))
+        sod["enforced"] = enforce_sod
+        if enforce_sod and sod["conflict"]:
+            raise ProblemError(
+                422, "Segregation of duties is required: the signer "
+                     f"({signer}) is also an author of the content being "
+                     "signed. A distinct authorized approver must apply this "
+                     "signature.",
+                rule="segregation_of_duties")
+        manifest["segregation_of_duties"] = sod
         # who/what/when/why on the immutable trail — the Part-11 signing record
         event_data = {
             "signer": signer, "meaning": _s(manifest.get("meaning")),
             "reason": reason, "manifest_id": manifest_id,
             "leaf_count": len(artifacts), "signed_at": signed_at,
             "auth_method": _s(manifest.get("auth_method")),
+            # SoD outcome is part of the Part-11 record — who authored vs signed
+            "sod_conflict": sod["conflict"], "sod_separated": sod["separated"],
+            "sod_conflicting_authors": sod["conflicting_authors"],
+            "sod_enforced": enforce_sod,
         }
         self.repo.set_esign_with_event(
             _s(dossier_id), manifest, actor=_s(actor) or signer,
@@ -754,6 +857,7 @@ class DossierService:
             "leaf_count": len(artifacts), "signed_at": signed_at,
             "tz": _s(manifest.get("tz")) or "UTC",
             "policy": _s(manifest.get("policy")),
+            "segregation_of_duties": sod,
             # honesty guardrail surfaced with the record itself
             "alignment": ("21 CFR Part 11 / GxP aligned — immutable, "
                           "meaning-bearing, verifiable. Not an external "

@@ -1,6 +1,7 @@
 // Client over the same-origin /api/dossier proxy → the dossier microservice.
 import { friendlyError } from "./friendlyError";
 import type {
+  ContentAuthors,
   ContentState,
   CurrentView,
   DossierFull,
@@ -172,6 +173,14 @@ export const dossierApi = {
   getEsign: (id: string) =>
     j<{ dossier_id: string; manifest: EsignManifest | null }>(
       `/dossiers/${encodeURIComponent(id)}/esign`),
+
+  // TIER2-ROLE-SEP: the distinct author identities recorded for this dossier's
+  // content. The sign step compares the signer against this set for
+  // segregation of duties (the signer should be a distinct authorized approver
+  // from the author(s)). Honesty: recorded author strings, not SSO-verified.
+  contentAuthors: (id: string) =>
+    j<ContentAuthors>(
+      `/dossiers/${encodeURIComponent(id)}/content-authors`),
 
   // Re-verify the signature: re-compute the current leaf checksums and compare
   // against the signed manifest. `tampered` is true if any signed leaf changed

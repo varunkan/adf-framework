@@ -257,6 +257,13 @@ def build_app(service: DossierService) -> FastAPI:
     def get_esign(dossier_id: str, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
         return service.get_esign(dossier_id, x_tenant_id or None)
 
+    # TIER2-ROLE-SEP: the distinct author identities recorded for this dossier's
+    # content — the set a signer is checked against for segregation of duties.
+    @router.get("/dossiers/{dossier_id}/content-authors")
+    def content_authors(dossier_id: str,
+                        x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        return service.content_authors(dossier_id, x_tenant_id or None)
+
     @router.post("/dossiers/{dossier_id}/esign/verify")
     def verify_esign(dossier_id: str, body: dict = None,
                      x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):

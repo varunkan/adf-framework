@@ -36,6 +36,13 @@ def _norm(value) -> str:
     return str(value if value is not None else "").strip()
 
 
+def _ident(value) -> str:
+    """Normalize an identity for COMPARISON: an email/username that differs only
+    by case or surrounding whitespace is the same person, so SoD cannot be
+    defeated by 'Vera@X' vs 'vera@x'. Not used for display — only for equality."""
+    return _norm(value).lower()
+
+
 def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -105,6 +112,58 @@ def qa_review(data: dict) -> dict:
         "comment": _norm(data.get("comment"))}}
 
 
+def segregation_of_duties(signer, authors) -> dict:
+    """TIER2-ROLE-SEP: a segregation-of-duties check for a Part-11 e-signature.
+
+    An e-signature is only DEFENSIBLE when the person attesting/approving is a
+    DISTINCT authorized approver — not one of the authors of the very content
+    being signed. This compares the SIGNER identity against the set of AUTHOR
+    identities recorded for the signed content and reports:
+
+      - ``conflict``            the signer is (also) one of the authors;
+      - ``conflicting_authors`` the display identities that collide (deduped);
+      - ``authorship_known``    whether ANY author identity was recorded — with
+                                no author on record we cannot PROVE separation,
+                                so ``separated`` is False and this stays False.
+                                We never silently report unknown authorship as
+                                cleanly separated.
+
+    Honesty: this asserts that "the signer attests as a distinct approver". It
+    is NOT an SSO/IdP identity assertion — the identities are the recorded
+    signer/author strings, compared case/whitespace-insensitively.
+    """
+    signer_key = _ident(signer)
+    # dedupe authors on the comparison key while keeping the first display form
+    by_key: dict[str, str] = {}
+    for a in (authors or []):
+        key = _ident(a)
+        if key and key not in by_key:
+            by_key[key] = _norm(a)
+    authorship_known = bool(by_key)
+    conflicting = [display for key, display in by_key.items()
+                   if key and key == signer_key]
+    conflict = bool(conflicting)
+    # separation is PROVEN only when authorship is known AND no author collides
+    separated = authorship_known and not conflict
+    reason = ("The signer is also an author of the content being signed — a "
+              "segregation-of-duties conflict. A 21 CFR Part 11 signature is "
+              "most defensible when the signer is a DISTINCT authorized "
+              "approver from the author(s)." if conflict else
+              ("The signer is distinct from all recorded author(s) of the "
+               "signed content." if separated else
+               "No author identity is recorded for the signed content, so "
+               "separation of duties cannot be proven from the record."))
+    return {
+        "separated": separated, "conflict": conflict,
+        "authorship_known": authorship_known,
+        "signer": _norm(signer),
+        "authors": list(by_key.values()),
+        "author_count": len(by_key),
+        "conflicting_authors": conflicting,
+        "reason": reason,
+    }
+
+
 def sign(data: dict) -> dict:
     data = data or {}
     errors = []
@@ -163,9 +222,24 @@ def sign(data: dict) -> dict:
             continue
         bound.append({"id": art_id, "kind": _norm(art.get("kind")) or "leaf",
                       "checksum": checksum, "checksum_type": "MD5"})
+    # TIER2-ROLE-SEP: segregation of duties. The signer must be a DISTINCT
+    # authorized approver from the author(s) of the content being signed. The
+    # default posture SURFACES + WARNS (recording the outcome on the manifest);
+    # an admin may make it a HARD BLOCK per tenant via ``enforce_segregation``.
+    enforce_sod = bool(data.get("enforce_segregation"))
+    sod = segregation_of_duties(signer, data.get("authors") or [])
+    sod = {**sod, "enforced": enforce_sod}
+    if enforce_sod and sod["conflict"]:
+        errors.append({
+            "rule": "segregation_of_duties",
+            "message": ("Segregation of duties is required: the signer "
+                        f"({signer}) is also an author of the content being "
+                        "signed. A distinct authorized approver must apply "
+                        "this signature.")})
     if errors:
         return {"valid": False, "errors": errors}
     manifest = {
+        "segregation_of_duties": sod,
         "signer": signer, "role": ROLE_SIGNER, "auth_method": auth_method,
         "meaning": meaning, "reason": reason,
         # server-stamped UTC when the caller does not supply one, so the
