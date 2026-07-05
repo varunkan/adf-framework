@@ -6,6 +6,7 @@
 import { useEffect, useState } from "react";
 import { dossierApi } from "@/lib/dossierApi";
 import type { ValidationRule, ValidationCriteria } from "@/lib/dossierTypes";
+import { CriteriaSyncHistory } from "./CriteriaSyncHistory";
 
 function group(rules: ValidationRule[]): [string, ValidationRule[]][] {
   const by: Record<string, ValidationRule[]> = {};
@@ -38,10 +39,25 @@ export function RuleCatalogue({ criteria }: { criteria?: ValidationCriteria }) {
       {criteria && (
         <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>
           Profile: <b>{criteria.name} v{criteria.version}</b>
-          {criteria.synced ? ` · synced ${criteria.synced}` : ""}. Modeled on:{" "}
-          {criteria.modeled_on}
+          {criteria.synced ? ` · synced ${criteria.synced}` : ""}
+          {criteria.review
+            ? ` · next review ${criteria.review.next_review}`
+            : ""}
+          . Modeled on: {criteria.modeled_on}
         </div>
       )}
+
+      {/* CAMP-CRITERIA-SYNC: the auditable "is the ruleset kept current?" trail —
+          review cadence + append-only version history, live from the engine. */}
+      <details style={{ marginTop: 6 }}>
+        <summary style={{ cursor: "pointer" }}>
+          How this ruleset stays synced to Health Canada&apos;s criteria
+        </summary>
+        <div style={{ marginTop: 6 }}>
+          <CriteriaSyncHistory />
+        </div>
+      </details>
+
       {err && <div className="notice bad" style={{ marginTop: 6 }}>{err}</div>}
       {rules === null && !err && (
         <div className="mut" style={{ marginTop: 6 }}>Loading…</div>

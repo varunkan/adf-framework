@@ -25,6 +25,7 @@ import type {
   SequenceList,
   ValidationResult,
   ValidationRuleCatalog,
+  CriteriaHistory,
 } from "./dossierTypes";
 
 const BASE = "/api/dossier";
@@ -159,6 +160,12 @@ export const dossierApi = {
   // criteria block. Powers the "what do we actually check" surface.
   validationRules: () =>
     j<ValidationRuleCatalog>(`/validation/rules`),
+
+  // CAMP-CRITERIA-SYNC: the auditable criteria-sync trail + review cadence —
+  // proves the ruleset stays synced to HC criteria versions (maintained, not
+  // stale). Powers the "how the ruleset is kept current" surface.
+  criteriaHistory: () =>
+    j<CriteriaHistory>(`/validation/criteria-history`),
 
   // ADOPT-EVALIDATOR: read the current USER-ATTESTED external eValidator result
   // for a dossier (or null). ANDS Studio cannot run HC's official eValidator —

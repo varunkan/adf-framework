@@ -120,12 +120,41 @@ export interface ValidationCriteria {
   version: string;
   // When the rule set was last reconciled against the published HC criteria.
   synced?: string;
+  // CAMP-CRITERIA-SYNC: the maintenance-cadence commitment, embedded so it
+  // travels with every validation surface (last/next review + how it's kept).
+  review?: CriteriaReview;
   modeled_on: string;
   disclaimer: string;
   coverage: {
     checked: string[];
     not_checked: string[];
   };
+}
+
+// CAMP-CRITERIA-SYNC: the "last reviewed / next review" maintenance cadence — a
+// buyer's proof the ruleset is maintained, not stale.
+export interface CriteriaReview {
+  cadence: string;
+  last_reviewed: string;
+  next_review: string;
+  process?: string;
+}
+
+// CAMP-CRITERIA-SYNC: one auditable entry in the criteria-sync trail — a profile
+// version, when it was reconciled to HC's published criteria, and what changed.
+export interface CriteriaHistoryEntry {
+  version: string;
+  date: string;
+  synced_to: string;
+  changes: string[];
+}
+
+// CAMP-CRITERIA-SYNC: the full criteria-sync transparency payload — the
+// versioned profile, the newest-first version history, and the review cadence.
+export interface CriteriaHistory {
+  criteria: ValidationCriteria;
+  history: CriteriaHistoryEntry[];
+  review: CriteriaReview;
 }
 
 // ADOPT-EVALIDATOR: a USER-ATTESTED external validator result. ANDS Studio

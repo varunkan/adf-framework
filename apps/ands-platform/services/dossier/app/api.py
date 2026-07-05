@@ -203,6 +203,14 @@ def build_app(service: DossierService) -> FastAPI:
         from . import ectd_validation
         return ectd_validation.rule_catalog()
 
+    @router.get("/validation/criteria-history")
+    def validation_criteria_history():
+        # CAMP-CRITERIA-SYNC: the auditable criteria-sync trail + review cadence
+        # — proves the ruleset stays synced to HC criteria versions (maintained,
+        # not stale). A buyer's adoption ask; static + honest, no tenant scope.
+        from . import ectd_validation
+        return ectd_validation.criteria_history()
+
     @router.post("/dossiers/{dossier_id}/rename")
     def rename_dossier(dossier_id: str, body: dict,
                        x_tenant_id: str = Header(default="",

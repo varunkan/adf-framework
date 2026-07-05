@@ -185,6 +185,101 @@ CRITERIA_VERSION = "1.2"
 # Criteria. Bump this whenever HC republishes and the mapping is re-checked.
 CRITERIA_SYNCED = "2026-05 (HC eCTD Validation Criteria v5.3)"
 
+# CAMP-CRITERIA-SYNC — criteria-sync transparency. A regulatory buyer's adoption
+# ask was: "confirm the structural validator stays synced to HC criteria versions
+# as HC updates them." Being able to point at a CURRENT sync date is not enough —
+# a buyer auditing whether the ruleset is MAINTAINED (not stale) needs the trail:
+# every profile version, when it was reconciled to HC's published criteria, and
+# exactly what changed. This is that auditable trail. It is factual history of
+# THIS validator profile; it never claims parity with HC's official eValidator.
+#
+# Invariant enforced by tests: newest-first, the top entry's ``version`` is the
+# live CRITERIA_VERSION and its ``synced_to`` is consistent with CRITERIA_SYNCED.
+# Append a new entry (never rewrite an old one) whenever CRITERIA_VERSION bumps.
+CRITERIA_HISTORY = [
+    {
+        "version": "1.2",
+        "date": "2026-05",
+        "synced_to": "HC eCTD Validation Criteria v5.3",
+        "changes": [
+            "Every CA-E/CA-W rule now names the governing HC/ICH source clause "
+            "it is modeled on (rule_catalog 'source' field).",
+            "criteria() declares the date it was last reconciled against the "
+            "published HC criteria (the 'synced' field).",
+            "Added the honestly-scoped PDF/A-1b STRUCTURAL marker checks "
+            "(CA-E-7003..7005 active-content errors; CA-W-7006..7009 advisory "
+            "conformance markers) — structural only, NOT full ISO 19005-1.",
+        ],
+    },
+    {
+        "version": "1.1",
+        "date": "2026-03",
+        "synced_to": "HC eCTD Validation Criteria v5.3",
+        "changes": [
+            "Added the transmissible per-sequence <ectd:ectd> backbone checks "
+            "(CA-E-55xx: operation attrs, lifecycle back-pointers, live hrefs, "
+            "eCTD DOCTYPE) beyond the static index.xml structure.",
+            "Added ca-regional.xml identity checks (company id, drug product) "
+            "against the CA Module 1 v2.2 regional backbone.",
+        ],
+    },
+    {
+        "version": "1.0",
+        "date": "2026-02",
+        "synced_to": "HC eCTD Validation Criteria v5.3",
+        "changes": [
+            "Initial published rule set: leaf inventory integrity, lifecycle "
+            "operation legality, file/folder naming hygiene, sequence numbering, "
+            "index.xml + ca-regional.xml backbone structure, PDF header/encryption.",
+            "Adopted stable HC-v5.3-style CA-<severity>-<block><nn> rule ids "
+            "(never renumbered or reused — retired instead).",
+        ],
+    },
+]
+
+# The maintenance-cadence commitment. A buyer must see this ruleset is on a
+# review schedule, not left to rot. HC does not publish on a fixed calendar, so
+# the honest cadence is: a scheduled periodic review PLUS an event-driven review
+# triggered whenever HC republishes the eCTD Validation Criteria. Bump
+# CRITERIA_REVIEW['last_reviewed'] each time a review completes and roll
+# 'next_review' forward; if a review changes the rules, also append to
+# CRITERIA_HISTORY and bump CRITERIA_VERSION.
+CRITERIA_REVIEW = {
+    "cadence": "Reviewed on a rolling quarterly schedule AND on demand whenever "
+               "Health Canada republishes the eCTD Validation Criteria.",
+    "last_reviewed": "2026-05",
+    "next_review": "2026-08",
+    "process": "Each review re-reconciles every CA-E/CA-W rule against the "
+               "current published Health Canada eCTD Validation Criteria and "
+               "the referenced ICH eCTD 3.2.2 / CA Module 1 v2.2 specifications. "
+               "Any change is recorded as a new version in the criteria history "
+               "with a dated changelog — the trail is append-only and auditable. "
+               "This tracks THIS structural profile; it is not, and does not "
+               "claim to be, Health Canada's official eValidator.",
+}
+
+
+def _review_block() -> dict:
+    """The maintenance-cadence commitment, embedded wherever criteria() travels."""
+    return dict(CRITERIA_REVIEW)
+
+
+def criteria_history() -> dict:
+    """The auditable criteria-sync trail + the review-cadence commitment.
+
+    CAMP-CRITERIA-SYNC: proves the ruleset is MAINTAINED, not stale. Returns the
+    full version history (newest-first: each version's sync date, which HC
+    criteria it was reconciled to, and a dated changelog of what changed), the
+    'last reviewed / next review' cadence, and the current versioned profile so a
+    report can stamp provenance-of-maintenance. Purely factual history of this
+    structural validator profile — never an HC official-eValidator parity claim.
+    """
+    return {
+        "criteria": criteria(),
+        "history": [dict(e, changes=list(e["changes"])) for e in CRITERIA_HISTORY],
+        "review": _review_block(),
+    }
+
 
 def criteria() -> dict:
     """The named, versioned validation profile + an honest coverage statement."""
@@ -192,6 +287,10 @@ def criteria() -> dict:
         "name": "ANDS Studio structural eCTD validator",
         "version": CRITERIA_VERSION,
         "synced": CRITERIA_SYNCED,
+        # CAMP-CRITERIA-SYNC: the maintenance-cadence commitment travels with the
+        # versioned profile so provenance-of-maintenance (last/next review) is
+        # stamped onto every validation report, not only a separate endpoint.
+        "review": _review_block(),
         "modeled_on": "Health Canada eCTD Validation Criteria v5.3 rule scheme "
                       "(CA-<severity>-<block> ids), CA Module 1 v2.2 regional "
                       "backbone and the ICH eCTD 3.2.2 index",

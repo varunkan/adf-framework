@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import { TopNav } from "@/components/TopNav";
 import Link from "next/link";
+import { CriteriaSyncHistory } from "@/components/dossier/CriteriaSyncHistory";
 
 type Rule = { rule: string; rule_id: string; family: string;
   severity: string; description: string };
@@ -149,6 +150,17 @@ export default function HelpPage() {
                 </details>
               ))
             )}
+          </div>
+        </section>
+        {/* CAMP-CRITERIA-SYNC: the auditable proof the ruleset stays synced to
+            Health Canada's criteria versions — review cadence + append-only
+            version history, live from the validation engine. */}
+        <section style={{ marginTop: 24 }}>
+          <h2 style={{ fontSize: 16 }}>
+            How the ruleset stays synced to Health Canada&apos;s criteria
+          </h2>
+          <div className="card glass" style={{ padding: "12px 16px" }}>
+            <CriteriaSyncHistory open />
           </div>
         </section>
         <section style={{ marginTop: 18 }}>
