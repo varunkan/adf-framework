@@ -72,37 +72,40 @@ export default function RegistryPage() {
     <>
       <TopNav subtitle="registry" />
       <main className="dossier-home">
-        <div style={{ display: "flex", alignItems: "baseline", gap: 12,
-          flexWrap: "wrap" }}>
-          <h1>Product registry</h1>
-          {/* per-tenant boundary indicator — which client workspace am I in? */}
-          <span
-            className="chip"
-            title="You are working inside a single client workspace. Data is walled off per workspace — cross-workspace reads are refused at the API. See the Trust & security summary on the home page."
-            style={{ display: "inline-flex", alignItems: "center", gap: 5,
-              fontSize: 11.5 }}
-          >
-            <ShieldCheck size={13} aria-hidden />
-            Workspace: <b>{workspace || "this client"}</b> · isolated
-          </span>
-          <span className="spacer" />
-          <button onClick={() => setCreating((v) => !v)}>
-            {creating ? "Cancel" : "Register product +"}
-          </button>
-        </div>
-        <p className="mut" style={{ maxWidth: "64ch" }}>
-          Every marketed-product registration — <Term k="DIN" />, market status
-          and the post-approval obligations (including{" "}
-          <Term k="Right to Sell" />) that follow the{" "}
-          <Term k="NOC">Notice of Compliance</Term>.
-        </p>
-        <p className="mut" style={{ fontSize: 12, maxWidth: "72ch" }}>
-          Every change on this page is captured in the dossier’s append-only
-          audit trail — actor and workspace stamped, sequence-numbered,
-          exportable for inspections (open a dossier → Audit).
-        </p>
+        <header style={{ marginBottom: 8 }}>
+          <div className="eyebrow">Operations</div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 12,
+            flexWrap: "wrap" }}>
+            <h1>Product registry</h1>
+            {/* per-tenant boundary indicator — which client workspace am I in? */}
+            <span
+              className="chip"
+              title="You are working inside a single client workspace. Data is walled off per workspace — cross-workspace reads are refused at the API. See the Trust & security summary on the home page."
+              style={{ display: "inline-flex", alignItems: "center", gap: 5,
+                fontSize: 11.5 }}
+            >
+              <ShieldCheck size={13} aria-hidden />
+              Workspace: <b>{workspace || "this client"}</b> · isolated
+            </span>
+            <span className="spacer" />
+            <button onClick={() => setCreating((v) => !v)}>
+              {creating ? "Cancel" : "Register product +"}
+            </button>
+          </div>
+          <p className="lede">
+            Every marketed-product registration — <Term k="DIN" />, market status
+            and the post-approval obligations (including{" "}
+            <Term k="Right to Sell" />) that follow the{" "}
+            <Term k="NOC">Notice of Compliance</Term>.
+          </p>
+          <p className="mut" style={{ maxWidth: "72ch" }}>
+            Every change on this page is captured in the dossier’s append-only
+            audit trail — actor and workspace stamped, sequence-numbered,
+            exportable for inspections (open a dossier → Audit).
+          </p>
+        </header>
 
-        <div className="notice" style={{ maxWidth: "72ch" }}>
+        <div className="notice" style={{ maxWidth: "72ch", marginTop: 4 }}>
           <b>Record only.</b> Registering a product or changing its status here
           logs a record in your own workspace — it does <b>not</b> transmit or
           file anything with Health Canada. Update these to mirror what Health
@@ -111,7 +114,7 @@ export default function RegistryPage() {
 
         {creating && <RegisterForm onCreated={created} />}
 
-        {err && <div className="notice bad">{err}</div>}
+        {err && <div className="notice bad" style={{ marginTop: 16 }}>{err}</div>}
 
         {loading ? (
           <div className="mut" style={{ marginTop: 20 }}>

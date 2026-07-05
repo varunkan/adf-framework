@@ -60,21 +60,24 @@ export default function CorrespondencePage() {
     <>
       <TopNav subtitle="correspondence" />
       <main className="dossier-home">
-        <h1>Correspondence &amp; notices</h1>
-        <p className="mut" style={{ maxWidth: "70ch" }}>
-          Log every exchange with Health Canada, ingest notices to drive the
-          DSTS lifecycle, and watch the PM(NOC) statutory clocks on each{" "}
-          <Term k="Form V" /> allegation (a <Term k="NOA" /> opens the{" "}
-          <Term k="s.6" /> action window; an s.6 action starts the{" "}
-          <Term k="24-month stay" />).
-        </p>
-        <p className="mut" style={{ fontSize: 12, maxWidth: "72ch" }}>
-          Every change on this page is captured in the dossier’s append-only
-          audit trail — actor and workspace stamped, sequence-numbered,
-          exportable for inspections (open a dossier → Audit).
-        </p>
+        <header style={{ marginBottom: 8 }}>
+          <div className="eyebrow">Operations</div>
+          <h1>Correspondence &amp; notices</h1>
+          <p className="lede">
+            Log every exchange with Health Canada, ingest notices to drive the
+            DSTS lifecycle, and watch the PM(NOC) statutory clocks on each{" "}
+            <Term k="Form V" /> allegation (a <Term k="NOA" /> opens the{" "}
+            <Term k="s.6" /> action window; an s.6 action starts the{" "}
+            <Term k="24-month stay" />).
+          </p>
+          <p className="mut" style={{ maxWidth: "72ch" }}>
+            Every change on this page is captured in the dossier’s append-only
+            audit trail — actor and workspace stamped, sequence-numbered,
+            exportable for inspections (open a dossier → Audit).
+          </p>
+        </header>
 
-        <div className="notice" style={{ maxWidth: "72ch" }}>
+        <div className="notice" style={{ maxWidth: "72ch", marginTop: 4 }}>
           <b>Record only.</b> Everything on this page logs a record in your own
           workspace — it does <b>not</b> transmit anything to Health Canada.
           Ingesting a notice, serving an NOA or logging correspondence updates
@@ -84,6 +87,7 @@ export default function CorrespondencePage() {
 
         {/* WS-OPS-TENANT: per-client/sponsor scope + isolation statement — the
             FIRST control, replacing the old auto-pick of dossier #1. */}
+        <div style={{ marginTop: 20 }}>
         <SponsorScope
           items={dossiers}
           value={sponsor}
@@ -96,8 +100,10 @@ export default function CorrespondencePage() {
           }}
           count={scoped.length}
         />
+        </div>
 
-        <div className="card glass" style={{ padding: 16, maxWidth: 560, marginTop: 14 }}>
+        <section className="card glass" style={{ padding: 18, maxWidth: 560, marginTop: 16 }}>
+          <h2 style={{ margin: "0 0 12px", fontSize: 16 }}>Open a dossier</h2>
           <label htmlFor="corr-dossier">Dossier</label>
           <div style={{ display: "flex", gap: 10 }}>
             <input
@@ -134,7 +140,7 @@ export default function CorrespondencePage() {
             {scoped.length} dossier{scoped.length === 1 ? "" : "s"} in the current
             scope. Only these are selectable.
           </p>
-        </div>
+        </section>
 
         {!picked || !pickedInScope ? (
           <div className="notice" style={{ marginTop: 16 }}>

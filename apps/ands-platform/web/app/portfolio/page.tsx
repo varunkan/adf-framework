@@ -156,39 +156,42 @@ export default function PortfolioPage() {
     <>
       <TopNav subtitle="portfolio" />
       <main className="dossier-home">
-        <h1>Portfolio</h1>
-        <p className="mut" style={{ maxWidth: "64ch" }}>
-          Every product dossier in your organisation — module progress, filing
-          gate and fee status at a glance.
-        </p>
-        <p className="mut" style={{ fontSize: 12, maxWidth: "72ch" }}>
-          Every change on this page is captured in the dossier’s append-only
-          audit trail — actor and workspace stamped, sequence-numbered,
-          exportable for inspections (open a dossier → Audit).
-        </p>
+        <header style={{ marginBottom: 8 }}>
+          <div className="eyebrow">Operations</div>
+          <h1>Portfolio</h1>
+          <p className="lede">
+            Every product dossier in your organisation — module progress, filing
+            gate and fee status at a glance.
+          </p>
+          <p className="mut" style={{ maxWidth: "72ch" }}>
+            Every change on this page is captured in the dossier’s append-only
+            audit trail — actor and workspace stamped, sequence-numbered,
+            exportable for inspections (open a dossier → Audit).
+          </p>
+        </header>
+
         {/* WS-OPS-TENANT: per-client/sponsor scope + isolation statement — the
             FIRST control on Portfolio, before the roll-up and grid. */}
         {!loading && allItems.length > 0 && (
-          <div style={{ marginTop: 16 }}>
+          <section style={{ marginTop: 20 }}>
             <SponsorScope
               items={allItems}
               value={sponsor}
               onChange={setSponsor}
               count={items.length}
             />
-          </div>
+            {items.length > 0 && (
+              <div className="affordance-bar">
+                <button className="ghost" onClick={exportStatus}>
+                  Export client status report (CSV)
+                  {sponsor !== ALL_SPONSORS ? " — this client only" : ""}
+                </button>
+              </div>
+            )}
+          </section>
         )}
 
-        {items.length > 0 && (
-          <div className="affordance-bar">
-            <button className="ghost" onClick={exportStatus}>
-              Export client status report (CSV)
-              {sponsor !== ALL_SPONSORS ? " — this client only" : ""}
-            </button>
-          </div>
-        )}
-
-        {err && <div className="notice bad">{err}</div>}
+        {err && <div className="notice bad" style={{ marginTop: 16 }}>{err}</div>}
 
         {loading ? (
           <div className="mut" style={{ marginTop: 20 }}>Loading portfolio…</div>
@@ -218,18 +221,20 @@ export default function PortfolioPage() {
             />
 
             {upcoming.length > 0 && (
-              <div className="card glass" style={{ marginTop: 16, padding: "12px 16px" }}
+              <section className="card glass" style={{ marginTop: 20, padding: "16px 18px" }}
                 aria-label="Upcoming deadlines">
-                <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-                  <b>⏳ {upcoming.length} dossier{upcoming.length === 1 ? "" : "s"} with a deadline in the next 30 days</b>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+                  <h2 style={{ margin: 0, fontSize: 16 }}>
+                    ⏳ {upcoming.length} dossier{upcoming.length === 1 ? "" : "s"} with a deadline in the next 30 days
+                  </h2>
                   {overdueCount > 0 && (
-                    <span className="chip blocked" style={{ fontSize: 11 }}>
+                    <span className="chip blocked">
                       {overdueCount} overdue
                     </span>
                   )}
                   <span className="mut" style={{ fontSize: 12 }}>soonest first</span>
                 </div>
-                <ul style={{ listStyle: "none", margin: "8px 0 0", padding: 0,
+                <ul style={{ listStyle: "none", margin: "12px 0 0", padding: 0,
                   display: "flex", flexWrap: "wrap", gap: 8 }}>
                   {upcoming.slice(0, 8).map(({ d, dm }) => (
                     <li key={d.dossier_id}>
@@ -242,7 +247,7 @@ export default function PortfolioPage() {
                     </li>
                   ))}
                 </ul>
-              </div>
+              </section>
             )}
 
             {/* WS-OPS-TENANT (density / progressive disclosure): scope, totals

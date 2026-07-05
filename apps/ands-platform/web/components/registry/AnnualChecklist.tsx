@@ -41,11 +41,11 @@ export function AnnualChecklist() {
   }
 
   return (
-    <div className="card glass" style={{ marginTop: 20, maxWidth: 720 }}>
-      <h2 style={{ margin: "0 0 2px", fontSize: 15, fontWeight: 700 }}>
+    <div className="card glass" style={{ marginTop: 24, maxWidth: 720 }}>
+      <h2 style={{ margin: 0, fontSize: 16 }}>
         Annual notification checklist{year ? ` — ${year}` : ""}
       </h2>
-      <p className="mut" style={{ margin: "6px 0 10px", fontSize: 12 }}>
+      <p className="mut" style={{ margin: "8px 0 14px", fontSize: 12 }}>
         Tracked on the registry service for this workspace: each tick records
         who signed it and when, and lands on the audit event stream. (The
         filings themselves still happen with Health Canada — sources in

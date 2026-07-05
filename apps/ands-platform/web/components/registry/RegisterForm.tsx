@@ -53,7 +53,8 @@ export function RegisterForm({
   }
 
   return (
-    <div className="card glass" style={{ maxWidth: 720, marginTop: 8 }}>
+    <div className="card glass" style={{ maxWidth: 720, marginTop: 16 }}>
+      <h2 style={{ margin: "0 0 14px", fontSize: 16 }}>Register a product</h2>
       <div className="field-row">
         <div>
           <label>Product name</label>
