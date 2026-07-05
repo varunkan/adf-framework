@@ -27,7 +27,22 @@ body{
   background-attachment:fixed;
 }
 a{color:var(--brand);text-decoration:none}
-.mut{color:var(--mut)}
+.mut{color:var(--mut);line-height:1.55}
+
+/* ── global type hierarchy: a clean, consistent, readable rhythm for bare
+   headings/paragraphs. Component rules with class selectors (.ready-card h2,
+   .rail h2, .stepcard .step-title, …) out-specify these and are untouched — so
+   this only sets sensible defaults, overriding NOTHING. Keeps every word; just
+   gives text a clear hierarchy and room to breathe. */
+h1,h2,h3,h4{color:var(--ink)}
+h1{font-size:29px;line-height:1.2;font-weight:800;margin:0 0 8px;letter-spacing:-.01em}
+h2{font-size:19px;line-height:1.3;font-weight:700;margin:26px 0 10px}
+h3{font-size:15.5px;line-height:1.35;font-weight:700;margin:18px 0 8px}
+p{line-height:1.62;margin:0 0 12px}
+p:last-child{margin-bottom:0}
+/* long-form copy stays a readable measure instead of a full-bleed wall */
+main > p,.dossier-home > p,.readable{max-width:74ch}
+
 .accent-text{background:var(--prism-accent);-webkit-background-clip:text;
   background-clip:text;color:transparent}
 
@@ -55,8 +70,8 @@ header.topbar{display:flex;align-items:center;gap:14px;padding:14px 26px;
   box-shadow:0 0 16px rgba(91,140,255,.7);transform:rotate(12deg)}
 .brand small{font-weight:500;color:var(--mut);letter-spacing:0}
 .topbar .spacer{margin-left:auto}
-.chip{font-size:12px;padding:5px 11px;border-radius:999px;border:1px solid var(--line);
-  background:rgba(91,140,255,.16)}
+.chip{font-size:12.5px;padding:5.5px 12px;border-radius:999px;border:1px solid var(--line);
+  background:rgba(91,140,255,.16);line-height:1.35}
 .chip.ready{background:rgba(55,211,155,.18);color:#bdf3df}
 .chip.blocked{background:rgba(255,209,102,.16);color:#ffe3a3}
 /* WS5: placeholder Dossier ID — deliberately NOT a rounded status pill. A
@@ -97,7 +112,7 @@ header.topbar{display:flex;align-items:center;gap:14px;padding:14px 26px;
 .step.current .stepdot{background:var(--prism-accent);color:#0a142b;border-color:transparent;
   box-shadow:0 0 14px rgba(91,140,255,.55)}
 .step .lbl{font-size:13.5px;font-weight:600;line-height:1.3}
-.step .sub{font-size:11px;color:var(--mut)}
+.step .sub{font-size:12px;color:var(--mut);line-height:1.35}
 .step.locked .sub{color:#8aa}
 
 /* ── the current step card ────────────────────────────────────────── */
@@ -106,13 +121,13 @@ header.topbar{display:flex;align-items:center;gap:14px;padding:14px 26px;
 .eyebrow{font-size:12px;letter-spacing:.14em;text-transform:uppercase;
   color:var(--mut);margin:0 0 6px;display:flex;gap:8px;align-items:center}
 .stepcard .step-title{font-size:27px;margin:0 0 12px;line-height:1.15;font-weight:700}
-.lede{font-size:16px;color:#cdd9ee;margin:0 0 18px;max-width:62ch}
+.lede{font-size:16.5px;line-height:1.6;color:#cdd9ee;margin:0 0 18px;max-width:64ch}
 .teach{background:rgba(91,140,255,.09);border:1px solid rgba(91,140,255,.22);
   border-radius:12px;padding:13px 16px;margin:14px 0;font-size:14px}
 .teach b{color:#cfe0ff}
 .teach ul{margin:8px 0 0;padding-left:18px}.teach li{margin:4px 0}
 
-label{display:block;font-size:13px;color:var(--mut);margin:14px 0 5px;font-weight:600}
+label{display:block;font-size:13.5px;color:var(--mut);margin:16px 0 6px;font-weight:600}
 input,select,textarea{width:100%;padding:11px 13px;border-radius:10px;color:var(--ink);
   background:rgba(0,0,0,.28);border:1px solid var(--line);font:inherit}
 input:focus,select:focus,textarea:focus{outline:3px solid var(--brand);outline-offset:1px}
@@ -148,8 +163,8 @@ button:disabled{opacity:.45;cursor:not-allowed;transform:none}
   opacity:0;visibility:hidden;transform:translateY(6px);transition:all var(--prism-ease)}
 
 /* advisories / notices */
-.notice{padding:11px 15px;border-radius:11px;border:1px solid var(--line);
-  background:rgba(91,140,255,.12);margin:12px 0;font-size:14px}
+.notice{padding:14px 17px;border-radius:12px;border:1px solid var(--line);
+  background:rgba(91,140,255,.12);margin:14px 0;font-size:14.5px;line-height:1.55}
 .notice.warn{background:rgba(255,209,102,.13);border-color:rgba(255,209,102,.35)}
 .notice.bad{background:rgba(255,107,107,.14);border-color:rgba(255,107,107,.4)}
 .notice.ok{background:rgba(55,211,155,.13);border-color:rgba(55,211,155,.36)}
