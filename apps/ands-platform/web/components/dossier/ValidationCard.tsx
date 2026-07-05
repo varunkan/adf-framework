@@ -381,7 +381,12 @@ export function ValidationCard({
       <Disclosure
         showLabel="Technical check & report"
         hideLabel="Hide technical check & report"
-        summary={<span>Run PDF header/encryption sub-check · export CSV/JSON</span>}
+        summary={
+          <span>
+            Run PDF header / encryption / PDF/A-1b structural sub-check · export
+            CSV/JSON
+          </span>
+        }
       >
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           <button
@@ -390,7 +395,9 @@ export function ValidationCard({
             onClick={run}
             disabled={busy}
           >
-            {busy ? "Checking…" : "Run technical check (PDF header/encryption)"}
+            {busy
+              ? "Checking…"
+              : "Run technical check (PDF header / encryption / PDF/A-1b)"}
           </button>
           <button
             className="ghost"
@@ -423,9 +430,12 @@ export function ValidationCard({
         <div className="mut" style={{ fontSize: 10, marginTop: 8 }}>
           Findings carry structural-rule ids (CA-E-…/CA-W-…) covering leaf
           integrity, lifecycle legality, naming, sequence numbering, XML backbone
-          and the document PDF header/encryption. This is a presence/format
-          completeness check — <b>not</b> a Health Canada review and{" "}
-          <b>not</b> full eCTD technical validation. Where a checksum is shown it
+          and the document payload: PDF header, encryption, and PDF/A-1b{" "}
+          <b>structural</b> markers (XMP pdfaid packet, OutputIntent, PDF-1.4
+          base version, and prohibited active content). This is a
+          presence/format completeness check — <b>not</b> a Health Canada review,{" "}
+          <b>not</b> full eCTD technical validation, and <b>not</b> full ISO
+          19005-1 (PDF/A-1) conformance validation. Where a checksum is shown it
           is document control (md5), not validation.
         </div>
       </Disclosure>

@@ -456,3 +456,132 @@ def test_validate_clean_replace_lifecycle_backbone_conformant():
                  "ca_product_missing"}
     assert not (seq_rules & {e["rule"] for e in res["errors"]})
     assert res["passed"] is True
+
+
+# ---------------------------------------------------------------------------
+# TIER2-PDFA — PDF/A-1b STRUCTURAL marker checks over the stored bytes (7xxx).
+# HONESTLY scoped: real, buildable structural markers (XMP pdfaid packet, an
+# OutputIntent, absence of prohibited active content, PDF-1.4 base version) —
+# NOT a claim of full ISO 19005-1 (PDF/A-1) validation. Absence of PDF/A markers
+# is advisory (CA-W); genuinely prohibited/destructive constructs are errors
+# (CA-E), exactly like the pre-existing /Encrypt rule.
+# ---------------------------------------------------------------------------
+
+# A minimal PDF/A-1b-ish fixture: PDF 1.4 header, an XMP metadata packet with a
+# pdfaid part/conformance marker, and a GTS_PDFA1 OutputIntent. Not a real
+# rendered PDF — just the structural byte markers the checker looks for.
+PDFA1B_OK = (
+    b"%PDF-1.4\n"
+    b"<< /Type /Catalog /OutputIntents [ << /Type /OutputIntent "
+    b"/S /GTS_PDFA1 >> ] >>\n"
+    b"<?xpacket begin=\"\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n"
+    b"<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">"
+    b"<rdf:RDF xmlns:pdfaid=\"http://www.aiim.org/pdfa/ns/id/\">"
+    b"<rdf:Description pdfaid:part=\"1\" pdfaid:conformance=\"B\"/>"
+    b"</rdf:RDF></x:xmpmeta>\n"
+    b"<?xpacket end=\"w\"?>\n"
+    b"%%EOF"
+)
+
+
+def test_pdfa1b_conformant_fixture_has_no_pdfa_findings():
+    d = _clean_dossier()
+    res = ectd_validation.validate(d, documents={"pm.pdf": PDFA1B_OK})
+    assert res["passed"] is True
+    rules = {f["rule"] for f in res["errors"] + res["warnings"]}
+    for r in ("pdfa_xmp_missing", "pdfa_outputintent_missing",
+              "pdfa_version", "pdfa_javascript", "pdfa_embedded_file"):
+        assert r not in rules, r
+
+
+def test_missing_pdfa_xmp_marker_is_a_warning_not_error():
+    d = _clean_dossier()
+    # a plain valid PDF (no PDF/A XMP packet) must NOT become an error — it is a
+    # transmissible PDF, just not marked PDF/A. Absence is advisory only.
+    res = ectd_validation.validate(
+        d, documents={"pm.pdf": b"%PDF-1.4\nplain body no xmp\n%%EOF"})
+    warn_rules = {w["rule"] for w in res["warnings"]}
+    err_rules = {e["rule"] for e in res["errors"]}
+    assert "pdfa_xmp_missing" in warn_rules
+    assert "pdfa_xmp_missing" not in err_rules
+    # still passes: a plain PDF without PDF/A markers is not a hard defect
+    assert res["passed"] is True
+
+
+def test_plain_pdf_still_passes_after_pdfa_checks():
+    # regression guard for the original contract (test_valid_pdf_document_passes):
+    # deepening the PDF check must not turn a plain PDF into a blocking error.
+    d = _clean_dossier()
+    res = ectd_validation.validate(
+        d, documents={"pm.pdf": b"%PDF-1.7\nplain unencrypted body\n%%EOF"})
+    assert res["passed"] is True
+
+
+def test_missing_outputintent_is_a_warning():
+    d = _clean_dossier()
+    # has a pdfaid XMP packet but no OutputIntent — PDF/A-1b requires one.
+    body = (
+        b"%PDF-1.4\n"
+        b"<?xpacket begin=\"\"?>"
+        b"<rdf:Description pdfaid:part=\"1\" pdfaid:conformance=\"B\"/>"
+        b"<?xpacket end=\"w\"?>\n%%EOF")
+    res = ectd_validation.validate(d, documents={"pm.pdf": body})
+    warn_rules = {w["rule"] for w in res["warnings"]}
+    assert "pdfa_outputintent_missing" in warn_rules
+    assert "pdfa_xmp_missing" not in warn_rules  # the XMP marker IS present
+
+
+def test_pdf_version_above_1_4_is_a_warning():
+    d = _clean_dossier()
+    res = ectd_validation.validate(
+        d, documents={"pm.pdf": b"%PDF-1.7\nbody\n%%EOF"})
+    warn_rules = {w["rule"] for w in res["warnings"]}
+    assert "pdfa_version" in warn_rules
+
+
+def test_pdf_javascript_is_a_hard_error():
+    d = _clean_dossier()
+    # active JavaScript is prohibited by PDF/A-1 (and HC) — a hard error.
+    res = ectd_validation.validate(
+        d, documents={"pm.pdf": b"%PDF-1.4\n/Type /Action /S /JavaScript\n%%EOF"})
+    assert res["passed"] is False
+    assert "pdfa_javascript" in {e["rule"] for e in res["errors"]}
+
+
+def test_pdf_embedded_file_stream_is_a_hard_error():
+    d = _clean_dossier()
+    # embedded file streams are prohibited by PDF/A-1 — a hard error.
+    res = ectd_validation.validate(
+        d, documents={"pm.pdf": b"%PDF-1.4\n/Type /EmbeddedFile /Length 10\n%%EOF"})
+    assert res["passed"] is False
+    assert "pdfa_embedded_file" in {e["rule"] for e in res["errors"]}
+
+
+def test_pdfa_findings_carry_rule_ids_and_family():
+    d = _clean_dossier()
+    res = ectd_validation.validate(
+        d, documents={"pm.pdf": b"%PDF-1.7\n/S /JavaScript\nno xmp\n%%EOF"})
+    findings = res["errors"] + res["warnings"]
+    for f in findings:
+        assert RULE_ID_RE.fullmatch(f["rule_id"]), f
+    # the new rules are registered in the catalogue with a source + family
+    cat = ectd_validation.rule_catalog()
+    by_rule = {r["rule"]: r for r in cat["rules"]}
+    for r in ("pdfa_xmp_missing", "pdfa_outputintent_missing", "pdfa_version",
+              "pdfa_javascript", "pdfa_embedded_file"):
+        assert r in by_rule, r
+        assert by_rule[r]["source"]
+        assert by_rule[r]["family"] == "Document payload conformance"
+
+
+def test_coverage_note_reflects_structural_pdfa_check_honestly():
+    c = ectd_validation.criteria()
+    checked_blob = " ".join(c["coverage"]["checked"]).lower()
+    notchecked_blob = " ".join(c["coverage"]["not_checked"]).lower()
+    # PDF/A moved from purely "not_checked (only header)" to an HONESTLY-scoped
+    # "structural PDF/A-1b markers" checked entry...
+    assert "pdf/a-1b" in checked_blob or "pdf/a" in checked_blob
+    assert "structural" in checked_blob
+    # ...while still NOT claiming full ISO 19005-1 conformance.
+    assert "19005" in notchecked_blob or "iso" in notchecked_blob
+    assert "full" in notchecked_blob

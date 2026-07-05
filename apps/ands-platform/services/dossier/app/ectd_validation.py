@@ -23,7 +23,12 @@ defects Health Canada's eCTD validation would flag *before* transmission:
     (id + href + checksum) and ca-regional.xml must identify the dossier;
   - optional document bytes: a ``.pdf`` whose bytes do not start with ``%PDF``
     is a ``pdf_header`` error; bytes containing ``/Encrypt`` are ``pdf_encrypted``
-    (HC rejects secured PDFs).
+    (HC rejects secured PDFs); and (TIER2-PDFA) honestly-scoped PDF/A-1b
+    STRUCTURAL markers over the bytes — prohibited active content (JavaScript,
+    embedded-file streams, launch/remote-goto actions) is an error, while
+    absence of the PDF/A conformance markers (an XMP ``pdfaid`` packet, an
+    OutputIntent, a PDF-1.4 base version) is advisory. This is a structural
+    check, NOT full ISO 19005-1 (PDF/A-1) validation.
 
 Every finding carries a stable Health-Canada-v5.3-style rule id (``rule_id``)
 alongside its machine ``rule`` name, human ``message`` and offending subject
@@ -40,7 +45,8 @@ alongside its machine ``rule`` name, human ``message`` and offending subject
                  transmissible per-sequence <ectd:ectd> backbone (operation
                  attrs, modified-file back-pointers, dangling hrefs, DOCTYPE)
             6xxx ca-regional.xml element structure (CA Module 1 v2.2)
-            7xxx document payload checks (PDF header / encryption)
+            7xxx document payload checks (PDF header / encryption; PDF/A-1b
+                 structural markers — TIER2-PDFA)
 
 Rule ids are stable API: never renumber or reuse an id — retire it instead.
 
@@ -60,6 +66,21 @@ MODULE_FOLDER_RE = re.compile(r"^m[1-5]/")
 MD5_HEX_RE = re.compile(r"[0-9a-fA-F]{32}")
 PDF_MAGIC = b"%PDF"
 PDF_ENCRYPT_MARKER = b"/Encrypt"
+
+# TIER2-PDFA — byte-level markers for the honestly-scoped PDF/A-1b STRUCTURAL
+# check. These are real, checkable structural signals over the stored bytes;
+# they are NOT a full ISO 19005-1 (PDF/A-1) parse/validation. See _pdfa_check.
+PDF_VERSION_RE = re.compile(rb"%PDF-(\d)\.(\d)")
+# an XMP metadata packet carrying the PDF/A identification schema (pdfaid)
+PDFA_XMP_PART_RE = re.compile(rb"pdfaid:part")
+PDFA_XMP_CONFORMANCE_RE = re.compile(rb"pdfaid:conformance")
+# an OutputIntent flagged as the PDF/A output-intent subtype
+PDFA_OUTPUTINTENT_RE = re.compile(rb"/OutputIntent")
+PDFA_GTS_PDFA1_RE = re.compile(rb"GTS_PDFA1")
+# constructs PDF/A-1 prohibits and HC rejects (active / external content)
+PDF_JAVASCRIPT_RE = re.compile(rb"/JavaScript\b|/JS\b")
+PDF_EMBEDDED_FILE_RE = re.compile(rb"/EmbeddedFile\b")
+PDF_LAUNCH_ACTION_RE = re.compile(rb"/Launch\b|/GoToR\b")
 
 # Pinned backbone descriptors (ported from the monolith's descriptor-driven
 # ``ectd.validate_backbone``): the expected root element is resolved from the
@@ -118,6 +139,20 @@ RULE_IDS = {
     # 7xxx — document payloads
     "pdf_header": "CA-E-7001",
     "pdf_encrypted": "CA-E-7002",
+    # 7xxx — PDF/A-1b STRUCTURAL markers (TIER2-PDFA). HONESTLY scoped: real,
+    # buildable byte-level structural markers, NOT full ISO 19005-1 validation.
+    # Prohibited active/external content (JavaScript, embedded files, launch/
+    # remote-goto actions) is a hard ERROR (like /Encrypt); absence of the PDF/A
+    # conformance markers (XMP pdfaid packet, OutputIntent, PDF-1.4 base
+    # version) is advisory (CA-W) — a plain transmissible PDF is not a hard
+    # defect just for not being marked PDF/A.
+    "pdfa_javascript": "CA-E-7003",
+    "pdfa_embedded_file": "CA-E-7004",
+    "pdfa_launch_action": "CA-E-7005",
+    "pdfa_xmp_missing": "CA-W-7006",
+    "pdfa_xmp_part_wrong": "CA-W-7007",
+    "pdfa_outputintent_missing": "CA-W-7008",
+    "pdfa_version": "CA-W-7009",
 }
 # defensive fallback for a rule the table does not know (e.g. a new rule added
 # to assembly.validate_leaf_operation before this table learns its id)
@@ -165,11 +200,22 @@ def criteria() -> dict:
                       "run eValidator (or your publisher's validator) before "
                       "you transmit.",
         "coverage": {
-            "checked": sorted(set(_FAMILIES.values())),
+            # TIER2-PDFA: the PDF payload family now includes honestly-scoped
+            # STRUCTURAL PDF/A-1b marker checks, surfaced as an explicit checked
+            # line so the deepened coverage is legible — while the not_checked
+            # line below keeps the honest ceiling (this is NOT full ISO
+            # 19005-1 validation).
+            "checked": sorted(set(_FAMILIES.values())) + [
+                "PDF/A-1b structural markers (XMP pdfaid packet, OutputIntent, "
+                "PDF-1.4 base version, and prohibited active content: "
+                "JavaScript / embedded files / launch actions)",
+            ],
             "not_checked": [
                 "Scientific, clinical or quality adequacy of the content",
-                "Full PDF/A-1 conformance (only the %PDF header and encryption "
-                "are checked, not the ISO profile)",
+                "Full PDF/A-1 (ISO 19005-1) conformance — only structural "
+                "PDF/A-1b markers are checked, not the full ISO profile "
+                "(fonts embedded, colour spaces, transparency, tagging, etc.); "
+                "run a real PDF/A validator before you rely on conformance",
                 "Cross-document hyperlink target resolution",
                 "Health Canada screening or review acceptance",
             ],
@@ -209,6 +255,17 @@ _RULE_DESCRIPTIONS = {
     "ca_product_missing": "ca-regional.xml must identify the drug product.",
     "pdf_header": "Documents claiming PDF must actually be PDFs (%PDF header).",
     "pdf_encrypted": "PDFs must not be encrypted or password-protected.",
+    "pdfa_javascript": "PDF/A-1 prohibits JavaScript/active content in documents.",
+    "pdfa_embedded_file": "PDF/A-1 prohibits embedded file streams.",
+    "pdfa_launch_action": "PDF/A-1 prohibits launch and remote-goto actions.",
+    "pdfa_xmp_missing": "PDF/A documents should carry an XMP pdfaid metadata "
+                        "packet declaring PDF/A part and conformance (advisory).",
+    "pdfa_xmp_part_wrong": "The XMP pdfaid packet should declare PDF/A part 1 "
+                           "with a B (or A) conformance level (advisory).",
+    "pdfa_outputintent_missing": "PDF/A requires an OutputIntent (GTS_PDFA1) "
+                                 "defining the output colour space (advisory).",
+    "pdfa_version": "PDF/A-1 is based on PDF 1.4; a higher %PDF version is "
+                    "outside the PDF/A-1 baseline (advisory).",
 }
 
 
@@ -233,7 +290,9 @@ _FAMILY_SOURCE = {
           "backbone: operation attrs, lifecycle back-pointers, live hrefs)",
     "6": "HC 'Preparation of Regulatory Activities in eCTD Format' — CA Module 1 "
          "v2.2 & ca-regional.dtd (Canadian regional backbone)",
-    "7": "ICH eCTD Spec v3.2.2 Appendix 7 (PDF) · HC document payload requirements",
+    "7": "ICH eCTD Spec v3.2.2 Appendix 7 (PDF) · HC document payload "
+         "requirements · PDF/A-1b structural markers modeled on ISO 19005-1 "
+         "(PDF/A-1) §6 — structural check only, NOT full ISO 19005-1 validation",
 }
 
 
@@ -295,9 +354,12 @@ _FAMILY_PARITY = {
                  "back-pointers, live hrefs)."),
     "6": (True, "HC eValidator validates the CA Module 1 v2.2 regional "
                 "backbone (ca-regional.xml)."),
-    "7": (False, "ANDS Studio checks only the %PDF header and encryption. HC "
-                 "eValidator (and your publisher) verify full PDF/A-1 "
-                 "conformance, which this tool does NOT — run it before you "
+    "7": (False, "ANDS Studio checks the %PDF header, encryption, and "
+                 "STRUCTURAL PDF/A-1b markers (XMP pdfaid packet, OutputIntent, "
+                 "PDF-1.4 base version, and prohibited active content). It does "
+                 "NOT perform full ISO 19005-1 (PDF/A-1) validation (embedded "
+                 "fonts, colour spaces, transparency, tagging, xref integrity) "
+                 "— HC eValidator and your publisher do; run them before you "
                  "transmit."),
     "REP": (False, "The Dossier ID is issued by Health Canada via the "
                    "Regulatory Enrolment Process (REP); no validator mints or "
@@ -729,7 +791,67 @@ def _sequence_backbone_check(dossier: dict, errors: list) -> None:
             errors.append(f)
 
 
-def _document_check(documents: dict, errors: list) -> None:
+def _pdfa_check(key: str, raw: bytes, errors: list, warnings: list) -> None:
+    """TIER2-PDFA — HONESTLY-scoped PDF/A-1b STRUCTURAL marker checks.
+
+    This deepens the payload check beyond the %PDF header toward the buildable,
+    byte-observable structural markers PDF/A-1b (ISO 19005-1) requires. It is a
+    STRUCTURAL check over the stored bytes — NOT a full ISO 19005-1 parse/
+    validation (which would also verify embedded fonts, colour spaces,
+    transparency, tagging, xref integrity, etc.). Honest severity split:
+
+      - constructs PDF/A-1 *prohibits* and HC rejects — JavaScript/active
+        content, embedded-file streams, launch/remote-goto actions — are hard
+        ERRORS, exactly like the pre-existing /Encrypt rule;
+      - absence of the PDF/A conformance *markers* — an XMP pdfaid packet, an
+        OutputIntent, a PDF-1.4 base version — is advisory (CA-W): a plain,
+        transmissible PDF is not a hard defect merely for not being marked
+        PDF/A, so these never turn a valid PDF into a blocking error.
+    """
+    # prohibited active/external content → hard errors
+    if PDF_JAVASCRIPT_RE.search(raw):
+        errors.append(_err("pdfa_javascript",
+                           f"document '{key}' contains JavaScript/active content "
+                           "(prohibited by PDF/A-1)", key))
+    if PDF_EMBEDDED_FILE_RE.search(raw):
+        errors.append(_err("pdfa_embedded_file",
+                           f"document '{key}' contains an embedded-file stream "
+                           "(/EmbeddedFile) (prohibited by PDF/A-1)", key))
+    if PDF_LAUNCH_ACTION_RE.search(raw):
+        errors.append(_err("pdfa_launch_action",
+                           f"document '{key}' contains a launch/remote-goto "
+                           "action (prohibited by PDF/A-1)", key))
+
+    # PDF version outside the PDF/A-1 baseline (1.4) → advisory
+    m = PDF_VERSION_RE.search(raw[:32])
+    if m:
+        major, minor = int(m.group(1)), int(m.group(2))
+        if (major, minor) > (1, 4):
+            warnings.append(_err("pdfa_version",
+                                 f"document '{key}' is PDF {major}.{minor}; "
+                                 "PDF/A-1 is based on PDF 1.4", key))
+
+    # XMP pdfaid identification packet → advisory when absent / malformed
+    has_part = bool(PDFA_XMP_PART_RE.search(raw))
+    has_conf = bool(PDFA_XMP_CONFORMANCE_RE.search(raw))
+    if not has_part and not has_conf:
+        warnings.append(_err("pdfa_xmp_missing",
+                             f"document '{key}' has no XMP PDF/A identification "
+                             "packet (pdfaid:part / pdfaid:conformance)", key))
+    elif not (has_part and has_conf):
+        warnings.append(_err("pdfa_xmp_part_wrong",
+                             f"document '{key}' has an incomplete XMP pdfaid "
+                             "packet (needs both part and conformance)", key))
+
+    # OutputIntent (PDF/A output colour space) → advisory when absent
+    if not (PDFA_OUTPUTINTENT_RE.search(raw) or PDFA_GTS_PDFA1_RE.search(raw)):
+        warnings.append(_err("pdfa_outputintent_missing",
+                             f"document '{key}' has no OutputIntent "
+                             "(GTS_PDFA1) declaring its output colour space",
+                             key))
+
+
+def _document_check(documents: dict, errors: list, warnings: list) -> None:
     for key, data in documents.items():
         name = _s(key).lower()
         raw = data if isinstance(data, (bytes, bytearray)) else _s(data).encode()
@@ -741,18 +863,28 @@ def _document_check(documents: dict, errors: list) -> None:
             errors.append(_err("pdf_header",
                                f"document '{key}' is named .pdf but its bytes do "
                                "not start with %PDF", key))
+            # not a PDF at all — the PDF/A structural markers are meaningless,
+            # so stop here (the pdf_header error already blocks the gate).
+            continue
         if PDF_ENCRYPT_MARKER in raw:
             errors.append(_err("pdf_encrypted",
                                f"document '{key}' is an encrypted/secured PDF "
                                "(HC rejects /Encrypt)", key))
+        # TIER2-PDFA: the deeper structural PDF/A-1b marker check
+        _pdfa_check(key, raw, errors, warnings)
 
 
 def validate(dossier: dict, *, documents: dict | None = None) -> dict:
     """Run the full eCTD technical validation over an assembled ``dossier``.
 
     ``documents`` optionally maps a doc id / leaf id / filename -> raw bytes; any
-    key ending ``.pdf`` is checked for the %PDF magic and for /Encrypt.
-    Returns ``{passed, errors, warnings, checked}`` where ``checked`` is the live
+    key ending ``.pdf`` is checked for the %PDF magic, for /Encrypt, and (TIER2-
+    PDFA) for honestly-scoped PDF/A-1b STRUCTURAL markers (XMP pdfaid packet,
+    OutputIntent, PDF-1.4 base version, and prohibited active content). The
+    marker-absence checks are advisory warnings; prohibited active content is a
+    hard error. This is a structural check over the bytes, NOT full ISO 19005-1
+    validation. Returns ``{passed, errors, warnings, checked}`` where ``checked``
+    is the live
     leaf count. Every error/warning carries a stable ``rule_id`` (see the
     module docstring for the CA-E/CA-W scheme). ``passed`` is true iff
     ``errors`` is empty.
@@ -768,7 +900,7 @@ def validate(dossier: dict, *, documents: dict | None = None) -> dict:
     _backbone_check(dossier, errors)
     _sequence_backbone_check(dossier, errors)
     if documents:
-        _document_check(documents, errors)
+        _document_check(documents, errors, warnings)
 
     checked = len(assembly.current_view(dossier)["live"])
     return {"passed": not errors, "errors": errors, "warnings": warnings,
