@@ -31,17 +31,9 @@ export function RegistrationRow({
 }) {
   const next = TRANSITIONS[reg.status] ?? [];
   return (
-    <div
-      className="card glass"
-      style={{
-        padding: "14px 18px",
-        display: "flex",
-        alignItems: "center",
-        gap: 18,
-        flexWrap: "wrap",
-      }}
-    >
-      <div style={{ flex: "1 1 220px", minWidth: 200 }}>
+    <div className="card glass roster-row registry-row">
+      {/* col 1 — identity (DIN / product / country · dossier) */}
+      <div>
         <div className="d-id">{reg.din || "DIN pending"}</div>
         <div className="d-title" style={{ margin: "2px 0 0" }}>
           {reg.product}
@@ -57,9 +49,13 @@ export function RegistrationRow({
         </div>
       </div>
 
-      <span className={statusChipClass(reg.status)}>{reg.status}</span>
+      {/* col 2 — status chip in a fixed-width cell so every row's status aligns */}
+      <span className="roster-status">
+        <span className={statusChipClass(reg.status)}>{reg.status}</span>
+      </span>
 
-      <span style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      {/* col 3 — allowed transitions, right-aligned */}
+      <div className="roster-actions">
         {next.map((s) => (
           <button key={s} className="chip" disabled={busy}
             onClick={() => onTransition(reg.id, s)}
@@ -71,7 +67,7 @@ export function RegistrationRow({
         {next.length === 0 && (
           <span className="chip mut">No further transitions</span>
         )}
-      </span>
+      </div>
     </div>
   );
 }

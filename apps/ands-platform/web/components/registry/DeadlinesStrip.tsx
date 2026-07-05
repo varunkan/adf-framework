@@ -43,7 +43,7 @@ export function DeadlinesStrip({ regs }: { regs: Registration[] }) {
         Annual Right-to-Sell fee per marketable DIN — due October 1 of the
         fiscal year. Amounts are billed by the fees service.
       </p>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+      <div className="tile-strip">
         {marketable.map((r) => {
           const o = rts[r.id];
           if (!o) {

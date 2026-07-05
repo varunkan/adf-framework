@@ -565,6 +565,43 @@ header.topbar .brand small{white-space:nowrap}
 .row-details .row-details-body{display:flex;align-items:center;gap:8px;
   flex-wrap:wrap;margin-top:8px;flex-basis:100%}
 
+/* ── roster rows (portfolio / registry): fixed-column grids so every row's
+   cells align vertically across the list — no ragged flex-wrap. Every cell
+   is min-width:0 so long titles/ids truncate instead of pushing the grid. ─ */
+.roster-row{display:grid;align-items:center;gap:18px;padding:14px 18px}
+/* ONLY the identity column flexes (min-width:0); every other column is a FIXED
+   width so — since every row is the same total width — the flexible column
+   resolves identically and ALL columns align to the pixel across the list.
+   (fr/auto columns would resolve per-row from that row's own content and
+   ragged the layout.) */
+.roster-row.portfolio-row{
+  grid-template-columns:minmax(0,1fr) 190px 230px 120px 200px}
+.roster-row.registry-row{
+  grid-template-columns:minmax(0,1fr) 150px 280px}
+.roster-row > *{min-width:0}
+/* the identity block truncates cleanly instead of widening the column */
+.roster-row .d-id,.roster-row .d-title,.roster-row .d-meta{
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* status cell: the chip fills a fixed-width box so every status aligns */
+.roster-status{display:flex;justify-content:center}
+.roster-status > .chip{display:inline-flex;justify-content:center;width:100%;
+  text-align:center;white-space:nowrap}
+/* right-aligned actions group (details + links / transitions) */
+.roster-actions{display:flex;align-items:center;gap:10px;justify-content:flex-end;
+  flex-wrap:wrap}
+/* deadline / right-to-sell strip: equal-width tiles on a grid, never ragged */
+.tile-strip{display:grid;gap:10px;
+  grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
+.tile-strip > *{display:flex;align-items:center;gap:4px;min-width:0}
+.tile-strip .chip{flex:1 1 auto;justify-content:flex-start;min-width:0;
+  white-space:normal}
+@media (max-width:860px){
+  .roster-row.portfolio-row,.roster-row.registry-row{
+    grid-template-columns:1fr;gap:10px}
+  .roster-status,.roster-actions{justify-content:flex-start}
+  .roster-status > .chip{width:auto}
+}
+
 /* ── Shared TopNav + account menu (lucide + Radix) ─────────────────────────
    One consistent, iconified nav on every page; a real dropdown account menu
    replacing the odd solid "Sign out" button. */

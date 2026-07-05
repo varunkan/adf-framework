@@ -136,17 +136,9 @@ export function PortfolioRow({ d, fee, noa = { kind: "none" }, collab }: {
   const id = encodeURIComponent(d.dossier_id);
 
   return (
-    <div
-      className="card glass"
-      style={{
-        padding: "14px 18px",
-        display: "flex",
-        alignItems: "center",
-        gap: 18,
-        flexWrap: "wrap",
-      }}
-    >
-      <div style={{ flex: "1 1 220px", minWidth: 200 }}>
+    <div className="card glass roster-row portfolio-row">
+      {/* col 1 — identity (truncates, never widens the column) */}
+      <div>
         <div className="d-id">{d.dossier_id}</div>
         <div className="d-title" style={{ margin: "2px 0 0" }}>{d.title}</div>
         <div className="d-meta mut">
@@ -155,50 +147,47 @@ export function PortfolioRow({ d, fee, noa = { kind: "none" }, collab }: {
         </div>
       </div>
 
-      {/* WS6 PM columns: owner / client / soonest deadline, at a glance */}
+      {/* col 2 — WS6 PM columns: owner / client / soonest deadline */}
       <PmColumns owner={d.owner} sponsor={d.sponsor} due={d.soonest_due} />
 
+      {/* col 3 — module tower (fills the cell, right-aligned bars) */}
       <MiniTower tower={d.tower} missing={d.gate?.missing} />
 
-      {/* Round-6 WS-A (density reduction): ONE primary status chip per row.
-          A blocked collaboration state outranks the gate — it reads "blocked"
-          so a scanning PM sees the single most important status, not chip-soup.
-          Owner / client / due stay visible (above); fee, NOA and collaboration
-          detail move behind the per-row "details" expander. */}
-      <span
-        className={`chip ${
-          collab?.blocked ? "blocked" : d.gate?.complete ? "ready" : "blocked"
-        }`}
-        title={
-          collab?.blocked
-            ? "Has an open task past due — see details"
+      {/* col 4 — ONE primary status chip, in a fixed-width cell so every row's
+          status aligns. Blocked collaboration outranks the gate. */}
+      <span className="roster-status">
+        <span
+          className={`chip ${
+            collab?.blocked ? "blocked" : d.gate?.complete ? "ready" : "blocked"
+          }`}
+          title={
+            collab?.blocked
+              ? "Has an open task past due — see details"
+              : d.gate?.complete
+                ? "All applicable modules complete"
+                : "Modules still outstanding"
+          }
+        >
+          {collab?.blocked
+            ? "Blocked"
             : d.gate?.complete
-              ? "All applicable modules complete"
-              : "Modules still outstanding"
-        }
-      >
-        {collab?.blocked
-          ? "Blocked"
-          : d.gate?.complete
-            ? "Ready to file"
-            : `${passed}/${applic} modules`}
+              ? "Ready to file"
+              : `${passed}/${applic} modules`}
+        </span>
       </span>
 
-      {/* secondary chips collapsed behind a quiet per-row expander; nothing is
-          removed. The day-counter provenance popovers inside NoaChip stay
-          on-demand as before. */}
-      <details className="row-details">
-        <summary aria-label={`Show fee, litigation and collaboration detail for ${d.dossier_id}`}>
-          Details
-        </summary>
-        <div className="row-details-body">
-          <FeeChip state={fee} />
-          <NoaChip clock={noa} />
-          <CollabChips collab={collab} />
-        </div>
-      </details>
-
-      <span style={{ display: "flex", gap: 8 }}>
+      {/* col 5 — actions: details expander + Open/Viewer, right-aligned */}
+      <div className="roster-actions">
+        <details className="row-details">
+          <summary aria-label={`Show fee, litigation and collaboration detail for ${d.dossier_id}`}>
+            Details
+          </summary>
+          <div className="row-details-body">
+            <FeeChip state={fee} />
+            <NoaChip clock={noa} />
+            <CollabChips collab={collab} />
+          </div>
+        </details>
         <Link className="chip" href={`/dossiers/${id}/m/1`}
           aria-label={`Open dossier ${d.dossier_id}`}>
           Open →
@@ -207,7 +196,7 @@ export function PortfolioRow({ d, fee, noa = { kind: "none" }, collab }: {
           aria-label={`Open Application Viewer for ${d.dossier_id}`}>
           Viewer
         </Link>
-      </span>
+      </div>
     </div>
   );
 }

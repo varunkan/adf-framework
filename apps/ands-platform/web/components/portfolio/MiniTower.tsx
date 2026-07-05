@@ -23,7 +23,7 @@ export function MiniTower({ tower, missing = [] }: {
   );
   if (view === "checklist") {
     return (
-      <div style={{ flex: "1 1 320px", minWidth: 260 }}>
+      <div style={{ width: "100%", minWidth: 0 }}>
         <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 4 }}>
           {toggle}
         </div>
@@ -32,7 +32,8 @@ export function MiniTower({ tower, missing = [] }: {
     );
   }
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+    <div style={{ width: "100%", display: "flex", flexDirection: "column",
+      gap: 4, alignItems: "flex-end" }}>
       {toggle}
       <div
         style={{ display: "flex", gap: 8, alignItems: "flex-end" }}
