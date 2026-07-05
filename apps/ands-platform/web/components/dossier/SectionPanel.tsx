@@ -556,7 +556,7 @@ function AttachedDocs({
               and whether the filer has confirmed it as their own content. */}
           <span
             className={`chip ${needsReview ? "blocked" : "ready"}`}
-            style={{ fontSize: 11 }}
+            style={{ fontSize: 12 }}
             title={isAi
               ? AI_PROVENANCE_TOOLTIP
               : node.content_origin === "sample"

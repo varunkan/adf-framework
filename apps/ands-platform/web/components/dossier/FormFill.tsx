@@ -366,7 +366,7 @@ function FieldRow({
       )}
 
       {stillExample && ghost && (
-        <div className="mut" style={{ fontSize: 11, marginTop: 2 }}>
+        <div className="mut" style={{ fontSize: 12, marginTop: 2 }}>
           Greyed example: <i>{ghost}</i> — this is <b>not</b> your content until
           you type over it.
         </div>

@@ -267,12 +267,13 @@ export default function DossiersHome() {
 
         {creating && (
           <div className="card glass" style={{ maxWidth: 560, marginTop: 8 }}>
+            <h2 style={{ margin: "0 0 4px", fontSize: 17 }}>New dossier</h2>
             <div className="field-row">
               <div>
                 <label>Dossier ID</label>
                 <input value={did} onChange={(e) => setDid(e.target.value)}
                   placeholder="e123456" />
-                <p className="mut" style={{ fontSize: 11, margin: "3px 0 0" }}>
+                <p className="mut" style={{ fontSize: 12, margin: "4px 0 0" }}>
                   Format: one letter + 6–7 digits (e.g. <code>e123456</code>).
                   A <code>d…</code> placeholder marks a draft ID until Health
                   Canada issues the real one.
@@ -310,13 +311,13 @@ export default function DossiersHome() {
                   style={{ fontWeight: 400 }}>(optional)</span></label>
                 <input value={sponsor} onChange={(e) => setSponsor(e.target.value)}
                   placeholder="Acme Pharma Inc." />
-                <label style={{ marginTop: 6 }}>Owner (PM) <span className="mut"
+                <label style={{ marginTop: 12 }}>Owner (PM) <span className="mut"
                   style={{ fontWeight: 400 }}>(optional)</span></label>
                 <input value={owner} onChange={(e) => setOwner(e.target.value)}
                   placeholder="j.smith@cro.example" />
               </div>
             </div>
-            <p className="mut" style={{ fontSize: 12, margin: "6px 0 0" }}>
+            <p className="mut" style={{ fontSize: 13, margin: "14px 0 0" }}>
               Health Canada issues your Dossier ID when you file a Dossier ID
               Request through <Term k="REP" /> (via your <Term k="CESG" />{" "}
               account).{" "}
@@ -383,7 +384,7 @@ export default function DossiersHome() {
                         {d.dossier_id}
                         {d.dossier_id.startsWith("d") && (
                           <button className="chip placeholder-id" title="Placeholder ID — NOT a Health Canada Dossier ID. Export and transmission are blocked until you set the real ID (issued via REP)."
-                            style={{ marginLeft: 8, fontSize: 11 }}
+                            style={{ marginLeft: 8, fontSize: 12 }}
                             onClick={(e) => openRename(e, d.dossier_id)}>
                             ⚠ placeholder — set real ID ✎
                           </button>
@@ -454,7 +455,7 @@ export default function DossiersHome() {
                             {d.dossier_id}
                             {d.dossier_id.startsWith("d") && (
                               <span className="chip placeholder-id" style={{ marginLeft: 6,
-                                fontSize: 10 }} title="Placeholder ID — NOT a Health Canada Dossier ID; export/transmission blocked until the real ID is set">⚠ placeholder</span>
+                                fontSize: 12 }} title="Placeholder ID — NOT a Health Canada Dossier ID; export/transmission blocked until the real ID is set">⚠ placeholder</span>
                             )}
                           </td>
                           <td>{d.title}</td>
@@ -495,8 +496,8 @@ export default function DossiersHome() {
 
         {showArchived && (
           <section className="card glass" style={{ marginTop: 20, padding: 16 }}>
-            <h2 style={{ margin: 0, fontSize: 15 }}>Archived (recoverable)</h2>
-            <p className="mut" style={{ fontSize: 12, margin: "6px 0 0",
+            <h2 style={{ margin: 0, fontSize: 17 }}>Archived (recoverable)</h2>
+            <p className="mut" style={{ fontSize: 13, margin: "6px 0 0",
               maxWidth: "72ch" }}>
               Deleting a dossier archives it here rather than destroying it —
               nothing is purged. Restore any archived dossier to return it to
@@ -516,7 +517,7 @@ export default function DossiersHome() {
                     <b>{a.dossier_id}</b>
                     <span className="mut" style={{ fontSize: 13 }}>{a.title}</span>
                     <span className="spacer" style={{ marginLeft: "auto" }} />
-                    <span className="mut" style={{ fontSize: 11,
+                    <span className="mut" style={{ fontSize: 12,
                       flexBasis: "100%" }}>
                       archived {a.archived_at ? new Date(a.archived_at)
                         .toLocaleString() : "—"}

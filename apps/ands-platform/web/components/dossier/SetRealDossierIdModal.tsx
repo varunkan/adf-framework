@@ -156,7 +156,7 @@ export function SetRealDossierIdModal({
                 target="_blank"
                 rel="noreferrer"
                 className="mut"
-                style={{ display: "inline-block", marginTop: 6, fontSize: 11 }}
+                style={{ display: "inline-block", marginTop: 6, fontSize: 12 }}
               >
                 Health Canada — Regulatory Enrolment Process (REP) ↗
               </a>

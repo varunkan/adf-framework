@@ -142,7 +142,8 @@ export default function ModuleWorkspace() {
             blocker lead; the 3D tower is demoted below it. */}
         <div className="card glass gate-card">
           <div className="gate-head">
-            <span className="mut" style={{ fontSize: 12 }}>
+            <span className="mut" style={{ fontSize: 13, fontWeight: 600,
+              letterSpacing: ".02em" }}>
               Ready to transmit
             </span>
             <span
@@ -183,7 +184,7 @@ export default function ModuleWorkspace() {
             />
           </div>
           {!g.complete && g.missing.length > 0 && (
-            <div className="mut" style={{ fontSize: 12, marginTop: 8 }}>
+            <div className="mut" style={{ fontSize: 13, marginTop: 8 }}>
               {g.missing.length} item(s) still needed to file (documents, fee, or
               validation).
             </div>
