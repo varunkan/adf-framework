@@ -4,7 +4,7 @@
 // "add a 'Regulatory Reference' section with links to Health Canada's
 // guidance documents" (operations). Same sources the in-app Health Canada
 // content review cites.
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { TopNav } from "@/components/TopNav";
 import Link from "next/link";
 import { CriteriaSyncHistory } from "@/components/dossier/CriteriaSyncHistory";
@@ -63,6 +63,22 @@ const SECTIONS: { title: string; items: { label: string; href: string; note: str
   },
 ];
 
+// A single labelled rule-ID row, so the validation catalogue reads as an
+// aligned code / description grid rather than a run-on paragraph list.
+function RuleIdRow({ code, extra, children }:
+  { code: string; extra?: string; children: ReactNode }) {
+  return (
+    <li style={{ display: "grid",
+      gridTemplateColumns: "minmax(120px, max-content) 1fr",
+      gap: "10px 16px", alignItems: "baseline", margin: "8px 0" }}>
+      <span style={{ whiteSpace: "nowrap" }}>
+        <code>{code}</code>{extra}
+      </span>
+      <span>{children}</span>
+    </li>
+  );
+}
+
 export default function HelpPage() {
   const [rules, setRules] = useState<Rule[] | null>(null);
   useEffect(() => {
@@ -76,24 +92,28 @@ export default function HelpPage() {
   return (
     <>
       <TopNav subtitle="regulatory reference" />
-      <main className="dossier-home">
+      <main className="dossier-home" style={{ maxWidth: 860 }}>
         <h1>Regulatory reference</h1>
-        <p className="mut" style={{ maxWidth: "68ch" }}>
+        <p className="lede">
           The primary Health Canada sources behind everything this app checks
           and generates. Every in-app review finding links to one of these;
           this page collects them so you can read the rule, not just trust the
           tool. All links go to canada.ca / laws-lois.justice.gc.ca.
         </p>
+
         {SECTIONS.map((s) => (
-          <section key={s.title} style={{ marginTop: 18 }}>
-            <h2 style={{ fontSize: 16 }}>{s.title}</h2>
-            <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
+          <section key={s.title} style={{ marginTop: 34 }}>
+            <h2>{s.title}</h2>
+            <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
               {s.items.map((it) => (
                 <a key={it.href} className="card glass" href={it.href}
                   target="_blank" rel="noopener noreferrer"
-                  style={{ padding: "12px 16px", display: "block" }}>
-                  <div style={{ fontWeight: 600 }}>{it.label} ↗</div>
-                  <div className="mut" style={{ fontSize: 13, marginTop: 2 }}>
+                  style={{ padding: "16px 18px", display: "block" }}>
+                  <div style={{ fontWeight: 600, fontSize: 15,
+                    lineHeight: 1.4 }}>
+                    {it.label} ↗
+                  </div>
+                  <div className="mut" style={{ fontSize: 14, marginTop: 5 }}>
                     {it.note}
                   </div>
                 </a>
@@ -101,72 +121,96 @@ export default function HelpPage() {
             </div>
           </section>
         ))}
-        <section style={{ marginTop: 24 }}>
-          <h2 style={{ fontSize: 16 }}>How validation works here</h2>
-          <div className="card glass" style={{ padding: "12px 16px", fontSize: 13 }}>
-            Every finding carries a rule ID you can cite in review meetings:
-            <ul style={{ margin: "8px 0 0", paddingLeft: 20 }}>
-              <li><code>CA-E-1xxx</code> — leaf inventory integrity: every live
-                document needs an href and a well-formed MD5 checksum; duplicate
-                leaf IDs are errors.</li>
-              <li><code>CA-E-2xxx</code> — lifecycle legality: replace/append/
-                delete operations must reference a real prior leaf; new leaves
-                can&apos;t claim one.</li>
-              <li><code>CA-E-3xxx</code> — file/folder naming hygiene (lowercase,
-                no spaces, module folder placement).</li>
-              <li><code>CA-E-4xxx</code> — sequence numbering.</li>
-              <li>XML backbone (index + CA regional) and PDF conformance run in
-                the full technical check on the stored bytes.</li>
-              <li><code>CA-REP-0001</code> — filing is blocked while a dossier
-                still uses a placeholder ID instead of the REP-issued one.</li>
+
+        {/* ── How validation works ────────────────────────────────────── */}
+        <section style={{ marginTop: 40 }}>
+          <h2>How validation works here</h2>
+          <div className="card glass" style={{ padding: "18px 22px" }}>
+            <p style={{ margin: 0 }}>
+              Every finding carries a rule ID you can cite in review meetings:
+            </p>
+            <ul style={{ margin: "12px 0 0", padding: 0, listStyle: "none" }}>
+              <RuleIdRow code="CA-E-1xxx">
+                leaf inventory integrity: every live document needs an href and
+                a well-formed MD5 checksum; duplicate leaf IDs are errors.
+              </RuleIdRow>
+              <RuleIdRow code="CA-E-2xxx">
+                lifecycle legality: replace/append/delete operations must
+                reference a real prior leaf; new leaves can&apos;t claim one.
+              </RuleIdRow>
+              <RuleIdRow code="CA-E-3xxx">
+                file/folder naming hygiene (lowercase, no spaces, module folder
+                placement).
+              </RuleIdRow>
+              <RuleIdRow code="CA-E-4xxx">
+                sequence numbering.
+              </RuleIdRow>
+              <li style={{ margin: "8px 0" }}>
+                XML backbone (index + CA regional) and PDF conformance run in
+                the full technical check on the stored bytes.
+              </li>
+              <RuleIdRow code="CA-REP-0001">
+                filing is blocked while a dossier still uses a placeholder ID
+                instead of the REP-issued one.
+              </RuleIdRow>
             </ul>
-            On top of the technical layer, each authorable form has a
-            content review against Health Canada&apos;s required elements —
-            every finding cites its canada.ca source and proposes the edit.
+            <p className="mut" style={{ margin: "14px 0 0", fontSize: 14 }}>
+              On top of the technical layer, each authorable form has a
+              content review against Health Canada&apos;s required elements —
+              every finding cites its canada.ca source and proposes the edit.
+            </p>
           </div>
+
           {/* the live catalogue itself — pulled from the validation engine,
               not hand-maintained copy, so it can never drift from reality */}
-          <div className="card glass" style={{ padding: "12px 16px",
-            fontSize: 13, marginTop: 10 }}>
-            <b>The complete rule catalogue
-              {rules ? ` (${rules.length} rules, live from the engine)` : ""}</b>
+          <div className="card glass" style={{ padding: "18px 22px",
+            marginTop: 14 }}>
+            <h3 style={{ margin: "0 0 6px" }}>
+              The complete rule catalogue
+              {rules ? ` (${rules.length} rules, live from the engine)` : ""}
+            </h3>
             {rules === null ? (
               <div className="mut" style={{ marginTop: 6 }}>Loading…</div>
             ) : (
-              Object.entries(families).map(([fam, rs]) => (
-                <details key={fam} style={{ marginTop: 8 }}>
-                  <summary style={{ cursor: "pointer" }}>
-                    {fam} — {rs.length} rule{rs.length === 1 ? "" : "s"}
-                  </summary>
-                  <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
-                    {rs.map((r) => (
-                      <li key={r.rule_id} style={{ margin: "3px 0" }}>
-                        <code>{r.rule_id}</code>
-                        {r.severity === "warning" ? " (warning)" : ""} —{" "}
-                        {r.description}
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              ))
+              <div style={{ display: "grid", gap: 6 }}>
+                {Object.entries(families).map(([fam, rs]) => (
+                  <details key={fam}>
+                    <summary style={{ cursor: "pointer", fontWeight: 600 }}>
+                      {fam} — {rs.length} rule{rs.length === 1 ? "" : "s"}
+                    </summary>
+                    <ul style={{ margin: "8px 0 4px", paddingLeft: 20 }}>
+                      {rs.map((r) => (
+                        <li key={r.rule_id} style={{ margin: "5px 0",
+                          lineHeight: 1.5 }}>
+                          <code>{r.rule_id}</code>
+                          {r.severity === "warning" ? " (warning)" : ""} —{" "}
+                          {r.description}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                ))}
+              </div>
             )}
           </div>
         </section>
+
         {/* CAMP-CRITERIA-SYNC: the auditable proof the ruleset stays synced to
             Health Canada's criteria versions — review cadence + append-only
             version history, live from the validation engine. */}
-        <section style={{ marginTop: 24 }}>
-          <h2 style={{ fontSize: 16 }}>
-            How the ruleset stays synced to Health Canada&apos;s criteria
-          </h2>
-          <div className="card glass" style={{ padding: "12px 16px" }}>
+        <section style={{ marginTop: 40 }}>
+          <h2>How the ruleset stays synced to Health Canada&apos;s criteria</h2>
+          <div className="card glass" style={{ padding: "18px 22px" }}>
             <CriteriaSyncHistory open />
           </div>
         </section>
-        <section style={{ marginTop: 18 }}>
-          <h2 style={{ fontSize: 16 }}>How AI drafting is controlled</h2>
-          <div className="card glass" style={{ padding: "12px 16px", fontSize: 13 }}>
-            <ul style={{ margin: 0, paddingLeft: 20 }}>
+
+        {/* ── AI drafting controls ────────────────────────────────────── */}
+        <section style={{ marginTop: 40 }}>
+          <h2>How AI drafting is controlled</h2>
+          <div className="card glass" style={{ padding: "18px 22px" }}>
+            <ul style={{ margin: 0, paddingLeft: 22, display: "grid",
+              gap: 10, lineHeight: 1.55 }}>
               <li>Opt-in, per section — only sections marked <b>✦AI</b> offer it,
                 and the standard template author is always available instead.</li>
               <li>Nothing is saved until you click <i>Use this draft</i>; the
@@ -181,7 +225,8 @@ export default function HelpPage() {
             </ul>
           </div>
         </section>
-        <p className="mut" style={{ fontSize: 12, marginTop: 20 }}>
+
+        <p className="mut" style={{ fontSize: 13, marginTop: 28 }}>
           Tip: dashed-underlined terms across the app reveal plain-language
           definitions on hover — and every Health Canada content-review
           finding cites its source directly.
