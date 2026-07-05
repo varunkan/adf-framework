@@ -43,14 +43,20 @@ export function ReadinessCard({
           {data.status === "READY" ? "● READY TO FILE" : "● BLOCKED"}
         </span>
       </div>
-      {/* Tier 1 — the filing checklist (workflow completeness). */}
-      <div className="mut" style={{ fontSize: 12 }}>
+      {/* Tier 1 — the filing checklist (workflow completeness). Grouped with a
+          little top room so it reads as its own line, distinct from the
+          technical-validation verdict below it. */}
+      <div className="mut" style={{ fontSize: 12, marginTop: 8 }}>
         <b>Filing checklist:</b> {data.done} of {data.total} steps complete (
         {data.percent}%)
       </div>
       {/* Tier 2 — the REAL, named eCTD technical validation verdict. Distinct
           from the checklist so the green badge reads as a validation pass, not a
-          step-completion checkbox (round-7 #1 blocker, all 24 respondents). */}
+          step-completion checkbox (round-7 #1 blocker, all 24 respondents).
+          Set off with top spacing + a hairline so the two verdicts don't merge
+          into one dense block. */}
+      <div style={{ marginTop: 10, paddingTop: 10,
+        borderTop: "1px solid var(--line)" }}>
       {(() => {
         const v = data.validation;
         const crit = v?.criteria ?? criteria;
@@ -113,7 +119,8 @@ export function ReadinessCard({
           <RuleCatalogue criteria={criteria ?? undefined} />
         </div>
       )}
-      <div className="progress" aria-hidden>
+      </div>
+      <div className="progress" aria-hidden style={{ marginTop: 14 }}>
         <i style={{ width: `${data.percent}%` }} />
       </div>
 

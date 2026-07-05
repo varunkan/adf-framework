@@ -197,7 +197,7 @@ export default function Page() {
                 export — not a new claim invented here. */}
             {view.journey.dossier_id && (
               <div className="card glass" style={{ marginTop: 12, padding: 14 }}>
-                <div className="mut" style={{ fontSize: 12, marginBottom: 6,
+                <div className="eyebrow" style={{ marginBottom: 8,
                   display: "flex", alignItems: "center", gap: 6 }}>
                   <ScrollText size={13} aria-hidden />
                   Audit trail
@@ -219,7 +219,7 @@ export default function Page() {
                 point them to the per-dossier panel where it actually lives. */}
             {activeStage?.key === "content" && (
               <div className="card glass" style={{ marginTop: 12, padding: 14 }}>
-                <div className="mut" style={{ fontSize: 12, marginBottom: 6 }}>
+                <div className="eyebrow" style={{ marginBottom: 8 }}>
                   Labelling / Product Monograph
                 </div>
                 <p className="mut" style={{ fontSize: 12, margin: "0 0 8px" }}>
@@ -332,25 +332,44 @@ function Hero({
       <button className="start" onClick={onStart} disabled={busy}>
         {busy ? "Starting…" : "Start my submission →"}
       </button>
-      {/* R7: the guided journey is one product's path — a coordinator managing
-          a portfolio enters here instead. Promoted from an afterthought link. */}
-      <div className="hero-portfolio" style={{ marginTop: 18, display: "flex",
-        gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
-        <Link className="chip" href="/dossiers"
-          style={{ fontWeight: 700 }}>
-          Managing several products? Open the dossier catalog
-          {portfolio.total ? ` (${portfolio.total})` : ""} →
-        </Link>
-        <Link className="chip" href="/portfolio">
-          Portfolio roll-up
-          {portfolio.blocked ? ` · ${portfolio.blocked} in progress` : ""} →
-        </Link>
-      </div>
-      <p className="sub" style={{ marginTop: 8 }}>
-        Labelling / regulatory: bilingual Module 1 and Product Monograph (EN + FR)
-        status live inside each dossier — open a dossier’s Module 1 to review it.
-      </p>
+
       {error && <div className="notice bad">{error}</div>}
+
+      {/* R7: the guided journey is one product's path — a coordinator managing
+          a portfolio enters here instead. Promoted from an afterthought link.
+          Grouped into a clearly-separated, labelled block so the two entry
+          points and the labelling note read as one calm section, not a
+          scattered row of links under the primary CTA. */}
+      <section
+        className="card glass"
+        aria-label="Other ways to start"
+        style={{
+          marginTop: 26,
+          padding: "16px 20px",
+          textAlign: "left",
+          maxWidth: 760,
+          marginInline: "auto",
+        }}
+      >
+        <div className="hero-portfolio" style={{ display: "flex", gap: 10,
+          flexWrap: "wrap" }}>
+          <Link className="chip" href="/dossiers"
+            style={{ fontWeight: 700 }}>
+            Managing several products? Open the dossier catalog
+            {portfolio.total ? ` (${portfolio.total})` : ""} →
+          </Link>
+          <Link className="chip" href="/portfolio">
+            Portfolio roll-up
+            {portfolio.blocked ? ` · ${portfolio.blocked} in progress` : ""} →
+          </Link>
+        </div>
+        <p className="mut" style={{ fontSize: 13, margin: "12px 0 0",
+          lineHeight: 1.55 }}>
+          Labelling / regulatory: bilingual Module 1 and Product Monograph
+          (EN + FR) status live inside each dossier — open a dossier’s Module 1
+          to review it.
+        </p>
+      </section>
       {/* WS-OVERALL (round-8) BLOCKER — replace the vague "progress saved
           automatically" footnote with a persistent, honest Trust & security
           strip answering the auditor's first questions (residency, tenant

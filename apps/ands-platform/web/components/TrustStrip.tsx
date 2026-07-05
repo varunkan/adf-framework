@@ -195,22 +195,33 @@ export function TrustStrip() {
             built we say so.
           </p>
           {ITEMS.map(({ icon: Icon, label, short, detail, status }) => (
-            <div key={label} style={{ fontSize: 12.5, lineHeight: 1.45 }}>
-              <b style={{ display: "inline-flex", alignItems: "center",
-                gap: 6 }}>
-                <Icon size={14} aria-hidden />
-                {label}
-              </b>
-              {status === "roadmap" && (
-                <span
-                  className="chip"
-                  style={{ marginLeft: 6, fontSize: 10, padding: "0 6px" }}
-                >
-                  roadmap
-                </span>
-              )}
-              <div style={{ marginTop: 2, fontWeight: 600 }}>{short}</div>
-              <div className="mut" style={{ marginTop: 2 }}>
+            <div
+              key={label}
+              className="card"
+              style={{
+                fontSize: 12.5,
+                lineHeight: 1.45,
+                padding: "10px 12px",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 6,
+                flexWrap: "wrap" }}>
+                <b style={{ display: "inline-flex", alignItems: "center",
+                  gap: 6 }}>
+                  <Icon size={14} aria-hidden />
+                  {label}
+                </b>
+                {status === "roadmap" && (
+                  <span
+                    className="chip"
+                    style={{ fontSize: 10, padding: "0 6px" }}
+                  >
+                    roadmap
+                  </span>
+                )}
+              </div>
+              <div style={{ marginTop: 4, fontWeight: 600 }}>{short}</div>
+              <div className="mut" style={{ marginTop: 3 }}>
                 {detail}
               </div>
             </div>
