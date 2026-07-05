@@ -314,6 +314,54 @@ def _parity_family_key(rule_id: str) -> str:
     return "55" if digits.startswith("55") else digits[0]
 
 
+# ADOPT-EVALIDATOR: rule-LEVEL parity, where the mapping is clean and honest.
+# A rule earns ``coverage_level == "rule"`` only when the specific defect it
+# raises maps to a single, well-known HC eValidator check of the SAME defect
+# (still an overlap, not a numeric-id parity claim). Rules whose family HC
+# covers but which do not have a clean 1:1 defect mapping stay at "family".
+# Rules with no HC eValidator counterpart at all are "none". This keeps the
+# honest not_covered set intact — we never upgrade a convenience check.
+_RULE_LEVEL_COVERED = {
+    # leaf inventory integrity — each is a discrete HC eValidator leaf check
+    "href_required",        # leaf must carry an xlink:href
+    "checksum_required",    # leaf must carry a checksum
+    "checksum_not_md5",     # checksum must be a valid MD5
+    "duplicate_leaf_id",    # leaf ids unique across the dossier
+    # lifecycle operation legality — discrete life-cycle-management checks
+    "operation_invalid",    # operation ∈ new/replace/append/delete
+    "prior_leaf_required",  # replace/append/delete names its prior leaf
+    "prior_leaf_unknown",   # the referenced prior leaf must exist
+    # file/folder naming hygiene — discrete naming checks
+    "href_not_lowercase",
+    "href_has_space",
+    # sequence numbering — discrete four-digit / uniqueness checks
+    "sequence_not_numeric",
+    "sequence_wrong_width",
+    "sequence_duplicate",
+    # transmissible sequence backbone — discrete lifecycle-attr checks
+    "leaf_operation_missing",
+    "leaf_modified_file_missing",
+    "leaf_href_dangling",
+    # regional backbone identity
+    "ca_dossier_id_missing",
+    "ca_company_id_missing",
+}
+
+
+def _coverage_level(rule: str, covered: bool) -> str:
+    """The honest per-rule coverage granularity.
+
+    "rule"   — a clean 1:1 defect mapping to a specific HC eValidator check;
+    "family" — HC's eValidator covers this rule's FAMILY, but this particular
+               rule is an ANDS Studio refinement/warning without a discrete
+               eValidator counterpart (e.g. our contiguity/module-folder hints);
+    "none"   — no HC eValidator counterpart at all (convenience/guardrail).
+    """
+    if not covered:
+        return "none"
+    return "rule" if rule in _RULE_LEVEL_COVERED else "family"
+
+
 def parity() -> dict:
     """The eValidator parity-gap table + a persistent, ACTIONABLE next step.
 
@@ -327,17 +375,24 @@ def parity() -> dict:
     rules = []
     for r in rule_catalog()["rules"]:
         covered, note = _FAMILY_PARITY[_parity_family_key(r["rule_id"])]
+        level = _coverage_level(r["rule"], covered)
         rules.append({
             "rule": r["rule"], "rule_id": r["rule_id"], "family": r["family"],
             "severity": r["severity"],
             "hc_evalidator_covered": covered, "note": note,
+            # ADOPT-EVALIDATOR: per-rule granularity — "rule" is a clean 1:1
+            # defect mapping, "family" a family-level overlap, "none" no HC
+            # counterpart. The honest not_covered set is preserved.
+            "coverage_level": level,
         })
     covered_count = sum(1 for r in rules if r["hc_evalidator_covered"])
+    rule_level_count = sum(1 for r in rules if r["coverage_level"] == "rule")
     return {
         "criteria": criteria(),
         "rules": rules,
         "covered_count": covered_count,
         "not_covered_count": len(rules) - covered_count,
+        "rule_level_count": rule_level_count,
         "next_step": {
             "banner": "You must still run Health Canada's official eValidator "
                       "before transmission. A clean result here means the "
