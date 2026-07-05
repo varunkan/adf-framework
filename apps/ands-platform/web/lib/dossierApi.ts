@@ -12,6 +12,7 @@ import type {
   EvalidatorAttestationResponse,
   EvalidatorReportResponse,
   ExportOutcome,
+  ImportCompatReport,
   RepRequest,
   RepRequestResponse,
   SequenceValidationResult,
@@ -221,6 +222,14 @@ export const dossierApi = {
   validateSequence: (id: string, sequence: string) =>
     j<SequenceValidationResult>(
       `/dossiers/${encodeURIComponent(id)}/validate/sequence/${encodeURIComponent(sequence)}`),
+
+  // CAMP-INTEROP: the import-compatibility self-check the tool runs over its OWN
+  // exported package — the structural contract any compliant RIM importer
+  // (Vault RIM / docuBridge / eValidator) relies on. Read-only; never a
+  // download and never a vendor-certification claim.
+  importCompat: (id: string, sequence: string) =>
+    j<ImportCompatReport>(
+      `/ectd/${encodeURIComponent(id)}/import-compat/${encodeURIComponent(sequence)}`),
 
   // TIER2-PARITY-UX: read the current PREPARED (not transmitted) REP Dossier-ID
   // Request for a dossier (or null).

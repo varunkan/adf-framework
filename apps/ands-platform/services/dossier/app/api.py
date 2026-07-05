@@ -417,6 +417,19 @@ def build_app(service: DossierService) -> FastAPI:
                      "X-Export-Missing": str(len(pkg["missing"])),
                      "X-Export-Validation": stamp})
 
+    # CAMP-INTEROP: import-compatibility self-check over the tool's OWN export.
+    # Answers the repeated adoption ask — "confirm the exported package imports
+    # clean into our Vault RIM / docuBridge lifecycle." Read-only structural
+    # report (no download, no gate): what a compliant ICH eCTD 3.2.2 / CA M1 v2.2
+    # importer will find. HONEST: verifies the STANDARD contract, not a vendor.
+    @router.get("/ectd/{dossier_id}/import-compat/{sequence}")
+    def import_compatibility(dossier_id: str, sequence: str,
+                             x_tenant_id: str = Header(default="",
+                                                       alias="X-Tenant-Id")):
+        service.assert_access(dossier_id, x_tenant_id or None)
+        return service.import_compatibility(dossier_id, sequence,
+                                            x_tenant_id or None)
+
     @router.get("/documents/{doc_id}")
     def download_document(doc_id: str, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
         doc = service.get_document(doc_id, x_tenant_id or None)

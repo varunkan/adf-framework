@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useDossier } from "@/components/dossier/DossierContext";
 import { dossierApi } from "@/lib/dossierApi";
 import { EvalidatorHandoff } from "@/components/dossier/EvalidatorHandoff";
+import { ImportCompat } from "@/components/dossier/ImportCompat";
 import { PreflightReport } from "@/components/dossier/PreflightReport";
 import type { OutlineView } from "@/lib/dossierTypes";
 
@@ -93,13 +94,19 @@ export default function ViewerPage() {
           transmission" banner + the parity-gap table — so downloading the
           package is never mistaken for passing HC's official validator. */}
       {exportedOk && (
-        <div className="card glass" style={{ marginTop: 10 }}>
-          <div className="mut" style={{ fontSize: 12 }}>
-            eCTD package exported. One required step remains before you can
-            transmit:
+        <>
+          {/* CAMP-INTEROP: the adoption ask — "will this import clean into our
+              Vault RIM / docuBridge?". On export success, self-check the exact
+              package that was built and show what a compliant importer finds. */}
+          <ImportCompat dossierId={dossierId} sequence="0000" />
+          <div className="card glass" style={{ marginTop: 10 }}>
+            <div className="mut" style={{ fontSize: 12 }}>
+              eCTD package exported. One required step remains before you can
+              transmit:
+            </div>
+            <EvalidatorHandoff criteria={content?.validation?.criteria} />
           </div>
-          <EvalidatorHandoff criteria={content?.validation?.criteria} />
-        </div>
+        </>
       )}
       <p className="mut" style={{ fontSize: 12 }}>
         The export is the spec folder tree (index.xml, ca-regional.xml, REP RT

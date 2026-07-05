@@ -175,6 +175,51 @@ export interface SequenceValidationResult extends ValidationResult {
   scope: "sequence";
 }
 
+// CAMP-INTEROP: the import-compatibility self-check the tool runs over its OWN
+// exported package — the structural contract any compliant RIM importer (Vault
+// RIM / docuBridge / eValidator) relies on. HONEST: verifies the STANDARD
+// contract; it does NOT certify a specific vendor.
+export interface ImportCompatCheck {
+  id: string;
+  label: string;
+  passed: boolean;
+  detail: string;
+}
+
+export interface ImportCompatLeaf {
+  leaf_id: string;
+  operation: string;
+  href: string;
+  resolved: boolean;
+  cross_sequence: boolean;
+}
+
+export interface ImportCompatInventory {
+  root: string;
+  index_xml: string;
+  index_md5: string;
+  ca_regional: string;
+  util_dtds: string[];
+  modules: string[];
+  files: string[];
+}
+
+export interface ImportCompatReport {
+  compatible: boolean;
+  checks: ImportCompatCheck[];
+  errors: { id: string; label: string; detail: string }[];
+  passed_count: number;
+  check_count: number;
+  inventory: ImportCompatInventory;
+  leaves: ImportCompatLeaf[];
+  file_count: number;
+  dossier_id: string;
+  sequence: string;
+  filename: string;
+  standard: { ectd: string; regional: string };
+  disclaimer: string;
+}
+
 // TIER2-PARITY-UX: a PREPARED (not transmitted) REP Dossier-ID Request.
 export interface RepRequest {
   transmitted: false;
