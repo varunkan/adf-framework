@@ -1,5 +1,16 @@
 ## Working principles (standing directives — apply to EVERY task)
 
+**NEVER start a dev/preview/web server that could displace the user's running
+app.** Do NOT run `preview_start`, `npm run dev`, `next dev/start`, `uvicorn`, or
+any server that binds a port the user's app may already use (esp. `:3000` and the
+mesh service ports 8010–8018). Starting a competing server on `:3000` will kill
+the user's working web and break their UI — this happened once (2026-07-05) and
+must never recur. To verify UI: interact READ-ONLY with the user's ALREADY-RUNNING
+server (its serverId), or verify from source + `tsc`/`next lint`/`next build` +
+the content checks. If a fresh server is genuinely required, ASK first and use a
+non-conflicting port. This overrides "always run autonomously" and the
+preview-tools guidance.
+
 **Always run autonomously.** Execute the work end to end without pausing for
 approval or check-ins. Make the reasonable call yourself from the goal, the
 evidence, and sensible defaults, and proceed. Do NOT use AskUserQuestion for
