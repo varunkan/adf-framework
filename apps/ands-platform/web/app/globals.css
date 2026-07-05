@@ -167,6 +167,23 @@ button:disabled{opacity:.45;cursor:not-allowed;transform:none}
   .sign-resign-banner .srb-cta{margin-left:auto}
 }
 
+/* POLISH-ID-BEFORE-409: the ambient placeholder-ID prompt — same full-width,
+   always-visible strip shape as the sign banner, but a warn (amber) tone since
+   it's a "set this up front" nudge, not an error. Fires on every builder page
+   for a d… draft dossier so the real-ID step happens before the export 409. */
+.placeholder-id-banner{display:flex;align-items:center;gap:12px;
+  margin:0;border-radius:0;border-left:0;border-right:0;
+  padding:10px 26px;font-size:13px;line-height:1.4}
+.placeholder-id-banner .pib-icon{flex:0 0 auto;color:#ffce7a}
+.placeholder-id-banner .pib-body{flex:1 1 auto;min-width:0}
+.placeholder-id-banner .pib-cta{flex:0 0 auto;white-space:nowrap;
+  display:inline-flex;align-items:center;gap:5px;font-weight:600;
+  border:0;cursor:pointer}
+@media (max-width:720px){
+  .placeholder-id-banner{flex-wrap:wrap;padding:10px 16px}
+  .placeholder-id-banner .pib-cta{margin-left:auto}
+}
+
 /* ── readiness card (right column) ────────────────────────────────── */
 .spatial{position:sticky;top:84px;display:flex;flex-direction:column;gap:20px}
 .ready-card h2{margin:0 0 2px;font-size:15px;font-weight:700}

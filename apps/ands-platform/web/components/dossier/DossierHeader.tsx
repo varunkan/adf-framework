@@ -1,13 +1,78 @@
 "use client";
 import Link from "next/link";
+import { useState } from "react";
 import { UserChip } from "@/components/UserChip";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useDossier } from "./DossierContext";
-import { CheckCircle2, AlertTriangle, ShieldX, PenLine } from "lucide-react";
+import { SetRealDossierIdModal } from "./SetRealDossierIdModal";
+import {
+  CheckCircle2,
+  AlertTriangle,
+  ShieldX,
+  PenLine,
+  KeyRound,
+} from "lucide-react";
 import { MODULE_NAME, type ModuleTabState } from "@/lib/leafStatus";
 import type { SignatureReadiness } from "@/lib/dossierTypes";
 
 const MODULES = ["1", "2", "3", "4", "5"];
+
+// POLISH-ID-BEFORE-409: a PERSISTENT, ambient strip under the workspace chrome
+// that fires the MOMENT a placeholder-ID (d…) dossier is opened — up front, in
+// the builder, so setting the real Health Canada Dossier ID is a deliberate
+// first step and the export 409 becomes a CONFIRMATION, not a surprise. Every
+// dossier page mounts this header, so the prompt is unavoidable, not something
+// the filer only discovers at the export wall. Reuses the shared set-real-ID +
+// REP-request flow (SetRealDossierIdModal).
+//
+// Honest: the in-app REP Dossier-ID Request records the request intent — it
+// does NOT transmit to Health Canada; export stays blocked until a real ID is
+// set AND validation passes.
+function PlaceholderIdBanner({ dossierId }: { dossierId: string }) {
+  const router = useRouter();
+  const params = useParams();
+  const { index, refresh } = useDossier();
+  const [open, setOpen] = useState(false);
+  // only for placeholder (draft) IDs — a real HC Dossier ID never starts with 'd'
+  if (!dossierId.startsWith("d")) return null;
+  const active = String((params as any)?.module || "1");
+  return (
+    <>
+      <div className="placeholder-id-banner notice warn" role="status">
+        <KeyRound size={16} aria-hidden className="pib-icon" />
+        <span className="pib-body">
+          <strong>
+            This dossier uses a placeholder ID ({dossierId}).
+          </strong>{" "}
+          Set the real Health Canada Dossier ID (issued via REP) before
+          validation / export — export stays blocked until you do.
+        </span>
+        <button className="chip pib-cta" onClick={() => setOpen(true)}>
+          <PenLine size={13} aria-hidden />
+          Set real Dossier ID
+        </button>
+      </div>
+      {open && (
+        <SetRealDossierIdModal
+          dossierId={dossierId}
+          seedCompany={index?.company_id || ""}
+          seedSponsor={index?.sponsor || ""}
+          onClose={() => setOpen(false)}
+          onRenamed={async (newId) => {
+            setOpen(false);
+            // the id changed — route to the same module under the new id, then
+            // let the fresh page mount re-fetch. refresh() keeps this tab honest
+            // if the router push is a no-op.
+            await refresh();
+            router.push(
+              `/dossiers/${encodeURIComponent(newId)}/m/${encodeURIComponent(active)}`
+            );
+          }}
+        />
+      )}
+    </>
+  );
+}
 
 // POLISH-SIGN-BANNER: a PERSISTENT, ambient strip under the workspace chrome
 // that fires the MOMENT the current package stops being cleanly signed — a leaf
@@ -143,6 +208,7 @@ export function DossierHeader() {
       <Link className="chip" href="/portfolio">Portfolio</Link>
       <Link className="chip" href="/">Journey</Link>
     </header>
+    <PlaceholderIdBanner dossierId={dossierId} />
     <SignatureReSignBanner
       sr={content?.signature_readiness}
       dossierId={dossierId}

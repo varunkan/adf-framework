@@ -3,10 +3,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { dossierApi } from "@/lib/dossierApi";
-import type { DossierListItem, RepRequest } from "@/lib/dossierTypes";
+import type { DossierListItem } from "@/lib/dossierTypes";
 import { Term } from "@/components/Term";
 import { TopNav } from "@/components/TopNav";
 import { Modal } from "@/components/Modal";
+import { SetRealDossierIdModal } from "@/components/dossier/SetRealDossierIdModal";
 import { auth } from "@/lib/auth";
 import { dueMeta } from "@/lib/deadline";
 import { toast } from "sonner";
@@ -63,36 +64,14 @@ export default function DossiersHome() {
   const [delTyped, setDelTyped] = useState("");
   const [delReason, setDelReason] = useState("");
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
-  const [renameNew, setRenameNew] = useState("");
-  const [renameReason, setRenameReason] = useState("");
   const [modalBusy, setModalBusy] = useState(false);
   const [modalErr, setModalErr] = useState("");
 
-  // TIER2-PARITY-UX: the in-app REP Dossier-ID Request helper, filed from inside
-  // the placeholder banner. HONEST: it records the request intent + returns
-  // guidance — it does NOT transmit to Health Canada.
-  const [repBusy, setRepBusy] = useState(false);
-  const [repDone, setRepDone] = useState<RepRequest | null>(null);
-  const [repCompany, setRepCompany] = useState("");
-  const [repSponsor, setRepSponsor] = useState("");
-
-  async function fileRepRequest() {
-    if (!renameTarget) return;
-    setRepBusy(true);
-    setModalErr("");
-    try {
-      const rr = await dossierApi.requestRepDossierId(renameTarget, {
-        company_id: repCompany.trim() || undefined,
-        sponsor: repSponsor.trim() || undefined,
-      });
-      setRepDone(rr);
-      toast.success("REP Dossier-ID Request prepared and recorded (not transmitted).");
-    } catch (er) {
-      setModalErr(String(er));
-    } finally {
-      setRepBusy(false);
-    }
-  }
+  // POLISH-ID-BEFORE-409: the set-real-ID + REP flow now lives in the shared
+  // SetRealDossierIdModal (reused by the builder chrome). Seed it with any
+  // known sponsor/company for the target dossier.
+  const [renameSeedCompany, setRenameSeedCompany] = useState("");
+  const [renameSeedSponsor, setRenameSeedSponsor] = useState("");
 
   // recoverable 'trash' (archived dossiers) — restore with undo
   const [showArchived, setShowArchived] = useState(false);
@@ -169,40 +148,10 @@ export default function DossiersHome() {
     e.preventDefault();
     e.stopPropagation();
     setRenameTarget(oldId);
-    setRenameNew("");
-    setRenameReason("");
-    setModalErr("");
-    // reset the REP-request helper for this target
-    setRepDone(null);
-    setRepCompany("");
-    setRepSponsor("");
     // seed the REP helper with any known sponsor/company for this dossier
     const d = items.find((it) => it.dossier_id === oldId);
-    if (d) {
-      setRepCompany((d as { company_id?: string }).company_id || "");
-      setRepSponsor((d as { sponsor?: string }).sponsor || "");
-    }
-  }
-
-  async function confirmRename() {
-    if (!renameTarget) return;
-    const next = renameNew.trim().toLowerCase();
-    if (!/^[a-z]\d{6,7}$/.test(next)) {
-      setModalErr("Dossier ID must be one letter + 6–7 digits (e.g. e123456)");
-      return;
-    }
-    setModalBusy(true);
-    setModalErr("");
-    try {
-      await dossierApi.renameDossier(renameTarget, next, renameReason.trim());
-      toast.success(`Dossier ID set to ${next}`);
-      setRenameTarget(null);
-      await load();
-    } catch (er) {
-      setModalErr(String(er));
-    } finally {
-      setModalBusy(false);
-    }
+    setRenameSeedCompany((d as { company_id?: string })?.company_id || "");
+    setRenameSeedSponsor((d as { sponsor?: string })?.sponsor || "");
   }
 
   async function create() {
@@ -637,128 +586,16 @@ export default function DossiersHome() {
       )}
 
       {renameTarget && (
-        <Modal
-          title="Set the real Health Canada Dossier ID"
+        <SetRealDossierIdModal
+          dossierId={renameTarget}
+          seedCompany={renameSeedCompany}
+          seedSponsor={renameSeedSponsor}
           onClose={() => setRenameTarget(null)}
-          footer={
-            <>
-              <button className="ghost" onClick={() => setRenameTarget(null)}>
-                Cancel
-              </button>
-              <button onClick={confirmRename} disabled={modalBusy || !renameNew.trim()}>
-                {modalBusy ? "Applying…" : "Apply new ID"}
-              </button>
-            </>
-          }
-        >
-          <p className="mut" style={{ fontSize: 13, marginTop: 0 }}>
-            Re-key <b>{renameTarget}</b> to the Dossier ID issued by Health
-            Canada (one letter + 6–7 digits, e.g. <code>e123456</code>). All
-            documents, sequences and history move with it. The before/after IDs
-            and your reason are written to the audit trail.
-          </p>
-          <label style={{ fontSize: 13 }}>New Dossier ID</label>
-          <input
-            value={renameNew}
-            autoFocus
-            onChange={(e) => setRenameNew(e.target.value)}
-            placeholder="e123456"
-            style={{ width: "100%", marginTop: 4 }}
-          />
-          <label style={{ fontSize: 13, marginTop: 10, display: "block" }}>
-            Reason for change (optional)
-          </label>
-          <input
-            value={renameReason}
-            onChange={(e) => setRenameReason(e.target.value)}
-            placeholder="e.g. HC issued Dossier ID via REP"
-            style={{ width: "100%", marginTop: 4 }}
-          />
-
-          {/* TIER2-PARITY-UX: file the REP Dossier-ID Request from inside the
-              placeholder banner. HONEST — it records the request intent +
-              returns guidance; it does NOT transmit to Health Canada. Shown for
-              placeholder (d…) dossiers, which don't yet have a real ID. */}
-          {renameTarget.startsWith("d") && (
-            <div className="notice" style={{ marginTop: 14, fontSize: 13 }}>
-              <div style={{ fontWeight: 600 }}>
-                Don&apos;t have a Dossier ID yet? Request one (REP)
-              </div>
-              <p className="mut" style={{ fontSize: 12, margin: "4px 0 8px" }}>
-                Health Canada issues the Dossier ID through the Regulatory
-                Enrolment Process (REP) via <Term k="CESG" />. ANDS Studio
-                prepares and records the request here — it does{" "}
-                <b>not</b> transmit to Health Canada. Once HC issues the ID, set
-                it above.
-              </p>
-              {repDone ? (
-                <div className="notice ok" style={{ fontSize: 12 }}>
-                  <div style={{ fontWeight: 600 }}>
-                    Request prepared and recorded (not transmitted).
-                  </div>
-                  <p className="mut" style={{ margin: "4px 0 6px" }}>
-                    {repDone.guidance.summary}
-                  </p>
-                  <ol style={{ margin: "0 0 0 16px", padding: 0 }}>
-                    {repDone.guidance.steps.map((s) => (
-                      <li key={s} className="mut" style={{ marginTop: 2 }}>
-                        {s}
-                      </li>
-                    ))}
-                  </ol>
-                  <a
-                    href={repDone.guidance.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="mut"
-                    style={{ display: "inline-block", marginTop: 6, fontSize: 11 }}
-                  >
-                    Health Canada — Regulatory Enrolment Process (REP) ↗
-                  </a>
-                </div>
-              ) : (
-                <>
-                  <div className="field-row">
-                    <div>
-                      <label style={{ fontSize: 12 }}>
-                        Company ID <span className="mut" style={{ fontWeight: 400 }}>(optional)</span>
-                      </label>
-                      <input
-                        value={repCompany}
-                        onChange={(e) => setRepCompany(e.target.value)}
-                        placeholder="HC company identifier"
-                        style={{ width: "100%", marginTop: 3 }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: 12 }}>
-                        Sponsor <span className="mut" style={{ fontWeight: 400 }}>(optional)</span>
-                      </label>
-                      <input
-                        value={repSponsor}
-                        onChange={(e) => setRepSponsor(e.target.value)}
-                        placeholder="Acme Pharma Inc."
-                        style={{ width: "100%", marginTop: 3 }}
-                      />
-                    </div>
-                  </div>
-                  <button
-                    className="ghost"
-                    style={{ marginTop: 8, fontSize: 12 }}
-                    onClick={fileRepRequest}
-                    disabled={repBusy}
-                  >
-                    {repBusy ? "Preparing…" : "Prepare REP Dossier-ID Request →"}
-                  </button>
-                </>
-              )}
-            </div>
-          )}
-
-          {modalErr && (
-            <div className="notice bad" style={{ marginTop: 10 }}>{modalErr}</div>
-          )}
-        </Modal>
+          onRenamed={async () => {
+            setRenameTarget(null);
+            await load();
+          }}
+        />
       )}
     </>
   );
