@@ -77,7 +77,9 @@ export function ImportCompat({
               ) : (
                 <XCircle size={13} aria-hidden />
               )}
-              {report.compatible ? "Import-compatible" : "Not import-compatible"}
+              {report.compatible
+                ? `Standard ${report.standard.ectd} structural contract met`
+                : `Standard ${report.standard.ectd} structural contract NOT met`}
             </span>
           )}
         </div>
@@ -92,6 +94,38 @@ export function ImportCompat({
           {loading ? "Checking…" : "Re-check"}
         </button>
       </div>
+
+      {/* SCOPE — stated next to the verdict so a skimming director cannot
+          over-read the green result as "certified into MY Vault instance".
+          Prominent (not a footnote) and vendor-neutral. */}
+      {report && (
+        <div
+          className="notice"
+          role="note"
+          style={{
+            marginTop: 8,
+            fontSize: 12,
+            display: "flex",
+            gap: 8,
+            alignItems: "flex-start",
+            borderLeft: "3px solid var(--brand, #6366f1)",
+            fontWeight: 500,
+          }}
+        >
+          <FileCheck2
+            size={16}
+            aria-hidden
+            style={{ flexShrink: 0, marginTop: 1 }}
+          />
+          <div>
+            Verifies the standard structural contract every compliant importer
+            relies on. <b>NOT</b> a certified import into a specific system
+            (Vault&nbsp;/&nbsp;docuBridge&nbsp;/&nbsp;etc.) — a green result means
+            the package meets the {report.standard.ectd} contract, not that it was
+            loaded into your Vault instance.
+          </div>
+        </div>
+      )}
 
       <p className="mut" style={{ fontSize: 12, marginTop: 6 }}>
         A self-check ANDS Studio runs over the eCTD package it just built for
