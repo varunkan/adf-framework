@@ -7,6 +7,7 @@ import { EctdPrimer } from "./EctdPrimer";
 import { EvalidatorHandoff } from "./EvalidatorHandoff";
 import {
   groupPdfaWarnings,
+  pdfaLeafItems,
   type PdfaAdvisoryGroup,
 } from "@/lib/pdfaAdvisories";
 import type {
@@ -90,27 +91,56 @@ function PdfaAdvisoryRow({ g }: { g: PdfaAdvisoryGroup }) {
           aria-expanded={open}
           onClick={() => setOpen((o) => !o)}
         >
-          {open ? "Hide leaves" : "Show affected leaves"}
+          {open
+            ? "Hide itemized list"
+            : `Review ${n} item${n === 1 ? "" : "s"}`}
         </button>
       </div>
       {open && (
         <div style={{ marginTop: 4 }}>
-          <div style={{ fontSize: 10, opacity: 0.75, marginBottom: 3 }}>
+          <div style={{ fontSize: 10, opacity: 0.75, marginBottom: 4 }}>
             {g.message}
           </div>
-          <ul style={{ margin: "0 0 0 14px", padding: 0 }}>
-            {g.leaves.map((leaf, i) => (
-              <li key={i} style={{ marginTop: 1 }}>
-                <code style={{ fontSize: 10, opacity: 0.85 }}>
-                  {leaf || "(document)"}
+          {/* POLISH-PDFA-ITEMIZE: one reviewable ROW per affected leaf so a
+              publisher can clear or accept EACH one, not just trust the count.
+              Each row states the leaf id, the specific marker it lacks, and the
+              plain non-blocking note. */}
+          <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
+            {pdfaLeafItems(g).map((item, i) => (
+              <li
+                key={i}
+                style={{
+                  marginTop: i === 0 ? 0 : 4,
+                  paddingTop: i === 0 ? 0 : 4,
+                  borderTop: i === 0 ? "none" : "1px solid var(--line)",
+                  display: "flex",
+                  gap: 6,
+                  alignItems: "baseline",
+                  flexWrap: "wrap",
+                }}
+              >
+                <code
+                  style={{ fontSize: 10, opacity: 0.9, whiteSpace: "nowrap" }}
+                >
+                  {item.leaf || "(document)"}
                 </code>
+                <span style={{ fontSize: 11 }}>
+                  lacks <b>{item.marker}</b>
+                </span>
+                <span
+                  className="mut"
+                  style={{ fontSize: 10, opacity: 0.7, whiteSpace: "nowrap" }}
+                >
+                  · {item.note}
+                </span>
               </li>
             ))}
           </ul>
-          <div style={{ fontSize: 10, opacity: 0.7, marginTop: 4 }}>
+          <div style={{ fontSize: 10, opacity: 0.7, marginTop: 6 }}>
             Generated leaves are marked PDF/A post-generation, so residual
             advisories are typically on <b>uploaded</b> plain PDFs. A plain,
-            transmissible PDF is not a defect merely for lacking PDF/A markers.
+            transmissible PDF is not a defect merely for lacking PDF/A markers —
+            your publisher can clear or accept each item above.
           </div>
         </div>
       )}

@@ -60,6 +60,39 @@ export interface GroupedWarnings {
   other: ValidationFinding[];
 }
 
+// POLISH-PDFA-ITEMIZE — one reviewable line item PER affected leaf. The group
+// collapses the wall of yellow to a per-rule headline; when a publisher expands
+// it they need to JUDGE each leaf, not re-trust a count. So each leaf becomes an
+// item carrying: the leaf id, the SPECIFIC marker that leaf lacks (the human
+// label, e.g. "XMP metadata packet"), the rule id it maps to, and the plain
+// non-blocking note — everything the publisher needs to clear or accept it.
+export interface PdfaLeafItem {
+  // the affected leaf id ("" surfaced as "(document)" by the caller)
+  leaf: string;
+  // the CA-W-70xx rule id this leaf tripped
+  rule_id: string;
+  // the specific conformance marker this leaf lacks, in human terms
+  marker: string;
+  // the plain-language advisory note — identical per rule, but stated per leaf
+  // so a publisher reads it on the line they are judging, not once at the top
+  note: string;
+}
+
+// The standing, honest advisory note. PDF/A markers are a nicety on a plain
+// transmissible PDF, never a hard error — so every itemized leaf says so.
+const PDFA_ADVISORY_NOTE = "advisory — does not block transmission";
+
+// Flatten a single advisory group into one reviewable item per affected leaf.
+// Order-preserving over the group's deduped leaves. Pure — no React, no I/O.
+export function pdfaLeafItems(g: PdfaAdvisoryGroup): PdfaLeafItem[] {
+  return g.leaves.map((leaf) => ({
+    leaf,
+    rule_id: g.rule_id,
+    marker: g.label,
+    note: PDFA_ADVISORY_NOTE,
+  }));
+}
+
 function isPdfaAdvisory(f: ValidationFinding): boolean {
   return typeof f.rule_id === "string" && f.rule_id.startsWith(PDFA_ADVISORY_PREFIX);
 }
