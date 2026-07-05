@@ -5,6 +5,10 @@ import { Disclosure } from "../Disclosure";
 import { RuleCatalogue } from "./RuleCatalogue";
 import { EctdPrimer } from "./EctdPrimer";
 import { EvalidatorHandoff } from "./EvalidatorHandoff";
+import {
+  groupPdfaWarnings,
+  type PdfaAdvisoryGroup,
+} from "@/lib/pdfaAdvisories";
 import type {
   ValidationCriteria,
   ValidationFinding,
@@ -40,6 +44,76 @@ function Row({ f, warn }: { f: ValidationFinding; warn?: boolean }) {
         ) : null}
         {f.message}
       </span>
+    </div>
+  );
+}
+
+// FIX-PDFA-NOISE — one COLLAPSED PDF/A advisory: the per-rule summary
+// ("PDF/A-1b advisory CA-W-7006 (XMP metadata) — 9 leaves"), rendered in a
+// clearly SECONDARY / muted style so it never reads as a hard error, with the
+// affected leaves tucked behind an expander. The advisory nature (does not
+// block) is stated on the face; the leaf list is one click away.
+function PdfaAdvisoryRow({ g }: { g: PdfaAdvisoryGroup }) {
+  const [open, setOpen] = useState(false);
+  const n = g.count;
+  return (
+    <div
+      className="mut"
+      style={{
+        fontSize: 12,
+        marginTop: 6,
+        paddingLeft: 8,
+        borderLeft: "2px solid var(--warn)",
+        opacity: 0.92,
+      }}
+    >
+      <div style={{ display: "flex", gap: 6, alignItems: "baseline", flexWrap: "wrap" }}>
+        <code style={{ fontSize: 10, opacity: 0.85, whiteSpace: "nowrap" }}>
+          {g.rule_id}
+        </code>
+        <span
+          className="chip"
+          style={{ fontSize: 9, padding: "0 5px", textTransform: "uppercase" }}
+        >
+          advisory
+        </span>
+        <span>
+          PDF/A-1b advisory ({g.label}) —{" "}
+          <b>
+            {n} leaf{n === 1 ? "" : "s"}
+          </b>{" "}
+          <span style={{ opacity: 0.8 }}>· advisory only, does not block</span>
+        </span>
+        <button
+          className="ghost"
+          style={{ fontSize: 10, padding: "1px 6px" }}
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+        >
+          {open ? "Hide leaves" : "Show affected leaves"}
+        </button>
+      </div>
+      {open && (
+        <div style={{ marginTop: 4 }}>
+          <div style={{ fontSize: 10, opacity: 0.75, marginBottom: 3 }}>
+            {g.message}
+          </div>
+          <ul style={{ margin: "0 0 0 14px", padding: 0 }}>
+            {g.leaves.map((leaf, i) => (
+              <li key={i} style={{ marginTop: 1 }}>
+                <code style={{ fontSize: 10, opacity: 0.85 }}>
+                  {leaf || "(document)"}
+                </code>
+              </li>
+            ))}
+          </ul>
+          <div style={{ fontSize: 10, opacity: 0.7, marginTop: 4 }}>
+            Generated leaves are marked PDF/A post-generation, so residual
+            advisories are typically on <b>uploaded</b> plain PDFs. A plain,
+            transmissible PDF is not a defect merely for lacking PDF/A markers.
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -305,6 +379,11 @@ export function ValidationCard({
   const [showAll, setShowAll] = useState(false);
   const v = full || structural;
   const errs = showAll ? v.errors : v.errors.slice(0, 5);
+  // FIX-PDFA-NOISE: collapse the repetitive PDF/A-1b advisories (CA-W-70xx) into
+  // a per-rule summary so 10-12 near-identical yellow rows read as the 2-4
+  // grouped advisories they actually are. Non-PDF/A warnings stay individual.
+  const { pdfaGroups, other: otherWarnings } = groupPdfaWarnings(v.warnings);
+  const shownOther = showAll ? otherWarnings : otherWarnings.slice(0, 3);
 
   async function run() {
     setBusy(true);
@@ -350,13 +429,26 @@ export function ValidationCard({
             {showAll ? "Show fewer" : `Show all ${v.errors.length} findings`}
           </button>
         )}
-        {(showAll ? v.warnings : v.warnings.slice(0, 3)).map((w, i) => (
+        {/* FIX-PDFA-NOISE: the PDF/A advisories are grouped per rule and shown
+            in full (there are only ever 2-4), each collapsing its affected
+            leaves behind an expander. They are visually SECONDARY (muted, warn
+            left-rule, "advisory" chip) so they never read as hard errors. */}
+        {pdfaGroups.map((g) => (
+          <PdfaAdvisoryRow key={g.rule_id} g={g} />
+        ))}
+        {shownOther.map((w, i) => (
           <Row key={`w${i}`} f={w} warn />
         ))}
-        {v.warnings.length > 3 && !showAll && (
-          <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>
-            +{v.warnings.length - 3} more warning(s) — Show all above
-          </div>
+        {otherWarnings.length > 3 && (
+          <button
+            className="ghost"
+            style={{ fontSize: 11, padding: "2px 6px", marginTop: 4 }}
+            onClick={() => setShowAll((s) => !s)}
+          >
+            {showAll
+              ? "Show fewer warnings"
+              : `+${otherWarnings.length - 3} more warning(s)`}
+          </button>
         )}
         {v.errors.length === 0 && v.warnings.length === 0 && (
           <div className="mut" style={{ fontSize: 12 }}>
