@@ -231,6 +231,55 @@ def cs_be(ctx: dict) -> dict:
     return _pdf("Comprehensive Summary — Bioequivalence (CS-BE)", body, "cs-be")
 
 
+def _field_value(field: dict, form: dict) -> str:
+    """The filled value for one schema field, or a clear placeholder."""
+    v = _s((form or {}).get(field.get("name")))
+    if v:
+        return v
+    if field.get("required"):
+        return f"[PLACEHOLDER: {field.get('label') or field.get('name')}]"
+    return "(not provided)"
+
+
+def structured_document(schema: dict, form: dict, ctx: dict | None = None) -> dict:
+    """Universal generator: render a section's filled form schema into a clean,
+    well-headed PDF/A-1b-clean PDF (via :mod:`pdfgen`).
+
+    Each field is laid out as ``Label: value`` (prose fields get their own
+    block), bilingual fields are flagged, and required-but-empty fields render
+    an explicit ``[PLACEHOLDER: …]`` rather than silently blank — honest about
+    what the filer still owes. The document carries the ``_DRAFT`` watermark;
+    nothing here is claimed HC-accepted.
+    """
+    schema = schema or {}
+    form = form or {}
+    title = _s(schema.get("title")) or "eCTD Document"
+    section = _s(schema.get("section"))
+    lines: list[str] = []
+    desc = _s(schema.get("description"))
+    if desc:
+        lines.append(desc)
+        lines.append("")
+    if section:
+        lines.append(f"eCTD section: {section}")
+        lines.append("")
+    for field in schema.get("fields", []):
+        label = _s(field.get("label") or field.get("name"))
+        if field.get("bilingual"):
+            label += " (bilingual: EN + FR)"
+        value = _field_value(field, form)
+        if field.get("prose") or field.get("type") == "textarea":
+            lines.append(f"{label}:")
+            for para in value.split("\n"):
+                lines.append(f"  {para}")
+            lines.append("")
+        else:
+            lines.append(f"{label}: {value}")
+    body = "\n".join(lines).rstrip() + "\n"
+    stem = f"section-{section.replace('.', '-').lower()}" if section else "document"
+    return _pdf(title, body, stem)
+
+
 GENERATORS = {
     "cover_letter": cover_letter,
     "rep_application_form": rep_application_form,
@@ -263,11 +312,28 @@ def generate(generator_key: str, ctx: dict) -> dict:
     """Produce the document for a generator key. Raises KeyError if unknown.
 
     A finalised interactive (LLM chat) draft in ``ctx['llm_draft']`` takes
-    priority over the deterministic template for LLM-draftable documents."""
+    priority over the deterministic template for LLM-draftable documents.
+
+    The universal ``"structured"`` key renders a section's filled form schema:
+    the section is taken from ``ctx['section']`` and the filled field map from
+    ``ctx['form']`` (falling back to ``ctx`` itself). Its schema is looked up
+    via :mod:`form_schemas`."""
     key = _s(generator_key)
+    ctx = ctx or {}
+    if key == "structured":
+        # lazy import — form_schemas is a leaf, but keep generators import-light
+        from . import form_schemas
+        section = _s(ctx.get("section"))
+        schema = form_schemas.form_schema(section)
+        if not schema:
+            raise KeyError(f"no form schema for section {section!r}")
+        form = ctx.get("form")
+        if not isinstance(form, dict):
+            form = ctx
+        return structured_document(schema, form, ctx)
     fn = GENERATORS[key]
-    llm_draft = _s((ctx or {}).get("llm_draft"))
+    llm_draft = _s(ctx.get("llm_draft"))
     if llm_draft and key in LLM_DRAFTABLE:
         title, stem = LLM_DRAFTABLE[key]
         return _pdf(title, llm_draft, stem)
-    return fn(ctx or {})
+    return fn(ctx)
