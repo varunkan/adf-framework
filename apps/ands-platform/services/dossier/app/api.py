@@ -227,6 +227,15 @@ def build_app(service: DossierService) -> FastAPI:
         service.assert_access(dossier_id, x_tenant_id or None)
         return service.validate_submission(dossier_id)
 
+    # TIER3-PREFLIGHT: ONE consolidated pre-flight / QA hand-off report — the
+    # whole filing-readiness picture (structural validation + eValidator
+    # attestation + Part-11 e-sign + SoD + fees + sequences + REP/Dossier-ID)
+    # assembled into a single archivable object, disclaimers inline. Resolves
+    # the "re-run validate at each step" limit.
+    @router.get("/dossiers/{dossier_id}/preflight-report")
+    def preflight_report(dossier_id: str, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        return service.preflight_report(dossier_id, x_tenant_id or None)
+
     # ADOPT-EVALIDATOR: record / read the USER-ATTESTED external eValidator
     # result. ANDS Studio cannot run HC's official eValidator, so this is where
     # the filer attaches the REAL outcome of running it on the exported package.

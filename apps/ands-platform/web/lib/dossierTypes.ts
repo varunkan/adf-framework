@@ -296,6 +296,53 @@ export interface ValidationRuleCatalog {
   criteria: ValidationCriteria;
 }
 
+// TIER3-PREFLIGHT: ONE consolidated pre-flight / QA hand-off report — the whole
+// filing-readiness picture assembled into a single archivable object. RESOLVES
+// the "re-run validate at each step" limit. Every honesty disclaimer travels
+// INLINE (see `disclaimers`); the readiness `summary`/`claim` are STRUCTURAL
+// statements and never assert Health Canada acceptance.
+export interface PreflightReadiness {
+  ready: boolean;
+  structural_errors: number;
+  structural_warnings: number;
+  signed: boolean;
+  signature_verified: boolean;
+  fee_arranged: boolean;
+  evalidator_attested: boolean;
+  placeholder_dossier_id: boolean;
+  summary: string;
+  claim: string;
+  next_step: string;
+}
+export interface PreflightEsign {
+  signed: boolean;
+  manifest: EsignManifest | null;
+  segregation_of_duties?: SegregationOfDuties | null;
+  verification: EsignVerification;
+}
+export interface PreflightReport {
+  dossier_id: string;
+  title: string;
+  drug_product?: string | null;
+  sponsor?: string | null;
+  submission_type?: string | null;
+  din?: string | null;
+  generated_at: string;
+  readiness: PreflightReadiness;
+  validation: ValidationResult;
+  evalidator_attestation: EvalidatorAttestation | null;
+  esign: PreflightEsign;
+  fees: FeesBlock | null;
+  sequences: SequenceList;
+  rep: {
+    dossier_id: string;
+    placeholder: boolean;
+    rep_request: RepRequest | null;
+  };
+  // one honest caveat per string — consolidated, never laundered away.
+  disclaimers: Record<string, string>;
+}
+
 // The verdict block the export gate returns inside a 409 problem body when
 // validation does not pass (fail-closed). `ran=false` => the validator itself
 // could not run, so export is blocked as "validation_unavailable".

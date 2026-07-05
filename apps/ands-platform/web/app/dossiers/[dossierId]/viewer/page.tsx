@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useDossier } from "@/components/dossier/DossierContext";
 import { dossierApi } from "@/lib/dossierApi";
 import { EvalidatorHandoff } from "@/components/dossier/EvalidatorHandoff";
+import { PreflightReport } from "@/components/dossier/PreflightReport";
 import type { OutlineView } from "@/lib/dossierTypes";
 
 export default function ViewerPage() {
@@ -105,6 +106,15 @@ export default function ViewerPage() {
         XML, every leaf at its href with checksums) zipped — what you upload
         through the CESG/FDA-ESG WebTrader.
       </p>
+
+      {/* TIER3-PREFLIGHT: ONE consolidated pre-flight / QA hand-off report —
+          the whole filing-readiness picture (structural validation + attested
+          eValidator result + Part-11 e-sign + SoD + fees + sequences +
+          REP/Dossier-ID) in a single archivable artifact, so a QA reviewer no
+          longer has to re-run validate at each step. */}
+      <div style={{ marginTop: 12 }}>
+        <PreflightReport dossierId={dossierId} />
+      </div>
 
       {tab === "files" && (
         <div className="viewer-files card glass">

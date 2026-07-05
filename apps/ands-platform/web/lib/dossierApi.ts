@@ -18,6 +18,7 @@ import type {
   MonographStatus,
   OutlineView,
   PmXmlValidation,
+  PreflightReport,
   SequenceList,
   ValidationResult,
   ValidationRuleCatalog,
@@ -141,6 +142,15 @@ export const dossierApi = {
 
   validate: (id: string) =>
     j<ValidationResult>(`/dossiers/${encodeURIComponent(id)}/validate`),
+
+  // TIER3-PREFLIGHT: the ONE consolidated pre-flight / QA hand-off report —
+  // the whole filing-readiness picture (structural validation + user-attested
+  // eValidator result + Part-11 e-sign + SoD + fees + sequences + REP/Dossier
+  // ID) assembled into a single archivable object, disclaimers inline. Resolves
+  // the "re-run validate at each step" ask.
+  preflightReport: (id: string) =>
+    j<PreflightReport>(
+      `/dossiers/${encodeURIComponent(id)}/preflight-report`),
 
   // The queryable registry of every structural/technical rule + the honest
   // criteria block. Powers the "what do we actually check" surface.
