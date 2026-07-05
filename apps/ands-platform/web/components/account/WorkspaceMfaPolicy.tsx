@@ -181,7 +181,7 @@ export function WorkspaceMfaPolicy() {
             </label>
           </div>
           <p className="mut" style={{ marginTop: 8, fontSize: 12 }}>
-            This is your workspace's <b>documented policy</b> for auditors and
+            This is your workspace&apos;s <b>documented policy</b> for auditors and
             SOPs. Being honest: sessions today expire server-side after 12 hours;
             the policy you set here is recorded as the target and is surfaced to
             members during onboarding. Configurable enforcement of shorter

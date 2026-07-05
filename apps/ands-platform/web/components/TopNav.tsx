@@ -49,7 +49,7 @@ function OnboardingPrimer() {
       fontSize: 13, display: "grid", gap: 6 }}>
       <div style={{ display: "flex", gap: 10, alignItems: "baseline",
         flexWrap: "wrap" }}>
-        <b>What you'll do here</b>
+        <b>What you&apos;ll do here</b>
         <span className="chip ready" style={{ fontSize: 11 }}>
           New to ANDS? Start here
         </span>
@@ -61,8 +61,8 @@ function OnboardingPrimer() {
       <div className="mut">
         ANDS Studio helps you assemble a Health Canada eCTD submission and get it
         ready to transmit. The usual path: <b>Journey</b> walks you step by step,
-        <b> Dossiers</b> is where you build each product's Module 1–5 tree, and
-        <b> Portfolio</b> shows everything's status at a glance.{" "}
+        <b> Dossiers</b> is where you build each product&apos;s Module 1–5 tree, and
+        <b> Portfolio</b> shows everything&apos;s status at a glance.{" "}
         <Link href="/">Open the guided Journey →</Link>
       </div>
       <OnboardingSecuritySummary />

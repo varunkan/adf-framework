@@ -43,7 +43,7 @@ function NotifyMe({ itemTitle }: { itemTitle: string }) {
   if (done) {
     return (
       <div className="mut" style={{ marginTop: 6, fontSize: 12 }}>
-        ✓ Noted — we'll contact <b>{org}</b> when <b>{itemTitle}</b> enters
+        ✓ Noted — we&apos;ll contact <b>{org}</b> when <b>{itemTitle}</b> enters
         early access.{" "}
         <span className="mut">
           (Demo build: this request is recorded locally, not emailed.)
@@ -89,7 +89,7 @@ export function RoadmapCard() {
       <p className="mut" style={{ margin: "6px 0 10px", fontSize: 13 }}>
         Honest target quarters for enterprise capabilities that are not built
         today. Nothing below works yet. If a date matters for your procurement,
-        use <b>Request early access</b> on the item and we'll capture your org.
+        use <b>Request early access</b> on the item and we&apos;ll capture your org.
       </p>
       <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, display: "grid",
         gap: 12 }}>
