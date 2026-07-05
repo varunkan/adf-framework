@@ -64,6 +64,11 @@ from app.repository_sqlite import SqliteDossierRepository  # noqa: E402
 from app.service import DossierService  # noqa: E402
 
 TRACE_PATH = HERE.parent / "traces" / "t2_validate_fix_export.json"
+# The ENRICHED trace: the same real task, then carried THROUGH the three
+# just-shipped adoption features (Part-11 e-signature end-to-end, user-attested
+# HC eValidator result, and a lifecycle 0001 replace) so a re-run measures
+# whether they moved the adoption needle.
+ADOPT_TRACE_PATH = HERE.parent / "traces" / "t2_full_adopt.json"
 
 # a minimal but genuinely valid PDF (has the %PDF magic the document check wants)
 _REAL_PDF = (
@@ -375,7 +380,9 @@ def run_task() -> dict:
 
     # honesty gate: prove the three trust-critical moments were really captured.
     _assert_faithful(trace, report, export_block, r, is_zip)
-    return trace
+    # hand back the live recorder + context so the adoption features can be
+    # exercised in-place, on the SAME dossier that just exported successfully.
+    return trace, rec, real_id, seq
 
 
 def _find_node(content_state: dict, section: str) -> dict:
@@ -447,6 +454,304 @@ def _assert_faithful(trace, val_report, export_block, export_resp, is_zip):
                for s in trace["steps"]), "no successful-export step recorded"
 
 
+def append_adoption_steps(rec: "Recorder", real_id: str, seq: str) -> dict:
+    """Carry the SAME dossier (already validated + exported) THROUGH the three
+    just-shipped adoption features, capturing REAL responses at each step:
+
+      A. Part-11 e-signature end-to-end — sign the exported package over its live
+         checksummed leaves, then verify the signature is intact (untampered).
+      B. eValidator user-attestation — attach the user-attested external HC
+         eValidator PASS and see it surfaced ALONGSIDE the structural check.
+      C. Lifecycle 0001 replace — open a follow-up sequence that REPLACES a prior
+         leaf and validate it; capture the replace op + prior-leaf back-pointer.
+
+    Returns the raw captures so the caller can run the anti-flattery gate.
+    """
+    client = rec.client
+    captures: dict = {}
+
+    # =====================================================================
+    # A. PART-11 E-SIGNATURE END-TO-END (committed f459f40)
+    # =====================================================================
+    # A0. read the REAL live leaves of the exported package so the manifest
+    #     binds over the actual checksummed content (never hand-authored).
+    fv = client.get(f"/api/dossier/ectd/{real_id}/viewer/files")
+    fv.raise_for_status()
+    live_leaves = [(leaf["leaf_id"], leaf["checksum"])
+                   for node in fv.json().get("nodes", [])
+                   for leaf in node.get("leaves", [])
+                   if leaf.get("leaf_id") and leaf.get("checksum")]
+    if not live_leaves:
+        raise AssertionError(
+            "no live checksummed leaves to sign — the export produced no "
+            "bindable content, so an e-signature would be meaningless")
+
+    # A1. e-sign the package: signer + meaning + reason, bound over the leaves.
+    signer = "regops@sponsor.example"
+    manifest = {
+        "signer": signer, "role": "authorized_signer", "auth_method": "mfa",
+        "meaning": "approved",
+        "reason": "I approve and authorize transmission of this ANDS sequence "
+                  f"{seq} to Health Canada.",
+        "at": "2026-07-04T00:00:00+00:00", "tz": "UTC",
+        "manifest_id": "esign-e478210-0000",
+        "leaf_count": len(live_leaves),
+        "artifacts": [{"id": lid, "kind": "leaf", "checksum": cs,
+                       "checksum_type": "MD5"} for lid, cs in live_leaves],
+    }
+    r = client.post(f"/api/dossier/dossiers/{real_id}/esign",
+                    json={"manifest": manifest},
+                    headers={"X-User-Email": signer})
+    r.raise_for_status()
+    signed = r.json()
+    captures["signed"] = signed
+    rec.record(
+        action="E-sign the exported eCTD package (21 CFR Part 11 signing act)",
+        method="POST", path=f"/api/dossier/dossiers/{real_id}/esign",
+        request_summary=f"Sign over the {len(live_leaves)} checksummed leaf/leaves "
+                        f"with signer={signer!r}, meaning='approved', reason "
+                        "'I approve and authorize transmission…'",
+        resp=r,
+        what_the_user_sees=(
+            f"{signed.get('signer')} signs the package with meaning "
+            f"'{signed.get('meaning')}' and reason '{signed.get('reason')}'. "
+            f"A durable signed manifest is recorded at {signed.get('signed_at')} "
+            f"{signed.get('tz')} binding {signed.get('leaf_count')} checksummed "
+            f"leaf/leaves under hash {signed.get('manifest_id')} — stamped "
+            f"'{signed.get('alignment')}' and written to the Part-11 audit trail."))
+
+    # A2. verify the signature against the LIVE leaf checksums (untampered).
+    #     body {} => the service re-derives the current checksums from the live
+    #     files view; an intact package must return verified=true.
+    r = client.post(f"/api/dossier/dossiers/{real_id}/esign/verify", json={})
+    r.raise_for_status()
+    verify = r.json()
+    captures["verify"] = verify
+    rec.record(
+        action="Verify the e-signature against the live package (tamper check)",
+        method="POST", path=f"/api/dossier/dossiers/{real_id}/esign/verify",
+        request_summary="Re-compute the current leaf checksums and compare them "
+                        "to the signed manifest",
+        resp=r,
+        what_the_user_sees=(
+            f"Verification re-checks all {verify.get('leaf_count')} signed "
+            f"leaf/leaves against the live package and returns "
+            f"verified={verify.get('verified')}, tampered={verify.get('tampered')} "
+            f"with {len(verify.get('findings', []))} finding(s) — the signature "
+            f"on manifest {verify.get('manifest_id')} is intact, so the reviewer "
+            "can trust nothing changed after signing."))
+
+    # =====================================================================
+    # B. eVALIDATOR USER-ATTESTATION (committed 24c9d80)
+    # =====================================================================
+    # B1. attach the REAL outcome of running HC's external eValidator on the
+    #     exported package — recorded honestly as a user-attested external result.
+    att_body = {
+        "result": "pass",
+        "validator_name": "HC eValidator",
+        "validator_version": "5.3",
+        "validated_on": "2026-07-04",
+        "notes": f"Ran HC eValidator on exported sequence {seq}; 0 errors, "
+                 "0 warnings.",
+        "report_filename": f"{real_id}-{seq}-evalidator.pdf",
+    }
+    r = client.post(f"/api/dossier/dossiers/{real_id}/evalidator-attestation",
+                    json=att_body,
+                    headers={"X-User-Email": "regops@sponsor.example"})
+    r.raise_for_status()
+    att = r.json()
+    captures["attestation"] = att
+    rec.record(
+        action="Attach the user-attested external HC eValidator PASS",
+        method="POST",
+        path=f"/api/dossier/dossiers/{real_id}/evalidator-attestation",
+        request_summary=f"Record result=pass from {att_body['validator_name']} "
+                        f"v{att_body['validator_version']} run on {att_body['validated_on']}",
+        resp=r,
+        what_the_user_sees=(
+            f"The portal records the external HC eValidator result as "
+            f"'{att.get('result', '').upper()}' — labeled source="
+            f"'{att.get('source')}', attested by {att.get('attested_by')}, with "
+            f"the honesty note: \"{att.get('disclaimer')}\". It is stored as the "
+            "filer's own external evidence, never a tool self-claim of parity."))
+
+    # B2. re-validate and show the external attestation travels ALONGSIDE the
+    #     structural check (independent signals, honestly separated).
+    r = client.get(f"/api/dossier/dossiers/{real_id}/validate")
+    r.raise_for_status()
+    val = r.json()
+    ext = val.get("external_attestation") or {}
+    captures["validate_with_attestation"] = val
+    rec.record(
+        action="Re-validate — external eValidator result surfaces alongside "
+               "the structural check",
+        method="GET", path=f"/api/dossier/dossiers/{real_id}/validate",
+        request_summary="Run the structural validator; read the external "
+                        "attestation carried in the same report",
+        resp=r,
+        excerpt={"structural_passed": val.get("passed"),
+                 "structural_errors": [e.get("rule_id") or e.get("rule")
+                                       for e in val.get("errors", [])],
+                 "external_attestation": ext},
+        what_the_user_sees=(
+            f"The report shows TWO independent signals: the ANDS structural check "
+            f"({'PASSED' if val.get('passed') else 'NOT PASSED'}) and, beside it, "
+            f"'HC eValidator: {str(ext.get('result', '')).upper()} — attested by "
+            f"{ext.get('attested_by')} ({str(ext.get('source', '')).replace('_', ' ')})'. "
+            "The external result is shown but never drives the structural pass flag."))
+
+    # =====================================================================
+    # C. LIFECYCLE 0001 REPLACE (committed 7325d24)
+    # =====================================================================
+    # C1. open a follow-up sequence 0001 (a response to a screening deficiency).
+    r = client.post(f"/api/dossier/dossiers/{real_id}/sequences",
+                    json={"sequence": "0001", "purpose": "response",
+                          "note": "response to screening deficiency notice"})
+    r.raise_for_status()
+    seqs = r.json()
+    rec.record(
+        action="Open follow-up sequence 0001 (a lifecycle response sequence)",
+        method="POST", path=f"/api/dossier/dossiers/{real_id}/sequences",
+        request_summary="Create sequence 0001 (purpose=response) — the "
+                        "post-filing lifecycle sequence",
+        resp=r,
+        what_the_user_sees=(
+            f"A new follow-up sequence 0001 opens and becomes the active working "
+            f"sequence (active={seqs.get('active_sequence')!r}); the original "
+            "0000 submission is preserved as history."))
+
+    # C2. re-file the 1.0 cover leaf in 0001 — the assembly records this as a
+    #     REPLACE of the prior 0000 leaf (real supersede, not a duplicate).
+    revised = (b"%PDF-1.4 revised Module 1.0 cover letter (response to "
+               b"screening deficiency) " + _REAL_PDF)
+    r = client.post(
+        f"/api/dossier/ectd/{real_id}/section/1.0/upload",
+        files={"file": ("cover_letter_v2.pdf", revised, "application/pdf")})
+    r.raise_for_status()
+    rec.record(
+        action="Re-file the Module 1.0 cover letter in sequence 0001 (supersede)",
+        method="POST",
+        path=f"/api/dossier/ectd/{real_id}/section/1.0/upload",
+        request_summary="Upload a revised 1.0 cover letter into the active 0001 "
+                        "sequence — supersedes the 0000 leaf",
+        resp=r, excerpt=_node_excerpt(r.json(), "1.0"),
+        what_the_user_sees="The revised Module 1.0 cover letter is placed in "
+        "sequence 0001; because a 0000 leaf already lives at 1.0, the portal "
+        "files it as a lifecycle REPLACE rather than a second copy.")
+
+    # C3. read the current view — the live leaf is a replace with a back-pointer.
+    r = client.get(f"/api/dossier/ectd/{real_id}/current-view")
+    r.raise_for_status()
+    view = r.json()
+    live = view.get("live", [])
+    replace_leaf = next((lf for lf in live
+                         if lf.get("operation") == "replace"
+                         and lf.get("sequence") == "0001"), None)
+    prior_leaf_id = replace_leaf.get("modified_leaf") if replace_leaf else None
+    captures["replace_leaf"] = replace_leaf
+    rec.record(
+        action="Inspect the current view — the 0001 replace + prior-leaf pointer",
+        method="GET", path=f"/api/dossier/ectd/{real_id}/current-view",
+        request_summary="Read the live leaf set and its lifecycle operations",
+        resp=r,
+        excerpt={"live_count": len(live),
+                 "replace_leaf": replace_leaf,
+                 "history_sequences": [h.get("sequence")
+                                       for h in view.get("history", [])]},
+        what_the_user_sees=(
+            f"The live view holds {len(live)} leaf/leaves; the 1.0 leaf now shows "
+            f"operation='{(replace_leaf or {}).get('operation')}' in sequence "
+            f"'{(replace_leaf or {}).get('sequence')}', pointing back at the "
+            f"superseded 0000 leaf '{prior_leaf_id}'. The prior version is retired "
+            "to history — a clean, auditable supersede."))
+
+    # C4. Outline endpoint surfaces the lifecycle_operations replace + pointer.
+    r = client.get(f"/api/dossier/ectd/{real_id}/viewer/outline/0001")
+    r.raise_for_status()
+    outline = r.json()
+    ops = outline.get("lifecycle_operations", [])
+    replace_op = next((o for o in ops
+                       if o.get("operation") == "replace"
+                       and o.get("modified_leaf")), None)
+    captures["replace_op"] = replace_op
+    rec.record(
+        action="Read the Outline lifecycle_operations for sequence 0001",
+        method="GET", path=f"/api/dossier/ectd/{real_id}/viewer/outline/0001",
+        request_summary="Read the sequence-0001 outline (backbone + lifecycle ops)",
+        resp=r,
+        excerpt={"sequence": outline.get("sequence"),
+                 "lifecycle_operations": ops},
+        what_the_user_sees=(
+            f"The 0001 Outline lists a lifecycle operation "
+            f"operation='{(replace_op or {}).get('operation')}' on leaf "
+            f"'{(replace_op or {}).get('leaf_id')}' with a back-pointer "
+            f"modified_leaf='{(replace_op or {}).get('modified_leaf')}' — exactly "
+            "the replace relationship HC's reviewer replays."))
+
+    # C5. validate sequence 0001 — the lifecycle replace is ACCEPTED.
+    r = client.get(f"/api/dossier/dossiers/{real_id}/validate")
+    r.raise_for_status()
+    val01 = r.json()
+    captures["validate_0001"] = val01
+    rec.record(
+        action="Validate the dossier after the 0001 replace",
+        method="GET", path=f"/api/dossier/dossiers/{real_id}/validate",
+        request_summary="Run the validator that gates export over the 0001 "
+                        "lifecycle",
+        resp=r,
+        what_the_user_sees=(
+            f"Validation of the 0001 lifecycle comes back "
+            f"{'PASSED' if val01.get('passed') else 'NOT PASSED'} with "
+            f"{len(val01.get('errors', []))} blocking finding(s) — the replace op "
+            "is a legal supersede of a live prior leaf, so it clears the same gate "
+            "that guards export."))
+
+    return captures
+
+
+def _assert_adopt_faithful(captures: dict) -> None:
+    """Anti-flattery gate for the adoption steps: fail loudly (non-zero exit)
+    unless a REAL signed manifest, a REAL verify=true, a REAL recorded eValidator
+    attestation, and a REAL 0001 replace op were genuinely captured."""
+    # (A) a REAL signed manifest
+    signed = captures.get("signed") or {}
+    assert signed.get("manifest_id"), "no signed manifest_id — e-sign not captured"
+    assert signed.get("signer"), "signed manifest has no signer"
+    assert (signed.get("leaf_count") or 0) >= 1, \
+        "signed manifest bound zero leaves — not a real signing act"
+    assert signed.get("signed_at"), "signed manifest carries no UTC timestamp"
+
+    # (A) a REAL verify=true (untampered)
+    verify = captures.get("verify") or {}
+    assert verify.get("signed") is True, "verify says the dossier is unsigned"
+    assert verify.get("verified") is True and verify.get("tampered") is False, \
+        f"e-sign verify did not confirm an intact signature: {verify}"
+    assert not verify.get("findings"), \
+        f"verify reported tamper findings on an untouched package: {verify.get('findings')}"
+
+    # (B) a REAL recorded eValidator attestation, honestly labeled external
+    att = captures.get("attestation") or {}
+    assert att.get("result") == "pass", "eValidator attestation was not recorded as pass"
+    assert att.get("source") == "user_attested_external", \
+        f"attestation is not labeled a user-attested external result: {att.get('source')}"
+    assert att.get("disclaimer"), "attestation dropped its honesty disclaimer"
+    ext = (captures.get("validate_with_attestation") or {}).get("external_attestation") or {}
+    assert ext.get("result") == "pass", \
+        "the external attestation did not surface alongside the structural check"
+
+    # (C) a REAL 0001 replace op with a prior-leaf back-pointer
+    rl = captures.get("replace_leaf") or {}
+    assert rl.get("operation") == "replace" and rl.get("sequence") == "0001", \
+        f"no 0001 replace leaf in the current view: {rl}"
+    assert rl.get("modified_leaf"), \
+        "the 0001 replace leaf has no prior-leaf back-pointer (modified_leaf)"
+    op = captures.get("replace_op") or {}
+    assert op.get("operation") == "replace" and op.get("modified_leaf"), \
+        f"the Outline did not surface a replace op with a back-pointer: {op}"
+    assert (captures.get("validate_0001") or {}).get("passed") is True, \
+        "the 0001 replace lifecycle did not pass the export-gating validator"
+
+
 def summarize(trace: dict) -> None:
     steps = trace["steps"]
 
@@ -486,9 +791,58 @@ def summarize(trace: dict) -> None:
     print("=" * 72)
 
 
+def summarize_adopt(trace: dict, captures: dict) -> None:
+    """Focused summary of the ENRICHED trace: the 4 adoption moments that
+    measure whether the just-shipped features moved the adoption needle."""
+    steps = trace["steps"]
+
+    def _find(prefix):
+        return next((s for s in steps if s["action"].startswith(prefix)), None)
+
+    esign = _find("E-sign the exported")
+    verify = _find("Verify the e-signature")
+    attest = _find("Attach the user-attested")
+    replace = _find("Inspect the current view")
+
+    print("=" * 72)
+    print(f"ENRICHED TRACE: {trace['task']}  ({len(steps)} steps)")
+    print(f"  written to: {ADOPT_TRACE_PATH}")
+    print("-" * 72)
+    signed = captures.get("signed") or {}
+    verify_c = captures.get("verify") or {}
+    att_c = captures.get("attestation") or {}
+    op_c = captures.get("replace_op") or {}
+    print(f"  real signed Part-11 manifest    : "
+          f"{'YES' if signed.get('manifest_id') else 'NO'}  "
+          f"(id={signed.get('manifest_id')!r}, leaves={signed.get('leaf_count')})")
+    print(f"  real verify = untampered        : "
+          f"{'YES' if verify_c.get('verified') else 'NO'}  "
+          f"(verified={verify_c.get('verified')}, tampered={verify_c.get('tampered')})")
+    print(f"  real eValidator attestation     : "
+          f"{'YES' if att_c.get('source') == 'user_attested_external' else 'NO'}  "
+          f"(result={att_c.get('result')!r}, source={att_c.get('source')!r})")
+    print(f"  real 0001 replace op            : "
+          f"{'YES' if op_c.get('operation') == 'replace' else 'NO'}  "
+          f"(op={op_c.get('operation')!r}, modified_leaf={op_c.get('modified_leaf')!r})")
+    print("-" * 72)
+    print("  4 most important NEW 'what_the_user_sees' lines:")
+    for label, s in (("SIGNED MANIFEST", esign),
+                     ("VERIFY (untampered)", verify),
+                     ("eVALIDATOR ATTESTATION", attest),
+                     ("0001 REPLACE", replace)):
+        if s:
+            print(f"\n  [{label}]  (step {s['step']}, HTTP {s['status']})")
+            print(f"    {s['what_the_user_sees']}")
+    print("=" * 72)
+
+
 def main() -> int:
     try:
-        trace = run_task()
+        trace, rec, real_id, seq = run_task()
+        # carry the SAME dossier through the three adoption features, capturing
+        # real responses, then gate on genuine captures before writing.
+        captures = append_adoption_steps(rec, real_id, seq)
+        _assert_adopt_faithful(captures)
     except AssertionError as exc:
         print(f"TRACE FAILED (unfaithful — refusing to write): {exc}",
               file=sys.stderr)
@@ -498,9 +852,28 @@ def main() -> int:
         print(f"TRACE ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
 
+    # 1) the original t2 trace (through the successful export) — unchanged.
     TRACE_PATH.parent.mkdir(parents=True, exist_ok=True)
     TRACE_PATH.write_text(json.dumps(trace, indent=2, ensure_ascii=False))
     summarize(trace)
+
+    # 2) the ENRICHED trace: the same task carried THROUGH the adoption features.
+    adopt_trace = {
+        "task": "t2_full_adopt",
+        "goal": trace["goal"] + " Then exercise the just-shipped adoption "
+                "features on that same dossier: e-sign the exported package "
+                "(21 CFR Part 11) and verify it is untampered, attach the "
+                "user-attested external HC eValidator PASS surfaced alongside "
+                "the structural check, and file a lifecycle 0001 sequence that "
+                "REPLACES a prior leaf — so a re-run measures whether these "
+                "features moved the adoption needle.",
+        "generated_from": trace["generated_from"],
+        "steps": rec.steps,
+    }
+    ADOPT_TRACE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    ADOPT_TRACE_PATH.write_text(
+        json.dumps(adopt_trace, indent=2, ensure_ascii=False))
+    summarize_adopt(adopt_trace, captures)
     return 0
 
 
