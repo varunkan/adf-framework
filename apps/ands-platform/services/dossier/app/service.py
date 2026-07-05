@@ -380,7 +380,9 @@ class DossierService:
             raise ProblemError(422, "this section cannot be authored in-app",
                                rule="section_not_generatable", detail=_s(section))
         payload = payload or {}
-        ctx = {**self._ctx_for(dossier_id), **payload}
+        # the section id must travel in the ctx so the universal "structured"
+        # (and "pm_xml") generators can look up this section's form schema.
+        ctx = {**self._ctx_for(dossier_id), **payload, "section": _s(section)}
         try:
             doc = generators.generate(key, ctx)
         except KeyError:

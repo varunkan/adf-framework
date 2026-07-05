@@ -262,8 +262,10 @@ def test_upload_to_unknown_section_404(client):
 
 def test_generate_on_upload_only_section_422(client):
     did = _dossier(client)
-    # 5.3.1 is upload-only (no generator)
-    r = client.post(f"/api/dossier/ectd/{did}/section/5.3.1/generate", json={})
+    # 1.2.2 Fees is upload-only BY DESIGN (a fee receipt is uploaded, not
+    # authored) — every content section now offers in-app generate, so this
+    # uses the section that is intentionally not generatable.
+    r = client.post(f"/api/dossier/ectd/{did}/section/1.2.2/generate", json={})
     assert r.status_code == 422
 
 

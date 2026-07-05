@@ -12,15 +12,20 @@ from ands_shared import ProblemError
 
 
 def _fill_all_required(dossier, dossier_id):
-    """Author (generate) or upload every required document section."""
+    """Upload confirmed content for every required document section.
+
+    Note: a *generated* in-app draft is intentionally UNCONFIRMED (its schema
+    renders explicit [PLACEHOLDER] values that are not filable), so it does NOT
+    complete a section — only real, confirmed content does. An upload IS the
+    filer's own confirmed content, so uploading every required section is what
+    flips the content gate. (The generate path is covered by the dossier unit
+    tests; here we exercise the journey↔dossier gate.)"""
     cs = dossier.content_state(dossier_id)
     for m in cs["modules"]:
         for n in m["nodes"]:
             if n["applicability"] != "required" or n["kind"] != "document":
                 continue
-            if "generate" in n["affordances"] and n["generator_key"]:
-                dossier.generate_document(dossier_id, n["section"], {})
-            elif n["bilingual"]:
+            if n["bilingual"]:
                 for lang in ("en", "fr"):
                     dossier.upload_document(dossier_id, n["section"],
                                             f"{n['id']}-{lang}.pdf",

@@ -13,7 +13,7 @@ Keyed by the section tree's ``generator_key``.
 
 from __future__ import annotations
 
-from . import pdfgen, pm_xml
+from . import form_schemas, pdfgen, pm_xml
 
 _ACTIVITY_LABELS = {
     "ANDS": "Abbreviated New Drug Submission (ANDS)",
@@ -456,8 +456,9 @@ def generate(generator_key: str, ctx: dict) -> dict:
     key = _s(generator_key)
     ctx = ctx or {}
     if key == "structured":
-        # lazy import — form_schemas is a leaf, but keep generators import-light
-        from . import form_schemas
+        # form_schemas is imported at module top (it is a pure leaf) — a lazy
+        # call-time import broke in the integration harness, which purges the
+        # ``app`` package between service loads (ModuleNotFoundError: 'app').
         section = _s(ctx.get("section"))
         schema = form_schemas.form_schema(section)
         if not schema:
