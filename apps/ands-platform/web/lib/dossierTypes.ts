@@ -559,7 +559,23 @@ export interface ContentState {
   fees: FeesBlock;
   validation: ValidationResult;
   din: string | null;
+  // POLISH-SIGN-BANNER: ambient signature-readiness signal so the workspace
+  // chrome can show a PERSISTENT "not cleanly signed — re-sign required" banner
+  // the moment a leaf changes after signing or a conflicted sign occurs. Reuses
+  // the same _signature_status the pre-flight computes (role-separation +
+  // tamper-evidence, NOT a Health Canada acceptance claim).
+  signature_readiness: SignatureReadiness;
   files_view: FilesView | null;
+}
+
+export interface SignatureReadiness {
+  signed: boolean;
+  status: SignatureStatus;
+  handoff_ready: boolean;
+  // the loud-banner trigger: signed AND the current signature is not verified
+  // (stale/conflicted). Unsigned is a normal pre-sign state and does NOT trip it.
+  needs_resign: boolean;
+  message: string;
 }
 
 // working sequences (0001+) + regulatory-response lifecycle

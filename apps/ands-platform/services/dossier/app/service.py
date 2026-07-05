@@ -1359,6 +1359,41 @@ class DossierService:
                         "tamper-evidence — not an external certification.)"),
         }
 
+    def _signature_readiness(self, dossier_id: str,
+                             tenant_id: str | None = None) -> dict:
+        """POLISH-SIGN-BANNER: a lightweight, always-available signature-
+        readiness signal for the dossier state/header payload so any page can
+        show a PERSISTENT, ambient banner the moment the current package stops
+        being cleanly signed — a leaf changed after signing, or a conflicted
+        (author-signs) sign occurred.
+
+        This REUSES ``_signature_status`` (the same collapse the pre-flight
+        computes) — NO new sign logic — so the ambient signal and the pre-flight
+        can never disagree. It reads the stored manifest, re-verifies it live
+        against the current leaves (tamper-evidence), and folds the SoD outcome
+        in, exactly as the pre-flight does.
+
+        ``needs_resign`` is the loud-banner trigger: a package that was SIGNED
+        but whose current signature is stale/unverified/conflicted. An UNSIGNED
+        package is a normal pre-sign state and does NOT trip the banner.
+
+        Honest: role-separation + tamper-evidence, NOT a Health Canada
+        acceptance claim (the message text carries that caveat)."""
+        manifest = self.repo.get_esign_manifest(_s(dossier_id))
+        verification = self.verify_esign(dossier_id, tenant_id=tenant_id)
+        sod = (manifest or {}).get("segregation_of_duties")
+        sig = self._signature_status(bool(manifest), verification, sod)
+        signed = bool(manifest)
+        return {
+            "signed": signed,
+            "status": sig["status"],
+            "handoff_ready": sig["handoff_ready"],
+            # loud banner only when a real signature has gone stale/conflicted —
+            # never for the normal "not signed yet" pre-sign state.
+            "needs_resign": signed and sig["status"] != "verified",
+            "message": sig["message"],
+        }
+
     def preflight_report(self, dossier_id: str,
                          tenant_id: str | None = None) -> dict:
         """Assemble the single consolidated pre-flight / QA hand-off report.
@@ -1534,6 +1569,12 @@ class DossierService:
             "version": tree["version"], "modules": modules, "gate": gate,
             "tower": dossier_state.tower_view(cs_be_only=cs_be_only, states=states),
             "fees": fees_block, "validation": validation, "din": idx.get("din"),
+            # POLISH-SIGN-BANNER: ambient signature-readiness signal so the
+            # workspace chrome can show a PERSISTENT "not cleanly signed —
+            # re-sign required" banner the moment a leaf changes after signing
+            # or a conflicted sign occurs (reuses _signature_status, no new
+            # sign logic).
+            "signature_readiness": self._signature_readiness(dossier_id),
             "files_view": assembly.build_files_view(model) if model else None}
 
     # -- dossier + sequence management (home catalog) ----------------------

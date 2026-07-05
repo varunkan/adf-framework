@@ -3,10 +3,54 @@ import Link from "next/link";
 import { UserChip } from "@/components/UserChip";
 import { useParams } from "next/navigation";
 import { useDossier } from "./DossierContext";
-import { CheckCircle2, AlertTriangle } from "lucide-react";
+import { CheckCircle2, AlertTriangle, ShieldX, PenLine } from "lucide-react";
 import { MODULE_NAME, type ModuleTabState } from "@/lib/leafStatus";
+import type { SignatureReadiness } from "@/lib/dossierTypes";
 
 const MODULES = ["1", "2", "3", "4", "5"];
+
+// POLISH-SIGN-BANNER: a PERSISTENT, ambient strip under the workspace chrome
+// that fires the MOMENT the current package stops being cleanly signed — a leaf
+// changed after signing, or a conflicted (author-signs) sign occurred. It is
+// loud and always-visible (every dossier page mounts this header), not a status
+// field the reviewer has to go read. It clears when the signature verifies.
+//
+// Honest: this is a role-separation + tamper-evidence signal (Part-11 aligned),
+// NOT a Health Canada acceptance claim.
+function SignatureReSignBanner({
+  sr,
+  dossierId,
+}: {
+  sr: SignatureReadiness | undefined;
+  dossierId: string;
+}) {
+  // only fire for a REAL signature gone stale/conflicted — never for the
+  // normal "not signed yet" pre-sign state.
+  if (!sr?.needs_resign) return null;
+  const label =
+    sr.status === "sod_conflict"
+      ? "Segregation-of-duties conflict"
+      : "Package changed after signing";
+  return (
+    <div className="sign-resign-banner notice bad" role="alert">
+      <ShieldX size={16} aria-hidden className="srb-icon" />
+      <span className="srb-body">
+        <strong>
+          This package is not cleanly signed — {label}.
+        </strong>{" "}
+        A distinct authorized approver must re-sign the current version before
+        hand-off / transmit. {sr.message}
+      </span>
+      <Link
+        className="chip srb-cta"
+        href={`/dossiers/${encodeURIComponent(dossierId)}/viewer#signature-readiness`}
+      >
+        <PenLine size={13} aria-hidden />
+        Go to sign step
+      </Link>
+    </div>
+  );
+}
 
 const TAB_STATE_WORD: Record<ModuleTabState, string> = {
   complete: "complete",
@@ -30,6 +74,7 @@ export function DossierHeader() {
   );
 
   return (
+    <>
     <header className="topbar">
       <span className="brand">
         <span className="dot" aria-hidden />
@@ -98,5 +143,10 @@ export function DossierHeader() {
       <Link className="chip" href="/portfolio">Portfolio</Link>
       <Link className="chip" href="/">Journey</Link>
     </header>
+    <SignatureReSignBanner
+      sr={content?.signature_readiness}
+      dossierId={dossierId}
+    />
+    </>
   );
 }

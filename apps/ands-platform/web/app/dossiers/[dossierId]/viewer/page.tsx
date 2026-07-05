@@ -126,7 +126,10 @@ export default function ViewerPage() {
           eValidator result + Part-11 e-sign + SoD + fees + sequences +
           REP/Dossier-ID) in a single archivable artifact, so a QA reviewer no
           longer has to re-run validate at each step. */}
-      <div style={{ marginTop: 12 }}>
+      {/* POLISH-SIGN-BANNER: the ambient "not cleanly signed — re-sign
+          required" header banner jumps here (the pre-flight carries the full
+          Part-11 signature status + re-sign action). */}
+      <div id="signature-readiness" style={{ marginTop: 12, scrollMarginTop: 72 }}>
         <PreflightReport dossierId={dossierId} />
       </div>
 
