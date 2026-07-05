@@ -1,0 +1,1444 @@
+{
+ "rows": [
+  {
+   "persona_id": "ra_director_cro",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "ease",
+   "text": "Genuinely smooth for something this involved. The Module 1 checklist drove me \u2014 8 required leaves, a live 0/8 progress counter, generate-or-upload on each, bilingual EN+FR handled correctly on 1.3.1 and 1.3.3. The hardest real filing step, the placeholder-to-real Dossier ID re-key, was one Rename with a reason. I got from empty dossier to a signed, validated, lifecycle-0001 package without ever dropping to a file tree or hand-editing XML, which is more than I can say for my first week on docuBridge.",
+   "pmf": [
+    0.1618,
+    0.1399,
+    0.262,
+    0.2785,
+    0.1578
+   ],
+   "mean": 3.131
+  },
+  {
+   "persona_id": "ra_director_cro",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "ease",
+   "text": "Genuinely smooth for how much ground it covers. Generating the Module 1 leaves I'd normally hand-assemble, uploading the bilingual PM and labelling, then running validate-export-sign was maybe twenty minutes of clicking with no dead ends. The one place I paused was the placeholder-to-real Dossier ID rename, but the CA-REP-0001 finding told me exactly what to do, so even that was self-explanatory. The lifecycle 0001 replace and the two SoD signing runs were the only steps where I slowed down to think, and that's the work itself, not the tool.",
+   "pmf": [
+    0.075,
+    0.0418,
+    0.2269,
+    0.5791,
+    0.0773
+   ],
+   "mean": 3.542
+  },
+  {
+   "persona_id": "ra_officer_generic",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "ease",
+   "text": "Genuinely easy for someone who does this daily. The Module 1 checklist with the 8 required leaves and a live 0/8 -> 100% counter is exactly how I think, and the generate/upload split per section matched what each doc actually needs (I'd never want a generated Product Monograph, and it correctly only offered upload there). The placeholder-ID create, the rename to the real HC ID carrying all content over, opening seq 0001 and having the cover-letter upload auto-file as a REPLACE instead of a dupe \u2014 that's the assembly work I do by hand in eCTD Office, and it just happened. Only mild friction was the two-step attestation (record the result, then separately attach the report file), but that's minor.",
+   "pmf": [
+    0.0894,
+    0.3448,
+    0.2136,
+    0.2821,
+    0.0702
+   ],
+   "mean": 2.899
+  },
+  {
+   "persona_id": "ra_officer_generic",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "ease",
+   "text": "Honestly, easier than my current eCTD Office plus GlobalSubmit routine. Module 1 was a guided 8-leaf checklist with generate-or-upload per section and a live progress counter, the bilingual 1.3.1/1.3.3 EN+FR pairs slotted in without me hand-building folders, and the validate-fix-export loop was three clicks. Setting the real Dossier ID via a reason-logged Rename that carried all placed content over unchanged is exactly how I'd want to re-key, and opening 0001 as a replace was trivial. Nothing fought me.",
+   "pmf": [
+    0.0828,
+    0.1855,
+    0.2695,
+    0.2901,
+    0.1721
+   ],
+   "mean": 3.283
+  },
+  {
+   "persona_id": "ra_junior",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "ease",
+   "text": "Honestly, easier than I expected \u2014 the Module 1 checklist walked me through all 8 required docs with a live progress bar (0/8 up to 100%), and I could either generate or upload each one, so I never had to guess what belonged where. The one spot I braced for was the export getting blocked, but the 409 told me exactly why (placeholder ID, CA-REP-0001) and what to do (file the REP request, then Rename to the real ID), so I unblocked myself without calling a senior. The Part-11 e-sign, the eValidator attach, and the 0001 replace were more steps than I'm used to, but each one confirmed what just happened, so I never felt lost.",
+   "pmf": [
+    0.0892,
+    0.1,
+    0.1544,
+    0.383,
+    0.2733
+   ],
+   "mean": 3.651
+  },
+  {
+   "persona_id": "ra_junior",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "ease",
+   "text": "Honestly easier than I expected. The Module 1 checklist counting me up 0/8 to 100% gave me a clear finish line, and generate-vs-upload was obvious per section. The one place I hesitated was the placeholder-to-real Dossier ID rename and knowing which sequence I was working in during the 0001 replace, but the system told me each time. As a junior I could get through this without pinging a senior on every step.",
+   "pmf": [
+    0.0231,
+    0.0502,
+    0.1761,
+    0.4705,
+    0.2802
+   ],
+   "mean": 3.935
+  },
+  {
+   "persona_id": "qa_manager",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "ease",
+   "text": "Honestly, easier than my current paper-SOP-and-Acrobat routine. The Module 1 checklist walked me through all 8 required leaves with a live progress counter, generate-or-upload on each, and the bilingual sections asked for both EN and FR without me guessing. The only real friction was conceptual, not mechanical: understanding why the placeholder ID blocked export, but the finding text told me exactly what to do (file the REP request, then Rename to the real ID), so I was never stuck.",
+   "pmf": [
+    0.0383,
+    0.3821,
+    0.1314,
+    0.4392,
+    0.009
+   ],
+   "mean": 2.999
+  },
+  {
+   "persona_id": "qa_manager",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "ease",
+   "text": "Honestly, easier than my current paper-SOP-and-Acrobat routine. The Module 1 checklist walked me through all 8 required leaves with a live progress counter, generate/upload was obvious per section, and when export got blocked the tool told me the exact finding and what to do (file the REP request, rename to the real ID). The rename-then-revalidate-then-export loop was clean. The only friction was the sheer number of distinct operations \u2014 sign, verify, attest, attach report, lifecycle 0001, SoD checks \u2014 which is a lot to learn, but each step landed where I expected.",
+   "pmf": [
+    0.048,
+    0.0794,
+    0.1876,
+    0.4221,
+    0.263
+   ],
+   "mean": 3.773
+  },
+  {
+   "persona_id": "consultant_ex_hc",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "ease",
+   "text": "Honestly easier than my usual LORENZ-plus-checklist grind. The Module 1 checklist drove me through all 8 required leaves with live progress (12%, 25%... 100%), the bilingual 1.3.1/1.3.3 correctly demanded EN+FR, and the validate to export to e-sign to lifecycle-0001 path never made me guess the next move. The only real friction was the expected one: the placeholder-ID block, which is friction by design, not confusion.",
+   "pmf": [
+    0.298,
+    0.156,
+    0.1677,
+    0.2865,
+    0.0918
+   ],
+   "mean": 2.718
+  },
+  {
+   "persona_id": "consultant_ex_hc",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "ease",
+   "text": "Genuinely smooth for someone who knows the terrain. The guided Module 1 checklist showed all 8 required leaves with a running percent, generate/upload affordances were obvious, and the placeholder-to-real-ID rename carried content over cleanly. The lifecycle 0001 replace and dual e-sign paths took a few deliberate steps, but nothing fought me \u2014 I got to a signed, exported, replaced-leaf state without guesswork.",
+   "pmf": [
+    0.0149,
+    0.0667,
+    0.2235,
+    0.5649,
+    0.13
+   ],
+   "mean": 3.728
+  },
+  {
+   "persona_id": "startup_founder",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "ease",
+   "text": "Honestly, way easier than I expected for something this regulated. Generating five of the Module 1 docs from my company details and uploading the rest got me to 100% in about ten clicks, and the module progress bar (0/8 up to 8/8) meant I never had to guess what was left. The lifecycle stuff \u2014 opening sequence 0001, the replace, the segregation-of-duties signing \u2014 took some care, but I got through it in one pass without a consultant holding my hand.",
+   "pmf": [
+    0.0119,
+    0.0375,
+    0.215,
+    0.4117,
+    0.3239
+   ],
+   "mean": 3.998
+  },
+  {
+   "persona_id": "startup_founder",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "ease",
+   "text": "Honestly smoother than I expected for something this regulated. The Module 1 checklist counting me up from 0/8 to 100% gave me a clear finish line, and half the docs the portal just generated from my company details instead of making me hunt for templates. The one real friction was the placeholder-ID dance: I hit the export block, had to go file the REP request, rename to the real ID, then re-validate and re-export. That's four extra steps, but every one told me exactly what to do next, so I never got stuck guessing.",
+   "pmf": [
+    0.0411,
+    0.0256,
+    0.1207,
+    0.5778,
+    0.2348
+   ],
+   "mean": 3.94
+  },
+  {
+   "persona_id": "regops_publisher",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "ease",
+   "text": "Genuinely smooth for someone who lives in this workflow. The Module 1 checklist tracked all 8 regional leaves with a live 0/8 to 8/8 progress, the placeholder-to-real Dossier ID rename carried content over cleanly, and lifecycle 0001 filed the cover letter as a REPLACE automatically instead of dropping a duplicate. The only real friction was my own vigilance around the 18 PDF/A warnings, but that's my job, not the tool fighting me.",
+   "pmf": [
+    0.0513,
+    0.0721,
+    0.1906,
+    0.6248,
+    0.0613
+   ],
+   "mean": 3.573
+  },
+  {
+   "persona_id": "regops_publisher",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "ease",
+   "text": "Genuinely smooth for someone who does this daily. The Module 1 checklist showed all 8 required leaves with live progress (0/8 up to 100%), the generate/upload affordances were exactly where I expected, and the bilingual sections correctly demanded EN+FR. The validate to blocked-export to rename to re-validate to export loop worked without me fighting the tool, and the 0001 replace filed as a lifecycle REPLACE automatically instead of making me hand-build the operation attribute. The only real friction is that the whole run was API-driven, so I'm judging the plumbing, not a UI I'd sit in front of all day.",
+   "pmf": [
+    0.0102,
+    0.0152,
+    0.1389,
+    0.5325,
+    0.3033
+   ],
+   "mean": 4.103
+  },
+  {
+   "persona_id": "cro_pm",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "ease",
+   "text": "Honestly smoother than I expected for something this regulated. Placing the Module 1 leaves was just generate-or-upload, and the progress bar ticking 12/25/50 up to 8/8 gave me exactly the \"who's blocked / how far are we\" signal I live for in Smartsheet. The one place I'd stumble is the placeholder-to-real-ID flow \u2014 the rename step is simple once you know to do it, but a first-timer might not connect \"file a REP request\" to \"then come back and Rename\" without hand-holding. The lifecycle 0001 replace and the e-sign steps were more clicks than a coordinator like me would drive alone, but each one told me what it did.",
+   "pmf": [
+    0.0131,
+    0.0562,
+    0.1672,
+    0.4979,
+    0.2656
+   ],
+   "mean": 3.947
+  },
+  {
+   "persona_id": "cro_pm",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "ease",
+   "text": "Honestly, easier than I expected for something this heavy. The Module 1 checklist counted me up 0/8 to 100% so I always knew what was left, and the generate/upload affordances meant I wasn't hunting for templates. The hard part isn't the tool \u2014 it's that I'd need real SME content, the actual PDFs, and a real HC Dossier ID from REP before any of this is a real filing. But the mechanical path from create-dossier to signed-and-exported was clean and I never got stuck wondering how to advance.",
+   "pmf": [
+    0.1076,
+    0.1388,
+    0.3693,
+    0.3202,
+    0.0641
+   ],
+   "mean": 3.094
+  },
+  {
+   "persona_id": "labelling_specialist",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "ease",
+   "text": "Honestly, easier than my usual Word-template grind. Module 1 laid out all 8 required leaves with progress ticking up, generate handled the boilerplate sections, and my bilingual PM and Labelling took EN and FR files without a fight. The only real friction was the export block, but even that was self-explanatory once I read it, and the rename fixed it in one step.",
+   "pmf": [
+    0.0741,
+    0.179,
+    0.2917,
+    0.2671,
+    0.188
+   ],
+   "mean": 3.316
+  },
+  {
+   "persona_id": "labelling_specialist",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "ease",
+   "text": "Honestly easier than my usual Word-template-plus-XML-tooling grind. The Module 1 checklist showed all 8 required leaves with a live 0/8 progress bar, generate/upload was obvious per section, and the bilingual PM and Labelling took both my EN and FR files without a fight. The one place I had to stop and think was the placeholder-ID block, but even that told me exactly what to do (file a REP request, then Rename), so it was a guided stop, not a wall.",
+   "pmf": [
+    0.0467,
+    0.235,
+    0.2927,
+    0.3286,
+    0.0971
+   ],
+   "mean": 3.194
+  },
+  {
+   "persona_id": "veteran_contractor",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "ease",
+   "text": "Honestly, easier than I expected for something this involved. The Module 1 checklist counted me up 8 of 8 with a running percentage, so I always knew what was left, and the generate/upload buttons meant I wasn't hand-assembling folders like I do now. The signing and the 0001 replace were the parts I braced for, but each was one action with a clear result, so I got through the whole filing without once opening a binder or a naming guide.",
+   "pmf": [
+    0.0302,
+    0.2052,
+    0.2434,
+    0.4014,
+    0.1199
+   ],
+   "mean": 3.376
+  },
+  {
+   "persona_id": "veteran_contractor",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "ease",
+   "text": "Honestly, easier than I expected for an old paper-binder man. The Module 1 checklist counted me up 0 of 8 to 100% so I always knew what was left, the portal generated five of the documents and I only had to upload the fee, monograph and labelling PDFs. Where it got fiddly was the placeholder-ID business and the sequence 0001 replace, but the system walked me through each of those rather than leaving me guessing, so I got through the whole thing without ringing anyone.",
+   "pmf": [
+    0.1449,
+    0.213,
+    0.2049,
+    0.257,
+    0.1801
+   ],
+   "mean": 3.114
+  },
+  {
+   "persona_id": "cdmo_ra_manager",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "ease",
+   "text": "Genuinely smooth for someone who files daily. The guided Module 1 checklist (8 leaves, live 0/8 to 100% progress) meant I never had to second-guess what Canada requires, generate/upload affordances were exactly where I expected, and bilingual 1.3.1/1.3.3 correctly demanded EN+FR. The only friction was the placeholder-ID block, but that is legitimate friction I'd hit anyway \u2014 clearing it was one Rename with a reason. Start to signed, validated, lifecycle-0001 filing without ever leaving the tool or consulting a guidance PDF.",
+   "pmf": [
+    0.0109,
+    0.0256,
+    0.1462,
+    0.5153,
+    0.302
+   ],
+   "mean": 4.072
+  },
+  {
+   "persona_id": "cdmo_ra_manager",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "ease",
+   "text": "Genuinely smooth for someone who files these daily. The Module 1 checklist drove me straight through all 8 required leaves \u2014 generate for the regional forms, upload for the monograph/labelling with EN+FR handled explicitly \u2014 and the progress counter (12/25/38...100%) meant I never guessed what was left. The placeholder-to-real-ID rename carried all content over unchanged, and the 0001 replace filed itself as a lifecycle REPLACE without me hand-editing any backbone XML. Compared to stitching this together in Freyr plus manual index work, this was noticeably faster.",
+   "pmf": [
+    0.0256,
+    0.0331,
+    0.1216,
+    0.5343,
+    0.2855
+   ],
+   "mean": 4.021
+  },
+  {
+   "persona_id": "quality_director_newcomer",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "ease",
+   "text": "Honestly easier than I feared. The Module 1 checklist walked me through all 8 required documents with a live 0/8 to 8/8 progress bar, so I never had to guess what Health Canada expects. Generating the cover letter, application form, and attestation from the company details saved me hours versus Word, and the bilingual EN+FR uploads just worked. The only real friction was mine, not the tool's \u2014 I didn't have my real Dossier ID yet, but the placeholder path made that a non-blocker.",
+   "pmf": [
+    0.0353,
+    0.1264,
+    0.245,
+    0.3549,
+    0.2385
+   ],
+   "mean": 3.635
+  },
+  {
+   "persona_id": "quality_director_newcomer",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "ease",
+   "text": "Honestly, easier than I feared going in with zero eCTD background. The Module 1 checklist counted me up 0/8 to 100% one document at a time, half of them generated from the details I'd already entered, and I never had to guess what \"required\" meant. The one place I sweated was the export getting blocked, but even that told me exactly which finding to fix, and the placeholder-to-real Dossier ID rename was two clicks.",
+   "pmf": [
+    0.1846,
+    0.3843,
+    0.0687,
+    0.3018,
+    0.0606
+   ],
+   "mean": 2.67
+  },
+  {
+   "persona_id": "ra_director_cro",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "clarity",
+   "text": "At every step I knew what the system was telling me. The validator gave me a real rule ID (CA-REP-0001) with a plain-language fix, not a cryptic code. The 409 export block said exactly which finding was holding it and offered the override path. The two-signal re-validate \u2014 structural PASS beside the user-attested eValidator PASS \u2014 was unambiguous about which one drove the gate. The only thing I had to read twice was the SoD result on step 16 (separated=false because no author was recorded), but the wording explained itself.",
+   "pmf": [
+    0.1432,
+    0.1148,
+    0.1149,
+    0.5959,
+    0.0312
+   ],
+   "mean": 3.257
+  },
+  {
+   "persona_id": "ra_director_cro",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "clarity",
+   "text": "At every step I knew what the system was telling me. The validation report gave me real rule IDs (CA-REP-0001, CA-W-7006/7008), the 409 export block named the exact blocking finding instead of silently failing, and the progress counter (n/8) meant I always knew where I stood. The PASS/advisory distinction on the PDF/A warnings was stated plainly \u2014 18 advisories but still PASSED because a plain PDF isn't a hard defect \u2014 which is precisely the nuance my team gets wrong. Nothing was ambiguous.",
+   "pmf": [
+    0.0622,
+    0.0558,
+    0.106,
+    0.5744,
+    0.2017
+   ],
+   "mean": 3.798
+  },
+  {
+   "persona_id": "ra_officer_generic",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "clarity",
+   "text": "Very clear at every step. The 409 export block literally named CA-REP-0001 and told me to file the REP request then rename, so I never guessed why I was stuck. The lifecycle view showing operation='replace' with modified_leaf pointing back at m1-0-1-cover-letter is precisely the relationship a reviewer replays, and seeing the outline list all 0000 'new' ops plus the one 0001 'replace' confirmed it was assembled correctly. The SoD messages (separated vs conflict, with the reason text) were unambiguous.",
+   "pmf": [
+    0.1912,
+    0.494,
+    0.0368,
+    0.2625,
+    0.0155
+   ],
+   "mean": 2.417
+  },
+  {
+   "persona_id": "ra_officer_generic",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "clarity",
+   "text": "At every step I knew what the system was telling me. The validator gave me a real report with rule IDs (CA-REP-0001, CA-W-7006/7008) and a leaf name on each finding, the 409 export block named the exact blocking rule instead of dumping a broken zip, and the current-view/outline showed operation=replace with a modified_leaf back-pointer to the superseded 0000 leaf \u2014 the same relationship HC's reviewer replays. The SoD check spelling out separated vs conflict with the actual author identity was unambiguous.",
+   "pmf": [
+    0.1792,
+    0.4898,
+    0.0768,
+    0.2425,
+    0.0117
+   ],
+   "mean": 2.418
+  },
+  {
+   "persona_id": "ra_junior",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "clarity",
+   "text": "Very clear at almost every step \u2014 the validation report showed real rule IDs (CA-REP-0001, CA-W-7006/7008) with plain-English messages and named the exact file, which is way better than the vague comments I get back from HC. I especially liked that it labeled what it does and does NOT check, and that the eValidator result was tagged \"user-attested external\" so I wasn't confused about who actually ran it. The only thing I had to slow down and read twice was the segregation-of-duties wording (author vs signer) and the PDF/A-1b warnings \u2014 as a junior I'd want a one-line \"do I need to fix this before filing?\" hint next to those advisory warnings.",
+   "pmf": [
+    0.0027,
+    0.0256,
+    0.1611,
+    0.4947,
+    0.3159
+   ],
+   "mean": 4.095
+  },
+  {
+   "persona_id": "ra_junior",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "clarity",
+   "text": "Very clear at almost every step. The validation report with real rule IDs (CA-REP-0001, CA-W-7006/7008) and the 409 export block naming the exact blocker meant I never had to guess why something stopped. The one thing I'd have paused on is the difference between the blocking error and the 18 PDF/A warnings, but the report literally said it still PASSED and told me what PDF/A-1b would require, so I understood it was advisory not a wall.",
+   "pmf": [
+    0.015,
+    0.0712,
+    0.0572,
+    0.7277,
+    0.1289
+   ],
+   "mean": 3.884
+  },
+  {
+   "persona_id": "qa_manager",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "clarity",
+   "text": "At every step I knew what the system was telling me. The validation report gave me actual rule IDs (CA-REP-0001, CA-W-7006, CA-W-7008) with the offending leaf named, not a vague red X. The 409 export block spelled out the exact blocking finding and my two options \u2014 fix it or do an audited override \u2014 which is the kind of unambiguous gate I sign off against. The two-signal validate view (structural PASS beside \"HC eValidator: PASS \u2014 user attested external\") was clear that these are separate things.",
+   "pmf": [
+    0.236,
+    0.2423,
+    0.0869,
+    0.3594,
+    0.0755
+   ],
+   "mean": 2.796
+  },
+  {
+   "persona_id": "qa_manager",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "clarity",
+   "text": "Very clear at each step. The validation report gave real rule IDs (CA-REP-0001 for the placeholder block, CA-W-7006/7008 for the PDF/A warnings) with the leaf named, not vague red text. I especially valued that it distinguished blocking errors from advisory warnings, and that it plainly states what it checks versus does NOT check. The 409 export block said \"validation_not_passed\" and listed the finding \u2014 no guessing why the download refused.",
+   "pmf": [
+    0.0764,
+    0.2006,
+    0.0145,
+    0.7004,
+    0.0082
+   ],
+   "mean": 3.363
+  },
+  {
+   "persona_id": "consultant_ex_hc",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "clarity",
+   "text": "Very clear at every step, and clear in the way a reviewer needs. The validator gave me actual rule IDs I recognize the shape of (CA-REP-0001 blocking, CA-W-7006/7008 advisory), the 409 named the exact blocking finding instead of a dead download, and the replace op showed operation=replace with a back-pointer to the superseded 0000 leaf. Nothing was hand-wavy; even the scope labels (scope=sequence, source=user_attested_external) told me precisely what I was looking at.",
+   "pmf": [
+    0.0101,
+    0.0094,
+    0.1028,
+    0.5396,
+    0.3381
+   ],
+   "mean": 4.186
+  },
+  {
+   "persona_id": "consultant_ex_hc",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "clarity",
+   "text": "Very clear at each step. The block told me exactly why (409 validation_not_passed, CA-REP-0001) and what to do, and the SoD checks spelled out separated/conflict with plain-language reasons. I especially valued that the report distinguishes structural PASS from the user-attested eValidator result and never lets the external attestation flip the pass flag \u2014 that's the honest framing I look for.",
+   "pmf": [
+    0.0335,
+    0.1106,
+    0.0528,
+    0.7439,
+    0.0592
+   ],
+   "mean": 3.685
+  },
+  {
+   "persona_id": "startup_founder",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "clarity",
+   "text": "At almost every step the system told me exactly where I stood and what to do next. The killer moment was validation coming back NOT PASSED with rule CA-REP-0001 spelling out in plain English that I was still on a placeholder ID and had to get the real HC Dossier ID via REP first \u2014 no cryptic error, it told me the fix. The 409 export block naming the exact finding, then watching it flip to PASSED and emit a real 9308-byte zip after I renamed to e478210, made the cause-and-effect obvious. The only slightly dense parts were the eighteen PDF/A XMP/OutputIntent warnings, but the report clearly flagged them as advisory, not blockers.",
+   "pmf": [
+    0.2364,
+    0.4883,
+    0.0342,
+    0.2017,
+    0.0395
+   ],
+   "mean": 2.319
+  },
+  {
+   "persona_id": "startup_founder",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "clarity",
+   "text": "Very clear at almost every step. The validation report gave me real rule IDs (CA-REP-0001, CA-W-7006/7008), not vague \"something's wrong,\" so I knew precisely what blocked me and what was merely advisory. I especially appreciated that the PDF/A warnings were labeled advisory and the submission still passed \u2014 as a non-regulatory guy, being told \"this is what PDF/A-1b would want but it's not a hard defect\" is exactly the hand-holding I need. The only thing I'd have to learn is the difference between \"structural pass\" and the external eValidator result, but the two-signal display made that distinction obvious.",
+   "pmf": [
+    0.0218,
+    0.0367,
+    0.1062,
+    0.5781,
+    0.2574
+   ],
+   "mean": 4.013
+  },
+  {
+   "persona_id": "regops_publisher",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "clarity",
+   "text": "Very clear at every step, which is rare. When export was blocked I got HTTP 409 'validation_not_passed' with the exact rule ID (CA-REP-0001) and the fix instruction, not a vague error; the validation report carried real CA-<severity>-<block> IDs, a version/sync stamp (v1.2, HC criteria v5.3), and an explicit checked/not_checked coverage list. The current-view and outline showing operation='replace' with modified_leaf back-pointer is exactly the relationship an HC reviewer replays, and it was spelled out.",
+   "pmf": [
+    0.0496,
+    0.2036,
+    0.0219,
+    0.6867,
+    0.0381
+   ],
+   "mean": 3.46
+  },
+  {
+   "persona_id": "regops_publisher",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "clarity",
+   "text": "Very clear at every gate. The 409 on export said 'validation_not_passed' and handed me the exact blocking rule (CA-REP-0001) rather than a silent broken download, and the placeholder-ID message told me precisely what to do: file the REP request, then Rename to the real ID. The validation report carried rule IDs, a version stamp synced to HC eCTD Validation Criteria v5.3, and an explicit checked/not_checked coverage list, which is exactly how I read eValidator output. The current-view and outline showing operation='replace' with modified_leaf back-pointing to m1-0-1-cover-letter is the replace relationship a reviewer replays, and it was legible.",
+   "pmf": [
+    0.2141,
+    0.3647,
+    0.0112,
+    0.383,
+    0.027
+   ],
+   "mean": 2.644
+  },
+  {
+   "persona_id": "cro_pm",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "clarity",
+   "text": "Very clear at almost every step \u2014 the system tells you what it just did and what state you're in, not just a green checkmark. The export block was the standout: instead of a silent fail or a bad download, it named the exact finding (CA-REP-0001) and told me the two ways forward. The validation report with real rule IDs, the \"not_checked\" disclaimers, and the segregation-of-duties messages all read like they were written by someone who's actually screened a filing. Only mild confusion: 18 PDF/A warnings that persist through every re-validate could look alarming to a non-expert until you read that they're advisory and it still passes.",
+   "pmf": [
+    0.0121,
+    0.0278,
+    0.1402,
+    0.5543,
+    0.2656
+   ],
+   "mean": 4.033
+  },
+  {
+   "persona_id": "cro_pm",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "clarity",
+   "text": "Very clear at nearly every step \u2014 this is where I felt most comfortable. When validation came back NOT PASSED it named the exact rule (CA-REP-0001) and told me in plain language to file a REP request and rename before filing; when export blocked it was an explicit 409 with the blocking finding listed, not a silent fail. The two-signal validation view (structural PASS beside \"HC eValidator: PASS \u2014 user attested external\") was unambiguous about what the tool did versus what I attested. The only place I had to slow down was the segregation-of-duties output \u2014 separated/conflict/authorship_known as separate flags is a lot to parse at a glance, though the plain-English reason line saved it.",
+   "pmf": [
+    0.0367,
+    0.1334,
+    0.0569,
+    0.7394,
+    0.0335
+   ],
+   "mean": 3.6
+  },
+  {
+   "persona_id": "labelling_specialist",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "clarity",
+   "text": "Almost always clear. Every step told me exactly where I stood and the validation findings came with real rule IDs (CA-REP-0001, CA-W-7006/7008) and plain-language fixes, not vague red text. My one hesitation was the very first e-sign showing segregation_of_duties separated=false with author_count 0 before I understood that authorship simply wasn't recorded yet; steps 25-28 made that story land properly.",
+   "pmf": [
+    0.0387,
+    0.1123,
+    0.1459,
+    0.5713,
+    0.1318
+   ],
+   "mean": 3.645
+  },
+  {
+   "persona_id": "labelling_specialist",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "clarity",
+   "text": "Very clear at almost every step. The validation report gave me real rule IDs (CA-REP-0001, CA-W-7006, CA-W-7008) with the offending leaf named, the 409 export block spelled out the exact blocking finding instead of a mystery failure, and the replace op in sequence 0001 showed the back-pointer to the superseded leaf the way HC's reviewer would replay it. The only thing I'd want spelled out more plainly in the UI is the difference between the two esign manifests when I signed as author vs approver.",
+   "pmf": [
+    0.0348,
+    0.1821,
+    0.0231,
+    0.7323,
+    0.0277
+   ],
+   "mean": 3.536
+  },
+  {
+   "persona_id": "veteran_contractor",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "clarity",
+   "text": "At every step the system told me plainly what it did and what I was looking at. The placeholder-ID banner up front, the validation report naming the exact rule CA-REP-0001 in words a person can read, the 409 that said \"export blocked, here's why\" instead of handing me a bad zip, and the outline showing operation=replace pointing back at the old cover-letter leaf. I never had to guess what state I was in.",
+   "pmf": [
+    0.0337,
+    0.0181,
+    0.1799,
+    0.3141,
+    0.4541
+   ],
+   "mean": 4.137
+  },
+  {
+   "persona_id": "veteran_contractor",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "clarity",
+   "text": "At nearly every step the screen told me plainly what happened and what to do next. When export was refused it did not just throw an error, it named the exact finding CA-REP-0001 and told me to file the Dossier ID Request and rename before filing, and the REP request even gave me the four CESG WebTrader steps. The one place I had to slow down and read twice was the segregation-of-duties wording and the difference between the structural check passing and PDF/A-1b only being advisory, but that is regulatory nuance, not muddled software.",
+   "pmf": [
+    0.1158,
+    0.339,
+    0.0619,
+    0.413,
+    0.0703
+   ],
+   "mean": 2.983
+  },
+  {
+   "persona_id": "cdmo_ra_manager",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "clarity",
+   "text": "Very clear at every step. Findings carried real HC-style rule IDs (CA-REP-0001 for the placeholder, CA-W-7006/7008 for the PDF/A gaps), the 409 export block named the exact blocking finding instead of dumping a broken zip, and the re-validate visibly flipped to PASSED. What earned my trust most was the honesty framing \u2014 the validator openly states it is NOT eValidator and lists what it does and does not check, so I knew precisely where its coverage ended.",
+   "pmf": [
+    0.0066,
+    0.0457,
+    0.0896,
+    0.6041,
+    0.254
+   ],
+   "mean": 4.053
+  },
+  {
+   "persona_id": "cdmo_ra_manager",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "clarity",
+   "text": "Very clear at every step. Rule IDs (CA-REP-0001, CA-W-7006/7008) are the language my team and Health Canada reviewers actually use, so the findings were self-explanatory. The 409 export block spelled out exactly which finding was holding it and how to clear it, and the two-signal validate view (structural PASS beside the user-attested eValidator PASS) left no ambiguity about which check owns the pass flag. The one thing I'd want surfaced more loudly is that the 18 PDF/A warnings persist through PASS \u2014 I understood them, but a junior might tune them out.",
+   "pmf": [
+    0.0296,
+    0.0801,
+    0.0532,
+    0.7691,
+    0.068
+   ],
+   "mean": 3.766
+  },
+  {
+   "persona_id": "quality_director_newcomer",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "clarity",
+   "text": "Very clear at almost every step. The validation report gave me actual rule IDs (CA-REP-0001, CA-W-7006, CA-W-7008) with plain-language explanations, not cryptic codes, and the export block told me exactly which finding was stopping me. As someone with zero eCTD background, the coverage box spelling out what IS and IS NOT checked was the single most reassuring thing I saw. The one place I'd want more hand-holding is the 18 PDF/A warnings \u2014 it looks alarming until you read that it still passes.",
+   "pmf": [
+    0.0184,
+    0.0557,
+    0.0865,
+    0.5791,
+    0.2603
+   ],
+   "mean": 4.007
+  },
+  {
+   "persona_id": "quality_director_newcomer",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "clarity",
+   "text": "Very clear at almost every step. When export failed with the 409, it didn't just error out \u2014 it named CA-REP-0001 and told me to file the REP request and rename before filing, which is precisely the gap in my knowledge it filled. The validation report with real rule IDs and an explicit \"checked / not_checked\" list is exactly the kind of scoping I need to defend a decision, and the segregation-of-duties conflict message spelled out why signing as the author is weak.",
+   "pmf": [
+    0.0578,
+    0.3873,
+    0.08,
+    0.4393,
+    0.0356
+   ],
+   "mean": 3.008
+  },
+  {
+   "persona_id": "ra_director_cro",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "trust",
+   "text": "This is the part that would actually move me. It failed closed \u2014 refused to emit a package while validation hadn't passed and showed the blocking finding instead of a misleading download. It never once claimed to BE eValidator: the disclaimer is on every report, the eValidator PASS is explicitly labeled user-attested with the real report file attached, and the REP request is honestly marked not-transmitted. The e-sign is tamper-evident and verifies against live checksums, and the SoD check surfaced a conflict when the author signed. That honesty about scope is exactly what earns trust in a regulated shop \u2014 I'd rely on it as a pre-flight and publishing tool, never as a substitute for my own eValidator run, which it correctly tells me to do.",
+   "pmf": [
+    0.4896,
+    0.1797,
+    0.1591,
+    0.1235,
+    0.0482
+   ],
+   "mean": 2.061
+  },
+  {
+   "persona_id": "ra_director_cro",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "trust",
+   "text": "This earned real trust because it fails closed and it doesn't lie about scope. The export genuinely refused at 409 until validation passed, the e-sign manifest was tamper-verified against re-computed checksums, and \u2014 critically \u2014 the eValidator result is labeled \"user_attested_external\" with an explicit disclaimer that ANDS Studio did NOT run HC's validator. That honesty is exactly what makes it defensible in an audit; a tool claiming eValidator parity would fail my due diligence instantly. The SoD conflict surfacing when author==signer is a genuine Part-11 signal I'd want on every filing. I would rely on this for the structural and lifecycle correctness, running the actual HC eValidator as the final gate \u2014 which is what it tells me to do.",
+   "pmf": [
+    0.48,
+    0.115,
+    0.1445,
+    0.1699,
+    0.0905
+   ],
+   "mean": 2.276
+  },
+  {
+   "persona_id": "ra_officer_generic",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "trust",
+   "text": "Yes, more than I expected \u2014 largely because it fails closed and is honest about scope. It refused to emit a package while validation hadn't passed and showed the exact finding instead of a misleading zip; the e-sign manifest verified as tamper-free by re-checksumming live leaves; and it never once claimed to BE eValidator. The repeated disclaimer that this is structural-only, the not_checked list (full ISO 19005-1, hyperlink resolution, HC acceptance), and labeling my eValidator PASS as 'user_attested_external' rather than a self-claim is exactly the honesty that makes me willing to rely on it as a pre-flight \u2014 I'd still run real eValidator before transmit, which it tells me to do.",
+   "pmf": [
+    0.1684,
+    0.0947,
+    0.4792,
+    0.2127,
+    0.045
+   ],
+   "mean": 2.871
+  },
+  {
+   "persona_id": "ra_officer_generic",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "trust",
+   "text": "This earned more trust than most tools because it's honest about its own boundaries. It fails closed \u2014 it refused to emit a package while validation hadn't passed rather than handing me a misleading download, and it repeatedly and explicitly says it is NOT HC's eValidator and does not replace it. Crucially it never fakes parity: the eValidator PASS is stored as user_attested_external (\"Studio did not run it \u2014 the filer did\"), the REP request is recorded as transmitted=False, and PDF/A is scoped as structural-markers-only with a clear not_checked list. That's the kind of disclaimer that would survive an audit \u2014 I'd rely on it to assemble and pre-flight, then still run real eValidator before transmit, which is exactly what it tells me to do.",
+   "pmf": [
+    0.4669,
+    0.1653,
+    0.167,
+    0.1417,
+    0.0591
+   ],
+   "mean": 2.161
+  },
+  {
+   "persona_id": "ra_junior",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "trust",
+   "text": "I'd trust it as a strong pre-flight, and that's exactly how it presents itself \u2014 it fails closed and refuses to export until validation passes, which matches how careful I have to be. What earned my trust most is that it does NOT pretend to be HC's eValidator: it says run eValidator yourself, records your result as your own attestation, and even stores the real report file with a checksum. The e-sign verify re-checking all 10 leaves for tampering and the clean 0001 replace pointing back at the superseded leaf are the kind of audit trail my QA people would actually want to see. I wouldn't skip the real eValidator step, but for structure, Module 1 completeness, and lifecycle correctness, yes I'd lean on it.",
+   "pmf": [
+    0.1207,
+    0.0733,
+    0.2988,
+    0.4402,
+    0.0671
+   ],
+   "mean": 3.26
+  },
+  {
+   "persona_id": "ra_junior",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "trust",
+   "text": "This earned real trust. It failed closed on the placeholder ID, refused to hand me a download, then genuinely passed once I fixed it, and every disclaimer said plainly this is NOT Health Canada's eValidator and doesn't replace it. That honesty is exactly what makes me trust it more, not less. The Part-11 e-sign with tamper verify and the segregation-of-duties conflict flag when the author signs are things I'd want on a real file, and it never pretended the attached eValidator result was its own.",
+   "pmf": [
+    0.3031,
+    0.0429,
+    0.2531,
+    0.2928,
+    0.1081
+   ],
+   "mean": 2.86
+  },
+  {
+   "persona_id": "qa_manager",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "trust",
+   "text": "This earned more trust than anything I've been shown, precisely because it refuses to overclaim. It fails closed \u2014 it would not emit a package while validation hadn't passed \u2014 and every screen repeats that its structural check is NOT Health Canada's eValidator and lists exactly what it does and does not check. The Part-11 e-sign gave me a signer, meaning, reason, a checksummed manifest, and a real tamper-verify that re-computed the leaf hashes; the segregation-of-duties check even flagged when the author signed their own content, honestly noting it's not IdP-enforced. That said, I would still not rely on it as my sole gate: it doesn't verify the eValidator result (it records my attestation), it only checks structural PDF/A-1b markers not full ISO 19005 conformance, and it doesn't touch scientific adequacy \u2014 all of which it tells me plainly, which is exactly why I'd trust it as far as it claims.",
+   "pmf": [
+    0.2085,
+    0.0848,
+    0.3914,
+    0.2815,
+    0.0337
+   ],
+   "mean": 2.847
+  },
+  {
+   "persona_id": "qa_manager",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "trust",
+   "text": "This earned real trust because it fails closed \u2014 it refused to emit a package while a blocker stood, and only produced the zip (stamped x-export-validation=passed) after I genuinely fixed the ID. The Part-11 e-sign with signer/meaning/reason, the tamper-evident manifest that I could re-verify against live checksums, and the segregation-of-duties check that correctly flagged a conflict when the author signed their own content \u2014 that is exactly the defensibility my auditors ask about. Critically, it does NOT overclaim: it repeatedly says it is not HC's eValidator, records my external eValidator result as user-attested (not a tool self-claim), and never lets the external pass drive its own flag. That honesty is why I'd rely on it as the preparation-and-control layer \u2014 with the mandatory real eValidator run before transmit, which it insists on anyway.",
+   "pmf": [
+    0.3431,
+    0.0385,
+    0.2845,
+    0.3105,
+    0.0233
+   ],
+   "mean": 2.633
+  },
+  {
+   "persona_id": "consultant_ex_hc",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "trust",
+   "text": "This is the first tool of this kind I'd actually stake my name on, largely because it does not overclaim. It failed CLOSED on the placeholder ID and refused to emit a package until validation genuinely passed, and every disclaimer is exactly what I'd write myself: structural-only, NOT the official eValidator, run eValidator before you transmit. The eValidator PASS is stored as user_attested_external with the real report file and checksum rather than a fake parity claim, the Part-11 manifest verifies tamper-free, and the segregation-of-duties check honestly reported separated=false/authorship_known=false when no author was recorded, then flagged the conflict when the author self-signed. That candor is what earns my trust; I'd still run my own eValidator, but I'd trust this to get a file clean before I do.",
+   "pmf": [
+    0.5367,
+    0.1813,
+    0.1029,
+    0.1086,
+    0.0705
+   ],
+   "mean": 1.995
+  },
+  {
+   "persona_id": "consultant_ex_hc",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "trust",
+   "text": "This earned more trust than any tool I've trialled. It fails closed on export, uses real HC v5.3-aligned rule IDs (CA-REP-0001, CA-W-7006/7008), and \u2014 critically \u2014 it does NOT overclaim: every screen says it is not HC's eValidator, PDF/A-1b is only structural markers not full ISO 19005-1, and the eValidator PASS is labelled user_attested_external. That honesty is exactly why I'd rely on it as a pre-flight, while still running my own LORENZ eValidator before transmit, which is what it tells me to do.",
+   "pmf": [
+    0.3551,
+    0.1423,
+    0.2496,
+    0.1867,
+    0.0664
+   ],
+   "mean": 2.467
+  },
+  {
+   "persona_id": "startup_founder",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "trust",
+   "text": "This is where it won me over. It fails closed \u2014 it refused to hand me a downloadable package while validation hadn't passed, which is exactly the behavior I'd want protecting a $180k filing. And it's relentlessly honest about its own limits: the validator literally says \"This is NOT Health Canada's official eValidator,\" my eValidator PASS is labeled user-attested-external with a note that the tool did NOT run it, and the REP request is recorded but explicitly NOT transmitted. The Part-11 e-sign with tamper-verify (verified=True, tampered=False) and the segregation-of-duties check that actually flagged a conflict when the author signed their own work tells me someone who knows regulated filings built this. I'd trust it to get me to a clean, signed, lifecycle-correct package \u2014 but I'd still run the real eValidator before transmitting, which is precisely what the tool tells me to do.",
+   "pmf": [
+    0.5021,
+    0.1311,
+    0.2144,
+    0.1076,
+    0.0448
+   ],
+   "mean": 2.062
+  },
+  {
+   "persona_id": "startup_founder",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "trust",
+   "text": "This is where it won me over. It fail-closed on export with a 409 instead of handing me a shiny broken zip \u2014 that's the opposite of most SaaS, and it's exactly what you want when a bad filing costs weeks. The e-sign with tamper-verify, the segregation-of-duties check that actually flagged when the author signed their own work, and the relentless honesty (\"this is NOT Health Canada's eValidator, run the real one\") tell me the people who built this understand the stakes and aren't overclaiming. I'd trust it to prepare and gate a real filing \u2014 but its own disclaimer is right: I'd still run the real eValidator before transmitting, which it fully expects me to do.",
+   "pmf": [
+    0.4071,
+    0.0966,
+    0.2829,
+    0.1694,
+    0.0441
+   ],
+   "mean": 2.347
+  },
+  {
+   "persona_id": "regops_publisher",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "trust",
+   "text": "More than I expected, precisely because it doesn't overclaim. It failed CLOSED on the placeholder ID and refused to emit a package, the Part-11 e-sign produced an immutable checksummed manifest that verified tamper-free, the segregation-of-duties check honestly surfaced both separated=True and the author-signs conflict, and critically it labels my eValidator PASS as 'user_attested_external' and states plainly that ANDS Studio did NOT run HC's eValidator. That honesty \u2014 structural-only, run eValidator before you transmit \u2014 is what earns trust from someone who validates for a living; a tool that claimed eValidator parity would earn my suspicion instead.",
+   "pmf": [
+    0.2574,
+    0.0664,
+    0.2521,
+    0.3449,
+    0.0793
+   ],
+   "mean": 2.922
+  },
+  {
+   "persona_id": "regops_publisher",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "trust",
+   "text": "This earned more trust than any pharma tool I've trialed, precisely because it refuses to overclaim. It fails closed on export, it labels its own validator 'NOT Health Canada's official eValidator' and tells me to run the real one before transmit, and it stores my eValidator PASS as 'user_attested_external' with a disclaimer that it did not run or reproduce it. The PDF/A finding is honest too: XMP packet and OutputIntent missing raised as advisory CA-W-7006/7008, not a fake hard fail, since a plain transmissible PDF isn't a defect. The segregation-of-duties check surfacing separated vs conflict on the Part-11 manifest is a real defensibility signal I'd actually cite in an audit. I would NOT transmit straight from here \u2014 but I trust it to get me to a clean, signed, externally-validated package, which is all I'd ask of it.",
+   "pmf": [
+    0.1847,
+    0.0959,
+    0.4136,
+    0.2509,
+    0.0549
+   ],
+   "mean": 2.895
+  },
+  {
+   "persona_id": "cro_pm",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "trust",
+   "text": "This is where it earned real credibility with me. It failed closed \u2014 a 409 that refused to emit a package while validation hadn't passed \u2014 then genuinely cleared once I fixed the ID and re-ran. It doesn't overclaim: it repeatedly says \"this is NOT Health Canada's eValidator, run the real one before you transmit,\" and the eValidator PASS is explicitly labeled user-attested, not a tool self-claim. The Part-11 e-sign with a tamper-verify that re-checks 10 checksums, plus the segregation-of-duties conflict actually surfacing when the author signs, is the kind of defensibility our QA would want to see. I'd trust it as a pre-transmission staging and gate \u2014 not as a replacement for eValidator, which it correctly never pretends to be.",
+   "pmf": [
+    0.1926,
+    0.0626,
+    0.2869,
+    0.4095,
+    0.0483
+   ],
+   "mean": 3.058
+  },
+  {
+   "persona_id": "cro_pm",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "trust",
+   "text": "This is what actually earned my trust: it failed closed. It refused to hand me a download while validation hadn't passed, showed me the real blocking rule, and only emitted the 9308-byte zip once the placeholder-ID block genuinely cleared. It's also refreshingly honest about its limits \u2014 it repeatedly says it is NOT Health Canada's eValidator, that the eValidator PASS is user-attested not tool-verified, and that the REP request is recorded but NOT transmitted. As a coordinator, a tool that tells me exactly what it does and doesn't guarantee is one I can defend to QA and to my client. I'd rely on it to catch structural/lifecycle problems and enforce the gate \u2014 but I'd still treat the real eValidator run and SME sign-off as the source of truth, which is exactly what it tells me to do.",
+   "pmf": [
+    0.2364,
+    0.0776,
+    0.3428,
+    0.2956,
+    0.0477
+   ],
+   "mean": 2.841
+  },
+  {
+   "persona_id": "labelling_specialist",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "trust",
+   "text": "Yes, more than I expected to. It failed CLOSED on the placeholder ID with a 409 instead of handing me a misleading zip, cleared only after a real fix, and it never once pretended to BE Health Canada's eValidator \u2014 it says plainly it's structural-only and records my externally-run eValidator PASS as user-attested, not its own claim. The PDF/A-1b warnings being advisory-not-blocking, the tamper-evident signature verify, and the honest replace/lifecycle back-pointer are exactly the honesty I need to defend a filing.",
+   "pmf": [
+    0.3747,
+    0.132,
+    0.2732,
+    0.1927,
+    0.0274
+   ],
+   "mean": 2.366
+  },
+  {
+   "persona_id": "labelling_specialist",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "trust",
+   "text": "This earned more trust than anything I've used, precisely because it does not overclaim. It fails closed on export, it separates its own structural check from the user-attested HC eValidator result and never lets the external attestation flip its own pass flag, and the PDF/A finding is honestly scoped as advisory rather than pretending to be full ISO 19005 conformance. That honesty is what makes me believe the green checkmarks I do see; I'd still run the real eValidator before transmitting, which is exactly what the tool tells me to do.",
+   "pmf": [
+    0.2197,
+    0.0688,
+    0.2645,
+    0.3892,
+    0.0579
+   ],
+   "mean": 2.997
+  },
+  {
+   "persona_id": "veteran_contractor",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "trust",
+   "text": "This is where it won me over, and I don't say that easily about AI tools. It refused to export while the placeholder ID was unresolved, then genuinely passed once I fixed it, and it kept telling me in writing that it is NOT Health Canada's eValidator and I still have to run the real one. It recorded my actual eValidator PASS as MY attestation, not its own claim; it flagged the segregation-of-duties conflict when the author tried to sign; and the e-signature re-verified with tampered=False. An honest tool that fails closed and won't overclaim is exactly what I'd stake my name on.",
+   "pmf": [
+    0.4195,
+    0.1881,
+    0.2618,
+    0.1093,
+    0.0213
+   ],
+   "mean": 2.125
+  },
+  {
+   "persona_id": "veteran_contractor",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "trust",
+   "text": "This is where I went from skeptical to genuinely reassured. It refused to export a package that had not passed, showed me the real rule IDs, cleared the block only after I actually fixed the ID, and then let me e-sign and re-verify against the live checksums with a tamper check. Most of all it kept telling me what it does NOT do: it is not Health Canada's eValidator, PDF/A is only structurally checked, and the eValidator PASS is my own attested result that it merely records. That honesty is exactly what earns my trust for a real file more than any confident AI claim would.",
+   "pmf": [
+    0.2326,
+    0.0817,
+    0.3939,
+    0.2684,
+    0.0234
+   ],
+   "mean": 2.768
+  },
+  {
+   "persona_id": "cdmo_ra_manager",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "trust",
+   "text": "Yes, as a preparation and pre-flight gatekeeper \u2014 with eyes open. It fails closed (no export until validation passes), the Part-11 e-sign produced an immutable checksummed manifest that actually re-verified tamper-free against the live leaves, and the segregation-of-duties check honestly surfaced separated vs conflict when the author self-signed. Critically it never claims to BE eValidator: it records my own attested external eValidator PASS and even stores the actual report file as evidence, labeled user-attested. That restraint is exactly why I'd rely on it \u2014 it doesn't overclaim the one thing only HC can certify.",
+   "pmf": [
+    0.2388,
+    0.1342,
+    0.0549,
+    0.5095,
+    0.0626
+   ],
+   "mean": 3.023
+  },
+  {
+   "persona_id": "cdmo_ra_manager",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "trust",
+   "text": "This is where it earned real credibility. It failed closed on the placeholder ID and refused to emit a package \u2014 that fail-closed behavior is exactly what protects me from transmitting garbage across clients. The disclaimers are honest to a fault: it explicitly says it is NOT eValidator, only checks structural PDF/A-1b markers not full ISO 19005-1, and records my eValidator attestation as user-attested external rather than claiming parity. The Part-11 e-sign with tamper-verify re-checksumming 10 leaves, plus the segregation-of-duties check that actually flagged the author-signs-own-content conflict \u2014 that is defensibility I can show an auditor. I would trust it to PREPARE and gate a real HC filing, with my own eValidator run before transmit, which is precisely how it tells me to use it.",
+   "pmf": [
+    0.3032,
+    0.0969,
+    0.1301,
+    0.3111,
+    0.1587
+   ],
+   "mean": 2.925
+  },
+  {
+   "persona_id": "quality_director_newcomer",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "trust",
+   "text": "This earned real trust because it fails closed. Watching the export get refused with a hard 409 while my Dossier ID was a placeholder, then clear the instant I set the real ID, told me it isn't just printing a green checkmark. What matters most: it never claimed to BE Health Canada's eValidator, and when I attached my own eValidator PASS it labeled it 'user-attested external' rather than adopting it as its own verdict. That honesty is exactly what I need to defend a filing.",
+   "pmf": [
+    0.4132,
+    0.1024,
+    0.2547,
+    0.2105,
+    0.0192
+   ],
+   "mean": 2.32
+  },
+  {
+   "persona_id": "quality_director_newcomer",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "trust",
+   "text": "This is what earned my trust \u2014 it fails closed. It refused to hand me a downloadable package while validation hadn't passed, then only emitted the 9308-byte zip stamped \"validation=passed\" after I actually fixed the ID. And it never once pretended to be Health Canada's eValidator: it labels its own check \"structural only,\" records my external eValidator result as \"user-attested, we did not run it,\" and the e-sign says \"not an external certification.\" For someone who worries about what he doesn't know, a tool that refuses to overclaim is far more trustworthy than one that promises the moon.",
+   "pmf": [
+    0.3598,
+    0.0762,
+    0.2977,
+    0.2119,
+    0.0544
+   ],
+   "mean": 2.525
+  },
+  {
+   "persona_id": "ra_director_cro",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "adoption",
+   "text": "Realistically high for a trial. Having done the loop, I'd put a real non-urgent ANDS through it in parallel with our Vault/docuBridge process and diff the exported sequence against what our validated publisher produces. Before it touches a client filing I'd need: an actual eValidator PASS on its export (not just structural), CSV/validation documentation for our QA, real IdP-backed signer identity rather than a typed email, and SoD that can be enforced not just surfaced. But the barrier to a pilot is low because it fails safe \u2014 worst case it blocks me, it doesn't silently ship a bad package.",
+   "pmf": [
+    0.1683,
+    0.028,
+    0.4931,
+    0.2988,
+    0.0119
+   ],
+   "mean": 2.958
+  },
+  {
+   "persona_id": "ra_director_cro",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "adoption",
+   "text": "Having done it, I'd put a real, non-critical ANDS through this in a pilot. What it would take before I trust it with a client filing: real SSO/IdP-backed identities behind the signer and author (the trace is honest that authorship is a recorded string, not an authenticated identity), Vault RIM interoperability so it fits our existing archive, and our QA validating a handful of exported packages against LORENZ and eValidator to confirm the backbone transmits clean. The fail-closed gating and audit trail are already at the bar I'd need; the gap is enterprise identity and integration, not correctness.",
+   "pmf": [
+    0.0992,
+    0.0131,
+    0.5733,
+    0.2856,
+    0.0289
+   ],
+   "mean": 3.132
+  },
+  {
+   "persona_id": "ra_officer_generic",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "adoption",
+   "text": "Highly likely to trial on a real, low-risk sequence \u2014 a Level IV administrative change or a response sequence, not a first ANDS. To go further my QA/validation group would need: proof the exported zip actually passes real HC eValidator on a live file (the whole thing hinges on that), the Part-11 e-sign backed by real authenticated identity/SSO rather than a typed email (right now signer/author are just strings and SoD is not enforced, only surfaced), and the audit trail exportable for inspection. The PDF/A story is the honest gap \u2014 18 advisory warnings but still PASSED means my source PDFs aren't PDF/A, and I'd want the tool to help remediate that, since a real publisher would flag it harder.",
+   "pmf": [
+    0.2426,
+    0.0155,
+    0.4951,
+    0.2236,
+    0.0232
+   ],
+   "mean": 2.769
+  },
+  {
+   "persona_id": "ra_officer_generic",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "adoption",
+   "text": "Very likely to trial on a real, low-risk file \u2014 say a straightforward Metformin-style generic ANDS \u2014 because it did the actual assembly, validation, Part-11 e-sign with tamper-verify, and a clean 0001 lifecycle replace end to end. To move past a trial I'd need: SSO/IdP-backed identities so signer/author isn't just an email string (they're honest that it isn't an IdP claim, but my QA won't accept unauthenticated signer identity for a real Part-11 record), validation of the audit trail and manifest immutability under our CSV, and confirmation the exported zip actually passes real HC eValidator on a live sequence. Get those and I'd champion it internally.",
+   "pmf": [
+    0.1956,
+    0.0468,
+    0.4169,
+    0.2847,
+    0.056
+   ],
+   "mean": 2.959
+  },
+  {
+   "persona_id": "ra_junior",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "adoption",
+   "text": "After doing this hands-on, I'd genuinely push to trial it on a real, low-risk ANDS \u2014 probably my next straightforward generic where I already know the answer, so I can compare. What it would take: my seniors and QA signing off, confirmation that the generated Module 1 docs (cover letter, application form, attestation) actually match current HC templates, and clarity on where the data lives since these are client submissions. The honesty about not transmitting the REP request and not being the official validator actually makes it MORE likely we'd trust it in a pilot, because it's not overselling.",
+   "pmf": [
+    0.0841,
+    0.0081,
+    0.6542,
+    0.2136,
+    0.0401
+   ],
+   "mean": 3.118
+  },
+  {
+   "persona_id": "ra_junior",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "adoption",
+   "text": "After doing this hands-on, I'd genuinely push to trial it on a real ANDS. What it would take: my seniors confirming the structural validator tracks the current HC criteria version, and a real REP Dossier-ID round-trip since the tool honestly doesn't transmit. I'd want to run it in parallel with our Word/eValidator process for the first submission rather than trust it cold. But the validate-block-fix-export-sign loop is more structure than we have today.",
+   "pmf": [
+    0.0978,
+    0.0207,
+    0.4128,
+    0.3126,
+    0.1561
+   ],
+   "mean": 3.409
+  },
+  {
+   "persona_id": "qa_manager",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "adoption",
+   "text": "Having done this, I'd push to trial it on a real, low-risk sequence \u2014 a lifecycle response or an administrative filing \u2014 rather than a first ANDS. Before that I'd need a few things confirmed for our vault: the Part-11 audit trail has to be exportable and durable for inspection, the e-sign needs to bind to a real authenticated identity (SSO/IdP) rather than a typed email, and our QA would run a parallel manual check against the actual eValidator on the same package to confirm parity. The honesty about scope actually makes the internal validation case easier, because I'm not asking my leadership to trust a black box that claims to be Health Canada's validator.",
+   "pmf": [
+    0.0837,
+    0.0414,
+    0.4005,
+    0.3976,
+    0.0769
+   ],
+   "mean": 3.343
+  },
+  {
+   "persona_id": "qa_manager",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "adoption",
+   "text": "Having done it, I'd push to trial this on a real, low-risk ANDS sequence. What it would take before my org commits: a signed vendor audit/qualification package (IQ/OQ, the Part-11 e-signature control documented for our CSV file), confirmation the audit trail is exportable and immutable for inspection, our SOPs updated to name it, and identity \u2014 the SoD check is honestly labeled \"not an SSO/IdP claim,\" so I'd want it wired to our real IdP before I trust the signer identity for a live filing. Cloud data residency and how the vault handles our uploaded PDFs would also need sign-off. With those, this is genuinely trial-able, not brochureware.",
+   "pmf": [
+    0.1455,
+    0.0109,
+    0.3263,
+    0.4112,
+    0.1061
+   ],
+   "mean": 3.321
+  },
+  {
+   "persona_id": "consultant_ex_hc",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "adoption",
+   "text": "Having done it hands-on, I'd trial this on a real, low-risk ANDS within a quarter, and I'd recommend two or three of my sponsor clients pilot it in parallel. To move past a trial I'd want the PDF/A gap closed to a fuller ISO 19005-1 check (the XMP/OutputIntent advisories are honest but I'd want conformance I can rely on), SoD authorship enforced against a real IdP rather than a self-declared email, and I'd validate a handful of exported packages against live HC eValidator myself to confirm the structural pass actually correlates. The honest not_checked list is exactly what tells me it's safe to trial rather than risky.",
+   "pmf": [
+    0.159,
+    0.0273,
+    0.5642,
+    0.2218,
+    0.0277
+   ],
+   "mean": 2.932
+  },
+  {
+   "persona_id": "consultant_ex_hc",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "adoption",
+   "text": "High \u2014 I'd trial this on a real ANDS this quarter. The placeholder-ID block, the tamper-evident Part-11 manifest with verify, and the auditable 0001 replace are the things that actually de-risk a filing. Before I put a client's file through it I'd want to confirm the REP request truly stays non-transmitted, watch how the CA-regional.xml and index.xml are emitted against my own eValidator on a throwaway sequence, and see the audit trail export. But nothing here is a dealbreaker.",
+   "pmf": [
+    0.2836,
+    0.0458,
+    0.4905,
+    0.1711,
+    0.009
+   ],
+   "mean": 2.576
+  },
+  {
+   "persona_id": "startup_founder",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "adoption",
+   "text": "Very likely to trial on a real file. As a cost-driven founder paying a consultancy six figures per filing, seeing myself take a Metformin ANDS from empty dossier to signed, externally-validated, sequence-0001 package by myself is exactly the control I've been wanting. To actually commit I'd need to confirm two things on a live file: that the REP Dossier-ID handoff to CESG WebTrader really works end to end (the tool honestly doesn't transmit, so that gap is on me), and that a real HC eValidator run on the exported zip comes back clean. If those hold on one real submission, I'd move filings in-house.",
+   "pmf": [
+    0.0534,
+    0.023,
+    0.3465,
+    0.4325,
+    0.1446
+   ],
+   "mean": 3.592
+  },
+  {
+   "persona_id": "startup_founder",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "adoption",
+   "text": "High \u2014 I'd put a real file through this. I pay a consultancy ~$180k a filing largely because I can't self-assemble a clean eCTD, and this just did the assembly, gating, signing, and lifecycle-replace in one pass without a regulatory hire. Before I bet a live submission on it, I'd want to run one real ANDS in parallel with my consultant as a shadow test and confirm the exported zip actually clears the real HC eValidator and gets accepted. If that one round-trips cleanly, I'm moving filings in-house.",
+   "pmf": [
+    0.1777,
+    0.023,
+    0.331,
+    0.4012,
+    0.067
+   ],
+   "mean": 3.157
+  },
+  {
+   "persona_id": "regops_publisher",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "adoption",
+   "text": "Having done it end to end, I'd push to trial this on a real ANDS in parallel with docuBridge. To go past a trial I'd need: (1) the eCTD zip round-tripped through actual HC eValidator and CESG WebTrader to confirm the backbone transmits clean, (2) the PDF/A story matured \u2014 either generated leaves that produce real PDF/A-1b with XMP+OutputIntent, or full ISO 19005-1 validation, since advisory-only won't satisfy our QA, and (3) SoD tied to our real IdP rather than free-text emails, plus computer-systems validation evidence for the Part-11 claims. But nothing here is a dealbreaker; it's the first tool in this space that felt built by people who understand publishing.",
+   "pmf": [
+    0.2083,
+    0.0101,
+    0.3548,
+    0.3345,
+    0.0923
+   ],
+   "mean": 3.092
+  },
+  {
+   "persona_id": "regops_publisher",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "adoption",
+   "text": "High likelihood I'd push my team to trial this on a real, low-risk ANDS. It nails the things I get burned by: placeholder-to-real Dossier ID re-keying on the audit trail, lifecycle replace legality, fail-closed export, and Part-11 e-sign with tamper verify. To go past trial I'd need the actual eValidator run integrated or a validated round-trip against docuBridge/eValidator on a dozen real sequences, plus confirmation the Rename and e-sign events survive in a queryable, exportable audit trail for our QA. The signer identity is self-declared, not SSO/IdP-backed, and it says so honestly \u2014 but for production I'd want it wired to our identity provider before a signature is legally load-bearing.",
+   "pmf": [
+    0.0902,
+    0.0368,
+    0.3578,
+    0.4293,
+    0.0859
+   ],
+   "mean": 3.384
+  },
+  {
+   "persona_id": "cro_pm",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "adoption",
+   "text": "Having done it, I'd push to trial this on a real, low-stakes ANDS \u2014 a follow-up sequence or a well-understood generic \u2014 rather than betting a novel filing on it first. What it would take before my org commits: our regulatory affairs lead and QA validating the e-sign against our actual Part-11 SOPs, confirming the audit trail exports in a form our auditors accept, and seeing it run against a real eValidator to compare findings on a known package. The honesty is what makes me willing to champion it internally \u2014 nothing here would blow up in a screening meeting because it doesn't promise more than it delivers.",
+   "pmf": [
+    0.0141,
+    0.0671,
+    0.3647,
+    0.4724,
+    0.0816
+   ],
+   "mean": 3.54
+  },
+  {
+   "persona_id": "cro_pm",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "adoption",
+   "text": "Having done it, I'd push to trial this on a real, low-risk ANDS \u2014 a straightforward generic where we control the timeline. The lifecycle-0001 replace with the back-pointer to the superseded leaf and the Part-11 e-sign with tamper-verify are the two things that would make my QA and RA leads take it seriously, because those are the parts we currently track in spreadsheets and pray. To actually adopt it I'd need: real user identities/SSO behind the signer (right now segregation-of-duties is honest but self-declared, enforced=false), multi-user roles so author and approver are truly separate people, and confidence it slots into our CESG/WebTrader transmission step since the tool stops short of transmitting. Give me a successful parallel run against one filing our current process already produced, and I'd champion a pilot.",
+   "pmf": [
+    0.1024,
+    0.0275,
+    0.3289,
+    0.4266,
+    0.1146
+   ],
+   "mean": 3.424
+  },
+  {
+   "persona_id": "labelling_specialist",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "adoption",
+   "text": "Having done it, I'd push to trial this on a real ANDS. What it would take: proof the generated 1.0/1.2.1/1.2.3 content matches our current HC forms and our French PM wording, our RA lead running the exported zip through the real eValidator to confirm zero findings, and SSO/real signer identity rather than typed emails before we lean on the Part-11 signatures. The placeholder-to-real Dossier-ID flow honestly not transmitting to REP is fine \u2014 that matches reality, we file through CESG ourselves.",
+   "pmf": [
+    0.0764,
+    0.0263,
+    0.3686,
+    0.4589,
+    0.0697
+   ],
+   "mean": 3.419
+  },
+  {
+   "persona_id": "labelling_specialist",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "adoption",
+   "text": "Having done it, I'd push to trial this on a real ANDS, likely a low-risk generic refile first. What it would take: our RA lead seeing the Part-11 e-sign and segregation-of-duties conflict flag, IT confirming the placeholder-to-real-ID Rename lands on the audit trail, and validating that the exported zip actually loads clean in our publisher's validator and CESG. The REP request being recorded-but-not-transmitted is the right honest behaviour, but I'd want that workflow clearly staffed so nobody assumes the tool filed it with Health Canada.",
+   "pmf": [
+    0.2654,
+    0.0211,
+    0.2881,
+    0.3604,
+    0.065
+   ],
+   "mean": 2.939
+  },
+  {
+   "persona_id": "veteran_contractor",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "adoption",
+   "text": "Having done it once, I'd trial it on a real ANDS for one of my small sponsors \u2014 that's a genuine change of heart for me. What it would take: I want to run my own real files through it, confirm the exported zip actually loads clean in HC's eValidator and gets accepted at screening, and have someone walk my sponsor's QA through the Part-11 signing and audit trail. The generated Module 1 text I'd still read line by line myself before signing, but the tool never pretended otherwise, which is why I'm willing.",
+   "pmf": [
+    0.0823,
+    0.0266,
+    0.3385,
+    0.4165,
+    0.1361
+   ],
+   "mean": 3.497
+  },
+  {
+   "persona_id": "veteran_contractor",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "adoption",
+   "text": "Having done it hands-on, I would put a real ANDS through this in parallel with my current process on the next filing, not bet a client's submission on it blind. What it would take: my own eyes on every generated document before I sign, a run of my publisher's real eValidator on the exported zip to confirm it lines up, and my sponsor's QA comfortable with the Part-11 signing and segregation-of-duties record. Because the tool never overclaims and fails closed, I would actually be willing to trial it, which for me is saying something.",
+   "pmf": [
+    0.0574,
+    0.025,
+    0.3491,
+    0.4597,
+    0.1089
+   ],
+   "mean": 3.538
+  },
+  {
+   "persona_id": "cdmo_ra_manager",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "adoption",
+   "text": "High \u2014 I would trial this on a real ANDS this quarter. Multi-client is my decisive axis: the placeholder-to-real Dossier-ID re-key with audit trail, per-dossier signer identity, and the in-app REP request that is explicitly NOT transmitted all fit a CDMO serving many sponsors. To go past a trial I'd need to confirm hard per-tenant data isolation, real SSO/IdP-backed signer identity (right now authorship is a recorded string, not an authenticated identity \u2014 the tool admits this), and a full end-to-end run against a live CESG/eValidator cycle. But nothing here blocks a pilot; it earns one.",
+   "pmf": [
+    0.0719,
+    0.0145,
+    0.4647,
+    0.3119,
+    0.1369
+   ],
+   "mean": 3.427
+  },
+  {
+   "persona_id": "cdmo_ra_manager",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "adoption",
+   "text": "High \u2014 I would put a real, low-risk ANDS through it on a pilot. The honesty and the audit trail are what make it viable in a multi-client CDMO; I can defend \"we used a structural pre-check plus real eValidator\" to any client QA. Before I roll it across my 5-person team I'd need: confirmed per-client data isolation/tenancy (the tenant_id was null here, which is a blocker for confidentiality), the real REP/CESG transmission loop or at least documented handoff (it correctly does NOT transmit today), a signer identity story better than a free-text email \u2014 ideally SSO/IdP-backed rather than typed-in, since Part-11 signatures hinge on identity \u2014 and per-client cost visibility. Give me tenancy and identity binding and I'd trial it on a live file next quarter.",
+   "pmf": [
+    0.117,
+    0.0295,
+    0.5369,
+    0.2698,
+    0.0468
+   ],
+   "mean": 3.1
+  },
+  {
+   "persona_id": "quality_director_newcomer",
+   "flow_key": "task_t2tier2",
+   "sample": 0,
+   "construct": "adoption",
+   "text": "Having done it, I'd trial this on a real file, probably a shadow run alongside our current manual process. What sold me was the full loop: the Part-11 e-sign with tamper verify, the segregation-of-duties check that actually flagged a conflict when the author signed, and the clean 0001 replace pointing back at the superseded leaf. Before spending money I'd need my regulatory consultant to confirm the exported zip passes the real HC eValidator, plus answers on data residency, access controls, and validation docs for our QA SOP.",
+   "pmf": [
+    0.1813,
+    0.0074,
+    0.3319,
+    0.4187,
+    0.0607
+   ],
+   "mean": 3.17
+  },
+  {
+   "persona_id": "quality_director_newcomer",
+   "flow_key": "task_t2tier2",
+   "sample": 1,
+   "construct": "adoption",
+   "text": "Having done it, I'd trial this on a real file with fairly high confidence \u2014 it walked me cleanly to a signed, externally-validated, lifecycle-0001-correct filing. Before I'd stake a live ANDS on it I'd want two things: our own regulatory consultant to confirm the Module 1 v2.2 checklist and the CS-BE content are actually complete (the tool honestly says it doesn't check scientific adequacy), and one real run through CESG/REP since the tool prepares but doesn't transmit. Given those, I'd absolutely run a shadow submission alongside our first filing.",
+   "pmf": [
+    0.0708,
+    0.0256,
+    0.5014,
+    0.3046,
+    0.0976
+   ],
+   "mean": 3.333
+  }
+ ]
+}
