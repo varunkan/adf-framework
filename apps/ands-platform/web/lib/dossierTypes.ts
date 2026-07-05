@@ -189,6 +189,27 @@ export interface EvalidatorAttestationResponse {
   attestation: EvalidatorAttestation | null;
 }
 
+// POLISH-EVAL-CLEARED: the FIRST-CLASS "eValidator-cleared" state (the
+// ra_director/ra_officer ask). `cleared` is true only when the user attested a
+// PASS result AND attached the actual report file (report_doc_id present) — a
+// bare pass, or a report without a pass, is honestly NOT cleared. It is
+// USER-ATTESTED EXTERNAL evidence, never an ANDS Studio self-claim of HC
+// eValidator parity; the `source` label + `disclaimer` always travel with it.
+export interface EvalidatorClearedState {
+  source: "user_attested_external";
+  cleared: boolean;
+  result: "pass" | "fail" | null;
+  report_present: boolean;
+  validator_name?: string | null;
+  validator_version?: string | null;
+  validated_on?: string | null;
+  attested_by?: string | null;
+  report_doc_id?: string | null;
+  report_filename?: string | null;
+  report_attached_at?: string | null;
+  disclaimer: string;
+}
+
 // TIER2-PARITY-UX: the response from attaching the eValidator report file.
 export interface EvalidatorReportResponse {
   dossier_id: string;
@@ -429,6 +450,10 @@ export interface ValidationResult {
   // ALONGSIDE the structural check (it never drives `passed`). null/absent when
   // the filer has not attached one yet.
   external_attestation?: EvalidatorAttestation | null;
+  // POLISH-EVAL-CLEARED: the first-class user-attested "eValidator-cleared"
+  // state (pass + attached report) travels alongside the structural result and
+  // never drives `passed`.
+  evalidator_cleared?: EvalidatorClearedState;
 }
 
 // One rule in the queryable catalogue (GET /api/dossier/validation/rules).
@@ -474,6 +499,8 @@ export interface PreflightReadiness {
   signature_message: string;
   fee_arranged: boolean;
   evalidator_attested: boolean;
+  // POLISH-EVAL-CLEARED: first-class user-attested cleared bool (pass + report).
+  evalidator_cleared: boolean;
   placeholder_dossier_id: boolean;
   summary: string;
   claim: string;
@@ -499,6 +526,8 @@ export interface PreflightReport {
   readiness: PreflightReadiness;
   validation: ValidationResult;
   evalidator_attestation: EvalidatorAttestation | null;
+  // POLISH-EVAL-CLEARED: the full first-class cleared block on the report.
+  evalidator_cleared: EvalidatorClearedState;
   esign: PreflightEsign;
   fees: FeesBlock | null;
   sequences: SequenceList;
@@ -559,6 +588,9 @@ export interface ContentState {
   fees: FeesBlock;
   validation: ValidationResult;
   din: string | null;
+  // POLISH-EVAL-CLEARED: the first-class "eValidator-cleared" state on the
+  // dossier itself, so the workspace can render a cleared / not-yet-cleared chip.
+  evalidator: EvalidatorClearedState;
   // POLISH-SIGN-BANNER: ambient signature-readiness signal so the workspace
   // chrome can show a PERSISTENT "not cleanly signed — re-sign required" banner
   // the moment a leaf changes after signing or a conflicted sign occurs. Reuses

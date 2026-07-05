@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { dossierApi } from "@/lib/dossierApi";
+import { EvalidatorClearedChip } from "./EvalidatorHandoff";
 import type {
   PreflightReport as Report,
   SignatureStatus,
@@ -119,6 +120,22 @@ function toCsv(r: Report): string {
         : "run HC eValidator on the exported package and attach the result"
     )
   );
+  // POLISH-EVAL-CLEARED: the first-class cleared state (pass + attached report)
+  // travels in the archived report — honestly labeled user-attested-external.
+  lines.push(
+    row(
+      "evalidator",
+      "eValidator-cleared (user-attested)",
+      r.evalidator_cleared.cleared ? "cleared" : "not yet cleared",
+      r.evalidator_cleared.cleared
+        ? `PASS attested${
+            r.evalidator_cleared.attested_by
+              ? ` by ${r.evalidator_cleared.attested_by}`
+              : ""
+          } with report file attached — external result, ANDS Studio did not run HC eValidator`
+        : "requires an attested PASS AND the actual eValidator report file attached"
+    )
+  );
   for (const e of r.validation.errors)
     lines.push(row("validation", e.rule_id || e.rule, "error", e.message));
   for (const w of r.validation.warnings)
@@ -207,6 +224,15 @@ function printReport(r: Report) {
     }</div>` +
     `<div><span>External eValidator (user-attested):</span> ${
       att ? `${esc(att.result)} — ${esc(att.validator_name)}` : "not attested"
+    }</div>` +
+    `<div><span>eValidator-cleared (user-attested):</span> ${
+      r.evalidator_cleared.cleared
+        ? `cleared${
+            r.evalidator_cleared.attested_by
+              ? ` — attested by ${esc(r.evalidator_cleared.attested_by)}`
+              : ""
+          } (report attached; external result)`
+        : "not yet cleared (needs an attested PASS + the report file)"
     }</div>` +
     `<div><span>Sequences:</span> ${r.sequences.sequences.length} (active ${esc(
       r.sequences.active_sequence
@@ -418,14 +444,11 @@ export function PreflightReport({ dossierId }: { dossierId: string }) {
               ok={rep.esign.handoff_ready_signature}
               label={`Part 11: ${SIG_PRESENT[rep.esign.signature_status].label}`}
             />
-            <StatusChip
-              ok={!!rep.evalidator_attestation}
-              label={
-                rep.evalidator_attestation
-                  ? `eValidator: ${rep.evalidator_attestation.result} (external)`
-                  : "eValidator: not attested"
-              }
-            />
+            {/* POLISH-EVAL-CLEARED: the FIRST-CLASS "eValidator-cleared" chip
+                (pass + attached report) — replaces the bare attested/not chip so
+                a QA reviewer sees the filing's cleared standing at a glance,
+                honestly labeled user-attested-external. */}
+            <EvalidatorClearedChip state={rep.evalidator_cleared} />
           </div>
 
           {/* SoD detail — honest role-separation, not an SSO/IdP claim */}

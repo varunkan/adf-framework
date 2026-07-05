@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { dossierApi } from "@/lib/dossierApi";
 import {
   ShieldAlert,
+  ShieldCheck,
   ExternalLink,
   ClipboardCheck,
   CheckCircle2,
@@ -29,10 +30,89 @@ import {
 } from "lucide-react";
 import type {
   EvalidatorAttestation,
+  EvalidatorClearedState,
   SequenceValidationResult,
   ValidationCriteria,
   ValidationRule,
 } from "@/lib/dossierTypes";
+
+// POLISH-EVAL-CLEARED: the FIRST-CLASS "eValidator-cleared" chip (the
+// ra_director/ra_officer ask). `cleared` is true only when the filer attested a
+// PASS AND attached the actual report file — surfaced here as a single, honestly
+// labeled chip so any surface (validation card, pre-flight report) can show
+// "eValidator: cleared (user-attested, report attached)" vs "not yet cleared".
+//
+// HONESTY: this is USER-ATTESTED EXTERNAL evidence, never an ANDS Studio
+// self-claim of HC eValidator parity. The chip label always names the external,
+// user-attested provenance, and the honest disclaimer travels beside it.
+export function EvalidatorClearedChip({
+  state,
+  showDisclaimer = false,
+}: {
+  state?: EvalidatorClearedState | null;
+  showDisclaimer?: boolean;
+}) {
+  const cleared = !!state?.cleared;
+  // the honest reason it is NOT yet cleared, so the chip is actionable rather
+  // than a bare red dot: no attestation, a fail, or a pass with no report file.
+  let notYetLabel = "eValidator: not yet cleared";
+  if (state && !cleared) {
+    if (state.result === "pass" && !state.report_present) {
+      notYetLabel = "eValidator: not yet cleared (attach the report file)";
+    } else if (state.result === "fail") {
+      notYetLabel = "eValidator: not yet cleared (attested result: failed)";
+    }
+  }
+  const who = state?.attested_by ? ` by ${state.attested_by}` : "";
+  return (
+    <span style={{ display: "inline-flex", flexDirection: "column", gap: 2 }}>
+      <span
+        className={`chip ${cleared ? "ready" : "blocked"}`}
+        role="status"
+        title={
+          cleared
+            ? "User-attested external eValidator PASS with the report file attached. ANDS Studio did not run HC's eValidator."
+            : "Not yet cleared. Attest a PASS from HC eValidator (or your publisher's validator) AND attach the actual report file."
+        }
+        style={{ fontSize: 11, display: "inline-flex", gap: 5, alignItems: "center" }}
+      >
+        {cleared ? (
+          <ShieldCheck size={12} aria-hidden />
+        ) : (
+          <ShieldAlert size={12} aria-hidden />
+        )}
+        {cleared
+          ? "eValidator: cleared (user-attested, report attached)"
+          : notYetLabel}
+      </span>
+      {cleared && (state?.validator_name || who) && (
+        <span className="mut" style={{ fontSize: 10 }}>
+          {state?.validator_name || "external validator"}
+          {state?.validator_version ? ` v${state.validator_version}` : ""}
+          {who}
+          {state?.validated_on ? ` · validated ${state.validated_on}` : ""}
+        </span>
+      )}
+      {cleared && state?.report_doc_id && (
+        <a
+          href={dossierApi.documentUrl(state.report_doc_id)}
+          target="_blank"
+          rel="noreferrer"
+          className="chip"
+          style={{ fontSize: 10, display: "inline-flex", gap: 4, alignItems: "center", textDecoration: "none", alignSelf: "flex-start" }}
+        >
+          <Download size={11} aria-hidden />
+          {state.report_filename || "eValidator report"}
+        </a>
+      )}
+      {showDisclaimer && state?.disclaimer && (
+        <span className="mut" style={{ fontSize: 10, opacity: 0.85 }}>
+          {state.disclaimer}
+        </span>
+      )}
+    </span>
+  );
+}
 
 // family key -> whether HC's official eValidator checks the same class of
 // defect + a plain note. Mirrors ectd_validation._FAMILY_PARITY. `covered`
@@ -581,14 +661,42 @@ export function EvalidatorBanner({ criteria }: { criteria?: ValidationCriteria }
 // success state. Pass `dossierId` to enable the "attach your real eValidator
 // result" flow (the ADOPT-EVALIDATOR loop-closer). `attestation` seeds the
 // currently-recorded external result so the badge renders without a refetch.
+// POLISH-EVAL-CLEARED: derive the first-class cleared state from the recorded
+// attestation on the client, using the SAME honest rule as the backend
+// (evalidator_cleared_state): cleared = attested PASS + report file attached.
+// A `cleared` prop (from validation.evalidator_cleared / content_state) takes
+// precedence when the parent already has the server-computed state.
+function clearedFromAttestation(
+  a: EvalidatorAttestation | null | undefined
+): EvalidatorClearedState {
+  const result = a?.result ?? null;
+  const report_present = !!a?.report_doc_id;
+  return {
+    source: "user_attested_external",
+    cleared: result === "pass" && report_present,
+    result,
+    report_present,
+    validator_name: a?.validator_name ?? null,
+    validator_version: a?.validator_version ?? null,
+    validated_on: a?.validated_on ?? null,
+    attested_by: a?.attested_by ?? null,
+    report_doc_id: a?.report_doc_id ?? null,
+    report_filename: a?.report_filename ?? null,
+    report_attached_at: a?.report_attached_at ?? null,
+    disclaimer: a?.disclaimer ?? "",
+  };
+}
+
 export function EvalidatorHandoff({
   criteria,
   dossierId,
   attestation,
+  cleared,
 }: {
   criteria?: ValidationCriteria;
   dossierId?: string;
   attestation?: EvalidatorAttestation | null;
+  cleared?: EvalidatorClearedState;
 }) {
   const [rules, setRules] = useState<ValidationRule[] | null>(null);
   const [err, setErr] = useState("");
@@ -633,12 +741,21 @@ export function EvalidatorHandoff({
 
   const parity = rules ? buildParity(rules) : [];
   const notCovered = parity.filter((p) => !p.covered).length;
+  // POLISH-EVAL-CLEARED: prefer the server-computed cleared state; otherwise
+  // derive it from the recorded attestation with the same honest rule.
+  const clearedState = cleared ?? clearedFromAttestation(att);
 
   return (
     <div style={{ marginTop: 8 }}>
-      <div style={{ fontSize: 12, fontWeight: 600, display: "flex", gap: 6, alignItems: "center" }}>
-        <ShieldAlert size={14} aria-hidden />
-        eValidator handoff
+      <div style={{ fontSize: 12, fontWeight: 600, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+          <ShieldAlert size={14} aria-hidden />
+          eValidator handoff
+        </span>
+        {/* POLISH-EVAL-CLEARED: the first-class cleared / not-yet-cleared chip,
+            pinned to the handoff header so the filing's eValidator standing is
+            legible at a glance — honestly labeled user-attested-external. */}
+        <EvalidatorClearedChip state={clearedState} />
       </div>
       <EvalidatorBanner criteria={criteria} />
       {att && <AttestationBadge a={att} />}

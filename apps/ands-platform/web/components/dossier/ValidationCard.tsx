@@ -469,6 +469,7 @@ export function ValidationCard({
           criteria={v.criteria}
           dossierId={dossierId}
           attestation={v.external_attestation}
+          cleared={v.evalidator_cleared}
         />
       )}
 

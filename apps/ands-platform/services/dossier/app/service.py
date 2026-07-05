@@ -737,6 +737,40 @@ class DossierService:
                           _s(dossier_id), event_data)
         return saved
 
+    # POLISH-EVAL-CLEARED: "eValidator-cleared" as a FIRST-CLASS, visible dossier
+    # state (the ra_director/ra_officer ask). The attestation record already
+    # stores a pass/fail + an attached report file; this collapses those into ONE
+    # honest state any surface (dossier state, pre-flight readiness, validation)
+    # can key off, WITHOUT re-deriving the rules or drifting on the honesty label.
+    #
+    # HONESTY: "cleared" is USER-ATTESTED EXTERNAL evidence — never a tool
+    # self-claim of HC eValidator parity. It requires BOTH a recorded PASS and the
+    # ACTUAL report file attached (report_doc_id present), so a bare pass with no
+    # report — or a report with no pass — is honestly NOT cleared. The disclaimer
+    # + source label always travel on the state.
+    @classmethod
+    def evalidator_cleared_state(cls, attestation: dict | None) -> dict:
+        att = attestation or {}
+        result = _s(att.get("result")).lower() or None
+        report_present = bool(att.get("report_doc_id"))
+        cleared = result == "pass" and report_present
+        return {
+            # the fixed honesty label: this is external evidence the USER
+            # attested, and the CLEARED state inherits it verbatim.
+            "source": "user_attested_external",
+            "cleared": cleared,
+            "result": result,
+            "report_present": report_present,
+            "validator_name": _s(att.get("validator_name")) or None,
+            "validator_version": _s(att.get("validator_version")) or None,
+            "validated_on": _s(att.get("validated_on")) or None,
+            "attested_by": _s(att.get("attested_by")) or None,
+            "report_doc_id": att.get("report_doc_id") or None,
+            "report_filename": _s(att.get("report_filename")) or None,
+            "report_attached_at": att.get("report_attached_at") or None,
+            "disclaimer": cls._ATTESTATION_DISCLAIMER,
+        }
+
     def get_evalidator_attestation(self, dossier_id: str,
                                    tenant_id: str | None = None) -> dict:
         """The current user-attested external eValidator result (or null)."""
@@ -1226,7 +1260,9 @@ class DossierService:
         model = self.repo.get_dossier(_s(dossier_id))
         if not model:
             return {"passed": True, "errors": [], "warnings": [], "checked": 0,
-                    "external_attestation": external}
+                    "external_attestation": external,
+                    "evalidator_cleared": self.evalidator_cleared_state(
+                        external)}
         documents = {}
         for state in self.repo.list_section_state(_s(dossier_id)).values():
             for meta in ([state.get("document")]
@@ -1265,6 +1301,10 @@ class DossierService:
                            "(Rename) before filing.", "leaf": None})
             result["passed"] = False
         result["external_attestation"] = external
+        # POLISH-EVAL-CLEARED: the first-class "eValidator-cleared" state travels
+        # ALONGSIDE the structural check (pass + attached report). It NEVER drives
+        # the structural `passed` flag — it is user-attested external evidence.
+        result["evalidator_cleared"] = self.evalidator_cleared_state(external)
         return result
 
     # -- TIER3-PREFLIGHT: ONE consolidated pre-flight / QA hand-off report ----
@@ -1419,6 +1459,10 @@ class DossierService:
         # it already embeds the versioned criteria and the external attestation.
         validation = self.validate_submission(dossier_id)
         evalidator = self.repo.get_evalidator_attestation(dossier_id)
+        # POLISH-EVAL-CLEARED: the first-class user-attested "eValidator-cleared"
+        # state (PASS + attached report) travels on the pre-flight report — both a
+        # bool on the readiness summary and the full honestly-labeled block below.
+        evalidator_cleared = self.evalidator_cleared_state(evalidator)
 
         # e-sign: the signed manifest + a LIVE re-verification (tamper-evidence)
         manifest = self.repo.get_esign_manifest(dossier_id)
@@ -1479,6 +1523,9 @@ class DossierService:
             "signature_message": sig["message"],
             "fee_arranged": bool((fees_block or {}).get("fee_paid")),
             "evalidator_attested": bool(evalidator),
+            # POLISH-EVAL-CLEARED: first-class cleared bool (pass + report) — a
+            # user-attested external result, never an HC acceptance claim.
+            "evalidator_cleared": bool(evalidator_cleared.get("cleared")),
             "placeholder_dossier_id": placeholder,
             "summary": summary,
             "claim": "Structural readiness snapshot — not a Health Canada "
@@ -1499,6 +1546,7 @@ class DossierService:
             "readiness": readiness,
             "validation": validation,
             "evalidator_attestation": evalidator,
+            "evalidator_cleared": evalidator_cleared,
             "esign": esign,
             "fees": fees_block,
             "sequences": sequences,
@@ -1564,11 +1612,18 @@ class DossierService:
                 "fee_paid": fee_paid,
                 "validation_passed": validation.get("passed", True),
                 "unconfirmed_sample_count": sample_count}
+        # POLISH-EVAL-CLEARED: the first-class "eValidator-cleared" state on the
+        # dossier itself (pass + attached report), so the workspace can show a
+        # cleared / not-yet-cleared chip WITHOUT re-reading the attestation. It
+        # is user-attested external evidence and never drives the structural gate.
+        evalidator_cleared = self.evalidator_cleared_state(
+            self.repo.get_evalidator_attestation(dossier_id))
         return {
             "dossier_id": dossier_id, "cs_be_only": cs_be_only,
             "version": tree["version"], "modules": modules, "gate": gate,
             "tower": dossier_state.tower_view(cs_be_only=cs_be_only, states=states),
             "fees": fees_block, "validation": validation, "din": idx.get("din"),
+            "evalidator": evalidator_cleared,
             # POLISH-SIGN-BANNER: ambient signature-readiness signal so the
             # workspace chrome can show a PERSISTENT "not cleanly signed —
             # re-sign required" banner the moment a leaf changes after signing
