@@ -145,11 +145,59 @@ export interface EvalidatorAttestation {
   disclaimer: string;
   recorded_at?: string;
   updated_at?: string;
+  // TIER2-PARITY-UX: the ACTUAL attached eValidator report FILE (bytes stored
+  // in the byte store) — surfaced as downloadable evidence, not just a filename.
+  report_doc_id?: string | null;
+  report_content_type?: string | null;
+  report_size?: number | null;
+  report_checksum?: string | null;
+  report_attached_by?: string | null;
+  report_attached_at?: string | null;
 }
 
 export interface EvalidatorAttestationResponse {
   dossier_id: string;
   attestation: EvalidatorAttestation | null;
+}
+
+// TIER2-PARITY-UX: the response from attaching the eValidator report file.
+export interface EvalidatorReportResponse {
+  dossier_id: string;
+  attestation: EvalidatorAttestation;
+}
+
+// TIER2-PARITY-UX: self-serve STRUCTURAL validation of a single sequence.
+// Same shape as ValidationResult, scoped to one sequence (never a filing
+// verdict or an HC eValidator parity claim).
+export interface SequenceValidationResult extends ValidationResult {
+  dossier_id: string;
+  sequence: string;
+  scope: "sequence";
+}
+
+// TIER2-PARITY-UX: a PREPARED (not transmitted) REP Dossier-ID Request.
+export interface RepRequest {
+  transmitted: false;
+  dossier_id: string;
+  placeholder: boolean;
+  company_id?: string | null;
+  sponsor?: string | null;
+  activity_type?: string | null;
+  contact_email?: string | null;
+  note?: string | null;
+  requested_by?: string | null;
+  requested_at?: string;
+  updated_at?: string;
+  guidance: {
+    summary: string;
+    steps: string[];
+    url: string;
+  };
+}
+
+export interface RepRequestResponse {
+  dossier_id: string;
+  rep_request: RepRequest | null;
 }
 
 // ADOPT-PART11-ESIGN: a REAL 21 CFR Part 11-aligned e-signature manifest — the

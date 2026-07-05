@@ -372,7 +372,13 @@ export function ValidationCard({
           pass. It carries the persistent "run HC eValidator before transmission"
           banner + the parity-gap table, extending (never removing) the honesty
           disclaimers into an actionable next step. */}
-      {v.passed && <EvalidatorHandoff criteria={v.criteria} />}
+      {v.passed && (
+        <EvalidatorHandoff
+          criteria={v.criteria}
+          dossierId={dossierId}
+          attestation={v.external_attestation}
+        />
+      )}
 
       {/* Round-6 WS-A (density reduction): the pass/fail result + findings above
           are the GATING signal — always visible. The extra technical sub-check,

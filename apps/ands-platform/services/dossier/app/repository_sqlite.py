@@ -157,6 +157,15 @@ CREATE TABLE IF NOT EXISTS esign_manifests (
     data         TEXT NOT NULL,
     updated_at   TEXT NOT NULL
 );
+-- TIER2-PARITY-UX: an in-app REP (Regulatory Enrolment Process) Dossier-ID
+-- Request the filer PREPARES from the placeholder banner. HONEST: it records
+-- the request intent + returned guidance — it does NOT transmit to Health
+-- Canada. One current request per dossier (the latest); full JSON in ``data``.
+CREATE TABLE IF NOT EXISTS rep_requests (
+    dossier_id  TEXT PRIMARY KEY,
+    data        TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
 """
 
 # columns a caller may patch on a plan item
@@ -210,6 +219,11 @@ class SqliteDossierRepository:
         "CREATE TABLE IF NOT EXISTS esign_manifests ("
         " dossier_id TEXT PRIMARY KEY, manifest_id TEXT NOT NULL,"
         " data TEXT NOT NULL, updated_at TEXT NOT NULL)",
+        # TIER2-PARITY-UX: in-app REP Dossier-ID Request intent (prepared, not
+        # transmitted). One current request per dossier.
+        "CREATE TABLE IF NOT EXISTS rep_requests ("
+        " dossier_id TEXT PRIMARY KEY, data TEXT NOT NULL,"
+        " updated_at TEXT NOT NULL)",
     )
 
     def __init__(self, db: SqliteDb | None = None) -> None:
@@ -642,6 +656,41 @@ class SqliteDossierRepository:
         authoritative local ledger as the destructive lifecycle events."""
         with self.db.transaction():
             saved = self.set_evalidator_attestation(dossier_id, attestation)
+            self.append_event(event_type, dossier_id, actor=actor,
+                              tenant_id=tenant_id, data=data)
+            return saved
+
+    # -- TIER2-PARITY-UX: in-app REP Dossier-ID Request intent -------------
+    def set_rep_request(self, dossier_id: str, rep_request: dict) -> dict:
+        """Upsert the CURRENT (latest) prepared REP Dossier-ID Request for a
+        dossier. HONEST: this is the recorded request INTENT + guidance — it is
+        not a transmission to Health Canada. Returns the stored dict."""
+        self.db.execute(
+            "INSERT INTO rep_requests (dossier_id, data, updated_at) "
+            "VALUES (?, ?, ?) ON CONFLICT(dossier_id) DO UPDATE SET "
+            "data=excluded.data, updated_at=excluded.updated_at",
+            (dossier_id, json.dumps(rep_request), utcnow_iso()))
+        return self.get_rep_request(dossier_id)
+
+    def get_rep_request(self, dossier_id: str) -> dict | None:
+        row = self.db.fetchone(
+            "SELECT data, updated_at FROM rep_requests WHERE dossier_id = ?",
+            (dossier_id,))
+        if not row:
+            return None
+        rec = json.loads(row["data"])
+        rec["updated_at"] = row["updated_at"]
+        return rec
+
+    def set_rep_request_with_event(self, dossier_id: str, rep_request: dict, *,
+                                   actor: str, event_type: str, tenant_id: str,
+                                   data: dict) -> dict:
+        """Persist the prepared REP request AND write its durable audit-ledger
+        event in ONE transaction (both commit or neither) — preparing a Dossier
+        ID Request is a regulatory intent worth recording on the same
+        authoritative local ledger as the other lifecycle events."""
+        with self.db.transaction():
+            saved = self.set_rep_request(dossier_id, rep_request)
             self.append_event(event_type, dossier_id, actor=actor,
                               tenant_id=tenant_id, data=data)
             return saved

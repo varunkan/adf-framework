@@ -704,6 +704,174 @@ class DossierService:
                 "attestation": self.repo.get_evalidator_attestation(
                     _s(dossier_id))}
 
+    # TIER2-PARITY-UX: attach the ACTUAL eValidator report FILE (bytes +
+    # filename), not just a filename string. The report bytes go to the blob
+    # store (the same durable, tenant-guarded byte store the eCTD documents use)
+    # and the resulting doc-id/checksum/filename are recorded ON the user-
+    # attested external attestation, so the report is surfaced as downloadable
+    # attached evidence. Honesty: the source label + disclaimer are preserved —
+    # attaching the file never turns the attestation into a tool self-claim, and
+    # the recorded pass/fail + validator fields (if any) are left intact.
+    def attach_evalidator_report(self, dossier_id: str, *, filename: str,
+                                 content_type: str, body: bytes,
+                                 actor: str = "",
+                                 tenant_id: str | None = None) -> dict:
+        self._tenant_guard(dossier_id, tenant_id)
+        if not self.repo.get_dossier_index(_s(dossier_id)):
+            raise ProblemError(404, "no such dossier", detail=_s(dossier_id))
+        raw = body if isinstance(body, (bytes, bytearray)) else \
+            _s(body).encode("utf-8")
+        raw = bytes(raw)
+        if not raw:
+            raise ProblemError(422, "the eValidator report file is empty",
+                               rule="evalidator_report_empty")
+        try:
+            meta = self.store.put(_s(dossier_id), "evalidator-report",
+                                  _s(filename) or "evalidator-report.pdf",
+                                  _s(content_type) or "application/octet-stream",
+                                  raw, origin="evalidator_report")
+        except ValueError as exc:
+            raise ProblemError(413, str(exc), rule="file_too_large")
+        # merge onto the existing attestation (or seed a fresh one). We keep the
+        # recorded result/validator fields untouched — only the report file
+        # linkage is (re)written here.
+        existing = self.repo.get_evalidator_attestation(_s(dossier_id)) or {}
+        attestation = {
+            **existing,
+            "source": "user_attested_external",
+            "report_doc_id": meta["doc_id"],
+            "report_filename": meta["filename"],
+            "report_content_type": meta["content_type"],
+            "report_size": meta["size"],
+            "report_checksum": meta["checksum"],
+            "report_attached_by": _s(actor)
+            or existing.get("report_attested_by") or None,
+            "report_attached_at": utcnow_iso(),
+            "disclaimer": self._ATTESTATION_DISCLAIMER,
+        }
+        event_data = {"report_doc_id": meta["doc_id"],
+                      "report_filename": meta["filename"],
+                      "report_size": meta["size"],
+                      "report_checksum": meta["checksum"]}
+        saved = self.repo.set_attestation_with_event(
+            _s(dossier_id), attestation, actor=_s(actor),
+            event_type="dossier.evalidator_report_attached",
+            tenant_id=_s(tenant_id), data=event_data)
+        audit_hook.record("dossier.evalidator_report_attached",
+                          _s(dossier_id), event_data)
+        return {"dossier_id": _s(dossier_id), "attestation": saved}
+
+    # TIER2-PARITY-UX: self-serve "validate a known-good sequence". The filer
+    # points the SAME structural validator at a prior/known-good sequence and
+    # sees it pass too — honest confidence-building before trusting a new export.
+    # This scopes the assembled model to ONE sequence and runs the exact same
+    # ectd_validation.validate the whole-dossier gate uses. It is STRUCTURAL
+    # only (the honest criteria/disclaimer travels) — never an HC eValidator
+    # parity claim, and it does NOT drive the filing gate.
+    def _sequence_scoped_model(self, dossier_id: str,
+                               sequence: str) -> tuple[dict, str]:
+        model = self.repo.get_dossier(_s(dossier_id))
+        if not model:
+            raise ProblemError(404, "no eCTD dossier", detail=_s(dossier_id))
+        key = _seq4(sequence)
+        seq = next((s for s in model.get("sequences", [])
+                    if s["sequence"] == key), None)
+        if seq is None:
+            raise ProblemError(404, "no such sequence on this dossier",
+                               detail=key)
+        # a single-sequence copy of the model — the validator replays only this
+        # sequence's own leaves, exactly what a per-sequence conformance check is.
+        return {"dossier_id": model["dossier_id"], "sequences": [seq]}, key
+
+    def validate_sequence(self, dossier_id: str, sequence: str,
+                          tenant_id: str | None = None) -> dict:
+        self._tenant_guard(dossier_id, tenant_id)
+        if not self.repo.get_dossier_index(_s(dossier_id)):
+            raise ProblemError(404, "no such dossier", detail=_s(dossier_id))
+        scoped, key = self._sequence_scoped_model(dossier_id, sequence)
+        result = ectd_validation.validate(scoped)
+        result["dossier_id"] = _s(dossier_id)
+        result["sequence"] = key
+        # honest framing: this is a scoped STRUCTURAL check on one sequence, not
+        # a filing-gate verdict and not an HC eValidator parity claim.
+        result["scope"] = "sequence"
+        return result
+
+    # TIER2-PARITY-UX: file the REP (Regulatory Enrolment Process) Dossier-ID
+    # Request from inside the placeholder banner. HONEST: this PREPARES and
+    # RECORDS the request intent + returns concrete REP/CESG guidance — it does
+    # NOT transmit anything to Health Canada. The recorded intent + guidance
+    # land on the durable audit ledger so the filing story is legible.
+    _REP_GUIDANCE_STEPS = (
+        "Sign in to Health Canada's Common Electronic Submissions Gateway "
+        "(CESG) with your company's account.",
+        "In the Regulatory Enrolment Process (REP), file a Dossier ID Request "
+        "for this regulatory activity (company-id + activity type).",
+        "Health Canada issues the real Dossier ID (one letter + 6-7 digits). "
+        "It is NOT minted or confirmed by any validator.",
+        "Come back and set the real ID on this dossier (the placeholder "
+        "→ real-ID Rename) before you export or transmit.",
+    )
+    _REP_GUIDANCE_URL = ("https://www.canada.ca/en/health-canada/services/"
+                         "drugs-health-products/drug-products/"
+                         "regulatory-enrolment-process.html")
+
+    def request_rep_dossier_id(self, dossier_id: str, data: dict, *,
+                               actor: str = "",
+                               tenant_id: str | None = None) -> dict:
+        self._tenant_guard(dossier_id, tenant_id)
+        idx = self.repo.get_dossier_index(_s(dossier_id))
+        if not idx:
+            raise ProblemError(404, "no such dossier", detail=_s(dossier_id))
+        data = data or {}
+        # fall back to the identity already on the dossier index where the
+        # caller does not re-supply it — the REP request needs the sponsor's
+        # company identity + activity type.
+        rep_request = {
+            # HONEST, load-bearing flag: this is a prepared intent, never a
+            # transmission to Health Canada.
+            "transmitted": False,
+            "dossier_id": _s(dossier_id),
+            "placeholder": _s(dossier_id).startswith("d"),
+            "company_id": _s(data.get("company_id")) or _s(idx.get("company_id"))
+            or None,
+            "sponsor": _s(data.get("sponsor")) or _s(idx.get("sponsor")) or None,
+            "activity_type": _s(data.get("activity_type"))
+            or _s(idx.get("submission_type")) or "ANDS",
+            "contact_email": _s(data.get("contact_email")) or _s(actor) or None,
+            "note": _s(data.get("note")) or None,
+            "requested_by": _s(actor) or None,
+            "requested_at": utcnow_iso(),
+            "guidance": {
+                "summary": "Prepared REP Dossier-ID Request. ANDS Studio does "
+                           "NOT transmit to Health Canada — file this "
+                           "through REP (via CESG WebTrader), then set the "
+                           "issued ID here.",
+                "steps": list(self._REP_GUIDANCE_STEPS),
+                "url": self._REP_GUIDANCE_URL,
+            },
+        }
+        event_data = {"company_id": rep_request["company_id"],
+                      "activity_type": rep_request["activity_type"],
+                      "transmitted": False}
+        self.repo.set_rep_request_with_event(
+            _s(dossier_id), rep_request, actor=_s(actor),
+            event_type="dossier.rep_dossier_id_requested",
+            tenant_id=_s(tenant_id), data=event_data)
+        audit_hook.record("dossier.rep_dossier_id_requested",
+                          _s(dossier_id), event_data)
+        return rep_request
+
+    def get_rep_request(self, dossier_id: str,
+                        tenant_id: str | None = None) -> dict:
+        """The current prepared REP Dossier-ID Request for a dossier (or null).
+        HONEST: a recorded intent + guidance, not a transmission."""
+        self._tenant_guard(dossier_id, tenant_id)
+        if not self.repo.get_dossier_index(_s(dossier_id)):
+            raise ProblemError(404, "no such dossier", detail=_s(dossier_id))
+        return {"dossier_id": _s(dossier_id),
+                "rep_request": self.repo.get_rep_request(_s(dossier_id))}
+
     # -- ADOPT-PART11-ESIGN: a REAL 21 CFR Part 11 e-signature, end to end --
     # The governance service owns the pure signature domain (identity + reason +
     # UTC + a tamper-evident manifest hash over the checksummed eCTD leaves).

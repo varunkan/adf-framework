@@ -13,7 +13,7 @@
 // The parity map mirrors the backend ectd_validation.parity() family map; the
 // rule ids are read live from the same rule catalogue the ValidationCard shows,
 // so the table can never claim a rule the engine does not run.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { dossierApi } from "@/lib/dossierApi";
 import {
@@ -23,9 +23,13 @@ import {
   CheckCircle2,
   XCircle,
   Copy,
+  Paperclip,
+  Download,
+  PlayCircle,
 } from "lucide-react";
 import type {
   EvalidatorAttestation,
+  SequenceValidationResult,
   ValidationCriteria,
   ValidationRule,
 } from "@/lib/dossierTypes";
@@ -128,8 +132,32 @@ function AttestationBadge({ a }: { a: EvalidatorAttestation }) {
         <div className="mut" style={{ marginTop: 3 }}>
           Attested by {a.attested_by || "an unnamed user"}
           {a.validated_on ? ` · validated ${a.validated_on}` : ""}
-          {a.report_filename ? ` · report: ${a.report_filename}` : ""}
+          {a.report_filename && !a.report_doc_id
+            ? ` · report: ${a.report_filename}`
+            : ""}
         </div>
+        {/* TIER2-PARITY-UX: the ACTUAL attached report file — downloadable
+            evidence, not just a filename string. */}
+        {a.report_doc_id && (
+          <div style={{ marginTop: 4 }}>
+            <a
+              href={dossierApi.documentUrl(a.report_doc_id)}
+              target="_blank"
+              rel="noreferrer"
+              className="chip"
+              style={{ fontSize: 10, display: "inline-flex", gap: 4, alignItems: "center", textDecoration: "none" }}
+            >
+              <Download size={11} aria-hidden />
+              {a.report_filename || "eValidator report"}
+              {typeof a.report_size === "number"
+                ? ` (${Math.max(1, Math.round(a.report_size / 1024))} KB)`
+                : ""}
+            </a>
+            <span className="mut" style={{ marginLeft: 6, fontSize: 10 }}>
+              attached report file
+            </span>
+          </div>
+        )}
         {a.notes && (
           <div className="mut" style={{ marginTop: 3 }}>
             &ldquo;{a.notes}&rdquo;
@@ -166,8 +194,32 @@ function AttestForm({
   );
   const [validatedOn, setValidatedOn] = useState(existing?.validated_on || "");
   const [notes, setNotes] = useState(existing?.notes || "");
-  const [reportName, setReportName] = useState(existing?.report_filename || "");
+  const [reportName, setReportName] = useState(
+    existing?.report_doc_id ? "" : existing?.report_filename || ""
+  );
   const [busy, setBusy] = useState(false);
+  // TIER2-PARITY-UX: the ACTUAL report file to attach (bytes), not just a name.
+  const [reportFile, setReportFile] = useState<File | null>(null);
+  const [attaching, setAttaching] = useState(false);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+
+  // Attach the real eValidator report file (its own endpoint — stores the bytes
+  // and links them on the attestation as downloadable evidence).
+  async function attachReport() {
+    if (!reportFile) return;
+    setAttaching(true);
+    try {
+      const res = await dossierApi.attachEvalidatorReport(dossierId, reportFile);
+      onSaved(res.attestation);
+      toast.success("eValidator report file attached.");
+      setReportFile(null);
+      if (fileRef.current) fileRef.current.value = "";
+    } catch (e) {
+      toast.error(`Could not attach the report file — ${String(e)}`);
+    } finally {
+      setAttaching(false);
+    }
+  }
 
   async function save() {
     if (!validatorName.trim()) {
@@ -260,7 +312,7 @@ function AttestForm({
           />
         </div>
         <div>
-          <label htmlFor="att-report">Report file / reference (optional)</label>
+          <label htmlFor="att-report">Report reference note (optional)</label>
           <input
             id="att-report"
             value={reportName}
@@ -269,7 +321,46 @@ function AttestForm({
           />
         </div>
       </div>
-      <label htmlFor="att-notes">Notes (optional)</label>
+      {/* TIER2-PARITY-UX: attach the ACTUAL eValidator report file (bytes),
+          the post-adopt ask. Stored as downloadable evidence on the record. */}
+      <div style={{ marginTop: 8 }}>
+        <label style={{ display: "flex", gap: 5, alignItems: "center" }}>
+          <Paperclip size={12} aria-hidden />
+          Attach the actual eValidator report file (recommended)
+        </label>
+        <div className="mut" style={{ fontSize: 11, margin: "2px 0 4px" }}>
+          Attach the real report PDF/XML your validator produced — it is stored
+          as downloadable evidence against this dossier, not just referenced by
+          name.
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <input
+            ref={fileRef}
+            type="file"
+            aria-label="eValidator report file"
+            accept=".pdf,.xml,.txt,.htm,.html,application/pdf,text/xml,application/xml"
+            onChange={(e) => setReportFile(e.target.files?.[0] || null)}
+            style={{ fontSize: 12 }}
+          />
+          <button
+            className="ghost"
+            style={{ fontSize: 12, padding: "5px 9px", display: "inline-flex", gap: 5, alignItems: "center" }}
+            onClick={attachReport}
+            disabled={!reportFile || attaching}
+          >
+            <Paperclip size={12} aria-hidden />
+            {attaching ? "Attaching…" : "Attach report file"}
+          </button>
+        </div>
+        {existing?.report_doc_id && (
+          <div className="mut" style={{ fontSize: 11, marginTop: 4, display: "flex", gap: 5, alignItems: "center" }}>
+            <CheckCircle2 size={12} aria-hidden />
+            A report file is already attached
+            {existing.report_filename ? ` (${existing.report_filename})` : ""}.
+          </div>
+        )}
+      </div>
+      <label htmlFor="att-notes" style={{ marginTop: 8, display: "block" }}>Notes (optional)</label>
       <textarea
         id="att-notes"
         value={notes}
@@ -289,17 +380,63 @@ function AttestForm({
   );
 }
 
-// The shadow / parallel-run helper: guidance to validate a KNOWN-GOOD prior
-// sequence in eValidator first, then compare, so the filer builds trust in the
-// export before trusting it on a live filing. Pure guidance — no false claims.
-function ShadowRunHelper() {
+// The shadow / parallel-run helper. Two honest capabilities:
+//  (a) a SELF-SERVE structural check: point ANDS Studio's OWN structural
+//      validator at a known-good prior sequence and see it pass too — a
+//      confidence-building "it passes here too" (STRUCTURAL only, never an HC
+//      eValidator parity claim; the disclaimer travels with the result).
+//  (b) guidance to then run the real HC eValidator on that known-good baseline
+//      first and compare, before trusting a new export on a live filing.
+function ShadowRunHelper({ dossierId }: { dossierId?: string }) {
   const [open, setOpen] = useState(false);
+  const [sequences, setSequences] = useState<string[]>([]);
+  const [seq, setSeq] = useState("");
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<SequenceValidationResult | null>(null);
+
+  // load the dossier's sequences so the filer can pick a known-good one
+  useEffect(() => {
+    if (!open || !dossierId) return;
+    let live = true;
+    dossierApi
+      .listSequences(dossierId)
+      .then((s) => {
+        if (!live) return;
+        const nums = (s.sequences || []).map((x) => x.sequence);
+        setSequences(nums);
+        setSeq((cur) => cur || nums[0] || "0000");
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [open, dossierId]);
+
+  async function runValidate() {
+    if (!dossierId || !seq) return;
+    setRunning(true);
+    setResult(null);
+    try {
+      const r = await dossierApi.validateSequence(dossierId, seq);
+      setResult(r);
+      if (r.passed) {
+        toast.success(`Sequence ${r.sequence} passes ANDS Studio's structural checks.`);
+      } else {
+        toast(`Sequence ${r.sequence}: ${r.errors.length} structural finding(s).`);
+      }
+    } catch (e) {
+      toast.error(`Could not validate the sequence — ${String(e)}`);
+    } finally {
+      setRunning(false);
+    }
+  }
+
   const steps = [
     "Pick a prior sequence you KNOW Health Canada already accepted (a known-good baseline).",
-    "Export that sequence from ANDS Studio and run it through HC eValidator (or your publisher's validator).",
-    "Confirm it comes back clean — this proves your eValidator setup and the export pipeline agree on a trusted baseline.",
+    "Run the self-serve structural check above on it — confirm ANDS Studio's structural validator passes it too.",
+    "Then export that sequence and run it through HC eValidator (or your publisher's validator) to confirm the real, authoritative result.",
     "Now export your NEW sequence and validate it the same way. Compare the findings against the known-good run.",
-    "Attach the new sequence's result above so the pass/fail is recorded against this dossier.",
+    "Attach the new sequence's result (and the report file) above so the pass/fail is recorded against this dossier.",
   ];
   const copyText = "eValidator shadow / parallel-run checklist:\n" +
     steps.map((s, i) => `${i + 1}. ${s}`).join("\n");
@@ -311,15 +448,74 @@ function ShadowRunHelper() {
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
       >
-        {open ? "Hide shadow / parallel-run helper" : "Shadow / parallel-run helper (build trust first)"}
+        {open ? "Hide known-good sequence check" : "Validate a known-good sequence (build trust first)"}
       </button>
       {open && (
         <div className="notice" style={{ marginTop: 6, fontSize: 11 }}>
           <div className="mut" style={{ marginBottom: 4 }}>
-            Validate a known-good prior sequence first and compare — the safest way
-            to trust a new export before a live filing.
+            Prove parity to yourself: run ANDS Studio&apos;s OWN structural checks on
+            a sequence you already know Health Canada accepted, and confirm it
+            passes here too — before trusting a new export on a live filing.
           </div>
-          <ol style={{ margin: "0 0 0 16px", padding: 0 }}>
+          {/* SELF-SERVE structural validate on a chosen sequence */}
+          {dossierId && (
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", margin: "6px 0" }}>
+              <label htmlFor="known-good-seq" className="mut">
+                Known-good sequence
+              </label>
+              <select
+                id="known-good-seq"
+                value={seq}
+                onChange={(e) => setSeq(e.target.value)}
+                style={{ fontSize: 11, padding: "2px 4px" }}
+              >
+                {(sequences.length ? sequences : ["0000"]).map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="ghost"
+                style={{ fontSize: 11, padding: "3px 8px", display: "inline-flex", gap: 5, alignItems: "center" }}
+                onClick={runValidate}
+                disabled={running || !seq}
+              >
+                <PlayCircle size={12} aria-hidden />
+                {running ? "Checking…" : "Run structural check"}
+              </button>
+            </div>
+          )}
+          {result && (
+            <div
+              className={`notice ${result.passed ? "ok" : "bad"}`}
+              role="status"
+              style={{ fontSize: 11, margin: "4px 0" }}
+            >
+              <b>
+                Sequence {result.sequence}:{" "}
+                {result.passed
+                  ? "passes ANDS Studio's structural checks"
+                  : `${result.errors.length} structural finding(s)`}
+              </b>
+              {!result.passed && (
+                <ul style={{ margin: "3px 0 0 16px", padding: 0 }}>
+                  {result.errors.slice(0, 6).map((e, i) => (
+                    <li key={i} className="mut">
+                      {e.rule_id ? `${e.rule_id}: ` : ""}
+                      {e.message}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="mut" style={{ marginTop: 4, fontSize: 10, opacity: 0.9 }}>
+                Structural check only — this is NOT Health Canada&apos;s official
+                eValidator and does not claim parity with it. Run HC eValidator
+                (or your publisher&apos;s) before you transmit.
+              </div>
+            </div>
+          )}
+          <ol style={{ margin: "6px 0 0 16px", padding: 0 }}>
             {steps.map((s) => (
               <li key={s} className="mut" style={{ marginTop: 2 }}>
                 {s}
@@ -449,7 +645,7 @@ export function EvalidatorHandoff({
       {dossierId && (
         <AttestForm dossierId={dossierId} existing={att} onSaved={setAtt} />
       )}
-      <ShadowRunHelper />
+      <ShadowRunHelper dossierId={dossierId} />
       {err && <div className="notice bad" style={{ marginTop: 6 }}>{err}</div>}
       {rules && (
         <>

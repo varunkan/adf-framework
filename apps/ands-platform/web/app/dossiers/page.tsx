@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { dossierApi } from "@/lib/dossierApi";
-import type { DossierListItem } from "@/lib/dossierTypes";
+import type { DossierListItem, RepRequest } from "@/lib/dossierTypes";
 import { Term } from "@/components/Term";
 import { TopNav } from "@/components/TopNav";
 import { Modal } from "@/components/Modal";
@@ -67,6 +67,32 @@ export default function DossiersHome() {
   const [renameReason, setRenameReason] = useState("");
   const [modalBusy, setModalBusy] = useState(false);
   const [modalErr, setModalErr] = useState("");
+
+  // TIER2-PARITY-UX: the in-app REP Dossier-ID Request helper, filed from inside
+  // the placeholder banner. HONEST: it records the request intent + returns
+  // guidance — it does NOT transmit to Health Canada.
+  const [repBusy, setRepBusy] = useState(false);
+  const [repDone, setRepDone] = useState<RepRequest | null>(null);
+  const [repCompany, setRepCompany] = useState("");
+  const [repSponsor, setRepSponsor] = useState("");
+
+  async function fileRepRequest() {
+    if (!renameTarget) return;
+    setRepBusy(true);
+    setModalErr("");
+    try {
+      const rr = await dossierApi.requestRepDossierId(renameTarget, {
+        company_id: repCompany.trim() || undefined,
+        sponsor: repSponsor.trim() || undefined,
+      });
+      setRepDone(rr);
+      toast.success("REP Dossier-ID Request prepared and recorded (not transmitted).");
+    } catch (er) {
+      setModalErr(String(er));
+    } finally {
+      setRepBusy(false);
+    }
+  }
 
   // recoverable 'trash' (archived dossiers) — restore with undo
   const [showArchived, setShowArchived] = useState(false);
@@ -146,6 +172,16 @@ export default function DossiersHome() {
     setRenameNew("");
     setRenameReason("");
     setModalErr("");
+    // reset the REP-request helper for this target
+    setRepDone(null);
+    setRepCompany("");
+    setRepSponsor("");
+    // seed the REP helper with any known sponsor/company for this dossier
+    const d = items.find((it) => it.dossier_id === oldId);
+    if (d) {
+      setRepCompany((d as { company_id?: string }).company_id || "");
+      setRepSponsor((d as { sponsor?: string }).sponsor || "");
+    }
   }
 
   async function confirmRename() {
@@ -638,6 +674,87 @@ export default function DossiersHome() {
             placeholder="e.g. HC issued Dossier ID via REP"
             style={{ width: "100%", marginTop: 4 }}
           />
+
+          {/* TIER2-PARITY-UX: file the REP Dossier-ID Request from inside the
+              placeholder banner. HONEST — it records the request intent +
+              returns guidance; it does NOT transmit to Health Canada. Shown for
+              placeholder (d…) dossiers, which don't yet have a real ID. */}
+          {renameTarget.startsWith("d") && (
+            <div className="notice" style={{ marginTop: 14, fontSize: 13 }}>
+              <div style={{ fontWeight: 600 }}>
+                Don&apos;t have a Dossier ID yet? Request one (REP)
+              </div>
+              <p className="mut" style={{ fontSize: 12, margin: "4px 0 8px" }}>
+                Health Canada issues the Dossier ID through the Regulatory
+                Enrolment Process (REP) via <Term k="CESG" />. ANDS Studio
+                prepares and records the request here — it does{" "}
+                <b>not</b> transmit to Health Canada. Once HC issues the ID, set
+                it above.
+              </p>
+              {repDone ? (
+                <div className="notice ok" style={{ fontSize: 12 }}>
+                  <div style={{ fontWeight: 600 }}>
+                    Request prepared and recorded (not transmitted).
+                  </div>
+                  <p className="mut" style={{ margin: "4px 0 6px" }}>
+                    {repDone.guidance.summary}
+                  </p>
+                  <ol style={{ margin: "0 0 0 16px", padding: 0 }}>
+                    {repDone.guidance.steps.map((s) => (
+                      <li key={s} className="mut" style={{ marginTop: 2 }}>
+                        {s}
+                      </li>
+                    ))}
+                  </ol>
+                  <a
+                    href={repDone.guidance.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mut"
+                    style={{ display: "inline-block", marginTop: 6, fontSize: 11 }}
+                  >
+                    Health Canada — Regulatory Enrolment Process (REP) ↗
+                  </a>
+                </div>
+              ) : (
+                <>
+                  <div className="field-row">
+                    <div>
+                      <label style={{ fontSize: 12 }}>
+                        Company ID <span className="mut" style={{ fontWeight: 400 }}>(optional)</span>
+                      </label>
+                      <input
+                        value={repCompany}
+                        onChange={(e) => setRepCompany(e.target.value)}
+                        placeholder="HC company identifier"
+                        style={{ width: "100%", marginTop: 3 }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 12 }}>
+                        Sponsor <span className="mut" style={{ fontWeight: 400 }}>(optional)</span>
+                      </label>
+                      <input
+                        value={repSponsor}
+                        onChange={(e) => setRepSponsor(e.target.value)}
+                        placeholder="Acme Pharma Inc."
+                        style={{ width: "100%", marginTop: 3 }}
+                      />
+                    </div>
+                  </div>
+                  <button
+                    className="ghost"
+                    style={{ marginTop: 8, fontSize: 12 }}
+                    onClick={fileRepRequest}
+                    disabled={repBusy}
+                  >
+                    {repBusy ? "Preparing…" : "Prepare REP Dossier-ID Request →"}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
           {modalErr && (
             <div className="notice bad" style={{ marginTop: 10 }}>{modalErr}</div>
           )}

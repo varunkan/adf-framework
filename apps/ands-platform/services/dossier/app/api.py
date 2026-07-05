@@ -242,6 +242,50 @@ def build_app(service: DossierService) -> FastAPI:
             dossier_id, body or {}, actor=x_user_email or "",
             tenant_id=x_tenant_id or None)
 
+    # TIER2-PARITY-UX: attach the ACTUAL eValidator report FILE (bytes) — the
+    # real report, not just a filename string. Stored in the tenant-guarded byte
+    # store and linked on the user-attested external attestation as downloadable
+    # evidence (a durable audit event is written).
+    @router.post("/dossiers/{dossier_id}/evalidator-attestation/report",
+                 status_code=201)
+    async def attach_evalidator_report(
+            dossier_id: str, file: UploadFile = File(...),
+            x_tenant_id: str = Header(default="", alias="X-Tenant-Id"),
+            x_user_email: str = Header(default="", alias="X-User-Email")):
+        service.assert_access(dossier_id, x_tenant_id or None)
+        raw = await file.read()
+        return service.attach_evalidator_report(
+            dossier_id, filename=file.filename or "evalidator-report.pdf",
+            content_type=file.content_type or "application/octet-stream",
+            body=raw, actor=x_user_email or "", tenant_id=x_tenant_id or None)
+
+    # TIER2-PARITY-UX: self-serve STRUCTURAL validation of a single (known-good)
+    # sequence — the confidence-building "it passes here too" affordance. Same
+    # structural validator, scoped to one sequence; never a filing verdict or an
+    # HC eValidator parity claim.
+    @router.get("/dossiers/{dossier_id}/validate/sequence/{sequence}")
+    def validate_sequence(dossier_id: str, sequence: str,
+                          x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        service.assert_access(dossier_id, x_tenant_id or None)
+        return service.validate_sequence(dossier_id, sequence,
+                                         x_tenant_id or None)
+
+    # TIER2-PARITY-UX: prepare + record an in-app REP Dossier-ID Request from the
+    # placeholder banner. HONEST — it records the request intent + returns
+    # guidance; it does NOT transmit to Health Canada.
+    @router.get("/dossiers/{dossier_id}/rep-request")
+    def get_rep_request(dossier_id: str,
+                        x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        return service.get_rep_request(dossier_id, x_tenant_id or None)
+
+    @router.post("/dossiers/{dossier_id}/rep-request", status_code=201)
+    def request_rep_dossier_id(dossier_id: str, body: dict,
+                               x_tenant_id: str = Header(default="", alias="X-Tenant-Id"),
+                               x_user_email: str = Header(default="", alias="X-User-Email")):
+        return service.request_rep_dossier_id(
+            dossier_id, body or {}, actor=x_user_email or "",
+            tenant_id=x_tenant_id or None)
+
     # ADOPT-PART11-ESIGN: record a REAL e-signature manifest (bound over the
     # checksummed eCTD leaves) as a durable, verifiable Part-11 signing act, and
     # re-verify it against the live leaf checksums to detect tampering.

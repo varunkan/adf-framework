@@ -10,7 +10,11 @@ import type {
   EsignVerification,
   EvalidatorAttestation,
   EvalidatorAttestationResponse,
+  EvalidatorReportResponse,
   ExportOutcome,
+  RepRequest,
+  RepRequestResponse,
+  SequenceValidationResult,
   MonographStatus,
   OutlineView,
   PmXmlValidation,
@@ -167,6 +171,68 @@ export const dossierApi = {
     j<EvalidatorAttestation>(
       `/dossiers/${encodeURIComponent(id)}/evalidator-attestation`,
       { method: "POST", body: JSON.stringify(body) }),
+
+  // TIER2-PARITY-UX: attach the ACTUAL eValidator report FILE (bytes) via a
+  // multipart upload — the real report, not just a filename string. The backend
+  // stores it in the tenant-guarded byte store and links it on the attestation
+  // as downloadable evidence.
+  attachEvalidatorReport: (id: string, file: File): Promise<EvalidatorReportResponse> =>
+    new Promise((resolve, reject) => {
+      const form = new FormData();
+      form.append("file", file);
+      const xhr = new XMLHttpRequest();
+      xhr.open(
+        "POST",
+        `${BASE}/dossiers/${encodeURIComponent(id)}/evalidator-attestation/report`
+      );
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve(JSON.parse(xhr.responseText));
+          } catch {
+            reject(new Error("bad response"));
+          }
+        } else {
+          let detail = `${xhr.status}`;
+          try {
+            const b = JSON.parse(xhr.responseText);
+            detail = [b.title, b.detail].filter(Boolean).join(": ") || detail;
+          } catch {}
+          reject(new Error(detail));
+        }
+      };
+      xhr.onerror = () => reject(new Error("network error"));
+      xhr.send(form);
+    }),
+
+  // TIER2-PARITY-UX: self-serve STRUCTURAL validation of ONE (known-good)
+  // sequence — the confidence-building "it passes here too". Same structural
+  // validator, scoped to a sequence; never a filing verdict or a parity claim.
+  validateSequence: (id: string, sequence: string) =>
+    j<SequenceValidationResult>(
+      `/dossiers/${encodeURIComponent(id)}/validate/sequence/${encodeURIComponent(sequence)}`),
+
+  // TIER2-PARITY-UX: read the current PREPARED (not transmitted) REP Dossier-ID
+  // Request for a dossier (or null).
+  getRepRequest: (id: string) =>
+    j<RepRequestResponse>(`/dossiers/${encodeURIComponent(id)}/rep-request`),
+
+  // Prepare + record an in-app REP Dossier-ID Request. HONEST: it records the
+  // request intent + returns guidance; it does NOT transmit to Health Canada.
+  requestRepDossierId: (
+    id: string,
+    body: {
+      company_id?: string;
+      sponsor?: string;
+      activity_type?: string;
+      contact_email?: string;
+      note?: string;
+    }
+  ) =>
+    j<RepRequest>(`/dossiers/${encodeURIComponent(id)}/rep-request`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
   // ADOPT-PART11-ESIGN: the current signed e-signature manifest for a dossier
   // (signer, UTC, reason, manifest hash, leaf count) — or null when unsigned.
