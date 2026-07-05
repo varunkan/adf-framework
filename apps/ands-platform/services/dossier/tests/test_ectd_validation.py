@@ -3,7 +3,7 @@
 import re
 import xml.etree.ElementTree as ET
 
-from app import assembly, ectd_validation
+from app import assembly, ectd_validation, generators
 
 
 def _clean_dossier():
@@ -572,6 +572,36 @@ def test_pdfa_findings_carry_rule_ids_and_family():
         assert r in by_rule, r
         assert by_rule[r]["source"]
         assert by_rule[r]["family"] == "Document payload conformance"
+
+
+# --- TIER3-PDFA-GEN — the tool's OWN generated leaves emit the PDF/A markers ---
+
+def test_generated_module1_pdf_leaves_have_no_pdfa_advisories():
+    """Every PROSE-PDF leaf ANDS Studio authors (cover letter, Form V, ANDS
+    attestation, QOS, CS-BE) must validate FREE of PDF/A advisory warnings —
+    the tool authors them, so it emits the PDF/A-1b structural markers rather
+    than warning on its own output. (The REP form is XML, not a PDF leaf.)"""
+    ctx = {"sponsor": "Acme Pharma", "company_id": "e123456",
+           "dossier_id": "e123456", "drug_product": "Generic 50mg",
+           "activity_type": "ANDS", "sequence": "0000",
+           "contact": "ra@acme.example"}
+    documents: dict = {}
+    for key, fn in generators.GENERATORS.items():
+        doc = fn(ctx)
+        if doc["content_type"] == "application/pdf":
+            documents[doc["filename"]] = doc["body"]
+    assert documents, "expected at least one generated PDF leaf"
+
+    d = _clean_dossier()
+    res = ectd_validation.validate(d, documents=documents)
+    pdfa_advisories = {"pdfa_xmp_missing", "pdfa_xmp_part_wrong",
+                       "pdfa_outputintent_missing", "pdfa_version"}
+    warn_rules = {w["rule"] for w in res["warnings"]}
+    assert not (warn_rules & pdfa_advisories), warn_rules & pdfa_advisories
+    # and none of the generated leaves tripped a prohibited-construct error
+    err_rules = {e["rule"] for e in res["errors"]}
+    for r in ("pdfa_javascript", "pdfa_embedded_file", "pdfa_launch_action"):
+        assert r not in err_rules, r
 
 
 def test_coverage_note_reflects_structural_pdfa_check_honestly():

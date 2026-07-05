@@ -8,15 +8,22 @@ the page-1 bold title, and the outline (bookmark) to page 1.
 
 import re
 
-from app import pdfgen
+from app import ectd_validation, pdfgen
 
 
 # ------------------------------------------------------------------ helpers
 
 def _streams(out: bytes) -> list[bytes]:
-    """Every content stream's raw bytes, in document order."""
+    """Every PAGE content stream's raw bytes, in document order.
+
+    The PDF/A-1b marker objects (the XMP /Metadata packet and the embedded
+    output-profile stream) are also ``stream``s, but they are not page content
+    — a page content stream always carries text operators (``BT``). Filter to
+    those so page-oriented assertions count pages, not markers.
+    """
     return [m.group(1) for m in
-            re.finditer(rb"stream\n(.*?)\nendstream", out, re.DOTALL)]
+            re.finditer(rb"stream\n(.*?)\nendstream", out, re.DOTALL)
+            if b"BT" in m.group(1)]
 
 
 def _pages_object(out: bytes):
@@ -274,3 +281,64 @@ def test_roundtrip_byte_length_over_400():
                           "A paragraph of body text that says a few things.")
     assert isinstance(out, bytes)
     assert len(out) > 400
+
+
+# ------------------------------------------------- TIER3-PDFA-GEN markers
+# The tool AUTHORS these PDFs, so it must emit the PDF/A-1b STRUCTURAL markers
+# the tier-2 checker (ectd_validation._pdfa_check) looks for — an XMP pdfaid
+# packet (part 1 / conformance B), a GTS_PDFA1 OutputIntent — on a PDF-1.4 base
+# and with NO prohibited constructs. These are real, byte-observable markers;
+# they are NOT a claim of full ISO 19005-1 conformance (see ectd_validation).
+
+def _pdfa(out: bytes):
+    """Run the tier-2 structural PDF/A check over ``out``; (errors, warnings)."""
+    errors: list = []
+    warnings: list = []
+    ectd_validation._pdfa_check("generated.pdf", out, errors, warnings)
+    return errors, warnings
+
+
+def test_xmp_pdfaid_packet_part1_conformance_b():
+    out = pdfgen.text_pdf("T", "B")
+    assert b"pdfaid:part" in out
+    assert b"pdfaid:conformance" in out
+    # part 1 / conformance B (PDF/A-1b) declared in the packet
+    assert re.search(rb'pdfaid:part\s*=\s*"1"', out)
+    assert re.search(rb'pdfaid:conformance\s*=\s*"B"', out)
+
+
+def test_gts_pdfa1_outputintent_present():
+    out = pdfgen.text_pdf("T", "B")
+    assert b"/OutputIntent" in out
+    assert b"GTS_PDFA1" in out
+
+
+def test_generated_pdf_passes_pdfa_check_with_zero_pdfa_warnings():
+    # a freshly generated leaf must trip NONE of the PDF/A advisory warnings —
+    # the whole point of TIER3-PDFA-GEN (kill the noise the tool created).
+    out = pdfgen.text_pdf("Health Canada — Cover Letter", "Body of the letter.")
+    errors, warnings = _pdfa(out)
+    warn_rules = {w["rule"] for w in warnings}
+    for r in ("pdfa_xmp_missing", "pdfa_xmp_part_wrong",
+              "pdfa_outputintent_missing", "pdfa_version"):
+        assert r not in warn_rules, r
+    # and no prohibited-construct errors were introduced by the markers
+    err_rules = {e["rule"] for e in errors}
+    for r in ("pdfa_javascript", "pdfa_embedded_file", "pdfa_launch_action"):
+        assert r not in err_rules, r
+
+
+def test_markers_introduce_no_prohibited_constructs():
+    out = pdfgen.text_pdf("Long", "\n".join(f"line {i}" for i in range(200)))
+    # the XMP/OutputIntent additions must not smuggle in any construct the
+    # PDF/A prohibited-content regexes (word-boundary anchored) would flag
+    assert not re.search(rb"/JavaScript\b|/JS\b", out)
+    assert not re.search(rb"/EmbeddedFile\b", out)
+    assert not re.search(rb"/Launch\b|/GoToR\b", out)
+    assert b"/Encrypt" not in out
+
+
+def test_pdfa_markers_deterministic():
+    a = pdfgen.text_pdf("Same", "Input\nover lines")
+    b = pdfgen.text_pdf("Same", "Input\nover lines")
+    assert a == b
