@@ -1,5 +1,14 @@
 ## Working principles (standing directives — apply to EVERY task)
 
+**Always run autonomously.** Execute the work end to end without pausing for
+approval or check-ins. Make the reasonable call yourself from the goal, the
+evidence, and sensible defaults, and proceed. Do NOT use AskUserQuestion for
+choices you can resolve — reserve it only for a genuinely blocking external
+dependency, and even then prefer picking the best option and moving on. Keep
+committing verified units and reporting progress; never request permission to
+continue. When a task is large, decompose it and drive it to completion via
+workflows/subagents rather than stopping to confirm.
+
 **Plan before executing.** Before acting on any non-trivial instruction, gather
 and weigh all data points that bear on it (code, tests, git history, memory,
 prior results, live process/env/config state), form an explicit plan, then
