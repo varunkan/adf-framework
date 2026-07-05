@@ -1308,6 +1308,57 @@ class DossierService:
             "HC eValidator run on the exported package."),
     }
 
+    @staticmethod
+    def _signature_status(signed: bool, verification: dict,
+                          sod: dict | None) -> dict:
+        """FIX-PREFLIGHT-SIG: collapse the e-sign state into ONE unambiguous
+        status for the pre-flight report, with a plain-language message and a
+        hand-off boolean.
+
+        The consolidated report shows the LATEST stored manifest plus a LIVE
+        re-verification. After later leaf changes (e.g. a 0001 replace) or a
+        conflict-demo sign, the current signature is LEGITIMATELY stale or
+        conflicted — a bare ``verified=false`` reads like a defect to a QA
+        reviewer. This names WHY and what to do instead.
+
+        Precedence: unsigned -> sod_conflict -> stale_unverified -> verified.
+        A conflict is surfaced ahead of verification because an author-signed
+        package is not defensibly hand-off-ready even if its bytes still match.
+        Only ``verified`` is hand-off-ready on the signature; it is a
+        role-separation + tamper-evidence signal, NOT an HC acceptance claim."""
+        if not signed:
+            return {
+                "status": "unsigned", "handoff_ready": False,
+                "message": ("Not signed yet. Apply a Part-11 e-signature over "
+                            "the current package before QA hand-off."),
+            }
+        if sod and sod.get("conflict"):
+            authors = sod.get("conflicting_authors") or sod.get("authors") or []
+            who = ", ".join(str(a) for a in authors) if authors else "an author"
+            return {
+                "status": "sod_conflict", "handoff_ready": False,
+                "message": (
+                    "Segregation-of-duties conflict: the signer is also an "
+                    f"author of the signed content ({who}). Have a distinct "
+                    "authorized approver re-sign the current package before "
+                    "hand-off. (Role-separation signal, not an SSO/IdP "
+                    "identity assertion.)"),
+            }
+        if not verification.get("verified"):
+            return {
+                "status": "stale_unverified", "handoff_ready": False,
+                "message": (
+                    "The package changed after it was signed, so the stored "
+                    "signature no longer verifies against the current leaves. "
+                    "Re-sign the current package before QA hand-off."),
+            }
+        return {
+            "status": "verified", "handoff_ready": True,
+            "message": ("Signed and verified against the current package, with "
+                        "no segregation-of-duties conflict. (Part-11 aligned "
+                        "tamper-evidence — not an external certification.)"),
+        }
+
     def preflight_report(self, dossier_id: str,
                          tenant_id: str | None = None) -> dict:
         """Assemble the single consolidated pre-flight / QA hand-off report.
@@ -1337,12 +1388,21 @@ class DossierService:
         # e-sign: the signed manifest + a LIVE re-verification (tamper-evidence)
         manifest = self.repo.get_esign_manifest(dossier_id)
         verification = self.verify_esign(dossier_id, tenant_id=tenant_id)
+        sod = (manifest or {}).get("segregation_of_duties")
+        # FIX-PREFLIGHT-SIG: collapse (signed? / verify passes? / SoD conflict?)
+        # into ONE unambiguous status a QA reviewer can act on, with a plain-
+        # language message and a hand-off boolean — so a bare verified=false
+        # (legitimate after a leaf changed or a conflict-demo sign) is never
+        # mistaken for a broken signature.
+        sig = self._signature_status(bool(manifest), verification, sod)
         esign = {
             "signed": bool(manifest),
             "manifest": manifest,
-            "segregation_of_duties": (manifest or {}).get(
-                "segregation_of_duties"),
+            "segregation_of_duties": sod,
             "verification": verification,
+            "signature_status": sig["status"],
+            "handoff_ready_signature": sig["handoff_ready"],
+            "message": sig["message"],
         }
 
         # fee / lifecycle: reuse content_state's already-computed blocks.
@@ -1375,6 +1435,13 @@ class DossierService:
             "structural_warnings": len(validation.get("warnings") or []),
             "signed": bool(manifest),
             "signature_verified": bool(verification.get("verified")),
+            # FIX-PREFLIGHT-SIG: the readiness summary reflects the SAME
+            # unambiguous signature status the esign block carries. A package
+            # whose current signature is stale/unverified/conflicted is NOT
+            # hand-off-ready on the signature — stated plainly, never an HC claim.
+            "signature_status": sig["status"],
+            "handoff_ready_signature": sig["handoff_ready"],
+            "signature_message": sig["message"],
             "fee_arranged": bool((fees_block or {}).get("fee_paid")),
             "evalidator_attested": bool(evalidator),
             "placeholder_dossier_id": placeholder,

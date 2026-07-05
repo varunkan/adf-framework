@@ -453,12 +453,25 @@ export interface ValidationRuleCatalog {
 // the "re-run validate at each step" limit. Every honesty disclaimer travels
 // INLINE (see `disclaimers`); the readiness `summary`/`claim` are STRUCTURAL
 // statements and never assert Health Canada acceptance.
+// FIX-PREFLIGHT-SIG: the consolidated report shows the LATEST stored manifest +
+// a LIVE verify. After later leaf changes (e.g. a 0001 replace) or a conflict-
+// demo sign, the current signature is legitimately stale/unverified/conflicted.
+// This one status collapses (signed? / verify passes? / SoD conflict?) into an
+// unambiguous verdict a QA reviewer can act on — never a bare verified=false.
+export type SignatureStatus =
+  | "unsigned"
+  | "verified"
+  | "stale_unverified"
+  | "sod_conflict";
 export interface PreflightReadiness {
   ready: boolean;
   structural_errors: number;
   structural_warnings: number;
   signed: boolean;
   signature_verified: boolean;
+  signature_status: SignatureStatus;
+  handoff_ready_signature: boolean;
+  signature_message: string;
   fee_arranged: boolean;
   evalidator_attested: boolean;
   placeholder_dossier_id: boolean;
@@ -471,6 +484,9 @@ export interface PreflightEsign {
   manifest: EsignManifest | null;
   segregation_of_duties?: SegregationOfDuties | null;
   verification: EsignVerification;
+  signature_status: SignatureStatus;
+  handoff_ready_signature: boolean;
+  message: string;
 }
 export interface PreflightReport {
   dossier_id: string;

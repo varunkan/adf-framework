@@ -26,7 +26,7 @@ These tests prove:
 
 import pytest
 
-from app import ectd_validation
+from app import audit_hook, ectd_validation
 
 
 def _create(client, did="p123456", title="Preflightol 5 mg tablet", tenant=None):
@@ -115,6 +115,108 @@ def test_report_includes_esign_and_verification(ctx):
     assert rep["esign"]["signed"] is False
     assert "verification" in rep["esign"]
     assert rep["esign"]["verification"]["signed"] is False
+
+
+# --- FIX-PREFLIGHT-SIG: loud, unambiguous signature status ------------------
+#
+# The pre-flight report previously surfaced a bare ``signature_verified=false``
+# after a leaf changed (or a conflict-demo sign) since signing. A QA reviewer
+# has no way to tell "never signed" from "signed but the package changed after"
+# from "signer was an author". These tests pin an explicit ``signature_status``
+# (one of unsigned / verified / stale_unverified / sod_conflict), a plain-
+# language message, a ``handoff_ready_signature`` boolean, and demand the
+# top-level readiness reflect it (a stale/conflicted signature is NOT
+# hand-off-ready).
+
+def _place_leaf(ctx, did, *, author, body=b"%PDF-1.4 cover"):
+    """Author one leaf under a recorded author, returning its live checksum
+    map (the exact set a manifest is signed + verified against)."""
+    audit_hook.set_actor(author)
+    try:
+        ctx.service.upload_document(did, "1.0", "cover.pdf",
+                                    "application/pdf", body)
+    finally:
+        audit_hook.set_actor("")
+    return ctx.service._current_leaf_checksums(did)
+
+
+def _manifest(leaves, *, signer, manifest_id="mani-pf"):
+    return {
+        "signer": signer, "role": "authorized_signer", "auth_method": "mfa",
+        "meaning": "approved", "reason": "I attest.",
+        "at": "2026-07-04T00:00:00+00:00", "tz": "UTC",
+        "manifest_id": manifest_id, "leaf_count": len(leaves),
+        "artifacts": [{"id": lid, "kind": "leaf", "checksum": cs,
+                       "checksum_type": "MD5"} for lid, cs in leaves.items()],
+    }
+
+
+def test_signature_status_unsigned(ctx):
+    _create(ctx.client, did="p623456")
+    rep = ctx.service.preflight_report("p623456")
+    esign = rep["esign"]
+    assert esign["signature_status"] == "unsigned"
+    assert esign["handoff_ready_signature"] is False
+    assert esign["message"]                       # a plain-language line exists
+    # readiness never claims a signature is in place when none is
+    assert rep["readiness"]["signature_status"] == "unsigned"
+    assert rep["readiness"]["handoff_ready_signature"] is False
+
+
+def test_signature_status_verified_when_signed_clean(ctx):
+    _create(ctx.client, did="p723456")
+    leaves = _place_leaf(ctx, "p723456", author="author@sponsor.example")
+    # a DISTINCT signer over the CURRENT package -> verify passes, no SoD clash
+    ctx.service.record_esign(
+        "p723456", _manifest(leaves, signer="qa@sponsor.example"),
+        actor="qa@sponsor.example")
+    rep = ctx.service.preflight_report("p723456")
+    esign = rep["esign"]
+    assert esign["signature_status"] == "verified"
+    assert esign["handoff_ready_signature"] is True
+    assert "verified" in esign["message"].lower()
+    assert rep["readiness"]["signature_status"] == "verified"
+    assert rep["readiness"]["handoff_ready_signature"] is True
+
+
+def test_signature_status_stale_unverified_after_leaf_change(ctx):
+    _create(ctx.client, did="p823456")
+    leaves = _place_leaf(ctx, "p823456", author="author@sponsor.example")
+    ctx.service.record_esign(
+        "p823456", _manifest(leaves, signer="qa@sponsor.example"),
+        actor="qa@sponsor.example")
+    # the package CHANGES after signing (e.g. a 0001 replace / re-upload) — the
+    # stored signature is now legitimately stale. The report must FLAG it, not
+    # show a bare verified=false a QA reviewer would trip over.
+    _place_leaf(ctx, "p823456", author="author@sponsor.example",
+                body=b"%PDF-1.4 cover REVISED")
+    rep = ctx.service.preflight_report("p823456")
+    esign = rep["esign"]
+    assert esign["signature_status"] == "stale_unverified"
+    assert esign["handoff_ready_signature"] is False
+    # the message explains WHY and what to do (re-sign the current package)
+    assert "re-sign" in esign["message"].lower()
+    # a stale signature is NOT hand-off-ready at the top level
+    assert rep["readiness"]["signature_status"] == "stale_unverified"
+    assert rep["readiness"]["handoff_ready_signature"] is False
+
+
+def test_signature_status_sod_conflict_when_author_signs(ctx):
+    _create(ctx.client, did="p923456")
+    # the SAME identity authors AND signs — a segregation-of-duties conflict.
+    # Under the default (warn) posture the signature is recorded but the report
+    # must call it out as a conflict, not a clean 'verified'.
+    leaves = _place_leaf(ctx, "p923456", author="amir@sponsor.example")
+    ctx.service.record_esign(
+        "p923456", _manifest(leaves, signer="amir@sponsor.example"),
+        actor="amir@sponsor.example")
+    rep = ctx.service.preflight_report("p923456")
+    esign = rep["esign"]
+    assert esign["signature_status"] == "sod_conflict"
+    assert esign["handoff_ready_signature"] is False
+    assert "author" in esign["message"].lower()
+    assert rep["readiness"]["signature_status"] == "sod_conflict"
+    assert rep["readiness"]["handoff_ready_signature"] is False
 
 
 # --- endpoint + tenant isolation --------------------------------------------

@@ -4,13 +4,19 @@ import {
   CheckCircle2,
   AlertTriangle,
   ShieldCheck,
+  ShieldAlert,
+  ShieldX,
+  PenLine,
   FileDown,
   Printer,
   ClipboardCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import { dossierApi } from "@/lib/dossierApi";
-import type { PreflightReport as Report } from "@/lib/dossierTypes";
+import type {
+  PreflightReport as Report,
+  SignatureStatus,
+} from "@/lib/dossierTypes";
 
 // TIER3-PREFLIGHT: ONE consolidated pre-flight / QA hand-off report. Tier-2
 // respondents asked verbatim for "ONE consolidated pre-flight report I can hand
@@ -93,18 +99,8 @@ function toCsv(r: Report): string {
     row(
       "e-sign",
       "Part 11 signature",
-      r.esign.signed ? "signed" : "unsigned",
-      r.esign.signed
-        ? `${
-            r.esign.verification.verified ? "verified" : "INVALIDATED"
-          }; SoD ${
-            r.esign.segregation_of_duties?.separated
-              ? "separated"
-              : r.esign.segregation_of_duties?.conflict
-              ? "CONFLICT"
-              : "unproven"
-          }`
-        : ""
+      r.esign.signature_status,
+      r.esign.message
     )
   );
   lines.push(
@@ -199,13 +195,9 @@ function printReport(r: Report) {
       r.rep.placeholder ? "placeholder (request real ID via REP)" : "real"
     }</div>` +
     `<div><span>Fee arranged:</span> ${yesno(!!r.fees?.fee_paid)}</div>` +
-    `<div><span>Part 11 e-signature:</span> ${
-      r.esign.signed
-        ? r.esign.verification.verified
-          ? "signed & verified"
-          : "signed — INVALIDATED (content changed)"
-        : "unsigned"
-    }</div>` +
+    `<div><span>Part 11 e-signature:</span> ${esc(
+      r.esign.signature_status
+    )} — ${esc(r.esign.message)}</div>` +
     `<div><span>Segregation of duties:</span> ${
       r.esign.segregation_of_duties?.separated
         ? "separated"
@@ -233,6 +225,86 @@ function printReport(r: Report) {
     w.document.close();
     w.focus();
   }
+}
+
+// FIX-PREFLIGHT-SIG: surface the e-sign signature_status LOUDLY. The report
+// shows the LATEST stored manifest + a LIVE verify, so after a leaf change or a
+// conflict-demo sign the current signature is legitimately stale/conflicted.
+// A bare "verified=false" reads like a defect to a QA reviewer — this banner
+// says WHICH state it is, WHY, and (when actionable) to re-sign the current
+// package before hand-off. It never claims Health Canada acceptance.
+const SIG_PRESENT: Record<
+  SignatureStatus,
+  {
+    tone: "ok" | "warn" | "bad";
+    Icon: typeof ShieldCheck;
+    label: string;
+    resign: boolean;
+  }
+> = {
+  verified: {
+    tone: "ok",
+    Icon: ShieldCheck,
+    label: "Signature verified",
+    resign: false,
+  },
+  unsigned: {
+    tone: "warn",
+    Icon: ShieldAlert,
+    label: "Not signed yet",
+    resign: false,
+  },
+  stale_unverified: {
+    tone: "bad",
+    Icon: ShieldX,
+    label: "Signature stale — package changed after signing",
+    resign: true,
+  },
+  sod_conflict: {
+    tone: "bad",
+    Icon: ShieldX,
+    label: "Segregation-of-duties conflict",
+    resign: true,
+  },
+};
+
+function SignatureBanner({ esign }: { esign: Report["esign"] }) {
+  const p = SIG_PRESENT[esign.signature_status] ?? SIG_PRESENT.unsigned;
+  const { Icon } = p;
+  return (
+    <div
+      className={`notice ${p.tone}`}
+      style={{ marginTop: 10, fontSize: 12 }}
+      role={p.tone === "bad" ? "alert" : undefined}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          fontWeight: 700,
+        }}
+      >
+        <Icon size={14} aria-hidden />
+        Part 11 e-signature: {p.label}
+      </div>
+      <div style={{ marginTop: 4 }}>{esign.message}</div>
+      {p.resign && (
+        <div
+          style={{
+            marginTop: 6,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 5,
+            fontWeight: 600,
+          }}
+        >
+          <PenLine size={12} aria-hidden />
+          Action: re-sign the current package before QA hand-off.
+        </div>
+      )}
+    </div>
+  );
 }
 
 function StatusChip({ ok, label }: { ok: boolean; label: string }) {
@@ -315,6 +387,9 @@ export function PreflightReport({ dossierId }: { dossierId: string }) {
             <div style={{ marginTop: 4 }}>{rep.readiness.next_step}</div>
           </div>
 
+          {/* FIX-PREFLIGHT-SIG: loud, unambiguous signature status banner */}
+          <SignatureBanner esign={rep.esign} />
+
           <div
             style={{
               display: "flex",
@@ -340,14 +415,8 @@ export function PreflightReport({ dossierId }: { dossierId: string }) {
               label={rep.fees?.fee_paid ? "Fee: arranged" : "Fee: not arranged"}
             />
             <StatusChip
-              ok={rep.esign.signed && rep.esign.verification.verified}
-              label={
-                rep.esign.signed
-                  ? rep.esign.verification.verified
-                    ? "Part 11: signed & verified"
-                    : "Part 11: INVALIDATED"
-                  : "Part 11: unsigned"
-              }
+              ok={rep.esign.handoff_ready_signature}
+              label={`Part 11: ${SIG_PRESENT[rep.esign.signature_status].label}`}
             />
             <StatusChip
               ok={!!rep.evalidator_attestation}
