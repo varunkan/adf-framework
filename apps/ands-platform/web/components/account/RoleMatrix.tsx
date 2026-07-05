@@ -46,26 +46,26 @@ function label(row: RoleMatrixRow): string {
 
 function RoleCard({ row, myRole }: { row: RoleMatrixRow; myRole?: string }) {
   return (
-    <div className="card" style={{ padding: "10px 12px",
+    <div className="card" style={{ padding: "14px 16px",
       outline: row.role === myRole ? "1px solid var(--accent, #6ea8fe)" : "none" }}>
       <div style={{ display: "flex", gap: 8, alignItems: "baseline",
         flexWrap: "wrap" }}>
-        <b style={{ fontSize: 14 }}>{label(row)}</b>
+        <b style={{ fontSize: 15 }}>{label(row)}</b>
         <code className="mut" style={{ fontSize: 12 }}>{row.role}</code>
         {row.role === myRole && (
           <span className="chip ready" style={{ fontSize: 11 }}>Your role</span>
         )}
       </div>
-      <p className="mut" style={{ margin: "4px 0 6px", fontSize: 13 }}>
+      <p className="mut" style={{ margin: "6px 0 10px", fontSize: 13 }}>
         {row.summary}
       </p>
       <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13,
-        display: "grid", gap: 2 }}>
+        display: "grid", gap: 4 }}>
         {row.capabilities.map((c) => (
           <li key={c}>{CAP_LABELS[c] || c}</li>
         ))}
       </ul>
-      <div className="mut" style={{ marginTop: 6, fontSize: 12 }}>
+      <div className="mut" style={{ marginTop: 10, fontSize: 12 }}>
         <b>Who assigns it:</b> {row.assignable_by}
       </div>
     </div>

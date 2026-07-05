@@ -59,69 +59,80 @@ export default function AccountPage() {
   return (
     <>
       <TopNav subtitle="account & security" />
-      <main className="dossier-home">
-        <h1>Account &amp; security</h1>
+      <main className="dossier-home" style={{ display: "grid", gap: 18 }}>
+        <h1 style={{ marginBottom: 2 }}>Account &amp; security</h1>
 
-        <section className="card glass" style={{ padding: "14px 18px",
-          maxWidth: 720 }}>
-          <h2 style={{ margin: 0, fontSize: 15 }}>Who you are here</h2>
+        <section className="card glass" style={{ padding: "20px 22px",
+          maxWidth: 760 }}>
+          <h2 style={{ marginTop: 0 }}>Who you are here</h2>
           {me ? (
-            <div style={{ marginTop: 8, fontSize: 14, display: "grid",
-              gap: 4 }}>
-              <div><span className="mut">Signed in as</span>{" "}
-                <b>{me.email}</b></div>
-              <div><span className="mut"><Term k="workspace">Workspace</Term></span>{" "}
-                <b>{me.tenant_name || "—"}</b>{" "}
-                <small className="mut">(from the account record — every
-                  dossier, document and filing here is isolated to this
-                  workspace)</small></div>
-              <div><span className="mut">Role</span> {me.role}</div>
-              {/* CAMP-SSO-OIDC — how this identity is assured RIGHT NOW: an
-                  SSO-verified principal (signed in via the workspace IdP) vs a
-                  recorded email (password login). The e-sign / Part-11 record
-                  reflects the same distinction. */}
-              <div>
-                <span className="mut">Identity</span>{" "}
+            <div style={{ marginTop: 14, fontSize: 14, display: "grid",
+              gap: 14 }}>
+              {/* aligned label / value rows so the identity facts scan as a
+                  clean two-column list rather than a run-on block */}
+              <div style={{ display: "grid",
+                gridTemplateColumns: "minmax(120px, max-content) 1fr",
+                gap: "10px 18px", alignItems: "baseline" }}>
+                <span className="mut">Signed in as</span>
+                <b>{me.email}</b>
+
+                <span className="mut"><Term k="workspace">Workspace</Term></span>
+                <div>
+                  <b>{me.tenant_name || "—"}</b>
+                  <div className="mut" style={{ fontSize: 12, marginTop: 3 }}>
+                    From the account record — every dossier, document and filing
+                    here is isolated to this workspace.
+                  </div>
+                </div>
+
+                <span className="mut">Role</span>
+                <span>{me.role}</span>
+
+                {/* CAMP-SSO-OIDC — how this identity is assured RIGHT NOW: an
+                    SSO-verified principal (signed in via the workspace IdP) vs a
+                    recorded email (password login). The e-sign / Part-11 record
+                    reflects the same distinction. */}
+                <span className="mut">Identity</span>
                 {me.identity_verified ? (
-                  <>
-                    <span className="chip ready">SSO-verified ✓</span>{" "}
-                    <small className="mut">
-                      authenticated principal via{" "}
+                  <div>
+                    <span className="chip ready">SSO-verified ✓</span>
+                    <div className="mut" style={{ fontSize: 12, marginTop: 4 }}>
+                      Authenticated principal via{" "}
                       {me.identity_issuer || "your identity provider"} — your
-                      e-signatures record a verified identity, not just an email
-                    </small>
-                  </>
+                      e-signatures record a verified identity, not just an email.
+                    </div>
+                  </div>
                 ) : (
-                  <>
-                    <span className="chip">Recorded email</span>{" "}
-                    <small className="mut">
-                      password sign-in — honestly a recorded email. With
+                  <div>
+                    <span className="chip">Recorded email</span>
+                    <div className="mut" style={{ fontSize: 12, marginTop: 4 }}>
+                      Password sign-in — honestly a recorded email. With
                       workspace SSO configured (below), sign-in becomes a
                       verified principal.
-                    </small>
-                  </>
+                    </div>
+                  </div>
                 )}
               </div>
               <RoleMatrix myRole={me.role} />
             </div>
           ) : (
-            <div className="mut" style={{ marginTop: 8, fontSize: 13 }}>
+            <div className="mut" style={{ marginTop: 10, fontSize: 13 }}>
               Loading your account…
             </div>
           )}
         </section>
 
-        <section className="card glass" style={{ padding: "14px 18px",
-          maxWidth: 720, marginTop: 14 }}>
-          <h2 style={{ margin: 0, fontSize: 15 }}>
+        <section className="card glass" style={{ padding: "20px 22px",
+          maxWidth: 760 }}>
+          <h2 style={{ marginTop: 0 }}>
             <Term k="MFA">Multi-factor authentication</Term>
           </h2>
           {!mfaKnown ? (
-            <div className="mut" style={{ marginTop: 8, fontSize: 13 }}>
+            <div className="mut" style={{ marginTop: 10, fontSize: 13 }}>
               Checking MFA status…
             </div>
           ) : mfa.step === "enabled" ? (
-            <div style={{ marginTop: 8, fontSize: 13 }}>
+            <div style={{ marginTop: 10, fontSize: 13 }}>
               <span className="chip ready">Enabled ✓</span>
               <p className="mut" style={{ marginTop: 8 }}>
                 Sign-ins to this account now require a 6-digit code from your
@@ -129,7 +140,7 @@ export default function AccountPage() {
               </p>
             </div>
           ) : mfa.step === "idle" ? (
-            <div style={{ marginTop: 8, fontSize: 13 }}>
+            <div style={{ marginTop: 10, fontSize: 13 }}>
               <p className="mut" style={{ margin: "0 0 10px" }}>
                 Add a time-based one-time code (<Term k="TOTP" />) from any
                 standard authenticator app (1Password, Google Authenticator,
@@ -141,8 +152,8 @@ export default function AccountPage() {
               </button>
             </div>
           ) : (
-            <div style={{ marginTop: 8, fontSize: 13, display: "grid",
-              gap: 10 }}>
+            <div style={{ marginTop: 10, fontSize: 13, display: "grid",
+              gap: 12 }}>
               <div className="notice">
                 <b>Step 1 —</b> add this secret to your authenticator app
                 (or paste the setup link into an app that accepts{" "}
@@ -193,14 +204,14 @@ export default function AccountPage() {
         {/* CAMP-SSO-OIDC: per-workspace OpenID Connect single sign-on config. */}
         <WorkspaceSsoPolicy />
 
-        <section className="card glass" style={{ padding: "14px 18px",
-          maxWidth: 720, marginTop: 14 }}>
-          <h2 style={{ margin: 0, fontSize: 15 }}>Password &amp; sessions</h2>
+        <section className="card glass" style={{ padding: "20px 22px",
+          maxWidth: 760 }}>
+          <h2 style={{ marginTop: 0 }}>Password &amp; sessions</h2>
           {/* R6-C: plain, non-technical items on the face; the crypto/security
               detail (salted hash, HttpOnly) moves into a "For your IT
               department" expander so the sign-in card stays plain. */}
-          <ul className="mut" style={{ margin: "8px 0 0", paddingLeft: 18,
-            fontSize: 13, display: "grid", gap: 4 }}>
+          <ul className="mut" style={{ margin: "12px 0 0", paddingLeft: 20,
+            fontSize: 14, display: "grid", gap: 8 }}>
             <li>Passwords must be at least 10 characters with letters and
               numbers.</li>
             <li>To change your password, sign out and use{" "}
@@ -214,8 +225,8 @@ export default function AccountPage() {
             hideLabel="Hide IT / security detail"
             summary={<span>How credentials and sessions are secured</span>}
           >
-            <ul className="mut" style={{ margin: "6px 0 0", paddingLeft: 18,
-              fontSize: 12, display: "grid", gap: 4 }}>
+            <ul className="mut" style={{ margin: "6px 0 0", paddingLeft: 20,
+              fontSize: 13, display: "grid", gap: 6 }}>
               <li>Passwords are stored only as a{" "}
                 <Term k="salted hash" /> — never in a form that can be reversed
                 back into the password.</li>
@@ -227,13 +238,13 @@ export default function AccountPage() {
           </Disclosure>
         </section>
 
-        <section className="card glass" style={{ padding: "14px 18px",
-          maxWidth: 720, marginTop: 14 }}>
-          <h2 style={{ margin: 0, fontSize: 15 }}>
+        <section className="card glass" style={{ padding: "20px 22px",
+          maxWidth: 760 }}>
+          <h2 style={{ marginTop: 0 }}>
             Deployment &amp; data residency
           </h2>
-          <ul className="mut" style={{ margin: "8px 0 0", paddingLeft: 18,
-            fontSize: 13, display: "grid", gap: 4 }}>
+          <ul className="mut" style={{ margin: "12px 0 0", paddingLeft: 20,
+            fontSize: 14, display: "grid", gap: 10 }}>
             <li>ANDS Studio is self-hosted: every service and database runs
               inside your own environment. Nothing leaves it except the
               packages you deliberately transmit to Health Canada.</li>

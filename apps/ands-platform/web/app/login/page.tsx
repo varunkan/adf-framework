@@ -175,39 +175,44 @@ export default function LoginPage() {
               onClick={() => setLang("fr")}>FR</button>
           </div>
         </div>
-        <h1 className="step-title" style={{ marginTop: 0 }}>
+        <h1 className="step-title" style={{ marginTop: 0, marginBottom: 4 }}>
           {mode === "login" ? L[lang].signIn
             : mode === "signup" ? L[lang].createWs
             : mode === "sso" ? "Sign in with your organization"
             : L[lang].resetPw}
         </h1>
-        {mode === "signup" && (
-          <p className="mut" style={{ fontSize: 12, marginTop: -4 }}>
-            <Term k="workspace">{L[lang].whatIsWs}</Term> — {L[lang].wsDesc}
-          </p>
-        )}
-        <p className="mut" style={{ fontSize: 13 }}>
-          {mode === "login"
-            ? L[lang].isolated
-            : mode === "signup"
-            ? (filingFor === "own"
-              ? "One workspace for your company — dossiers, documents and " +
-                "filings stay isolated to your organisation."
-              : "One workspace per client company — dossiers, documents and " +
-                "filings stay isolated between the clients you file for.")
-            : mode === "sso"
-            ? "Use your organisation's identity provider (OpenID Connect). " +
-              "You are redirected to your IdP to authenticate, then returned " +
-              "here signed in as a verified principal."
-            : "Enter your account email. We issue a one-time code (expires " +
-              "in 15 minutes) to set a new password."}
-        </p>
 
-        {/* #7 — one-line data-residency clarifier: self-hosted can stay in
-            Canada (a gating question for HC filers). */}
-        <p className="mut" style={{ fontSize: 12, marginTop: -2 }}>
-          🍁 {L[lang].residency}
-        </p>
+        {/* Intro copy grouped as one calm block with even spacing, instead of
+            stacked lines with negative margins crushed together. */}
+        <div style={{ display: "grid", gap: 8 }}>
+          {mode === "signup" && (
+            <p className="mut" style={{ fontSize: 12, margin: 0 }}>
+              <Term k="workspace">{L[lang].whatIsWs}</Term> — {L[lang].wsDesc}
+            </p>
+          )}
+          <p className="mut" style={{ fontSize: 13, margin: 0 }}>
+            {mode === "login"
+              ? L[lang].isolated
+              : mode === "signup"
+              ? (filingFor === "own"
+                ? "One workspace for your company — dossiers, documents and " +
+                  "filings stay isolated to your organisation."
+                : "One workspace per client company — dossiers, documents and " +
+                  "filings stay isolated between the clients you file for.")
+              : mode === "sso"
+              ? "Use your organisation's identity provider (OpenID Connect). " +
+                "You are redirected to your IdP to authenticate, then returned " +
+                "here signed in as a verified principal."
+              : "Enter your account email. We issue a one-time code (expires " +
+                "in 15 minutes) to set a new password."}
+          </p>
+
+          {/* #7 — one-line data-residency clarifier: self-hosted can stay in
+              Canada (a gating question for HC filers). */}
+          <p className="mut" style={{ fontSize: 12, margin: 0 }}>
+            🍁 {L[lang].residency}
+          </p>
+        </div>
 
         {mode === "signup" && (
           <>

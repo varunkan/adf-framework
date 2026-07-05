@@ -133,11 +133,11 @@ export function SecurityCompliance() {
   }, []);
 
   return (
-    <section className="card glass" style={{ padding: "14px 18px",
-      maxWidth: 720, marginTop: 14 }}>
+    <section className="card glass" style={{ padding: "20px 22px",
+      maxWidth: 760 }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 10,
         flexWrap: "wrap" }}>
-        <h2 style={{ margin: 0, fontSize: 15 }}>Audit &amp; compliance</h2>
+        <h2 style={{ margin: 0 }}>Audit &amp; compliance</h2>
         <span className="spacer" style={{ marginLeft: "auto" }} />
         <button className="ghost" style={{ fontSize: 12 }}
           disabled={!roles.length}
@@ -147,7 +147,7 @@ export function SecurityCompliance() {
       </div>
 
       {/* (b) named 21 CFR Part 11 / GxP statement — honest scope */}
-      <p className="mut" style={{ marginTop: 8, fontSize: 13 }}>
+      <p className="mut" style={{ marginTop: 12, fontSize: 14 }}>
         <b>21 CFR Part 11 / GxP alignment.</b> Security-relevant actions land on
         an append-only, actor- and workspace-stamped audit trail (below), access
         is governed by role-based capabilities enforced at the API, and stored
@@ -159,10 +159,10 @@ export function SecurityCompliance() {
       </p>
 
       {/* (a) security event log — who / what / when */}
-      <h3 style={{ margin: "12px 0 4px", fontSize: 13 }}>
+      <h3 style={{ margin: "20px 0 6px" }}>
         Sign-in &amp; security-settings event log
       </h3>
-      <p className="mut" style={{ margin: "0 0 6px", fontSize: 12 }}>
+      <p className="mut" style={{ margin: "0 0 10px", fontSize: 13 }}>
         Sign-ins, MFA-policy changes and role changes for this workspace —
         who, what and when. Narrowed from the full audit trail below.
       </p>

@@ -83,16 +83,16 @@ function NotifyMe({ itemTitle }: { itemTitle: string }) {
 
 export function RoadmapCard() {
   return (
-    <section className="card glass" style={{ padding: "14px 18px",
-      maxWidth: 720, marginTop: 14 }}>
-      <h2 style={{ margin: 0, fontSize: 15 }}>Roadmap — not yet available</h2>
-      <p className="mut" style={{ margin: "6px 0 10px", fontSize: 13 }}>
+    <section className="card glass" style={{ padding: "20px 22px",
+      maxWidth: 760 }}>
+      <h2 style={{ marginTop: 0 }}>Roadmap — not yet available</h2>
+      <p className="mut" style={{ margin: "10px 0 16px", fontSize: 14 }}>
         Honest target quarters for enterprise capabilities that are not built
         today. Nothing below works yet. If a date matters for your procurement,
         use <b>Request early access</b> on the item and we&apos;ll capture your org.
       </p>
-      <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, display: "grid",
-        gap: 12 }}>
+      <ul style={{ margin: 0, paddingLeft: 20, fontSize: 14, display: "grid",
+        gap: 18 }}>
         {ROADMAP.map((e) => (
           <li key={e.id}>
             <b>{e.title}</b>{" "}

@@ -78,17 +78,19 @@ export function WorkspaceMfaPolicy() {
   const canManage = !!sec?.can_manage;
 
   return (
-    <section className="card glass" style={{ padding: "14px 18px",
-      maxWidth: 720, marginTop: 14 }}>
-      <h2 style={{ margin: 0, fontSize: 15 }}>Workspace security policy</h2>
+    <section className="card glass" style={{ padding: "20px 22px",
+      maxWidth: 760 }}>
+      <h2 style={{ marginTop: 0 }}>Workspace security policy</h2>
       {!sec ? (
-        <div className="mut" style={{ marginTop: 8, fontSize: 13 }}>
+        <div className="mut" style={{ marginTop: 10, fontSize: 13 }}>
           {err ? <span className="notice bad">{err}</span> : "Loading policy…"}
         </div>
       ) : (
-        <div style={{ marginTop: 8, fontSize: 13 }}>
+        <div style={{ marginTop: 12, fontSize: 13, display: "grid",
+          gap: 22 }}>
           {/* ---- MFA policy (server-enforced) ---- */}
-          <h3 style={{ margin: "0 0 6px", fontSize: 13 }}>
+          <div>
+          <h3 style={{ margin: "0 0 8px" }}>
             Multi-factor authentication
           </h3>
           <div style={{ display: "flex", gap: 8, alignItems: "center",
@@ -120,9 +122,11 @@ export function WorkspaceMfaPolicy() {
                 "required to enrol TOTP MFA before they can continue. Enforced " +
                 "server-side on every login."}
           </p>
+          </div>
 
           {/* ---- Segregation of duties (server-enforced sign policy) ---- */}
-          <h3 style={{ margin: "14px 0 6px", fontSize: 13 }}>
+          <div>
+          <h3 style={{ margin: "0 0 8px" }}>
             Segregation of duties
           </h3>
           <div style={{ display: "flex", gap: 8, alignItems: "center",
@@ -152,9 +156,11 @@ export function WorkspaceMfaPolicy() {
                 "recorded on the Part-11 record. This is a workspace control " +
                 "over signing; it is not an SSO/IdP identity check."}
           </p>
+          </div>
 
           {/* ---- Session length + idle lockout (documented policy) ---- */}
-          <h3 style={{ margin: "14px 0 6px", fontSize: 13 }}>
+          <div>
+          <h3 style={{ margin: "0 0 8px" }}>
             Session length &amp; idle lockout
           </h3>
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap",
@@ -187,13 +193,18 @@ export function WorkspaceMfaPolicy() {
             members during onboarding. Configurable enforcement of shorter
             windows and idle timeout is on the roadmap.
           </p>
+          </div>
 
-          {!canManage && (
-            <p className="mut" style={{ fontSize: 12 }}>
-              Only a workspace admin can change these policies.
-            </p>
+          {(!canManage || err) && (
+            <div>
+              {!canManage && (
+                <p className="mut" style={{ fontSize: 12, margin: 0 }}>
+                  Only a workspace admin can change these policies.
+                </p>
+              )}
+              {err && <div className="notice bad" style={{ marginTop: 8 }}>{err}</div>}
+            </div>
           )}
-          {err && <div className="notice bad" style={{ marginTop: 8 }}>{err}</div>}
         </div>
       )}
     </section>

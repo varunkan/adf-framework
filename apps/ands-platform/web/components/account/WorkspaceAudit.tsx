@@ -72,16 +72,16 @@ export function WorkspaceAudit() {
   return (
     <section
       className="card glass"
-      style={{ padding: "14px 18px", maxWidth: 720, marginTop: 14 }}
+      style={{ padding: "20px 22px", maxWidth: 760 }}
     >
       <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-        <h2 style={{ margin: 0, fontSize: 15 }}>Audit trail</h2>
+        <h2 style={{ margin: 0 }}>Audit trail</h2>
         <span className="spacer" style={{ marginLeft: "auto" }} />
         <button className="ghost" onClick={load} style={{ fontSize: 12 }}>
           Refresh
         </button>
       </div>
-      <p className="mut" style={{ marginTop: 6, fontSize: 13 }}>
+      <p className="mut" style={{ marginTop: 10, fontSize: 14 }}>
         The append-only governance record for this workspace — every domain
         event, actor- and workspace-stamped, sequence-numbered, newest first.
         Download for a regulatory inspection record.

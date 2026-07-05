@@ -66,17 +66,17 @@ export function WorkspaceSsoPolicy() {
   const canManage = !!cfg?.can_manage;
 
   return (
-    <section className="card glass" style={{ padding: "14px 18px",
-      maxWidth: 720, marginTop: 14 }}>
-      <h2 style={{ margin: 0, fontSize: 15 }}>
+    <section className="card glass" style={{ padding: "20px 22px",
+      maxWidth: 760 }}>
+      <h2 style={{ marginTop: 0 }}>
         Single sign-on (<Term k="SSO">SSO</Term> · <Term k="OIDC">OpenID Connect</Term>)
       </h2>
       {!cfg ? (
-        <div className="mut" style={{ marginTop: 8, fontSize: 13 }}>
+        <div className="mut" style={{ marginTop: 10, fontSize: 13 }}>
           {err ? <span className="notice bad">{err}</span> : "Loading SSO config…"}
         </div>
       ) : (
-        <div style={{ marginTop: 8, fontSize: 13 }}>
+        <div style={{ marginTop: 12, fontSize: 13 }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center",
             flexWrap: "wrap" }}>
             <span className={cfg.enabled ? "chip ready" : "chip"}>
