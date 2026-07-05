@@ -50,6 +50,42 @@ export interface SectionNode {
   needs_review?: boolean;
 }
 
+// FORMS-WEB: the declarative form schema the web renders every eCTD content
+// section by (upload + form-fill + per-field AI-draft + generate). Mirrors the
+// shared FORM-SCHEMA CONTRACT in services/dossier/app/form_schemas.py.
+export type FieldType =
+  | "text"
+  | "textarea"
+  | "date"
+  | "select"
+  | "email"
+  | "number";
+
+export interface FormField {
+  name: string;
+  label: string;
+  type: FieldType;
+  required: boolean;
+  // prose:true — a free-text field the filer can AI-draft one field at a time.
+  prose: boolean;
+  // an HC-grounded one-liner telling the filer what Health Canada expects here.
+  help: string;
+  options?: string[];
+  placeholder?: string;
+  sample?: string;
+  // a bilingual (EN + FR) field per the HC template.
+  bilingual?: boolean;
+}
+
+export interface FormSchema {
+  section: string;
+  title: string;
+  description: string;
+  // "structured" (universal PDF from the filled fields) OR a bespoke key.
+  generator: string;
+  fields: FormField[];
+}
+
 export interface ModuleProgress {
   required_total: number;
   required_filled: number;

@@ -45,6 +45,11 @@ class DraftChatIn(BaseModel):
     messages: list[ChatMessageIn] = Field(default_factory=list)
 
 
+class DraftFieldIn(BaseModel):
+    # FORMS-WEB: AI-draft ONE prose field of a section's form.
+    field: str = ""
+
+
 class MarkNaIn(BaseModel):
     reason: str = ""
 

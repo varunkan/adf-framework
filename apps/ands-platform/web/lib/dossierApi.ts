@@ -26,6 +26,7 @@ import type {
   ValidationResult,
   ValidationRuleCatalog,
   CriteriaHistory,
+  FormSchema,
 } from "./dossierTypes";
 
 const BASE = "/api/dossier";
@@ -108,6 +109,13 @@ export const dossierApi = {
       `/ectd/${encodeURIComponent(id)}/section/${encodeURIComponent(section)}/generate`,
       { method: "POST", body: JSON.stringify(payload) }
     ),
+
+  // FORMS-WEB: the declarative form schema for a section — the contract the
+  // dynamic form renders every field by (type, prose→AI-draft, help, options).
+  // Static (no dossier scope); a group node / backbone section 404s.
+  sectionFormSchema: (section: string) =>
+    j<{ schema: FormSchema }>(
+      `/section-form-schema/${encodeURIComponent(section)}`),
 
   // realistic, editable pre-fill for an authorable form
   formSample: (id: string, section: string) =>
@@ -426,6 +434,53 @@ export const dossierApi = {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ messages }),
+        cache: "no-store",
+      }
+    );
+    if (!res.ok || !res.body) {
+      let detail = `${res.status}`;
+      try {
+        const b = await res.json();
+        detail = [b.title, b.detail].filter(Boolean).join(": ") || detail;
+      } catch {}
+      throw new Error(friendlyError(res.status, detail));
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const events = buf.split("\n\n");
+      buf = events.pop() || "";
+      for (const evt of events) {
+        const line = evt.split("\n").find((l) => l.startsWith("data: "));
+        if (!line) continue;
+        const raw = line.slice(6);
+        if (raw === "[DONE]") return;
+        try {
+          yield JSON.parse(raw);
+        } catch {}
+      }
+    }
+  },
+
+  // FORMS-WEB: AI-draft ONE prose field of a section's form. Reuses the same
+  // SSE path as chat drafting — streams { delta } / { error } chunks the caller
+  // accumulates into the field. HONEST: a draft for the filer to review, never
+  // a filable value (the drafting prompt refuses to invent regulatory facts).
+  streamDraftField: async function* (
+    id: string,
+    section: string,
+    field: string
+  ): AsyncGenerator<{ delta?: string; error?: string }> {
+    const res = await fetch(
+      `${BASE}/ectd/${encodeURIComponent(id)}/section/${encodeURIComponent(section)}/draft-field`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ field }),
         cache: "no-store",
       }
     );

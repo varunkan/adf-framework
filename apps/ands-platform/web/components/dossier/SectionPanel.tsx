@@ -4,6 +4,7 @@ import Link from "next/link";
 import { dossierApi } from "@/lib/dossierApi";
 import type { CurrentViewLeaf, DocMeta, FeesBlock, SectionNode } from "@/lib/dossierTypes";
 import { DraftChat } from "./DraftChat";
+import { FormFill } from "./FormFill";
 import { EctdPrimer } from "./EctdPrimer";
 import { useDossier } from "./DossierContext";
 import { Disclosure } from "../Disclosure";
@@ -640,54 +641,13 @@ function Dropzone({
   );
 }
 
-// human labels for the sample/editable fields (any extra keys fall back to a
-// prettified key name)
-const FIELD_LABELS: Record<string, string> = {
-  drug_product: "Drug product", dossier_id: "Dossier ID",
-  company_id: "Health Canada Company ID", sponsor: "Sponsor company",
-  din: "DIN (assigned at NOC)", sequence: "Sequence", activity_type: "Activity type",
-  contact_name: "Regulatory contact", contact_email: "Contact email",
-  sequence_description: "Sequence description", dossier_type: "Dossier type",
-  crp_brand: "Canadian Reference Product (brand)", crp_din: "Reference product DIN",
-  patents: "Patent / CSP numbers on the Register", patent_expiry: "Expiry (per patent)",
-  allegation: "s.5 statement (per patent)", signer: "Authorised signer",
-  signer_title: "Signer title", dosage_form: "Dosage form", strength: "Strength",
-  study_design: "BE study design", auc_ci: "AUC 90% CI",
-  cmax: "Cmax 90% CI / point estimate", ruleset: "BE ruleset",
-  manufacturer: "Manufacturer", shelf_life: "Proposed shelf life", storage: "Storage",
-};
-const prettyLabel = (k: string) =>
-  FIELD_LABELS[k] || k.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
-
-function ReviewPanel({ review }: { review: any }) {
-  if (!review) return null;
-  const f = review.findings || [];
-  return (
-    <div className={`notice ${review.passed ? "ok" : "bad"}`} style={{ marginTop: 10 }}>
-      <b>Health Canada review:</b>{" "}
-      {review.passed
-        ? "no blocking content gaps."
-        : `${review.error_count} to fix, ${review.warning_count} to check.`}
-      {f.length > 0 && (
-        <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
-          {f.map((x: any, i: number) => (
-            <li key={i} style={{ marginBottom: 6, fontSize: 12 }}>
-              <b>{x.severity === "error" ? "✗" : "⚠"} {x.message}</b>
-              <div className="mut">↳ {x.suggested_edit}{" "}
-                {x.hc_url && (
-                  <a href={x.hc_url} target="_blank" rel="noopener noreferrer">
-                    HC guidance ↗
-                  </a>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
+// The "Author in-app" panel. Every content section is now form-fillable: the
+// schema-driven FormFill component renders each field by type, offers per-prose-
+// field AI drafting, and generates the document into the eCTD leaf. For a whole-
+// document AI-draftable prose doc (e.g. the cover letter / Form V), the filer can
+// ALSO draft the entire document conversationally — the "Draft with AI" (chat)
+// vs "Fill the form" toggle. Both save an unconfirmed draft the review/confirm
+// gate on the saved-doc card then blocks until confirmed.
 function AuthorForm({
   node,
   op,
@@ -701,173 +661,25 @@ function AuthorForm({
   onDone: (c: any, msg: string) => void;
   onError: (e: string) => void;
 }) {
-  const [busy, setBusy] = useState(false);
-  // real dossier facts pre-fill as saved values; sample keys start EMPTY and
-  // show the worked example only as a ghost placeholder (never saved content).
-  const [fields, setFields] = useState<Record<string, string>>({});
-  const [ghosts, setGhosts] = useState<Record<string, string>>({});
-  const [order, setOrder] = useState<string[]>([]);
-  const [sampleKeys, setSampleKeys] = useState<Set<string>>(new Set());
-  const [review, setReview] = useState<any>(null);
-  const set = (k: string, v: string) => setFields((f) => ({ ...f, [k]: v }));
   const aiDraftable = !!node.ai_draftable;
   const [mode, setMode] = useState<"ai" | "template">(aiDraftable ? "ai" : "template");
 
-  // pull the realistic sample. Real dossier facts become editable values; each
-  // sample/example key becomes a GHOST placeholder on an empty field, so the
-  // example is not saved content the filer can forget to replace.
+  // reset to the section's default mode when the section changes.
   useEffect(() => {
-    let live = true;
-    setReview(null);
-    dossierApi.formSample(dossierId, node.section).then((s) => {
-      if (!live) return;
-      const sk = new Set(s.sample_keys || []);
-      const all = s.fields || {};
-      const real: Record<string, string> = {};
-      const ghost: Record<string, string> = {};
-      for (const [k, v] of Object.entries(all)) {
-        if (sk.has(k)) ghost[k] = v;   // worked example → ghost placeholder
-        else real[k] = v;              // dossier's own fact → editable value
-      }
-      setFields(real);
-      setGhosts(ghost);
-      setOrder(Object.keys(all));
-      setSampleKeys(sk);
-    }).catch(() => {});
-    return () => { live = false; };
-  }, [dossierId, node.section]);
+    setMode(aiDraftable ? "ai" : "template");
+  }, [node.section, aiDraftable]);
 
-  // Any sample-key field the filer left blank falls back to the ghost example
-  // on author. Whether the fill still carries worked-example values is decided
-  // SERVER-SIDE (it re-derives which fields equal the example and blocks until
-  // confirmed) — the client does not send, and the server does not trust, a
-  // sample-origin flag. So an unreplaced example is always caught.
-  function payload(): Record<string, any> {
-    const merged: Record<string, string> = { ...fields };
-    for (const k of sampleKeys) {
-      if (!((merged[k] || "").trim()) && ghosts[k]) merged[k] = ghosts[k];
-    }
-    return merged;
-  }
-
-  async function runReview(): Promise<boolean> {
-    try {
-      const r = await dossierApi.formReview(dossierId, node.section, payload());
-      setReview(r);
-      return r.passed;
-    } catch (e) {
-      onError(String(e));
-      return false;
-    }
-  }
-
-  async function go() {
-    setBusy(true);
-    try {
-      const p = payload();
-      const c = await dossierApi.generate(dossierId, node.section, p);
-      onDone(c, p.sample_origin
-        ? `${node.title} drafted from the sample — review it against the ` +
-          "Health Canada guidance and confirm it as your content before filing."
-        : `${node.title} authored`);
-      await runReview();   // surface HC content review right after authoring
-    } catch (e) {
-      onError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  // IDIOT-PROOF (MAJOR): the greyed "example — replace this" placeholder must
-  // not let a rushed junior file example text. A sample field left blank falls
-  // back to its worked example on author — so an EMPTY sample field is exactly
-  // the danger. Compute the still-unreplaced sample fields so we can flag each
-  // one inline and warn, loudly, before authoring.
-  const unreplaced = [...sampleKeys].filter((k) => !((fields[k] || "").trim()));
-
-  const formBody = (
-    <>
-      <p className="mut" style={{ fontSize: 13 }}>
-        <b>Author in-app</b> produces a PDF/A leaf placed at this section&apos;s
-        eCTD position (lifecycle operation:{" "}
-        <i>{opMeta(op)?.word ?? "new leaf"}</i>). Your dossier&apos;s known
-        facts are pre-filled; fields marked <i>example — replace this</i> show
-        greyed <b>example text you must replace</b> with your product&apos;s real
-        data — the example is never saved as your content, and any left
-        unreplaced keeps this section blocked until you confirm it.
-      </p>
-      {/* An unmissable, sighted-visible warning that names the exact fields still
-          carrying example text, so the placeholder cannot be silently filed. */}
-      {unreplaced.length > 0 && (
-        <div className="notice warn" role="status" style={{ fontSize: 12 }}>
-          <AlertTriangle size={14} aria-hidden style={{ verticalAlign: "-2px", marginRight: 4 }} />
-          <b>{unreplaced.length} field{unreplaced.length > 1 ? "s" : ""} still
-          show the example</b> and will fall back to the greyed example text if
-          you author now: {unreplaced.map(prettyLabel).join(", ")}. Replace{" "}
-          {unreplaced.length > 1 ? "them" : "it"} with your product&apos;s real
-          data — until you do, this section stays <b>not filable</b>.
-        </div>
-      )}
-      {order.map((k) => {
-        const multiline = k === "allegation" || k === "study_design";
-        const isSample = sampleKeys.has(k);
-        const stillExample = isSample && !((fields[k] || "").trim());
-        const ph = isSample ? `e.g. ${ghosts[k] || ""}` : undefined;
-        return (
-          <div key={k}>
-            <label>
-              {prettyLabel(k)}{" "}
-              {isSample && (
-                <span
-                  className="applic optional"
-                  style={
-                    stillExample
-                      ? { color: "var(--warn)", borderColor: "var(--warn)" }
-                      : { color: "var(--ok)" }
-                  }
-                >
-                  {stillExample ? "example — replace this" : "example replaced ✓"}
-                </span>
-              )}
-            </label>
-            {multiline ? (
-              <textarea rows={2} value={fields[k] || ""} placeholder={ph}
-                aria-invalid={stillExample || undefined}
-                onChange={(e) => set(k, e.target.value)} />
-            ) : (
-              <input value={fields[k] || ""} placeholder={ph}
-                aria-invalid={stillExample || undefined}
-                onChange={(e) => set(k, e.target.value)} />
-            )}
-            {stillExample && (
-              <div className="mut" style={{ fontSize: 11, marginTop: 2 }}>
-                Greyed example: <i>{ghosts[k]}</i> — this is <b>not</b> your
-                content until you type over it.
-              </div>
-            )}
-          </div>
-        );
-      })}
-      <div className="cta-row">
-        <button onClick={go} disabled={busy}>
-          {busy ? "Authoring…" : `Author ${node.title} →`}
-        </button>
-        <button className="ghost" onClick={runReview} disabled={busy}>
-          Review vs Health Canada
-        </button>
-      </div>
-      <ReviewPanel review={review} />
-    </>
+  const formFill = (
+    <FormFill node={node} op={op} dossierId={dossierId}
+      onDone={onDone} onError={onError} />
   );
 
   if (aiDraftable) {
     return (
       <div className="author-form">
-        {/* Two ways to draft the SAME leaf; each keeps its own Review action so
-            the filer reviews in the mode they drafted in. Both save an
-            unconfirmed draft that the review/confirm banner (on the saved-doc
-            card above) then blocks until confirmed. */}
-        <div className="affordance-bar" role="group" aria-label="How to draft this section">
+        {/* Two ways to author the SAME leaf: a conversational whole-document AI
+            draft, or the structured form (with per-field AI drafting). */}
+        <div className="affordance-bar" role="group" aria-label="How to author this section">
           <button type="button" aria-pressed={mode === "ai"}
             className={mode === "ai" ? "on" : ""}
             onClick={() => setMode("ai")}>💬 Draft with AI</button>
@@ -879,13 +691,13 @@ function AuthorForm({
           <DraftChat node={node} dossierId={dossierId} onDone={onDone}
             onError={onError} onFallback={() => setMode("template")} />
         ) : (
-          formBody
+          formFill
         )}
       </div>
     );
   }
 
-  return <div className="author-form">{formBody}</div>;
+  return formFill;
 }
 
 function PmXmlPanel({ dossierId }: { dossierId: string; title?: string }) {

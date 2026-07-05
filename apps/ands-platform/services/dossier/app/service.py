@@ -10,9 +10,9 @@ from datetime import date
 
 from . import (admin_sequence, archive, assembly, content_model, content_plan,
                dossier_state, drafting, ectd_validation, export_pkg, fees,
-               form_review, form_samples, generators, import_compat,
-               llm_provider, monograph, pm_xml, pm_xref, section_tree,
-               shadow_run)
+               form_review, form_samples, form_schemas, generators,
+               import_compat, llm_provider, monograph, pm_xml, pm_xref,
+               section_tree, shadow_run)
 from . import audit_hook
 from .document_store import SqliteBlobStore
 from .ports import DossierRepository
@@ -477,6 +477,48 @@ class DossierService:
         system = drafting.system_prompt(node, ctx)
         return llm_provider.stream_chat([{"role": "system", "content": system},
                                          *messages])
+
+    # -- FORMS-WEB: dynamic form schema + per-field AI draft ---------------
+    def form_schema(self, section: str) -> dict:
+        """The declarative form schema for a content section — the contract the
+        web renders every field by (upload + form-fill + per-field AI-draft +
+        generate). Raises ProblemError(404) for a group node / backbone section
+        with no authorable form."""
+        schema = form_schemas.form_schema(_s(section))
+        if not schema:
+            raise ProblemError(404, "this section has no authorable form",
+                               rule="no_form_schema", detail=_s(section))
+        return schema
+
+    def prepare_draft_field(self, dossier_id: str, section: str,
+                            field_name: str) -> tuple[str, dict]:
+        """Validate eagerly before any streaming starts, so a bad field / an
+        unconfigured LLM comes back as a clean JSON error instead of a broken
+        stream. Returns (system_prompt, ctx) for :meth:`stream_draft_field`.
+
+        HONEST: the per-field draft reuses the SAME AI path as chat drafting and
+        the drafting prompt tells the model never to invent regulatory facts —
+        it is a DRAFT for the filer to review, not a filable value."""
+        node = self._node(dossier_id, section)   # 404s an unknown section
+        ctx = self._ctx_for(dossier_id)
+        try:
+            system = drafting.draft_field(_s(section), _s(field_name), ctx)
+        except KeyError:
+            # no such prose (AI-draftable) field on this section's form
+            raise ProblemError(
+                422, "this field cannot be drafted by AI — only free-text "
+                "(prose) fields are AI-draftable", rule="field_not_ai_draftable",
+                detail=_s(field_name))
+        if not llm_provider.is_configured():
+            raise ProblemError(503, "AI drafting is not configured "
+                               "(GROQ_API_KEY unset)", rule="llm_not_configured")
+        return system, ctx
+
+    def stream_draft_field(self, system: str):
+        """Stream the AI draft for ONE prose field — one turn, no chat history."""
+        return llm_provider.stream_chat([{"role": "system", "content": system},
+                                         {"role": "user",
+                                          "content": "Draft this field now."}])
 
     def mark_na(self, dossier_id, section, reason="") -> dict:
         node = self._node(dossier_id, section)

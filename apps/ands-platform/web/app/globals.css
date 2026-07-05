@@ -16,8 +16,9 @@
 *{box-sizing:border-box}
 html,body{padding:0;margin:0}
 body{
-  font:15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  font:15.5px/1.62 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
   color:var(--ink); min-height:100vh;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
   background:
     radial-gradient(1200px 600px at 8% -12%,#1a2c52 0,transparent 60%),
     radial-gradient(900px 520px at 112% 8%,#3a1f57 0,transparent 55%),
@@ -462,6 +463,16 @@ button:disabled{opacity:.45;cursor:not-allowed;transform:none}
 .dropzone.over{border-color:var(--brand);border-style:solid;background:rgba(91,140,255,.12)}
 .dropzone.busy{opacity:.6}
 .author-form label{margin-top:10px}
+/* FORMS-WEB: one field of the schema-driven dynamic form. */
+.form-fill .form-field{margin-top:12px}
+.form-fill .form-field:first-of-type{margin-top:6px}
+.form-fill .field-help{font-size:11.5px;line-height:1.45;margin-top:3px;display:flex;
+  align-items:flex-start;gap:2px}
+.form-fill .field-help svg{flex:0 0 auto;margin-top:2px;opacity:.8}
+.form-fill .draft-field-btn{padding:5px 11px;font-size:12px;display:inline-flex;
+  align-items:center;gap:5px}
+.form-fill .draft-field-btn svg{opacity:.85}
+.form-fill .draft-field-btn[aria-busy="true"]{opacity:.7}
 .chat-panel{margin-top:4px}
 .chat-thread{display:flex;flex-direction:column;gap:10px;max-height:340px;
   overflow-y:auto;padding:12px;border:1px solid var(--line);border-radius:12px;

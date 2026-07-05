@@ -12,9 +12,10 @@ from ands_shared import create_app
 
 from . import ectd, llm_provider
 from .models import (AdminSequenceIn, BinderIn, ContentPlanIn, CreateDossierIn,
-                     DraftChatIn, FeeStatusIn, GenerateIn, ItemAssignIn,
-                     ItemStatusIn, LeafIn, MarkNaIn, PmLeafIn, PmXmlBuildIn,
-                     PmXmlGateIn, PmXmlValidateIn, PmXrefIn, SequenceIn)
+                     DraftChatIn, DraftFieldIn, FeeStatusIn, GenerateIn,
+                     ItemAssignIn, ItemStatusIn, LeafIn, MarkNaIn, PmLeafIn,
+                     PmXmlBuildIn, PmXmlGateIn, PmXmlValidateIn, PmXrefIn,
+                     SequenceIn)
 from .service import DossierService
 
 
@@ -144,6 +145,14 @@ def build_app(service: DossierService) -> FastAPI:
     @router.get("/section-tree")
     def section_tree(cs_be_only: bool = True):
         return service.get_section_tree(cs_be_only)
+
+    # FORMS-WEB: the declarative form schema for ONE content section — the
+    # contract the web renders every field by (upload + form-fill + per-field
+    # AI-draft + generate). Static (no dossier / tenant scope); a group node or
+    # backbone section with no authorable form returns 404.
+    @router.get("/section-form-schema/{section}")
+    def section_form_schema(section: str):
+        return {"schema": service.form_schema(section)}
 
     @router.get("/dossiers")
     def list_dossiers(x_tenant_id: str = Header(default="",
@@ -375,6 +384,31 @@ def build_app(service: DossierService) -> FastAPI:
         async def gen():
             try:
                 async for delta in service.stream_draft_chat(node, ctx, messages):
+                    yield f"data: {json.dumps({'delta': delta})}\n\n"
+                yield "data: [DONE]\n\n"
+            except llm_provider.LlmNotConfigured as exc:
+                yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+            except Exception as exc:  # upstream/network errors mid-stream
+                yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+
+        return StreamingResponse(gen(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache",
+                                          "X-Accel-Buffering": "no"})
+
+    # FORMS-WEB: AI-draft ONE prose field of a section's form. Reuses the same
+    # AI path (and honesty prompt) as chat drafting; validated eagerly so a bad
+    # field / unconfigured LLM comes back as a clean JSON error, not a broken
+    # stream. Streams the drafted text as SSE {delta}/{error} chunks. HONEST: a
+    # draft for the filer to review, never a filable value.
+    @router.post("/ectd/{dossier_id}/section/{section}/draft-field")
+    def draft_field(dossier_id: str, section: str, body: DraftFieldIn, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        service.assert_access(dossier_id, x_tenant_id or None)
+        system, _ctx = service.prepare_draft_field(dossier_id, section,
+                                                   body.field)
+
+        async def gen():
+            try:
+                async for delta in service.stream_draft_field(system):
                     yield f"data: {json.dumps({'delta': delta})}\n\n"
                 yield "data: [DONE]\n\n"
             except llm_provider.LlmNotConfigured as exc:
