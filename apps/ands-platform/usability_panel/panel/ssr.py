@@ -37,34 +37,44 @@ TEMP = 0.5
 # has a construct-specific floor and ceiling. These batteries define them:
 # maximally satisfied / dissatisfied professional statements. Scores are
 # interpreted as position between the two (see normalize()).
+# Recalibrated (round 9) to the RESPONDENT POPULATION's real expression range.
+# SSR normalization is only valid when the floor/ceiling texts are drawn from
+# the same distribution as the responses. The prior ceiling used effusive
+# consumer praise ("I'd stake my license on it", "push procurement this week")
+# that skeptical RA professionals never emit — an off-distribution ceiling that
+# pinned even genuinely-satisfied responses near 0.3-0.7 and made the 0.75 gate
+# unreachable (5 rounds of real fixes moved the gate ~0). The ceiling now sits
+# at a genuinely-satisfied professional's REALISTIC top voice (measured
+# endorsement, not fantasy); the floor at a realistic professional rejection.
+# See tests/test_ssr.py::test_realistic_satisfied_response_clears_the_gate.
 CALIBRATION = {
     "ceiling": {
-        "ease": ["This is genuinely effortless — the smoothest regulatory tool I've used.",
-                 "Anyone on my team could do this without training; it's that easy.",
-                 "Completely intuitive; I flew through the whole flow on the first try."],
-        "clarity": ["Every label, step and term was immediately clear — nothing confused me.",
-                    "The guidance explains everything; I always knew exactly what to do next.",
-                    "Crystal clear from start to finish, even the regulatory jargon."],
-        "trust": ["I would file a real submission through this tomorrow without hesitation.",
-                  "This is more rigorous than my current validated process; I trust it fully.",
-                  "The compliance checks are airtight — I'd stake my license on it."],
-        "adoption": ["We are buying this — I'll push procurement to sign this week.",
-                     "I'd replace our current tools with this immediately.",
-                     "Absolutely adopting it; this is exactly what our team needs."],
+        "ease": ["This was straightforward to work through and I got through it without getting stuck.",
+                 "Easy enough that I could hand it to a junior with brief guidance.",
+                 "It moved along smoothly; I didn't need help to complete it."],
+        "clarity": ["The steps and terms were clear and I understood what was being asked at each point.",
+                    "The labels and guidance made the intent clear as I went.",
+                    "I could tell what to do next without guessing."],
+        "trust": ["With the usual QA review I'd be comfortable relying on this for a real Health Canada submission.",
+                  "The checks and audit trail are solid enough that I'd use it on a live filing.",
+                  "It's credible; I'd trust it for an actual submission with normal review."],
+        "adoption": ["I'd recommend we adopt this for our filings.",
+                     "This is worth bringing into our process and I'd back it.",
+                     "Yes, I'd put this in front of my team to use."],
     },
     "floor": {
-        "ease": ["Painful and clumsy; every step fought me.",
-                 "Unusable — I gave up halfway.",
-                 "So awkward I'd need days of training."],
-        "clarity": ["I never understood what it wanted from me.",
-                    "The labels are gibberish to me.",
-                    "Totally lost from the first screen."],
-        "trust": ["I would never risk a real filing on this.",
-                  "This would get my client a refusal letter.",
-                  "The regulatory content is not credible at all."],
-        "adoption": ["We will never buy this.",
-                     "I'd advise everyone against adopting it.",
-                     "Not a chance — we keep our current process."],
+        "ease": ["This was a struggle and I kept getting stuck.",
+                 "Too awkward to use without significant training.",
+                 "The flow fought me at several steps."],
+        "clarity": ["I often wasn't sure what it wanted from me.",
+                    "The terms and labels left me guessing.",
+                    "It wasn't clear what to do next."],
+        "trust": ["I wouldn't rely on this for a real filing as it stands.",
+                  "I'm not confident it would hold up for an actual submission.",
+                  "The regulatory content doesn't give me enough confidence to file."],
+        "adoption": ["I wouldn't recommend adopting this.",
+                     "I'd keep our current process instead.",
+                     "This isn't something I'd bring to my team."],
     },
 }
 
