@@ -30,6 +30,22 @@ CREATE TABLE IF NOT EXISTS dossiers (
 CREATE TABLE IF NOT EXISTS binders (
     id TEXT PRIMARY KEY, dossier_id TEXT NOT NULL, sequence TEXT NOT NULL,
     binder TEXT NOT NULL, share_token TEXT, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS documents (
+    doc_id TEXT PRIMARY KEY, dossier_id TEXT NOT NULL, section TEXT NOT NULL,
+    filename TEXT NOT NULL, content_type TEXT NOT NULL, checksum TEXT NOT NULL,
+    size BIGINT NOT NULL, origin TEXT NOT NULL, lang TEXT,
+    body BYTEA NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS section_state (
+    dossier_id TEXT NOT NULL, section TEXT NOT NULL, status TEXT NOT NULL,
+    action TEXT, data TEXT NOT NULL, updated_at TEXT NOT NULL,
+    PRIMARY KEY (dossier_id, section));
+CREATE TABLE IF NOT EXISTS dossier_index (
+    dossier_id TEXT PRIMARY KEY, title TEXT NOT NULL, submission_type TEXT,
+    cs_be_only INTEGER NOT NULL DEFAULT 1, din TEXT, company_id TEXT,
+    sponsor TEXT, drug_product TEXT, fee_paid INTEGER NOT NULL DEFAULT 0,
+    sme_granted INTEGER NOT NULL DEFAULT 0, tenant_id TEXT,
+    active_sequence TEXT NOT NULL DEFAULT '0000',
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 """
 
 _ITEM_PATCHABLE = ("assignee", "due_date", "status")
@@ -181,3 +197,164 @@ class PostgresDossierRepository:
         if row:
             row["binder"] = json.loads(row["binder"])
         return row
+
+    # -- documents (byte store backing) ------------------------------------
+    def put_document(self, rec: dict) -> dict:
+        self._exec(
+            "INSERT INTO documents (doc_id, dossier_id, section, filename, "
+            "content_type, checksum, size, origin, lang, body, created_at) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (rec["doc_id"], rec["dossier_id"], rec["section"], rec["filename"],
+             rec["content_type"], rec["checksum"], rec["size"], rec["origin"],
+             rec.get("lang"), rec["body"], utcnow_iso()))
+        return rec
+
+    def get_document(self, doc_id: str) -> dict | None:
+        row = self._one("SELECT * FROM documents WHERE doc_id = %s", (doc_id,))
+        if row:
+            row["body"] = bytes(row["body"])
+        return row
+
+    def get_document_meta(self, doc_id: str) -> dict | None:
+        return self._one(
+            "SELECT doc_id, dossier_id, section, filename, content_type, "
+            "checksum, size, origin, lang, created_at FROM documents "
+            "WHERE doc_id = %s", (doc_id,))
+
+    def delete_document(self, doc_id: str) -> None:
+        self._exec("DELETE FROM documents WHERE doc_id = %s", (doc_id,))
+
+    # -- per-section state -------------------------------------------------
+    def get_section_state(self, dossier_id: str, section: str) -> dict | None:
+        row = self._one(
+            "SELECT data FROM section_state WHERE dossier_id = %s AND "
+            "section = %s", (dossier_id, section))
+        return json.loads(row["data"]) if row else None
+
+    def upsert_section_state(self, dossier_id: str, section: str,
+                             entry: dict) -> dict:
+        self._exec(
+            "INSERT INTO section_state (dossier_id, section, status, action, "
+            "data, updated_at) VALUES (%s,%s,%s,%s,%s,%s) "
+            "ON CONFLICT (dossier_id, section) DO UPDATE SET "
+            "status=excluded.status, action=excluded.action, "
+            "data=excluded.data, updated_at=excluded.updated_at",
+            (dossier_id, section, entry.get("status", ""), entry.get("action"),
+             json.dumps(entry), utcnow_iso()))
+        return entry
+
+    def list_section_state(self, dossier_id: str) -> dict:
+        rows = self._all(
+            "SELECT section, data FROM section_state WHERE dossier_id = %s",
+            (dossier_id,))
+        return {r["section"]: json.loads(r["data"]) for r in rows}
+
+    # -- dossier index (home catalog) --------------------------------------
+    def create_dossier_index(self, rec: dict) -> dict:
+        now = utcnow_iso()
+        self._exec(
+            "INSERT INTO dossier_index (dossier_id, title, submission_type, "
+            "cs_be_only, din, company_id, sponsor, drug_product, tenant_id, "
+            "created_at, updated_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+            "ON CONFLICT (dossier_id) DO UPDATE SET title=excluded.title, "
+            "submission_type=excluded.submission_type, "
+            "cs_be_only=excluded.cs_be_only, din=excluded.din, "
+            # preserve REP identity across upserts that omit it (COALESCE keeps
+            # the stored sponsor/company_id when the new rec leaves them NULL)
+            "company_id=COALESCE(excluded.company_id, dossier_index.company_id), "
+            "sponsor=COALESCE(excluded.sponsor, dossier_index.sponsor), "
+            "drug_product=COALESCE(excluded.drug_product, "
+            "dossier_index.drug_product), "
+            # an upsert never re-homes a dossier to another tenant
+            "tenant_id=COALESCE(dossier_index.tenant_id, excluded.tenant_id), "
+            "updated_at=excluded.updated_at",
+            (rec["dossier_id"], rec["title"], rec.get("submission_type"),
+             1 if rec.get("cs_be_only", True) else 0, rec.get("din"),
+             rec.get("company_id") or None, rec.get("sponsor") or None,
+             rec.get("drug_product") or None,
+             rec.get("tenant_id") or None, now, now))
+        return self.get_dossier_index(rec["dossier_id"])
+
+    def set_fee_status(self, dossier_id: str, fee_paid: bool,
+                       sme_granted: bool) -> dict | None:
+        self._exec(
+            "UPDATE dossier_index SET fee_paid = %s, sme_granted = %s, "
+            "updated_at = %s WHERE dossier_id = %s",
+            (1 if fee_paid else 0, 1 if sme_granted else 0, utcnow_iso(),
+             dossier_id))
+        return self.get_dossier_index(dossier_id)
+
+    def set_active_sequence(self, dossier_id: str, sequence: str) -> None:
+        self._exec(
+            "UPDATE dossier_index SET active_sequence = %s, updated_at = %s "
+            "WHERE dossier_id = %s", (sequence, utcnow_iso(), dossier_id))
+
+    @staticmethod
+    def _index_row(rec: dict) -> dict:
+        rec["cs_be_only"] = bool(rec["cs_be_only"])
+        rec["fee_paid"] = bool(rec.get("fee_paid"))
+        rec["sme_granted"] = bool(rec.get("sme_granted"))
+        rec["active_sequence"] = rec.get("active_sequence") or "0000"
+        return rec
+
+    def get_dossier_index(self, dossier_id: str) -> dict | None:
+        row = self._one("SELECT * FROM dossier_index WHERE dossier_id = %s",
+                        (dossier_id,))
+        return self._index_row(row) if row else None
+
+    def list_dossier_index(self, tenant_id: str | None = None) -> list[dict]:
+        if tenant_id:
+            # strict: a tenant sees ONLY its own dossiers (unowned/other-tenant
+            # dossiers are invisible — the CRO isolation guarantee)
+            rows = self._all(
+                "SELECT * FROM dossier_index WHERE tenant_id = %s "
+                "ORDER BY created_at DESC", (tenant_id,))
+        else:
+            rows = self._all(
+                "SELECT * FROM dossier_index ORDER BY created_at DESC")
+        return [self._index_row(r) for r in rows]
+
+    def rename_dossier(self, old_id: str, new_id: str) -> bool:
+        """Re-key a dossier (placeholder -> real HC Dossier ID). Rewrites the
+        embedded id inside JSON payloads (eCTD model paths, binders, section
+        state) as well as the key columns. Caller verified new_id is free."""
+        if not self._one(
+                "SELECT 1 FROM dossier_index WHERE dossier_id = %s", (old_id,)):
+            return False
+        # JSON payloads embed the id in eCTD folder paths/hrefs — rewrite them.
+        # (No rowid in Postgres; the extra dossier_id predicate keeps the
+        # per-row key unambiguous for section_state's composite PK.)
+        for table, key_col, payload in (("dossiers", "dossier_id", "model"),
+                                        ("binders", "id", "binder"),
+                                        ("section_state", "section", "data")):
+            rows = self._all(
+                f"SELECT {key_col} AS k, {payload} AS p FROM {table} "
+                "WHERE dossier_id = %s", (old_id,))
+            for r in rows:
+                self._exec(
+                    f"UPDATE {table} SET {payload} = %s "
+                    f"WHERE {key_col} = %s AND dossier_id = %s",
+                    (str(r["p"]).replace(old_id, new_id), r["k"], old_id))
+        for table in ("dossier_index", "dossiers", "section_state", "documents",
+                      "binders", "pm_leaves", "content_plans",
+                      "content_plan_items"):
+            self._exec(
+                f"UPDATE {table} SET dossier_id = %s WHERE dossier_id = %s",
+                (new_id, old_id))
+        return True
+
+    def delete_dossier(self, dossier_id: str) -> bool:
+        existed = bool(
+            self._one("SELECT 1 FROM dossier_index WHERE dossier_id = %s",
+                      (dossier_id,))
+            or self._one("SELECT 1 FROM dossiers WHERE dossier_id = %s",
+                         (dossier_id,)))
+        for table in ("dossier_index", "dossiers", "section_state", "documents",
+                      "binders", "pm_leaves", "content_plans"):
+            self._exec(f"DELETE FROM {table} WHERE dossier_id = %s",
+                       (dossier_id,))
+        # plan items key off plan_id, not dossier_id — clear orphans
+        self._exec(
+            "DELETE FROM content_plan_items WHERE plan_id NOT IN "
+            "(SELECT id FROM content_plans)")
+        return existed
