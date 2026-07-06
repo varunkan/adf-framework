@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { auth } from "@/lib/auth";
@@ -7,7 +7,7 @@ import { Term } from "@/components/Term";
 
 const PW_RULE = "At least 10 characters, with letters and numbers.";
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const [mode, setMode] = useState<"login" | "signup" | "reset">("login");
@@ -291,5 +291,28 @@ export default function LoginPage() {
         )}
       </div>
     </main>
+  );
+}
+
+// useSearchParams() opts a route into client-side rendering, so Next.js requires
+// the consuming component to sit under a <Suspense> boundary for static
+// prerendering to succeed. Wrapping LoginForm here keeps the sign-in / MFA / SSO
+// logic untouched while giving the build a boundary to prerender against.
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="login-page">
+          <div className="card glass login-card">
+            <div className="brand" style={{ marginBottom: 6 }}>
+              <span className="dot" aria-hidden /> ANDS&nbsp;Studio
+            </div>
+            <p className="mut" style={{ fontSize: 13 }}>Loading…</p>
+          </div>
+        </main>
+      }
+    >
+      <LoginForm />
+    </Suspense>
   );
 }
