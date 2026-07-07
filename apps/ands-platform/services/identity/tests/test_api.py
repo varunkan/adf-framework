@@ -142,3 +142,20 @@ def test_authorize_endpoint(client):
                           "capability": "transmit",
                           "resource": {"tenant_id": "t1"}})
     assert r.json()["allowed"] is False
+
+
+# -- round-9: credential re-auth for controlled e-signatures ------------------
+def test_reauth_verifies_credentials_without_touching_sessions(client):
+    client.post("/api/identity/auth/signup",
+                json={"email": "signer@acme.io", "password": "pw12345-2026",
+                      "company_name": "Acme"})
+    ok = client.post("/api/identity/auth/reauth",
+                     json={"email": "signer@acme.io",
+                           "password": "pw12345-2026"})
+    assert ok.status_code == 200 and ok.json()["ok"] is True
+    bad = client.post("/api/identity/auth/reauth",
+                      json={"email": "signer@acme.io", "password": "nope"})
+    assert bad.status_code == 401
+    ghost = client.post("/api/identity/auth/reauth",
+                        json={"email": "ghost@x.io", "password": "whatever1x"})
+    assert ghost.status_code == 401   # never reveals whether the account exists

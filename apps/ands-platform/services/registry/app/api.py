@@ -42,6 +42,12 @@ def build_app(service: RegistryService) -> FastAPI:
                                                    alias="X-Tenant-Id")):
         return service.annual_checklist(year, x_tenant_id or None)
 
+    @router.get("/annual-checklist/signing-log")
+    def annual_signing_log(year: int = 0,
+                           x_tenant_id: str = Header(default="",
+                                                     alias="X-Tenant-Id")):
+        return service.annual_signing_log(year, x_tenant_id or None)
+
     @router.post("/annual-checklist/items")
     def set_annual_item(body: ChecklistItemIn,
                         x_tenant_id: str = Header(default="",

@@ -1,0 +1,36 @@
+eliciting 192 responses (12 personas x 8 flows x 2)...
+  10/192
+  20/192
+  30/192
+  40/192
+  50/192
+  60/192
+  70/192
+  80/192
+  90/192
+  100/192
+  110/192
+  120/192
+  130/192
+  140/192
+  150/192
+  160/192
+  170/192
+  180/192
+  190/192
+  192/192
+SSR-scoring...
+  note: dropping 15 failed elicitation(s)
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights:   0%|          | 0/199 [00:00<?, ?it/s]Loading weights: 100%|██████████| 199/199 [00:00<00:00, 7552.52it/s]
+mining themes...
+
+wrote /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/usability_panel/results/round2_report.md
+  ai_draft         ease=3.01  clarity=2.775  trust=2.538
+  builder_forms    ease=3.05  clarity=3.151  trust=2.694
+  catalog          ease=3.255  clarity=2.64  trust=2.445
+  journey          ease=3.004  clarity=3.047  trust=2.564
+  onboarding       ease=3.389  clarity=3.157  trust=2.443
+  operations       ease=3.03  clarity=2.54  trust=2.437
+  overall          ease=3.109  clarity=3.001  trust=2.52  adoption=3.597
+  validate_export  ease=3.073  clarity=2.729  trust=2.474

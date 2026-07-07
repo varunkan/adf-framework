@@ -14,11 +14,21 @@ CREATE TABLE IF NOT EXISTS registrations (
 CREATE TABLE IF NOT EXISTS annual_checklist (
     tenant_id TEXT NOT NULL, year INTEGER NOT NULL, item_key TEXT NOT NULL,
     done INTEGER NOT NULL DEFAULT 0, signed_by TEXT, signed_at TEXT,
+    meaning TEXT, reauthenticated INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (tenant_id, year, item_key));
+CREATE TABLE IF NOT EXISTS annual_checklist_log (
+    id BIGSERIAL PRIMARY KEY, tenant_id TEXT NOT NULL, year INTEGER NOT NULL,
+    item_key TEXT NOT NULL, action TEXT NOT NULL, signed_by TEXT,
+    signed_at TEXT NOT NULL, meaning TEXT,
+    reauthenticated INTEGER NOT NULL DEFAULT 0);
 """
 
 # pre-tenancy databases lack the column; ALTER is a no-op error then
-_MIGRATIONS = ("ALTER TABLE registrations ADD COLUMN tenant_id TEXT",)
+_MIGRATIONS = (
+    "ALTER TABLE registrations ADD COLUMN tenant_id TEXT",
+    "ALTER TABLE annual_checklist ADD COLUMN meaning TEXT",
+    "ALTER TABLE annual_checklist ADD COLUMN reauthenticated INTEGER NOT NULL DEFAULT 0",
+)
 
 _FILTERS = ("product", "country", "din", "status", "dossier_id")
 
@@ -101,16 +111,31 @@ class PostgresRegistrationRepository:
 
     def set_checklist_item(self, tenant_id: str, year: int, item_key: str,
                            done: bool, signed_by: str | None,
-                           signed_at: str | None) -> dict:
+                           signed_at: str | None, meaning: str | None = None,
+                           reauthenticated: bool = False) -> dict:
         self._exec(
             "INSERT INTO annual_checklist (tenant_id, year, item_key, done, "
-            "signed_by, signed_at) VALUES (%s,%s,%s,%s,%s,%s) "
+            "signed_by, signed_at, meaning, reauthenticated) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) "
             "ON CONFLICT (tenant_id, year, item_key) DO UPDATE SET "
             "done = EXCLUDED.done, signed_by = EXCLUDED.signed_by, "
-            "signed_at = EXCLUDED.signed_at",
+            "signed_at = EXCLUDED.signed_at, meaning = EXCLUDED.meaning, "
+            "reauthenticated = EXCLUDED.reauthenticated",
             (tenant_id or "", int(year), item_key, 1 if done else 0,
-             signed_by, signed_at))
+             signed_by, signed_at, meaning, 1 if reauthenticated else 0))
+        self._exec(
+            "INSERT INTO annual_checklist_log (tenant_id, year, item_key, "
+            "action, signed_by, signed_at, meaning, reauthenticated) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+            (tenant_id or "", int(year), item_key,
+             "sign" if done else "unsign", signed_by,
+             signed_at or utcnow_iso(), meaning, 1 if reauthenticated else 0))
         rows = self._all(
             "SELECT * FROM annual_checklist WHERE tenant_id = %s AND year = %s "
             "AND item_key = %s", (tenant_id or "", int(year), item_key))
         return rows[0]
+
+    def get_checklist_log(self, tenant_id: str, year: int) -> list[dict]:
+        return self._all(
+            "SELECT * FROM annual_checklist_log WHERE tenant_id = %s AND "
+            "year = %s ORDER BY id", (tenant_id or "", int(year)))

@@ -19,6 +19,12 @@ class LoginIn(BaseModel):
     mfa_code: str = ""
 
 
+class ReauthIn(BaseModel):
+    email: str = ""
+    password: str = ""
+    mfa_code: str = ""
+
+
 class MfaVerifyIn(BaseModel):
     code: str = ""
 

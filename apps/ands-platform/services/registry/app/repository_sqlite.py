@@ -24,7 +24,20 @@ CREATE TABLE IF NOT EXISTS annual_checklist (
     done      INTEGER NOT NULL DEFAULT 0,
     signed_by TEXT,
     signed_at TEXT,
+    meaning   TEXT,
+    reauthenticated INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (tenant_id, year, item_key)
+);
+CREATE TABLE IF NOT EXISTS annual_checklist_log (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL,
+    year      INTEGER NOT NULL,
+    item_key  TEXT NOT NULL,
+    action    TEXT NOT NULL,
+    signed_by TEXT,
+    signed_at TEXT NOT NULL,
+    meaning   TEXT,
+    reauthenticated INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -35,6 +48,8 @@ class SqliteRegistrationRepository:
     _MIGRATIONS = (
         # pre-tenancy databases lack the column; ALTER is a no-op error then
         "ALTER TABLE registrations ADD COLUMN tenant_id TEXT",
+        "ALTER TABLE annual_checklist ADD COLUMN meaning TEXT",
+        "ALTER TABLE annual_checklist ADD COLUMN reauthenticated INTEGER NOT NULL DEFAULT 0",
     )
 
     def __init__(self, db: SqliteDb | None = None) -> None:
@@ -98,16 +113,34 @@ class SqliteRegistrationRepository:
 
     def set_checklist_item(self, tenant_id: str, year: int, item_key: str,
                            done: bool, signed_by: str | None,
-                           signed_at: str | None) -> dict:
+                           signed_at: str | None, meaning: str | None = None,
+                           reauthenticated: bool = False) -> dict:
         self.db.execute(
             "INSERT INTO annual_checklist (tenant_id, year, item_key, done, "
-            "signed_by, signed_at) VALUES (?, ?, ?, ?, ?, ?) "
+            "signed_by, signed_at, meaning, reauthenticated) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT (tenant_id, year, item_key) DO UPDATE SET "
             "done = excluded.done, signed_by = excluded.signed_by, "
-            "signed_at = excluded.signed_at",
+            "signed_at = excluded.signed_at, meaning = excluded.meaning, "
+            "reauthenticated = excluded.reauthenticated",
             (tenant_id or "", int(year), item_key, 1 if done else 0,
-             signed_by, signed_at))
+             signed_by, signed_at, meaning, 1 if reauthenticated else 0))
+        # append-only signing record — never updated, never deleted
+        self.db.execute(
+            "INSERT INTO annual_checklist_log (tenant_id, year, item_key, "
+            "action, signed_by, signed_at, meaning, reauthenticated) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (tenant_id or "", int(year), item_key,
+             "sign" if done else "unsign", signed_by,
+             signed_at or utcnow_iso(),
+             meaning, 1 if reauthenticated else 0))
         row = self.db.fetchone(
             "SELECT * FROM annual_checklist WHERE tenant_id = ? AND year = ? "
             "AND item_key = ?", (tenant_id or "", int(year), item_key))
         return dict(row)
+
+    def get_checklist_log(self, tenant_id: str, year: int) -> list[dict]:
+        rows = self.db.fetchall(
+            "SELECT * FROM annual_checklist_log WHERE tenant_id = ? AND "
+            "year = ? ORDER BY id", (tenant_id or "", int(year)))
+        return [dict(r) for r in rows]

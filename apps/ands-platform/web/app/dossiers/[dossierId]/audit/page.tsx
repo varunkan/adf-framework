@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useDossier } from "@/components/dossier/DossierContext";
 import { dossierApi } from "@/lib/dossierApi";
 import { Term } from "@/components/Term";
+import { withIntegrityManifest } from "@/lib/csvIntegrity";
 
 type AuditEvent = {
   id: string;
@@ -71,7 +72,7 @@ export default function AuditPage() {
     load();
   }, [load]);
 
-  function exportCsv() {
+  async function exportCsv() {
     if (!events?.length) return;
     const esc = (s: unknown) =>
       `"${String(s ?? "").replace(/"/g, '""')}"`;
@@ -85,7 +86,12 @@ export default function AuditPage() {
             Object.entries(e.detail || {}).filter(([k]) => k !== "actor"))),
       ]),
     ];
-    const csv = rows.map((r) => r.map(esc).join(",")).join("\n");
+    // Round-9 (n=5): the export is a documented inspection artifact — a
+    // versioned schema line, an all-UTC statement, and an embedded SHA-256
+    // manifest so any post-export edit is detectable.
+    const csv = await withIntegrityManifest(
+      rows.map((r) => r.map(esc).join(",")).join("\n"),
+      "ands.audit-export", "1");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
     a.download = `audit-${dossierId}.csv`;

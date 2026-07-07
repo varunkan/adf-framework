@@ -153,6 +153,27 @@ class IdentityService:
         tenant = self.repo.get_tenant(tenant_id)
         return bool(tenant and tenant.get("require_mfa"))
 
+    # -- round-9: credential re-auth for controlled e-signatures -------------
+    # Verifies credentials WITHOUT creating or touching any session — the
+    # "something you know at the moment of signing" check behind Part-11-style
+    # sign-offs (annual checklist). Same generic 401 as login: never reveals
+    # whether an account exists. MFA-enabled accounts must supply a code.
+    def reauth(self, data: dict) -> dict:
+        email = _email(data.get("email"))
+        password = _s(data.get("password"))
+        row = next(
+            (r for r in self.repo.find_by_email_raw(email)
+             if security.verify_password(password, r["pw_salt"],
+                                         r["pw_hash"])), None)
+        if not row:
+            raise ProblemError(401, "invalid credentials", rule="auth_failed")
+        if row.get("mfa_enabled"):
+            if not security.verify_totp(row.get("mfa_secret"),
+                                        data.get("mfa_code")):
+                raise ProblemError(401, "an MFA code is required",
+                                   rule="mfa_required")
+        return {"ok": True, "email": email}
+
     # -- MFA (SAAS-NFR-003) -------------------------------------------------
     def _require_mfa_setup_principal(self, token: str) -> dict:
         # enrolment must work for a member BLOCKED by the mandate, so it accepts

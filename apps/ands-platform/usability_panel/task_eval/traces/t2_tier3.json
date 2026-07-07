@@ -13,7 +13,7 @@
       "what_the_user_sees": "A new dossier 'Metformin HCl 500 mg Tablets — ANDS' opens under the working ID d4821. A banner notes this is a placeholder until Health Canada issues the real Dossier ID via a REP Dossier ID Request.",
       "response_excerpt": {
         "dossier_id": "d4821",
-        "uid": "71e22e7d68cd4ac38c4c9ca70a118584",
+        "uid": "e7e74b9729214dec9db1f49c92d3b128",
         "title": "Metformin HCl 500 mg Tablets — ANDS",
         "submission_type": "ANDS",
         "cs_be_only": true,
@@ -29,8 +29,8 @@
         "archived_at": null,
         "archived_by": null,
         "archive_reason": null,
-        "created_at": "2026-07-05T02:53:19.563918+00:00",
-        "updated_at": "2026-07-05T02:53:19.563918+00:00",
+        "created_at": "2026-07-05T07:19:49.839481+00:00",
+        "updated_at": "2026-07-05T07:19:49.839481+00:00",
         "archived": false
       }
     },
@@ -408,6 +408,12 @@
           "name": "ANDS Studio structural eCTD validator",
           "version": "1.2",
           "synced": "2026-05 (HC eCTD Validation Criteria v5.3)",
+          "review": {
+            "cadence": "Reviewed on a rolling quarterly schedule AND on demand whenever Health Canada republishes the eCTD Validation Criteria.",
+            "last_reviewed": "2026-05",
+            "next_review": "2026-08",
+            "process": "Each review re-reconciles every CA-E/CA-W rule against the current published Health Canada eCTD Validation Criteria and the referenced ICH eCTD 3.2.2 / CA Module 1 v2.2 specifications. Any change is recorded as a new version in the criteria history with a dated changelog — the trail is append-only and auditable. This tracks THIS structural profile; it is not, and does not claim to be, Health Canada's official eValidator."
+          },
           "modeled_on": "Health Canada eCTD Validation Criteria v5.3 rule scheme (CA-<severity>-<block> ids), CA Module 1 v2.2 regional backbone and the ICH eCTD 3.2.2 index",
           "disclaimer": "Structural and technical checks only. This is NOT Health Canada's official eValidator and does not replace it — run eValidator (or your publisher's validator) before you transmit.",
           "coverage": {
@@ -461,6 +467,12 @@
             "name": "ANDS Studio structural eCTD validator",
             "version": "1.2",
             "synced": "2026-05 (HC eCTD Validation Criteria v5.3)",
+            "review": {
+              "cadence": "Reviewed on a rolling quarterly schedule AND on demand whenever Health Canada republishes the eCTD Validation Criteria.",
+              "last_reviewed": "2026-05",
+              "next_review": "2026-08",
+              "process": "Each review re-reconciles every CA-E/CA-W rule against the current published Health Canada eCTD Validation Criteria and the referenced ICH eCTD 3.2.2 / CA Module 1 v2.2 specifications. Any change is recorded as a new version in the criteria history with a dated changelog — the trail is append-only and auditable. This tracks THIS structural profile; it is not, and does not claim to be, Health Canada's official eValidator."
+            },
             "modeled_on": "Health Canada eCTD Validation Criteria v5.3 rule scheme (CA-<severity>-<block> ids), CA Module 1 v2.2 regional backbone and the ICH eCTD 3.2.2 index",
             "disclaimer": "Structural and technical checks only. This is NOT Health Canada's official eValidator and does not replace it — run eValidator (or your publisher's validator) before you transmit.",
             "coverage": {
@@ -577,6 +589,12 @@
           "name": "ANDS Studio structural eCTD validator",
           "version": "1.2",
           "synced": "2026-05 (HC eCTD Validation Criteria v5.3)",
+          "review": {
+            "cadence": "Reviewed on a rolling quarterly schedule AND on demand whenever Health Canada republishes the eCTD Validation Criteria.",
+            "last_reviewed": "2026-05",
+            "next_review": "2026-08",
+            "process": "Each review re-reconciles every CA-E/CA-W rule against the current published Health Canada eCTD Validation Criteria and the referenced ICH eCTD 3.2.2 / CA Module 1 v2.2 specifications. Any change is recorded as a new version in the criteria history with a dated changelog — the trail is append-only and auditable. This tracks THIS structural profile; it is not, and does not claim to be, Health Canada's official eValidator."
+          },
           "modeled_on": "Health Canada eCTD Validation Criteria v5.3 rule scheme (CA-<severity>-<block> ids), CA Module 1 v2.2 regional backbone and the ICH eCTD 3.2.2 index",
           "disclaimer": "Structural and technical checks only. This is NOT Health Canada's official eValidator and does not replace it — run eValidator (or your publisher's validator) before you transmit.",
           "coverage": {
@@ -690,8 +708,8 @@
         "notes": "Ran HC eValidator on exported sequence 0000; 0 errors, 0 warnings.",
         "report_filename": "e478210-0000-evalidator.pdf",
         "disclaimer": "This is a USER-ATTESTED external result. ANDS Studio did NOT run Health Canada's eValidator — the filer ran it (or their publisher's validator) on the exported package and attached the outcome. ANDS Studio records the attestation; it does not verify or reproduce it.",
-        "recorded_at": "2026-07-05T02:53:19.613000+00:00",
-        "updated_at": "2026-07-05T02:53:19.613009+00:00"
+        "recorded_at": "2026-07-05T07:19:49.888523+00:00",
+        "updated_at": "2026-07-05T07:19:49.888532+00:00"
       }
     },
     {
@@ -715,8 +733,8 @@
           "notes": "Ran HC eValidator on exported sequence 0000; 0 errors, 0 warnings.",
           "report_filename": "e478210-0000-evalidator.pdf",
           "disclaimer": "This is a USER-ATTESTED external result. ANDS Studio did NOT run Health Canada's eValidator — the filer ran it (or their publisher's validator) on the exported package and attached the outcome. ANDS Studio records the attestation; it does not verify or reproduce it.",
-          "recorded_at": "2026-07-05T02:53:19.613000+00:00",
-          "updated_at": "2026-07-05T02:53:19.613009+00:00"
+          "recorded_at": "2026-07-05T07:19:49.888523+00:00",
+          "updated_at": "2026-07-05T07:19:49.888532+00:00"
         }
       }
     },
@@ -967,6 +985,12 @@
           "name": "ANDS Studio structural eCTD validator",
           "version": "1.2",
           "synced": "2026-05 (HC eCTD Validation Criteria v5.3)",
+          "review": {
+            "cadence": "Reviewed on a rolling quarterly schedule AND on demand whenever Health Canada republishes the eCTD Validation Criteria.",
+            "last_reviewed": "2026-05",
+            "next_review": "2026-08",
+            "process": "Each review re-reconciles every CA-E/CA-W rule against the current published Health Canada eCTD Validation Criteria and the referenced ICH eCTD 3.2.2 / CA Module 1 v2.2 specifications. Any change is recorded as a new version in the criteria history with a dated changelog — the trail is append-only and auditable. This tracks THIS structural profile; it is not, and does not claim to be, Health Canada's official eValidator."
+          },
           "modeled_on": "Health Canada eCTD Validation Criteria v5.3 rule scheme (CA-<severity>-<block> ids), CA Module 1 v2.2 regional backbone and the ICH eCTD 3.2.2 index",
           "disclaimer": "Structural and technical checks only. This is NOT Health Canada's official eValidator and does not replace it — run eValidator (or your publisher's validator) before you transmit.",
           "coverage": {
@@ -999,8 +1023,8 @@
           "notes": "Ran HC eValidator on exported sequence 0000; 0 errors, 0 warnings.",
           "report_filename": "e478210-0000-evalidator.pdf",
           "disclaimer": "This is a USER-ATTESTED external result. ANDS Studio did NOT run Health Canada's eValidator — the filer ran it (or their publisher's validator) on the exported package and attached the outcome. ANDS Studio records the attestation; it does not verify or reproduce it.",
-          "recorded_at": "2026-07-05T02:53:19.613000+00:00",
-          "updated_at": "2026-07-05T02:53:19.613009+00:00"
+          "recorded_at": "2026-07-05T07:19:49.888523+00:00",
+          "updated_at": "2026-07-05T07:19:49.888532+00:00"
         }
       }
     },
@@ -1235,9 +1259,9 @@
       "path": "/api/dossier/dossiers/e478210/evalidator-attestation/report",
       "request_summary": "Upload the real 139-byte eValidator report PDF as external evidence",
       "status": 201,
-      "what_the_user_sees": "The actual HC eValidator report file 'e478210-0000-evalidator.pdf' (139 bytes, checksum f391666e7d3e...) is stored and linked as downloadable evidence (doc c25cdb8a87c64c8595d9a7912e04aadc), labeled source='user_attested_external'. It is the filer's own external evidence — the report itself, not just a filename string.",
+      "what_the_user_sees": "The actual HC eValidator report file 'e478210-0000-evalidator.pdf' (139 bytes, checksum f391666e7d3e...) is stored and linked as downloadable evidence (doc 9fb698dc9597419a8a7e615df1e9f6b5), labeled source='user_attested_external'. It is the filer's own external evidence — the report itself, not just a filename string.",
       "response_excerpt": {
-        "report_doc_id": "c25cdb8a87c64c8595d9a7912e04aadc",
+        "report_doc_id": "9fb698dc9597419a8a7e615df1e9f6b5",
         "report_filename": "e478210-0000-evalidator.pdf",
         "report_size": 139,
         "report_checksum": "f391666e7d3ef42c65f222dedbedb4d1",
@@ -1451,6 +1475,12 @@
             "name": "ANDS Studio structural eCTD validator",
             "version": "1.2",
             "synced": "2026-05 (HC eCTD Validation Criteria v5.3)",
+            "review": {
+              "cadence": "Reviewed on a rolling quarterly schedule AND on demand whenever Health Canada republishes the eCTD Validation Criteria.",
+              "last_reviewed": "2026-05",
+              "next_review": "2026-08",
+              "process": "Each review re-reconciles every CA-E/CA-W rule against the current published Health Canada eCTD Validation Criteria and the referenced ICH eCTD 3.2.2 / CA Module 1 v2.2 specifications. Any change is recorded as a new version in the criteria history with a dated changelog — the trail is append-only and auditable. This tracks THIS structural profile; it is not, and does not claim to be, Health Canada's official eValidator."
+            },
             "modeled_on": "Health Canada eCTD Validation Criteria v5.3 rule scheme (CA-<severity>-<block> ids), CA Module 1 v2.2 regional backbone and the ICH eCTD 3.2.2 index",
             "disclaimer": "Structural and technical checks only. This is NOT Health Canada's official eValidator and does not replace it — run eValidator (or your publisher's validator) before you transmit.",
             "coverage": {

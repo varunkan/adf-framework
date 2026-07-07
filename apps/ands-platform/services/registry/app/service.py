@@ -16,10 +16,14 @@ def _s(v) -> str:
 
 class RegistryService:
     def __init__(self, repo: RegistrationRepository, bus,
-                 *, source: str = "registry") -> None:
+                 *, source: str = "registry", reauth=None) -> None:
         self.repo = repo
         self.bus = bus
         self.source = source
+        # round-9: the credential re-auth port for controlled e-signatures —
+        # callable (email, password, mfa_code) -> bool, wired to the identity
+        # service in main.py; injectable in tests. Signing REQUIRES it.
+        self.reauth = reauth
 
     def register(self) -> "RegistryService":
         return self
@@ -86,10 +90,14 @@ class RegistryService:
         items = []
         for key, label in registry.ANNUAL_CHECKLIST_ITEMS:
             row = saved.get(key) or {}
-            items.append({"item_key": key, "label": label,
-                          "done": bool(row.get("done")),
-                          "signed_by": row.get("signed_by"),
-                          "signed_at": row.get("signed_at")})
+            done = bool(row.get("done"))
+            items.append({"item_key": key, "label": label, "done": done,
+                          "signed_by": row.get("signed_by") if done else None,
+                          "signed_at": row.get("signed_at") if done else None,
+                          "meaning": row.get("meaning") if done else None,
+                          "reauthenticated":
+                              bool(row.get("reauthenticated")) if done
+                              else False})
         return {"year": year, "items": items, "count": len(items)}
 
     def set_annual_item(self, data: dict, tenant_id: str | None = None,
@@ -100,23 +108,63 @@ class RegistryService:
                                rule="checklist_item_unknown")
         year = int(data.get("year") or 0) or datetime.now(timezone.utc).year
         done = bool(data.get("done"))
-        # a tick IS a sign-off: who + when, recorded server-side; unticking
-        # clears it (the row keeps no history — the event bus carries that)
-        signed_by = (_s(user_email) or "unrecorded") if done else None
-        signed_at = utcnow_iso() if done else None
-        row = self.repo.set_checklist_item(_s(tenant_id), year, key, done,
-                                           signed_by, signed_at)
+        signed_by = signed_at = meaning = None
+        reauthed = False
+        if done:
+            # round-9 (qa_manager): a tick is a CONTROLLED e-signature —
+            # credential re-auth at the moment of signing + a captured
+            # meaning-of-signature. Identity comes from the RE-AUTHENTICATED
+            # email, never from a spoofable header.
+            meaning = _s(data.get("meaning"))
+            if not meaning:
+                raise ProblemError(
+                    422, "a meaning-of-signature attestation is required",
+                    rule="signature_meaning_required")
+            email = _s(data.get("email")).lower()
+            password = _s(data.get("password"))
+            if not email or not password:
+                raise ProblemError(
+                    401, "re-enter your credentials to sign",
+                    rule="signature_reauth_required")
+            if self.reauth is None or not self.reauth(
+                    email, password, _s(data.get("mfa_code"))):
+                raise ProblemError(
+                    401, "credentials did not verify — the item was NOT signed",
+                    rule="signature_reauth_failed")
+            signed_by, signed_at, reauthed = email, utcnow_iso(), True
+        else:
+            # unticking clears the signature; the actor lands in the log
+            signed_by = None
+        row = self.repo.set_checklist_item(
+            _s(tenant_id), year, key, done,
+            signed_by if done else (_s(user_email) or None),
+            signed_at, meaning, reauthed)
         self.bus.publish(EventEnvelope.make(
             EventType.ANNUAL_CHECKLIST_SIGNED, source=self.source,
             tenant_id=_s(tenant_id),
             data={"year": year, "item_key": key, "done": done,
-                  "signed_by": signed_by, "signed_at": signed_at}))
-        return {"year": year, "item": {
-            "item_key": key,
-            "label": dict(registry.ANNUAL_CHECKLIST_ITEMS)[key],
-            "done": bool(row.get("done")),
-            "signed_by": row.get("signed_by"),
-            "signed_at": row.get("signed_at")}}
+                  "signed_by": signed_by, "signed_at": signed_at,
+                  "meaning": meaning, "reauthenticated": reauthed}))
+        item = {"item_key": key,
+                "label": dict(registry.ANNUAL_CHECKLIST_ITEMS)[key],
+                "done": bool(row.get("done")),
+                "signed_by": row.get("signed_by") if done else None,
+                "signed_at": row.get("signed_at"),
+                "meaning": row.get("meaning"),
+                "reauthenticated": bool(row.get("reauthenticated"))}
+        return {"year": year, "item": item}
+
+    def annual_signing_log(self, year: int,
+                           tenant_id: str | None = None) -> dict:
+        """The viewable, append-only signing record (round-9)."""
+        year = int(year) or datetime.now(timezone.utc).year
+        entries = [
+            {"item_key": r["item_key"], "action": r["action"],
+             "signed_by": r["signed_by"], "signed_at": r["signed_at"],
+             "meaning": r["meaning"],
+             "reauthenticated": bool(r["reauthenticated"])}
+            for r in self.repo.get_checklist_log(_s(tenant_id), year)]
+        return {"year": year, "entries": entries, "count": len(entries)}
 
     def _emit(self, reg: dict, event: str) -> None:
         self.bus.publish(EventEnvelope.make(

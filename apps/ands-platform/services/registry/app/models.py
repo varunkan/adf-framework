@@ -22,3 +22,8 @@ class ChecklistItemIn(BaseModel):
     year: int = 0            # 0 = current year (server decides)
     item_key: str = ""
     done: bool = True
+    # round-9 controlled e-signature: credential re-auth + meaning attestation
+    email: str = ""
+    password: str = ""
+    mfa_code: str = ""
+    meaning: str = ""

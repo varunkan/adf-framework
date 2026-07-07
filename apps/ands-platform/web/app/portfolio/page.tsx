@@ -3,6 +3,7 @@
 // List payload gives id/title/type/tower/gate; fee state needs per-dossier
 // content, fetched in parallel after first paint so rows land immediately.
 import { useEffect, useState } from "react";
+import { withIntegrityManifest } from "@/lib/csvIntegrity";
 import { TopNav } from "@/components/TopNav";
 import Link from "next/link";
 import { dossierApi } from "@/lib/dossierApi";
@@ -120,7 +121,7 @@ export default function PortfolioPage() {
   const overdueCount = upcoming.filter((x) => x.dm!.overdue).length;
 
   // client-facing status export — PMs report to sponsors in spreadsheets
-  function exportStatus() {
+  async function exportStatus() {
     const esc = (s: unknown) => `"${String(s ?? "").replace(/"/g, '""')}"`;
     const rows = [
       // WS6: owner / client / soonest due travel to the client status report —
@@ -140,10 +141,13 @@ export default function PortfolioPage() {
                   : fee?.kind || ""];
       }),
     ];
+    // Round-9 (n=5): versioned schema + all-UTC + SHA-256 manifest — the
+    // client status report is evidence a PM forwards; make edits detectable.
+    const csv = await withIntegrityManifest(
+      rows.map((r) => r.map(esc).join(",")).join("\n"),
+      "ands.portfolio-status", "1");
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob(
-      [rows.map((r) => r.map(esc).join(",")).join("\n")],
-      { type: "text/csv" }));
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
     a.download =
       sponsor === ALL_SPONSORS
         ? "portfolio-status.csv"

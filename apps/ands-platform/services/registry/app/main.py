@@ -19,7 +19,26 @@ def build():
         repo = SqliteRegistrationRepository(SqliteDb(settings.sqlite_path))
     bus = (RedisEventBus(settings.redis_url) if settings.bus == "redis"
            else InMemoryEventBus())
-    return build_app(RegistryService(repo, bus).register())
+
+    # round-9: the credential re-auth port behind controlled e-signatures —
+    # a real HTTP check against the identity service (fail CLOSED: any error
+    # or non-200 refuses the signature; never sign on a guess).
+    def reauth(email: str, password: str, mfa_code: str = "") -> bool:
+        import os
+        import httpx
+        tok = os.environ.get("ANDS_INTERNAL_TOKEN", "").strip()
+        try:
+            r = httpx.post(
+                settings.identity_url.rstrip("/") + "/api/identity/auth/reauth",
+                json={"email": email, "password": password,
+                      "mfa_code": mfa_code},
+                headers={"X-Internal-Auth": tok} if tok else {},
+                timeout=5.0)
+            return r.status_code == 200 and bool(r.json().get("ok"))
+        except Exception:
+            return False
+
+    return build_app(RegistryService(repo, bus, reauth=reauth).register())
 
 
 app = build()

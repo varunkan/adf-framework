@@ -16,7 +16,11 @@ from app.service import RegistryService
 def ctx():
     repo = SqliteRegistrationRepository(SqliteDb(":memory:"))
     bus = InMemoryEventBus()
-    service = RegistryService(repo, bus).register()
+    # fake credential re-auth port: any email, password "signer-pass-1"
+    service = RegistryService(
+        repo, bus,
+        reauth=lambda email, password, mfa: password == "signer-pass-1",
+    ).register()
     client = TestClient(build_app(service))
     return SimpleNamespace(client=client, service=service, bus=bus, repo=repo)
 

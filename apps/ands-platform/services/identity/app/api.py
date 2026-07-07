@@ -9,6 +9,7 @@ from ands_shared import ProblemError, create_app
 from . import rbac
 from .models import (AssignPlanIn, AuthorizeIn, BillingIn, CreatePlanIn,
                      LoginIn, MfaVerifyIn, OverrideIn, ProvisionTenantIn,
+                     ReauthIn,
                      RequireMfaIn, RequireSodIn, ResetCompleteIn,
                      ResetRequestIn, SignupIn, SsoAuthorizeIn, SsoCallbackIn,
                      SsoConfigIn)
@@ -34,6 +35,10 @@ def build_app(service: IdentityService) -> FastAPI:
     @router.post("/auth/login")
     def login(body: LoginIn):
         return service.login(body.model_dump())
+
+    @router.post("/auth/reauth")
+    def reauth(body: ReauthIn):
+        return service.reauth(body.model_dump())
 
     @router.post("/auth/logout")
     def logout(authorization: str = Header(default="")):

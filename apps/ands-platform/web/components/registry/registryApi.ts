@@ -115,12 +115,31 @@ export const registryApi = {
     j<{ year: number; items: ChecklistItem[]; count: number }>(
       `/annual-checklist${year ? `?year=${year}` : ""}`),
 
-  setAnnualItem: (itemKey: string, done: boolean, year = 0) =>
+  setAnnualItem: (itemKey: string, done: boolean, year = 0,
+    sign?: { email: string; password: string; mfaCode?: string;
+             meaning: string }) =>
     j<{ year: number; item: ChecklistItem }>("/annual-checklist/items", {
       method: "POST",
-      body: JSON.stringify({ item_key: itemKey, done, year }),
+      body: JSON.stringify({
+        item_key: itemKey, done, year,
+        email: sign?.email || "", password: sign?.password || "",
+        mfa_code: sign?.mfaCode || "", meaning: sign?.meaning || "",
+      }),
     }),
+
+  signingLog: (year = 0) =>
+    j<{ year: number; entries: SigningLogEntry[]; count: number }>(
+      `/annual-checklist/signing-log${year ? `?year=${year}` : ""}`),
 };
+
+export interface SigningLogEntry {
+  item_key: string;
+  action: "sign" | "unsign";
+  signed_by: string | null;
+  signed_at: string;
+  meaning: string | null;
+  reauthenticated: boolean;
+}
 
 export interface ChecklistItem {
   item_key: string;
@@ -128,4 +147,6 @@ export interface ChecklistItem {
   done: boolean;
   signed_by: string | null;
   signed_at: string | null;
+  meaning?: string | null;
+  reauthenticated?: boolean;
 }

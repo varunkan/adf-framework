@@ -22,7 +22,7 @@ svc() {  # svc <name> <port> <reldir> <extra-env...>  -- python uvicorn service
   echo "  ▸ starting $name (:$port)"
   ( cd "$ROOT/services/$dir" && env "$@" \
       ANDS_INTERNAL_TOKEN="$ANDS_INTERNAL_TOKEN" PYTHONPATH=".:$LIBS" \
-      nohup "$VENV/uvicorn" app.main:app --port "$port" \
+      nohup "$VENV/uvicorn" app.main:app --port "$port" --reload --reload-dir app \
       >>"$LOGS/$name.log" 2>&1 & )
 }
 
@@ -31,7 +31,7 @@ svc dossier      8010 dossier      GOVERNANCE_URL=http://127.0.0.1:8012
 svc identity     8014 identity     ANDS_OWNER_EMAIL=owner@ands.local ANDS_OWNER_PASSWORD=ands-owner-dev
 svc governance   8012 governance
 svc transmission 8013 transmission
-svc registry     8016 registry
+svc registry     8016 registry     IDENTITY_URL=http://127.0.0.1:8014
 svc lifecycle    8017 lifecycle
 svc collaboration 8018 collaboration
 svc journey      8011 journey      DOSSIER_URL=http://127.0.0.1:8010 GOVERNANCE_URL=http://127.0.0.1:8012 TRANSMISSION_URL=http://127.0.0.1:8013
@@ -50,4 +50,8 @@ else
       nohup npm run dev >>"$LOGS/web.log" 2>&1 & )
 fi
 
+# marker: the mesh is meant to be up in this environment. The Stop hook uses it
+# to self-heal any service that has since crashed (idempotent; never kills a
+# running one). Removed by dev-down.sh so an intentional shutdown stays down.
+touch "$LOGS/.mesh-active"
 echo "ANDS Studio → http://localhost:3000  (logs: $LOGS)"
