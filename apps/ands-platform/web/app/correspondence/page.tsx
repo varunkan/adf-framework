@@ -10,7 +10,7 @@ import type { DossierListItem } from "@/lib/dossierTypes";
 import { Term } from "@/components/Term";
 import { CorrespondenceHub } from "@/components/correspondence/CorrespondenceHub";
 import { NoticeInbox } from "@/components/correspondence/NoticeInbox";
-import { NoaRegister } from "@/components/correspondence/NoaRegister";
+import { NoaRegister, StatutoryClockStrip } from "@/components/correspondence/NoaRegister";
 import {
   SponsorScope,
   ALL_SPONSORS,
@@ -65,7 +65,8 @@ export default function CorrespondencePage() {
           <h1>Correspondence &amp; notices</h1>
           <p className="lede">
             Log every exchange with Health Canada, ingest notices to drive the
-            DSTS lifecycle, and watch the PM(NOC) statutory clocks on each{" "}
+            {" "}<Term k="DSTS" /> lifecycle, and watch the PM(NOC){" "}
+            <Term k="litigation clock">statutory clocks</Term> on each{" "}
             <Term k="Form V" /> allegation (a <Term k="NOA" /> opens the{" "}
             <Term k="s.6" /> action window; an s.6 action starts the{" "}
             <Term k="24-month stay" />).
@@ -156,6 +157,13 @@ export default function CorrespondencePage() {
               marginTop: 18,
             }}
           >
+            {/* Round-9 (n=6): live statutory clocks lead the page by default —
+                never buried behind the Advanced expander. An at-risk clock
+                (≤10 days) also auto-opens the register below. */}
+            <StatutoryClockStrip
+              dossierId={picked}
+              onUrgent={() => setShowNoa(true)}
+            />
             <NoticeInbox
               dossierId={picked}
               onIngested={() => setCorrKey((k) => k + 1)}

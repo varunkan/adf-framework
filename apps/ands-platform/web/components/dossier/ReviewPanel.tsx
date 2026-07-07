@@ -6,10 +6,19 @@ export function ReviewPanel({ review }: { review: any }) {
   const f = review.findings || [];
   return (
     <div className={`notice ${review.passed ? "ok" : "bad"}`} style={{ marginTop: 10 }}>
-      <b>Health Canada review:</b>{" "}
+      {/* Round-9 (builder_forms, n=4): a green "no blocking content gaps"
+          reads as a compliance pass — it is a completeness HEURISTIC. Say so
+          on the face, in the same honest voice as the eValidator caveat. */}
+      <b>Content review:</b>{" "}
       {review.passed
-        ? "no blocking content gaps."
+        ? "no obvious gaps found — advisory only."
         : `${review.error_count} to fix, ${review.warning_count} to check.`}
+      {review.passed && (
+        <div className="mut" style={{ fontSize: 11, marginTop: 2 }}>
+          A content-completeness check against Health Canada&apos;s required
+          elements — not a screening clearance or regulatory acceptance.
+        </div>
+      )}
       {f.length > 0 && (
         <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
           {f.map((x: any, i: number) => (

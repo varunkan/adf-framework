@@ -82,7 +82,7 @@ export function RegisterForm({
             {!din.trim()
               ? "Issued by Health Canada at NOC — leave blank until then."
               : /^\d{8}$/.test(din.trim())
-              ? "✓ Valid DIN format."
+              ? "✓ Valid DIN format. (Format check only — this does not confirm the DIN is real or active with Health Canada.)"
               : `✗ A DIN is exactly 8 digits (${din.trim().length}/8${
                   /\D/.test(din.trim()) ? ", digits only" : ""})`}
           </div>

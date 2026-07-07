@@ -219,6 +219,41 @@ export const TERMS: Record<string, string> = {
     "replace (supersedes a prior document), append (adds alongside it), or " +
     "delete (withdraws it). The eCTD backbone records the operation so Health " +
     "Canada's systems know what changed.",
+  // Round-9 glossary gaps (operations n=16, builder n=5): every acronym a
+  // junior meets on the operations pages, in the same plain voice.
+  DSTS:
+    "Drug Submission Tracking System — Health Canada's internal tracker for " +
+    "where your submission sits in review (screening, review, decision). The " +
+    "notices you receive (SDN, NOD, NOC…) mark its stage changes; ingesting " +
+    "them here mirrors that lifecycle in your workspace.",
+  "Part-11":
+    "US FDA 21 CFR Part 11 — the benchmark rules for trustworthy electronic " +
+    "records: attributable, time-stamped, tamper-evident audit trails and " +
+    "controlled e-signatures. Health Canada expects equivalent controls; this " +
+    "app's append-only, actor-stamped audit trail is built to that standard.",
+  "litigation clock":
+    "A statutory countdown under the PM(NOC) Regulations: serving a Notice of " +
+    "Allegation opens the brand's 45-day window to sue (s.6); starting that " +
+    "action triggers a 24-month hold on your approval (the stay). The clocks " +
+    "here are calculated aids — verify against the court/HC record.",
+  md5:
+    "A short digital fingerprint computed from a file's exact bytes — if the " +
+    "file changes at all, the fingerprint changes. Used here for document " +
+    "control (spotting silent changes), NOT as validation or acceptance. The " +
+    "eCTD 3.2.2 backbone itself uses md5 checksums (index-md5.txt).",
+  backbone:
+    "The XML index files at the heart of an eCTD sequence (index.xml + the " +
+    "Canadian ca-regional.xml) — they list every document (leaf), where it " +
+    "sits, its checksum and its lifecycle operation. Health Canada's systems " +
+    "read the backbone, not your folder names.",
+  "provenance chip":
+    "The small label on every saved document recording HOW it was made — " +
+    "uploaded, generated from a form, or AI-assisted. It is permanent: an " +
+    "AI-assisted document stays labelled through review, export and audit.",
+  "module badge":
+    "The per-module status marker in the builder — whether that module's " +
+    "required documents are placed (a completeness signal only; validation " +
+    "is a separate, explicit step).",
 };
 
 export const TERM_KEYS = Object.keys(TERMS).sort((a, b) => b.length - a.length);

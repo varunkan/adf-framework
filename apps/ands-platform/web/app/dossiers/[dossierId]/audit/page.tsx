@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useDossier } from "@/components/dossier/DossierContext";
 import { dossierApi } from "@/lib/dossierApi";
+import { Term } from "@/components/Term";
 
 type AuditEvent = {
   id: string;
@@ -97,7 +98,7 @@ export default function AuditPage() {
       <p className="eyebrow">Audit · Part-11 record</p>
       <h1>Audit Trail</h1>
       <p className="lede">
-        The durable, append-only Part-11 record for this dossier — written
+        The durable, append-only <Term k="Part-11" /> record for this dossier — written
         synchronously alongside each change and preserved even if the central
         governance service is unreachable. Newest first; chained across a
         Dossier ID re-key so history for the prior ID still resolves.

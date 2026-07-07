@@ -75,21 +75,96 @@ function Clock({ label, days, end, prov }: {
   if (days == null || !end) return null;
   const tone = days === 0 ? "ok" : days <= 10 ? "warn" : "";
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-      <span className={`notice ${tone}`} style={{ padding: "4px 10px", fontSize: 12 }}>
-        <b>{days}</b> day{days === 1 ? "" : "s"} left · {label} ends {end}
-        {/* WS-OPS-PROV: the calculated-aid caveat, stamped on the clock face
-            itself — the full source citation + derivation are in the popover. */}
-        <span
-          className="mut"
-          style={{ marginLeft: 6, fontSize: 10 }}
-          title="Calculated aid — verify against the HC record"
-        >
-          · calculated aid
+    <span style={{ display: "inline-flex", flexDirection: "column", gap: 2 }}>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+        <span className={`notice ${tone}`} style={{ padding: "4px 10px", fontSize: 12 }}>
+          <b>{days}</b> day{days === 1 ? "" : "s"} left · {label} ends {end}
+          {/* WS-OPS-PROV: the calculated-aid caveat, stamped on the clock face
+              itself — the full source citation + derivation are in the popover. */}
+          <span
+            className="mut"
+            style={{ marginLeft: 6, fontSize: 10 }}
+            title="Calculated aid — verify against the HC record"
+          >
+            · calculated aid
+          </span>
         </span>
+        <ProvenancePopover prov={prov} />
       </span>
-      <ProvenancePopover prov={prov} />
+      {/* Round-9 (operations BLOCKER, n=15): the statutory basis on the ROW
+          FACE, not only inside the popover — regulation section, day-count
+          convention, and the input date the count runs from. All fields come
+          off the provenance record; nothing is fabricated. */}
+      <span className="mut" style={{ fontSize: 10.5, paddingLeft: 2 }}>
+        {prov.citation} ·{" "}
+        {prov.basis === "calendar"
+          ? "calendar days (weekends & holidays counted)"
+          : "business days"}{" "}
+        · from {prov.anchorLabel} {prov.anchorDate || "(not yet set)"}
+      </span>
     </span>
+  );
+}
+
+// Round-9 (operations BLOCKER, n=6): "statutory clocks are not an advanced
+// afterthought, they're the whole point, and hiding them is how a deadline
+// gets missed." Every LIVE clock on the dossier renders in this prominent
+// strip at the top of the page by default — management actions stay in the
+// register below. Same Clock + provenance renderers: one source of truth.
+export function StatutoryClockStrip({ dossierId, onUrgent }: {
+  dossierId: string;
+  // fires (once per load) when any clock is at/inside 10 days — the page uses
+  // it to auto-open the register so the actionable controls are one glance away
+  onUrgent?: () => void;
+}) {
+  const [items, setItems] = useState<NoaRecord[]>([]);
+  useEffect(() => {
+    let alive = true;
+    lifecycleApi.listNoa(dossierId)
+      .then((r) => { if (alive) setItems(r.allegations); })
+      .catch(() => {});           // strip is additive — absent on error
+    return () => { alive = false; };
+  }, [dossierId]);
+
+  const live = items.filter(
+    (n) =>
+      (n.status === "served" && n.action_days_remaining != null && n.action_window_end) ||
+      (n.status === "stay_running" && n.stay_days_remaining != null && n.stay_end)
+  );
+  const urgent = live.some((n) =>
+    Math.min(n.action_days_remaining ?? 99999, n.stay_days_remaining ?? 99999) <= 10);
+  useEffect(() => { if (urgent) onUrgent?.(); }, [urgent, onUrgent]);
+
+  if (!live.length) return null;
+  return (
+    <div className="card glass" style={{ padding: "14px 18px" }}>
+      <h2 style={{ margin: "0 0 8px", fontSize: 15 }}>
+        ⏱ Statutory clocks — live on this dossier
+      </h2>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {live
+          .sort((a, b) =>
+            Math.min(a.action_days_remaining ?? 99999, a.stay_days_remaining ?? 99999) -
+            Math.min(b.action_days_remaining ?? 99999, b.stay_days_remaining ?? 99999))
+          .map((n) => (
+            <div key={n.id} style={{ display: "flex", gap: 10,
+              alignItems: "baseline", flexWrap: "wrap", fontSize: 13 }}>
+              <span style={{ minWidth: 130 }}>
+                Patent <b>{n.patent_number}</b>
+              </span>
+              {n.status === "served" ? (
+                <Clock label="45-day action window"
+                  days={n.action_days_remaining} end={n.action_window_end}
+                  prov={actionProvenanceFull(n)} />
+              ) : (
+                <Clock label="24-month stay"
+                  days={n.stay_days_remaining} end={n.stay_end}
+                  prov={stayProvenanceFull(n)} />
+              )}
+            </div>
+          ))}
+      </div>
+    </div>
   );
 }
 

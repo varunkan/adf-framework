@@ -7,6 +7,7 @@ import { MiniTower } from "./MiniTower";
 import { ProvenancePopover, type Provenance } from "@/components/ProvenancePopover";
 import { dueMeta } from "@/lib/deadline";
 import { ShieldCheck } from "lucide-react";
+import { Term } from "@/components/Term";
 
 export type FeeState =
   | { kind: "loading" }
@@ -134,6 +135,11 @@ export function PortfolioRow({ d, fee, noa = { kind: "none" }, collab }: {
   const passed = d.tower.filter((t) => t.state === "pass").length;
   const applic = d.tower.filter((t) => t.state !== "na").length;
   const id = encodeURIComponent(d.dossier_id);
+  // Round-9 (operations, n=3+6): at-risk states surface at ROW level; neutral
+  // states stay in Details (the progressive disclosure the panel praised).
+  const overdue = dueMeta(d.soonest_due)?.overdue ?? false;
+  const blockedAndOverdue = Boolean(collab?.blocked) && overdue;
+  const urgentNoa = noa.kind !== "none" && noa.days <= 10;
 
   return (
     <div className="card glass roster-row portfolio-row">
@@ -142,8 +148,8 @@ export function PortfolioRow({ d, fee, noa = { kind: "none" }, collab }: {
         <div className="d-id">{d.dossier_id}</div>
         <div className="d-title" style={{ margin: "2px 0 0" }}>{d.title}</div>
         <div className="d-meta mut">
-          {d.submission_type}
-          {d.cs_be_only ? " · CS-BE" : ""}
+          <Term k={d.submission_type}>{d.submission_type}</Term>
+          {d.cs_be_only ? <> · <Term k="CS-BE" /></> : null}
         </div>
       </div>
 
@@ -154,26 +160,36 @@ export function PortfolioRow({ d, fee, noa = { kind: "none" }, collab }: {
       <MiniTower tower={d.tower} missing={d.gate?.missing} />
 
       {/* col 4 — ONE primary status chip, in a fixed-width cell so every row's
-          status aligns. Blocked collaboration outranks the gate. */}
+          status aligns. Blocked collaboration outranks the gate. Round-9: the
+          blocked REASON is inline (no Details hunt), blocked+past-deadline is
+          a distinct combined state, and the tooltip states the exact rule that
+          trips each state — including that "Ready to file" reflects internal
+          module completeness, NOT an eValidator pass. */}
       <span className="roster-status">
         <span
           className={`chip ${
             collab?.blocked ? "blocked" : d.gate?.complete ? "ready" : "blocked"
           }`}
+          style={blockedAndOverdue ? { fontWeight: 700 } : undefined}
           title={
             collab?.blocked
-              ? "Has an open task past due — see details"
+              ? `Rule: an open collaboration task is past its due date (${collab.overdue} overdue, assigned to ${collab.assignees.join(", ") || "unassigned"}). Outranks the module gate.`
               : d.gate?.complete
-                ? "All applicable modules complete"
-                : "Modules still outstanding"
+                ? "Rule: every applicable module has its required documents placed. Internal completeness only — NOT an eValidator or Health Canada validation pass; run validation before relying on this."
+                : "Rule: one or more applicable modules still have required documents outstanding."
           }
         >
-          {collab?.blocked
-            ? "Blocked"
-            : d.gate?.complete
-              ? "Ready to file"
-              : `${passed}/${applic} modules`}
+          {blockedAndOverdue
+            ? "Blocked & past due"
+            : collab?.blocked
+              ? `Blocked — ${collab.overdue} task(s) overdue`
+              : d.gate?.complete
+                ? "Ready to file"
+                : `${passed}/${applic} modules`}
         </span>
+        {/* at-risk statutory clock escapes the Details expander (n=6:
+            "statutory clocks are not an advanced afterthought") */}
+        {urgentNoa && <NoaChip clock={noa} />}
       </span>
 
       {/* col 5 — actions: details expander + Open/Viewer, right-aligned */}
@@ -184,7 +200,8 @@ export function PortfolioRow({ d, fee, noa = { kind: "none" }, collab }: {
           </summary>
           <div className="row-details-body">
             <FeeChip state={fee} />
-            <NoaChip clock={noa} />
+            {/* non-urgent clocks stay here; urgent ones are on the row face */}
+            {!urgentNoa && <NoaChip clock={noa} />}
             <CollabChips collab={collab} />
           </div>
         </details>
@@ -193,8 +210,9 @@ export function PortfolioRow({ d, fee, noa = { kind: "none" }, collab }: {
           Open →
         </Link>
         <Link className="chip" href={`/dossiers/${id}/viewer`}
-          aria-label={`Open Application Viewer for ${d.dossier_id}`}>
-          Viewer
+          aria-label={`Open Application Viewer and eCTD validation for ${d.dossier_id}`}
+          title="index.xml backbone, eCTD validation, eValidator handoff and the pre-flight report live here">
+          Viewer · validation
         </Link>
       </div>
     </div>
