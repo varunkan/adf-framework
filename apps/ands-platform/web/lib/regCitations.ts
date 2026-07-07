@@ -64,7 +64,7 @@ export const DEFICIENCY_WINDOWS: Record<"SDN" | "NOD" | "NON", RegCitation> = {
 export const IDENTITY_LEAD_TIMES: Record<"companyId" | "dossierId", RegCitation> = {
   companyId: {
     claim:
-      "5-digit Company ID — enrol via the Office of Submission and " +
+      "5-digit Company ID — enrol via the Office of Submissions and " +
       "Intellectual Property; typically issued within ~2 weeks. Required " +
       "before you can transmit.",
     source:

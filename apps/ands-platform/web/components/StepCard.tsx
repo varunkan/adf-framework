@@ -145,7 +145,7 @@ export function StepCard({
             nothing else waits on it. Don&apos;t have one? Enrol through the{" "}
             <Term k="REP" /> by sending a completed Company Template to the
             Office of Submissions and Intellectual Property
-            (hc.osip-bpip.sc@canada.ca); IDs are typically issued within a
+            (osip-bppi@hc-sc.gc.ca); IDs are typically issued within a
             couple of weeks.
           </div>
           <label>Your Health Canada Company ID</label>

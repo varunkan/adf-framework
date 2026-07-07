@@ -46,8 +46,8 @@ export function PrereqChecklist({ onBegin }: { onBegin: () => void }) {
           <span className="chip" style={{ fontSize: 11 }}>lead time ~2 weeks</span>
           <div className="mut" style={{ fontSize: 13, marginTop: 4 }}>
             Enrol by emailing your completed Company Template to the Office of
-            Submission and Intellectual Property —{" "}
-            <a href="mailto:hc.osip-bpip.sc@canada.ca">hc.osip-bpip.sc@canada.ca</a>.
+            Submissions and Intellectual Property —{" "}
+            <a href="mailto:osip-bppi@hc-sc.gc.ca">osip-bppi@hc-sc.gc.ca</a>.
             Typically issued within a couple of weeks. You need it before you can
             transmit, but not to start.
           </div>
