@@ -86,7 +86,16 @@ class IdentityService:
     # -- signup / login / session ------------------------------------------
     def signup(self, data: dict) -> dict:
         """Self-serve: create a tenant (trial, all-features) + its admin user +
-        a session (REQ-077)."""
+        a session (REQ-077).
+
+        Round-9 onboarding item 4: a NEW workspace defaults to 'MFA Required'
+        (create_tenant inserts require_mfa=1), so the founding admin — who has
+        no authenticator yet — must NOT receive a full session (it would be
+        dead-on-arrival at the resolve() backstop). We mint a short-lived
+        scope="mfa_setup" token instead and flag ``mfa_setup_required`` so the
+        UI guides authenticator setup, after which the admin logs in with
+        password + TOTP for a full session.
+        """
         _check_password_policy(_s(data.get("password")))
         company = _s(data.get("company_name")) or "New tenant"
         tenant_id = new_id()
@@ -95,13 +104,14 @@ class IdentityService:
         user = self._add_user(tenant_id, data.get("email"),
                               data.get("password"), rbac.TENANT_ADMIN_ROLE,
                               _s(data.get("name")))
-        token = self._start_session(user)
+        token = self._start_session(user, ttl=MFA_SETUP_TTL, scope="mfa_setup")
         self.bus.publish(EventEnvelope.make(
             EventType.TENANT_PROVISIONED, source=self.source,
             tenant_id=tenant_id,
             data={"tenant_id": tenant_id, "plan_id": tenant["plan_id"],
                   "admin_email": user["email"]}))
-        return {"tenant": tenant, "user": user, "token": token}
+        return {"tenant": tenant, "user": user, "token": token,
+                "mfa_setup_required": True}
 
     def login(self, data: dict) -> dict:
         tenant_id = _s(data.get("tenant_id"))
@@ -466,7 +476,15 @@ class IdentityService:
 
     def _session_blocked_by_mandate(self, principal: dict) -> bool:
         """True when the principal's workspace requires MFA and the user has no
-        verified MFA — the check that revokes pre-existing non-MFA sessions."""
+        verified MFA — the check that revokes pre-existing non-MFA sessions.
+
+        SSO-verified principals are exempt: they authenticated at the
+        workspace's IdP (which owns the authentication-strength policy for
+        federated sign-ins, and where JIT-provisioned members have no local
+        password at all). The local MFA mandate governs password credentials.
+        """
+        if principal.get("identity_verified"):
+            return False
         if not self._workspace_requires_mfa(principal.get("tenant_id")):
             return False
         user = self.repo.get_user_raw(principal["user_id"]) or {}

@@ -45,3 +45,12 @@ class NoticeIn(BaseModel):
 class PauseIn(BaseModel):
     type: str                                  # the notice type to pause/resume
     paused: bool = True
+
+
+class EventIn(BaseModel):
+    """journey · J20/J21 session event ledger · a UX event the UI reports.
+    Only whitelisted types are accepted (see service._UX_EVENT_TYPES) — the
+    journey's own regulatory events are written server-side, never via this."""
+    type: str                                  # e.g. "expert_mode"
+    reason: str = ""                           # required to ENABLE expert mode
+    data: dict = Field(default_factory=dict)

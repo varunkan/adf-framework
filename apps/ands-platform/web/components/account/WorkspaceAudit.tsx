@@ -10,6 +10,10 @@ import {
   download,
   type AuditEvent,
 } from "@/lib/governanceApi";
+// onboarding — item 1 (BLOCKER n=8): the workspace CSV export becomes
+// tamper-evident like the dossier audit export — same embedded SHA-256
+// integrity manifest (import-only reuse of the shared helper).
+import { withIntegrityManifest } from "@/lib/csvIntegrity";
 
 function when(at: string): string {
   const d = new Date(at);
@@ -55,9 +59,13 @@ export function WorkspaceAudit() {
     setBusy(false);
   }
 
-  function downloadCsv() {
+  async function downloadCsv() {
     if (!events?.length) return;
-    download("workspace-audit.csv", auditToCsv(events), "text/csv");
+    // item 1 — embed the SHA-256 integrity manifest so any post-export edit
+    // is detectable (verification procedure travels inside the file).
+    const csv = await withIntegrityManifest(
+      auditToCsv(events), "ands.workspace-audit-export", "1");
+    download("workspace-audit.csv", csv, "text/csv");
   }
 
   function downloadJson() {

@@ -1,13 +1,23 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { dossierApi } from "@/lib/dossierApi";
 import { opMeta } from "@/lib/leafStatus";
+import { ChipLegend } from "./ChipLegend";
+import {
+  indexRules,
+  moduleOfLeaf,
+  modulePath,
+  ruleForFinding,
+  ruleHowToFix,
+} from "./validationExtras";
 import type {
   CurrentView,
   CurrentViewLeaf,
   ExportValidationVerdict,
   SequenceInfo,
   SequenceList,
+  ValidationRule,
 } from "@/lib/dossierTypes";
 
 // WS7 — make the new/replace/append/delete lifecycle OPERATOR of each leaf
@@ -74,10 +84,36 @@ export function SequencePanel({
   } | null>(null);
   const [overrideReason, setOverrideReason] = useState("");
   const [exporting, setExporting] = useState("");
+  // ROUND9-VALIDATE item 13 (cro_pm): the per-sequence plain-language rollup —
+  // open error/warning counts + last-checked timestamp, from the same
+  // structural validator that gates export.
+  const [rollups, setRollups] = useState<
+    Record<string, { errors: number; warnings: number; at: string }>
+  >({});
+  // ROUND9-VALIDATE item 14: the live rule catalogue joins each block-modal
+  // finding to its how-to-fix hint + owning-module link.
+  const [rules, setRules] = useState<ValidationRule[] | null>(null);
+  const ruleIdx = useMemo(() => indexRules(rules), [rules]);
+
+  useEffect(() => {
+    let live = true;
+    dossierApi
+      .validationRules()
+      .then((c) => {
+        if (live) setRules(c.rules);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
 
   const refresh = useCallback(async () => {
+    let seqs: SequenceInfo[] = [];
     try {
-      setData(await dossierApi.listSequences(dossierId));
+      const list = await dossierApi.listSequences(dossierId);
+      setData(list);
+      seqs = list.sequences;
       setError("");
     } catch (e) {
       setError(String(e));
@@ -89,6 +125,29 @@ export function SequencePanel({
     } catch {
       setView(null);
     }
+    // item 13: per-sequence rollup — best-effort, never blocks the panel.
+    try {
+      const entries = await Promise.all(
+        seqs.map(async (s) => {
+          try {
+            const r = await dossierApi.validateSequence(dossierId, s.sequence);
+            return [
+              s.sequence,
+              {
+                errors: r.errors.length,
+                warnings: r.warnings.length,
+                at: new Date().toLocaleTimeString(),
+              },
+            ] as const;
+          } catch {
+            return null;
+          }
+        })
+      );
+      setRollups(
+        Object.fromEntries(entries.filter((e): e is NonNullable<typeof e> => !!e))
+      );
+    } catch {}
   }, [dossierId]);
 
   useEffect(() => {
@@ -184,6 +243,9 @@ export function SequencePanel({
           </span>
         )}
       </div>
+      {/* ROUND9-VALIDATE item 4: the plain-language chip legend lives where
+          the chips live. */}
+      <ChipLegend compact />
       {error && (
         <div className="notice bad" style={{ marginTop: 8, fontSize: 12 }}>
           {error}
@@ -215,29 +277,61 @@ export function SequencePanel({
           )}
           {block.verdict?.errors?.length ? (
             <div style={{ marginTop: 6 }}>
-              {block.verdict.errors.slice(0, 8).map((f, i) => (
-                <div
-                  key={i}
-                  style={{ display: "flex", gap: 6, alignItems: "baseline" }}
-                >
-                  <code style={{ fontSize: 10, whiteSpace: "nowrap" }}>
-                    {f.rule_id || f.rule}
-                  </code>
-                  <span style={{ fontSize: 11 }}>
-                    {f.leaf ? (
-                      <code style={{ fontSize: 10, opacity: 0.8 }}>
-                        {f.leaf}:{" "}
+              {/* ROUND9-VALIDATE item 3 (n=12): error-severity findings are
+                  NEVER truncated — the block modal renders ALL of them. item
+                  14: each carries the how-to-fix hint + a 'Fix this' link to
+                  the owning module page. */}
+              {block.verdict.errors.map((f, i) => {
+                const rule = ruleForFinding(ruleIdx, f);
+                const hint = ruleHowToFix(rule);
+                const mod = moduleOfLeaf(f.leaf, view);
+                return (
+                  <div key={i} style={{ marginTop: i === 0 ? 0 : 4 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 6,
+                        alignItems: "baseline",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <code style={{ fontSize: 10, whiteSpace: "nowrap" }}>
+                        {f.rule_id || f.rule}
                       </code>
-                    ) : null}
-                    {f.message}
-                  </span>
-                </div>
-              ))}
-              {block.verdict.errors.length > 8 && (
-                <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>
-                  +{block.verdict.errors.length - 8} more
-                </div>
-              )}
+                      <span style={{ fontSize: 11 }}>
+                        {f.leaf ? (
+                          <code style={{ fontSize: 10, opacity: 0.8 }}>
+                            {f.leaf}:{" "}
+                          </code>
+                        ) : null}
+                        {f.message}
+                      </span>
+                      {mod && (
+                        <Link
+                          href={modulePath(dossierId, mod)}
+                          className="chip"
+                          style={{
+                            fontSize: 9,
+                            padding: "0 6px",
+                            textDecoration: "none",
+                          }}
+                          title="Open the module page that owns this failing leaf"
+                        >
+                          Fix this →
+                        </Link>
+                      )}
+                    </div>
+                    {hint && (
+                      <div
+                        className="mut"
+                        style={{ fontSize: 10, paddingLeft: 8, marginTop: 1 }}
+                      >
+                        Fix: {hint}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           ) : null}
           <div style={{ marginTop: 10 }}>
@@ -342,6 +436,16 @@ export function SequencePanel({
             </button>
           </span>
         </div>
+        {/* ROUND9-VALIDATE item 13: the per-sequence plain-language status
+            rollup — open error/warning counts + last checked, no rule-id
+            decoding needed. */}
+        {rollups[s.sequence] && (
+          <div className="mut" style={{ fontSize: 10.5, marginTop: 3 }}>
+            {rollups[s.sequence].errors} open error(s) ·{" "}
+            {rollups[s.sequence].warnings} warning(s) · last checked{" "}
+            {rollups[s.sequence].at} (structural check, not HC review)
+          </div>
+        )}
         {ops.length > 0 && (
           <div
             style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 4 }}

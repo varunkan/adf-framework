@@ -14,13 +14,21 @@ const WORD: Record<string, string> = {
 };
 
 // The persistent READY / BLOCKED card — plain-language blockers + Resume.
+// journey · J9 simple view · variant="compact" keeps the guardrail set alive
+// when the journey collapses to "rail + active step": the status chip, the
+// filing-checklist % SEPARATE from the eCTD technical-validation verdict, the
+// expander-free provenance + verbatim eValidator disclaimer, and the "single
+// thing standing between you and ready" blocker callout with its jump button.
 export function ReadinessCard({
   data,
   onResume,
+  variant = "full",
 }: {
   data: ReadinessCardData;
   onResume: (key: string) => void;
+  variant?: "full" | "compact";
 }) {
+  const compact = variant === "compact";
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [showRules, setShowRules] = useState(false);
   // R6-B: name + version the validation profile that underpins READY-TO-FILE,
@@ -87,6 +95,15 @@ export function ReadinessCard({
             </span>
           );
         }
+        // journey · J1 ruleset provenance expander-free (round-9 BLOCKER,
+        // n=12): the mirrored HC-criteria version + the update cadence were
+        // only visible inside expanders. They now render on the card FACE as
+        // an always-visible line. The per-rule eValidator error-code map
+        // lives in the rule catalogue / dossier service (separate scope).
+        const modeledOn = crit?.modeled_on ?? criteria?.modeled_on;
+        const review = (crit as { review?: { cadence?: string;
+          last_reviewed?: string; next_review?: string } } | null)?.review
+          ?? criteria?.review;
         return (
           <div style={{ fontSize: 11, marginTop: 4 }}>
             <div>{head}</div>
@@ -102,6 +119,23 @@ export function ReadinessCard({
                 {showRules ? "Hide rule catalogue" : "Rule catalogue"}
               </button>
             </div>
+            {(modeledOn || review) && (
+              <div className="mut" style={{ marginTop: 2 }}>
+                {modeledOn && (
+                  <>
+                    Mirrors <b>{modeledOn}</b>
+                  </>
+                )}
+                {review && (
+                  <>
+                    {modeledOn ? " · " : ""}
+                    reviewed {review.last_reviewed || "—"} · next review{" "}
+                    {review.next_review || "—"}
+                    {review.cadence ? ` (${review.cadence})` : ""}
+                  </>
+                )}
+              </div>
+            )}
             {v && v.ran && !v.passed && v.failing_rules.length > 0 && (
               <ul style={{ margin: "4px 0 0", paddingLeft: 16 }}>
                 {v.failing_rules.map((f, i) => (
@@ -124,8 +158,13 @@ export function ReadinessCard({
         <i style={{ width: `${data.percent}%` }} />
       </div>
 
-      <EctdPrimer compact />
+      {/* journey · J9 · the teaching scaffolding, step tiles and breakdown
+          expander stay in the FULL view only; the compact face above already
+          carries the checklist %, the validation verdict, the provenance and
+          the disclaimer — nothing safety-critical is dropped. */}
+      {!compact && <EctdPrimer compact />}
 
+      {!compact && (
       <button
         className="ghost"
         style={{ fontSize: 11, padding: "2px 6px", marginTop: 6 }}
@@ -136,7 +175,8 @@ export function ReadinessCard({
           ? "Hide breakdown"
           : `How is ${data.percent}% measured?`}
       </button>
-      {showBreakdown && (
+      )}
+      {!compact && showBreakdown && (
         <div style={{ marginTop: 6, fontSize: 11 }}>
           <div className="mut">
             The percentage counts completed filing steps: {doneCount} of{" "}
@@ -170,6 +210,7 @@ export function ReadinessCard({
         </div>
       )}
 
+      {!compact && (
       <div className="tiles">
         {data.tiles.map((t) => (
           <div key={t.key} className={`tile ${t.state}`} title={t.reg || t.label}>
@@ -179,7 +220,10 @@ export function ReadinessCard({
           </div>
         ))}
       </div>
+      )}
 
+      {/* DO-NOT-BREAK: the "single thing standing between you and ready"
+          blocker callout + jump renders in BOTH variants. */}
       {data.blocking_items.length > 0 && (
         <div className="blockers">
           <div className="mut" style={{ fontSize: 12 }}>

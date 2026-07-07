@@ -17,10 +17,15 @@ import {
   CheckCircle2,
   XCircle,
   FileCheck2,
+  FileCode2,
   FolderTree,
   RefreshCw,
 } from "lucide-react";
-import type { ImportCompatReport } from "@/lib/dossierTypes";
+import type {
+  ImportCompatReport,
+  OutlineView,
+  ValidationCriteria,
+} from "@/lib/dossierTypes";
 
 export function ImportCompat({
   dossierId,
@@ -32,6 +37,32 @@ export function ImportCompat({
   const [report, setReport] = useState<ImportCompatReport | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  // Round-9 builder_forms BLOCKER "Export/backbone integrity is unverifiable —
+  // show real backbone XML, exact checks, byte-true md5" (n=5): the ACTUAL
+  // generated backbone XML — index.xml AND ca-regional.xml — inspectable here
+  // (fetched lazily when the inspector opens), plus the versioned HC criteria
+  // the structural check is modeled on.
+  const [outline, setOutline] = useState<OutlineView | null>(null);
+  const [outlineErr, setOutlineErr] = useState("");
+  const [crit, setCrit] = useState<ValidationCriteria | null>(null);
+
+  useEffect(() => {
+    dossierApi
+      .criteriaHistory()
+      .then((h) => setCrit(h.criteria))
+      .catch(() => {});
+  }, []);
+
+  const loadOutline = useCallback(() => {
+    if (outline) return;
+    dossierApi
+      .outline(dossierId, sequence)
+      .then((o) => {
+        setOutline(o);
+        setOutlineErr("");
+      })
+      .catch((e) => setOutlineErr(String(e)));
+  }, [dossierId, sequence, outline]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -252,6 +283,81 @@ export function ImportCompat({
               )}
             </div>
           </details>
+
+          {/* Round-9 builder_forms BLOCKER "Export/backbone integrity is
+              unverifiable" (n=5): the real generated backbone XML — BOTH
+              index.xml and ca-regional.xml — inspectable in place, so the
+              package handed to eValidator can be read line by line. */}
+          <details
+            style={{ marginTop: 10 }}
+            onToggle={(e) => {
+              if ((e.currentTarget as HTMLDetailsElement).open) loadOutline();
+            }}
+          >
+            <summary
+              style={{ cursor: "pointer", fontSize: 12, display: "flex", gap: 6, alignItems: "center" }}
+            >
+              <FileCode2 size={14} aria-hidden />
+              Inspect the generated backbone XML — index.xml + ca-regional.xml
+            </summary>
+            {outlineErr && (
+              <div className="notice bad" style={{ marginTop: 8, fontSize: 12 }}>
+                Backbone unavailable — {outlineErr}
+              </div>
+            )}
+            {!outline && !outlineErr && (
+              <div className="mut" style={{ marginTop: 8, fontSize: 12 }}>
+                Loading backbone…
+              </div>
+            )}
+            {outline && (
+              <div style={{ marginTop: 8 }}>
+                <div className="mut" style={{ fontSize: 11, fontWeight: 600 }}>
+                  index.xml — ICH eCTD 3.2.2 backbone
+                </div>
+                <pre
+                  className="xml"
+                  style={{ maxHeight: 240, overflow: "auto", fontSize: 10.5, marginTop: 4 }}
+                >
+                  {outline.backbone["index.xml"]}
+                </pre>
+                <div className="mut" style={{ fontSize: 11, fontWeight: 600, marginTop: 8 }}>
+                  ca-regional.xml — CA Module 1 v2.2 regional backbone
+                </div>
+                <pre
+                  className="xml"
+                  style={{ maxHeight: 240, overflow: "auto", fontSize: 10.5, marginTop: 4 }}
+                >
+                  {outline.backbone["ca-regional.xml"]}
+                </pre>
+                <div className="mut" style={{ fontSize: 11, marginTop: 6 }}>
+                  util/dtd ships the DTD set both DOCTYPEs resolve against
+                  (ich-ectd-3-2.dtd + ca-regional.dtd) — the files themselves
+                  travel inside the exported zip, where they can be inspected
+                  byte for byte.
+                </div>
+              </div>
+            )}
+          </details>
+
+          {/* Round-9 builder_forms BLOCKER (n=5), profile ask — HONESTY BAR:
+              the structural check maps to HC's published criteria at
+              rule-family level; NO 1:1 commercial eValidator profile/version
+              mapping exists, so none is claimed. */}
+          <div className="mut" style={{ marginTop: 10, fontSize: 12, lineHeight: 1.6 }}>
+            {crit && (
+              <>
+                Structural rules: <b>{crit.name} v{crit.version}</b>, modeled on{" "}
+                <b>{crit.modeled_on}</b>
+                {crit.synced ? <> · synced {crit.synced}</> : null}.{" "}
+              </>
+            )}
+            The check maps to Health Canada&apos;s published criteria at
+            rule-family level — it does <b>not</b> map 1:1 to any specific
+            commercial eValidator profile/version, so none is claimed here.
+            When you run eValidator, select the current Health Canada profile
+            inside that tool.
+          </div>
 
           {/* honesty: standard contract, NOT a vendor certification */}
           <div

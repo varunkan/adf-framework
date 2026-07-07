@@ -6,6 +6,8 @@ import { EvalidatorHandoff } from "@/components/dossier/EvalidatorHandoff";
 import { ImportCompat } from "@/components/dossier/ImportCompat";
 import { ShadowRun } from "@/components/dossier/ShadowRun";
 import { PreflightReport } from "@/components/dossier/PreflightReport";
+import { PathToFiling } from "@/components/dossier/PathToFiling";
+import { AUTO_PLACEMENT_STATEMENT } from "@/components/dossier/validationExtras";
 import type { OutlineView } from "@/lib/dossierTypes";
 
 export default function ViewerPage() {
@@ -116,6 +118,12 @@ export default function ViewerPage() {
             </div>
             <EvalidatorHandoff criteria={content?.validation?.criteria} />
           </div>
+          {/* ROUND9-VALIDATE item 8 (n=5): the 'Path to filing' CHECKLIST —
+              real checkable steps (export → obtain & run an eValidator →
+              resolve & re-export → attach the result → CESG WebTrader), each
+              marked ANDS Studio vs External. Extends the banner above; never
+              replaces it. */}
+          <PathToFiling dossierId={dossierId} exported />
         </>
       )}
       <p className="mut" style={{ fontSize: 13, marginTop: 10 }}>
@@ -159,8 +167,14 @@ export default function ViewerPage() {
                   <div key={lf.leaf_id} className="vf-leaf">
                     <span aria-hidden>📄 </span>
                     {lf.title || lf.leaf_id}{" "}
-                    <span className="mut">
-                      {lf.href} · md5 {lf.checksum.slice(0, 8)}…
+                    {/* ROUND9-VALIDATE item 16 (consultant_ex_hc): every md5
+                        render carries the 'document control' label + tooltip —
+                        enforced by the copy-rule lint in the service suite. */}
+                    <span
+                      className="mut"
+                      title="md5 is a content fingerprint used for document control (spotting silent changes) — NOT validation or acceptance. The eCTD 3.2.2 backbone itself uses md5 checksums."
+                    >
+                      {lf.href} · md5 (document control) {lf.checksum.slice(0, 8)}…
                     </span>
                   </div>
                 ))}
@@ -170,6 +184,11 @@ export default function ViewerPage() {
           <div className="mut" style={{ marginTop: 10, fontSize: 13 }}>
             {files?.live_leaf_count || 0} live leaves · placement{" "}
             {files?.placement_version}
+          </div>
+          {/* ROUND9-VALIDATE item 15 (ra_director_cro): the direct statement —
+              no manual per-document leaf placement is required. */}
+          <div className="mut" style={{ marginTop: 6, fontSize: 12.5 }}>
+            {AUTO_PLACEMENT_STATEMENT}
           </div>
         </div>
       )}

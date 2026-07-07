@@ -30,8 +30,15 @@ def test_enroll_then_verify_enables_mfa(client):
     v = client.post("/api/identity/auth/mfa/verify", json={"code": code},
                     headers=auth(body["token"]))
     assert v.status_code == 200 and v.json()["enabled"] is True
+    # the signup token is setup-scoped (round-9 MFA-required default), so the
+    # status read needs the full session minted by a password+TOTP login
+    full = client.post("/api/identity/auth/login",
+                       json={"email": "ra@acme.io", "password": "pw12345-2026",
+                             "tenant_id": body["tenant"]["id"],
+                             "mfa_code": security.totp_code(enrol["secret"])})
+    assert full.status_code == 200
     status = client.get("/api/identity/auth/mfa/status",
-                        headers=auth(body["token"])).json()
+                        headers=auth(full.json()["token"])).json()
     assert status["enabled"] is True
 
 

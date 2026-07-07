@@ -6,8 +6,8 @@ from fastapi import APIRouter, FastAPI, Header, Query
 
 from ands_shared import create_app
 
-from .models import (AdvanceIn, DossierAssessIn, IntakeIn, NoticeIn, PauseIn,
-                     PlaceDocIn, StartIn)
+from .models import (AdvanceIn, DossierAssessIn, EventIn, IntakeIn, NoticeIn,
+                     PauseIn, PlaceDocIn, StartIn)
 from .service import JourneyService
 
 
@@ -60,6 +60,21 @@ def build_app(service: JourneyService) -> FastAPI:
         """Drop a document onto an eCTD Module slot (lights up the tower)."""
         return service.place_document(session_id, body.slot_key, body.doc,
                                       body.languages, tenant_id=x_tenant_id or None)
+
+    @router.get("/{session_id}/events")
+    def events(session_id: str,
+               x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        """journey · J21 · the session's append-only event ledger — available
+        from the very first action, before any dossier exists."""
+        return service.events(session_id, x_tenant_id or None)
+
+    @router.post("/{session_id}/events")
+    def log_event(session_id: str, body: EventIn,
+                  x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        """journey · J20 · record a whitelisted UX event (expert_mode). The
+        server enforces the documented-reason requirement on enable."""
+        return service.log_ux_event(session_id, body.type, body.reason,
+                                    body.data, tenant_id=x_tenant_id or None)
 
     @router.post("/{session_id}/track/notice")
     def track_notice(session_id: str, body: NoticeIn,

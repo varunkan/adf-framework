@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef } from "react";
 import * as Tooltip from "@radix-ui/react-tooltip";
-import { HelpCircle, Sparkles } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import type { ModuleView, SectionNode } from "@/lib/dossierTypes";
 import {
   LEAF_STATUS,
@@ -137,36 +137,45 @@ export function SectionTree({
         </div>
       </header>
 
-      {/* P2-3 — the always-on legend is demoted to a collapsed "Status key" */}
-      <Tooltip.Root>
-        <Tooltip.Trigger asChild>
-          <button type="button" className="tree-key-btn ghost" aria-label="Status key">
-            <HelpCircle size={13} aria-hidden /> Status key
-          </button>
-        </Tooltip.Trigger>
-        <Tooltip.Portal>
-          <Tooltip.Content className="tt tt-key" sideOffset={6} align="start">
-            <b>What each status means</b>
-            <ul className="tt-legend">
-              {(["empty", "partial", "complete", "review", "na"] as LeafState[]).map(
-                (s) => {
-                  const m = LEAF_STATUS[s];
-                  const Icon = m.icon;
-                  return (
-                    <li key={s}>
-                      <span className={`t-glyph ${s}`} aria-hidden>
-                        <Icon size={14} aria-hidden />
-                      </span>
-                      {m.word}
-                    </li>
-                  );
-                }
-              )}
-            </ul>
-            <Tooltip.Arrow className="tt-arrow" />
-          </Tooltip.Content>
-        </Tooltip.Portal>
-      </Tooltip.Root>
+      {/* Round-9 builder_forms MAJOR "Workspace density overload" (n=22),
+          remaining ask "keep the status-key legend persistently visible": the
+          key is a compact ALWAYS-ON strip again (P2-3 had demoted it to a
+          hover-only button, which hid the vocabulary the panel asked to keep).
+          One quiet line — icon + word, hover for the full meaning — so the
+          density win is not undone. */}
+      <div
+        className="mut"
+        role="list"
+        aria-label="Status key — what each icon means"
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: "3px 10px",
+          alignItems: "center",
+          margin: "6px 0 2px",
+          fontSize: 11,
+        }}
+      >
+        {(["empty", "partial", "complete", "review", "na"] as LeafState[]).map(
+          (s) => {
+            const m = LEAF_STATUS[s];
+            const Icon = m.icon;
+            return (
+              <span
+                key={s}
+                role="listitem"
+                title={m.help}
+                style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+              >
+                <span className={`t-glyph ${s}`} aria-hidden>
+                  <Icon size={12} aria-hidden />
+                </span>
+                {m.word}
+              </span>
+            );
+          }
+        )}
+      </div>
 
       <ul role="tree" aria-orientation="vertical" ref={listRef}>
         {visible.map((n) =>

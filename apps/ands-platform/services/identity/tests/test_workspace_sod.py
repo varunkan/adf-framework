@@ -14,19 +14,13 @@ real workspace control over the SIGN path — it is NOT an SSO/IdP identity clai
 
 from app import rbac
 
-from tests.conftest import auth
-
-
-def _signup(client, email="ra@acme.io", company="Acme"):
-    return client.post("/api/identity/auth/signup",
-                       json={"email": email, "password": "pw12345-2026",
-                             "company_name": company}).json()
+from tests.conftest import auth, signup_admin
 
 
 # -- the flag itself ------------------------------------------------------
 
 def test_tenant_admin_can_set_and_read_require_sod(client):
-    body = _signup(client)
+    body = signup_admin(client)
     tok = body["token"]
     # default is OFF — the honest starting posture (advisory, not enforced)
     sec = client.get("/api/identity/tenant/security", headers=auth(tok)).json()
@@ -45,8 +39,12 @@ def test_tenant_admin_can_set_and_read_require_sod(client):
 
 def test_plain_user_cannot_set_require_sod(ctx):
     client = ctx.client
-    admin = _signup(client)
+    admin = signup_admin(client)
     tid = admin["tenant"]["id"]
+    # relax the (round-9 default-on) MFA mandate so the member can hold a
+    # plain password session for this RBAC check
+    client.post("/api/identity/tenant/security/require-mfa",
+                json={"require_mfa": False}, headers=auth(admin["token"]))
     ctx.service._add_user(tid, "member@acme.io", "pw12345-2026",
                           rbac.USER_ROLE, "Member")
     login = client.post("/api/identity/auth/login",
@@ -58,9 +56,12 @@ def test_plain_user_cannot_set_require_sod(ctx):
 
 
 def test_require_sod_is_independent_of_require_mfa(client):
-    """The two workspace policies are orthogonal — turning SoD on must not turn
-    MFA on (or vice versa)."""
-    tok = _signup(client)["token"]
+    """The two workspace policies are orthogonal — flipping SoD must not flip
+    MFA (or vice versa). MFA now defaults ON (round-9 item 4), so we relax it
+    first and prove the SoD flip leaves it relaxed."""
+    tok = signup_admin(client)["token"]
+    client.post("/api/identity/tenant/security/require-mfa",
+                json={"require_mfa": False}, headers=auth(tok))
     client.post("/api/identity/tenant/security/require-sod",
                 json={"require_sod": True}, headers=auth(tok))
     sec = client.get("/api/identity/tenant/security", headers=auth(tok)).json()
@@ -74,7 +75,7 @@ def test_internal_workspace_policy_read_reports_sod(client):
     """The sign path (a backend service) reads the workspace policy for a tenant
     via the internal policy endpoint. In-process (no internal token set) it is
     reachable directly; the payload carries require_sod + require_mfa."""
-    body = _signup(client)
+    body = signup_admin(client)
     tok = body["token"]
     tid = body["tenant"]["id"]
     client.post("/api/identity/tenant/security/require-sod",

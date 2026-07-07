@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { UserChip } from "@/components/UserChip";
 import { useParams, useRouter } from "next/navigation";
 import { useDossier } from "./DossierContext";
@@ -28,21 +28,51 @@ const MODULES = ["1", "2", "3", "4", "5"];
 // Honest: the in-app REP Dossier-ID Request records the request intent — it
 // does NOT transmit to Health Canada; export stays blocked until a real ID is
 // set AND validation passes.
+// R9-CATALOG "Placeholder-ID warning too easy to forget" (n=4): the banner
+// re-asks for an explicit acknowledgment every 7 days until the real ID is
+// set. The ack quiets only the extra prompt — the banner itself NEVER hides
+// (persistent, unmissable), and export/transmission stay hard-blocked.
+const PIB_ACK_MS = 7 * 24 * 60 * 60 * 1000;
+
 function PlaceholderIdBanner({ dossierId }: { dossierId: string }) {
   const router = useRouter();
   const params = useParams();
   const { index, refresh } = useDossier();
   const [open, setOpen] = useState(false);
+  const [needsAck, setNeedsAck] = useState(false);
+  const isPlaceholder = dossierId.startsWith("d");
+  // recurring-ack state lives in the browser (per user+dossier); read in an
+  // effect so SSR/hydration stays deterministic
+  useEffect(() => {
+    if (!isPlaceholder) return;
+    try {
+      const t = Number(localStorage.getItem(`ands.pib.ack.${dossierId}`) || 0);
+      setNeedsAck(!t || Date.now() - t > PIB_ACK_MS);
+    } catch {
+      setNeedsAck(true);
+    }
+  }, [dossierId, isPlaceholder]);
   // only for placeholder (draft) IDs — a real HC Dossier ID never starts with 'd'
-  if (!dossierId.startsWith("d")) return null;
+  if (!isPlaceholder) return null;
   const active = String((params as any)?.module || "1");
+  // R9-CATALOG (n=4): the placeholder's AGE, from the dossier creation stamp
+  const created = index?.created_at ? Date.parse(index.created_at) : NaN;
+  const ageDays = isNaN(created)
+    ? null : Math.max(0, Math.floor((Date.now() - created) / 86400000));
+  function acknowledge() {
+    try {
+      localStorage.setItem(`ands.pib.ack.${dossierId}`, String(Date.now()));
+    } catch {}
+    setNeedsAck(false);
+  }
   return (
     <>
       <div className="placeholder-id-banner notice warn" role="status">
         <KeyRound size={16} aria-hidden className="pib-icon" />
         <span className="pib-body">
           <strong>
-            This dossier uses a placeholder ID ({dossierId}).
+            This dossier uses a placeholder ID ({dossierId})
+            {ageDays !== null ? ` — day ${ageDays + 1}` : ""}.
           </strong>{" "}
           Set the real Health Canada Dossier ID (issued via REP) before
           validation / export — export stays blocked until you do.
@@ -52,6 +82,26 @@ function PlaceholderIdBanner({ dossierId }: { dossierId: string }) {
           Set real Dossier ID
         </button>
       </div>
+      {needsAck && (
+        <div className="notice bad" role="alert" style={{ display: "flex",
+          gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ flex: "1 1 auto" }}>
+            <strong>Action needed:</strong> this dossier still runs on a
+            placeholder ID{ageDays !== null ? ` (day ${ageDays + 1})` : ""}.
+            Enter the real REP-issued ID — or acknowledge to be re-asked in
+            7 days. The warning banner stays either way.
+          </span>
+          <button className="chip" onClick={() => setOpen(true)}>
+            <PenLine size={13} aria-hidden />
+            Set real ID now
+          </button>
+          <button className="ghost" style={{ fontSize: 12 }}
+            onClick={acknowledge}
+            title="Records your acknowledgment in this browser and re-asks in 7 days. Export/transmission remain blocked until the real ID is set.">
+            Acknowledge — re-ask me in 7 days
+          </button>
+        </div>
+      )}
       {open && (
         <SetRealDossierIdModal
           dossierId={dossierId}

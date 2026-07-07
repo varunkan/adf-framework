@@ -9,7 +9,7 @@ new regulatory logic.
 
 from __future__ import annotations
 
-from ands_shared import EventEnvelope, ProblemError, new_id
+from ands_shared import EventEnvelope, ProblemError, new_id, utcnow_iso
 
 from . import content_slots, drug_intake, dossier_id, journey, readiness_card, tracking
 from .ports import SessionRepository
@@ -32,6 +32,18 @@ class JourneyService:
         self.dossier = dossier          # DossierClient port (optional)
         self.governance = governance    # GovernanceClient port (optional)
         self.transmission = transmission  # TransmissionClient port (optional)
+
+    # -- session event ledger (J20/J21) --------------------------------------
+    # journey · J21 audit from the first action · an APPEND-ONLY, sequence-
+    # numbered event ledger on the session itself, written from `start()`
+    # onward — BEFORE any dossier (and its Part-11 ledger) exists. It is a
+    # second, additive record: the dossier's Part-11 ledger is never replaced.
+    def _log_event(self, session: dict, event_type: str, **data) -> dict:
+        events = session.setdefault("events", [])
+        event = {"seq": len(events) + 1, "at": utcnow_iso(),
+                 "type": event_type, "data": data}
+        events.append(event)          # append-only by construction
+        return event
 
     # -- emit ---------------------------------------------------------------
     def _emit(self, event_type: str, session: dict, **data) -> None:
@@ -136,11 +148,18 @@ class JourneyService:
             "tenant_id": owner,
             "signals": signals,
             "intake": None,
+            "events": [],
         }
+        # journey · J21 · ledgered from the VERY FIRST action: seq 1 is the
+        # session's creation, before any dossier record exists.
+        self._log_event(session, "journey.session_started",
+                        title=_s(data.get("title")))
         answers = data.get("answers")
         if answers:
             session["intake"] = drug_intake.assess(answers)
             self._apply_intake(session, answers)
+            self._log_event(session, "journey.intake",
+                            drug_product=_s(answers.get("drug_product")))
         self.repo.create(session_id, session)
         self._emit("journey.started", session)
         return self._view(session)
@@ -164,6 +183,10 @@ class JourneyService:
             session = self._load(session_id, tenant_id)
             session["intake"] = assessment
             self._apply_intake(session, answers or {})
+            self._log_event(session, "journey.intake",
+                            drug_product=_s((answers or {}).get("drug_product")),
+                            submission_type=_s(
+                                assessment["route"].get("submission_type")))
             self.repo.update(session["id"], session)
             self._emit("journey.intake", session,
                        submission_type=assessment["route"].get("submission_type"),
@@ -294,6 +317,30 @@ class JourneyService:
                     detail="; ".join(m.get("title", "")
                                      for m in (gate.get("missing") or [])[:6]))
             signals["content_done"] = True
+        elif step == "bilingual":
+            # journey · J8 bilingual M1/PM stage · n=5. The step records a REAL
+            # human review confirmation (EN/FR parity + French translation
+            # review are required; mock-ups + PM XML validation are recorded
+            # as stated). Honesty: this records the filer's review — the
+            # mock-up FILES and the PM XML validate affordance live in the
+            # dossier builder (MonographPanel), not here.
+            parity = bool(data.get("en_fr_parity"))
+            translated = bool(data.get("translation_reviewed"))
+            if not (parity and translated):
+                raise ProblemError(
+                    422, "confirm the EN + FR Product Monograph parity review "
+                         "and the French translation review to complete this "
+                         "step — the bilingual PM at 1.3.1 is a transmission "
+                         "blocker",
+                    detail="bilingual")
+            signals["bilingual"] = {
+                "confirmed": True,
+                "en_fr_parity": True,
+                "translation_reviewed": True,
+                "mockups_state": _s(data.get("mockups_state")) or "not_recorded",
+                "pm_xml_validated": bool(data.get("pm_xml_validated")),
+                "reviewer": _s(data.get("reviewer")),
+                "at": utcnow_iso()}
         elif step == "validate":
             did = _s(signals.get("dossier_id"))
             report = (self.dossier.validate(did)
@@ -402,6 +449,56 @@ class JourneyService:
                 signals["esign_manifest"] = manifest
         elif step == "transmit":
             did = _s(signals.get("dossier_id"))
+            # journey · J3 hard eValidator gate · BEFORE transmitting, an
+            # eValidator run must be confirmed. Two honest sources, in order:
+            # 1) the dossier's recorded USER-ATTESTED external attestation
+            #    (set via the dossier service's evalidator-attestation flow);
+            # 2) the filer's own attestation in this request's data.
+            # Either way it is the USER's attested result — never a tool
+            # self-claim of having run HC's eValidator.
+            att = None
+            if self.dossier is not None and did:
+                try:
+                    att = self.dossier.evalidator_attestation(did)
+                except AttributeError:
+                    att = None            # older client port — fall through
+            att_result = _s((att or {}).get("result")).lower()
+            if att_result == "fail":
+                raise ProblemError(
+                    422, "your attested eValidator run failed — resolve the "
+                         "findings, re-export and re-attest before "
+                         "transmitting",
+                    detail="evalidator")
+            if att_result == "pass":
+                signals["evalidator"] = {
+                    "attested": True, "result": "pass",
+                    "source": "dossier_attestation",
+                    "validator_name": _s(att.get("validator_name")) or None,
+                    "at": utcnow_iso()}
+            else:
+                confirmed = bool(data.get("evalidator_confirmed"))
+                own_result = (_s(data.get("evalidator_result")).lower()
+                              or "pass")
+                if not confirmed:
+                    raise ProblemError(
+                        422, "an eValidator run must be confirmed before "
+                             "transmitting — run Health Canada's published "
+                             "validation criteria through an eValidator (e.g. "
+                             "the commercially licensed Lorenz eValidator) on "
+                             "the exported package, then attest the result "
+                             "here",
+                        detail="evalidator")
+                if own_result != "pass":
+                    raise ProblemError(
+                        422, "your attested eValidator run failed — resolve "
+                             "the findings, re-export and re-attest before "
+                             "transmitting",
+                        detail="evalidator")
+                signals["evalidator"] = {
+                    "attested": True, "result": "pass",
+                    "source": "user_attested",
+                    "validator_name": _s(data.get("validator_name")) or None,
+                    "at": utcnow_iso()}
             seq = _s(signals.get("sequence")) or "0000"
             txn = (self.transmission.transmit(did, seq)
                    if self.transmission is not None and did else None)
@@ -420,9 +517,51 @@ class JourneyService:
                     "real": False}
         # 'track' is ongoing — nothing to write.
 
+        # journey · J21 · every successful advance lands on the session ledger.
+        self._log_event(session, f"journey.step.{step}", step=step)
         self.repo.update(session["id"], session)
         self._emit(f"journey.step.{step}", session)
         return self._view(session)
+
+    # -- session event ledger (J20/J21) --------------------------------------
+    # UX event types the UI may report through POST /events. Everything else
+    # (steps, intake, placements, notices) is written server-side only, so the
+    # ledger cannot be polluted with spoofed regulatory events.
+    _UX_EVENT_TYPES = ("expert_mode",)
+
+    def events(self, session_id: str, tenant_id: str | None = None) -> dict:
+        """journey · J21 · the session's append-only event ledger (readable
+        from the very first action — no dossier required)."""
+        session = self._load(session_id, tenant_id)
+        events = session.get("events") or []
+        return {"session_id": session["id"], "events": events,
+                "count": len(events)}
+
+    def log_ux_event(self, session_id: str, event_type: str, reason: str = "",
+                     data: dict | None = None,
+                     tenant_id: str | None = None) -> dict:
+        """journey · J20 expert-mode audit · record a whitelisted UX event.
+        Enabling Expert mode REQUIRES a documented reason (422 without one) —
+        enforced server-side so the requirement cannot be bypassed in the UI."""
+        session = self._load(session_id, tenant_id)
+        kind = _s(event_type)
+        kind = kind[len("journey."):] if kind.startswith("journey.") else kind
+        if kind not in self._UX_EVENT_TYPES:
+            raise ProblemError(422, "unsupported session event type",
+                               detail=kind or "(empty)")
+        data = dict(data or {})
+        enabled = bool(data.get("enabled"))
+        reason = _s(reason)
+        if enabled and not reason:
+            raise ProblemError(
+                422, "a documented reason is required to enable Expert mode — "
+                     "it is recorded on the session's audit ledger",
+                detail="expert_mode")
+        event = self._log_event(session, f"journey.{kind}",
+                                enabled=enabled, reason=reason)
+        self.repo.update(session["id"], session)
+        self._emit(f"journey.{kind}", session, enabled=enabled, reason=reason)
+        return {"event": event, "count": len(session.get("events") or [])}
 
     # -- content slots (drag-drop document placement onto Module 1-5) -------
     def place_document(self, session_id: str, slot_key: str, doc,
@@ -437,6 +576,7 @@ class JourneyService:
             raise ProblemError(422, "unknown content slot", detail=str(exc))
         signals["content_slots"] = slots
         signals["content_done"] = content_slots.checklist_gate(slots)["complete"]
+        self._log_event(session, "journey.content.placed", slot=_s(slot_key))
         self.repo.update(session["id"], session)
         self._emit("journey.content.placed", session, slot=_s(slot_key))
         return self._view(session)
@@ -451,6 +591,9 @@ class JourneyService:
         tr = self._tracking(session.setdefault("signals", {}))
         tr["notices"].append({"type": _s((notice or {}).get("type")),
                               "date": _s((notice or {}).get("date"))})
+        self._log_event(session, "journey.track.notice",
+                        notice_type=_s((notice or {}).get("type")),
+                        date=_s((notice or {}).get("date")))
         self.repo.update(session["id"], session)
         self._emit("journey.track.notice", session,
                    notice_type=_s((notice or {}).get("type")))

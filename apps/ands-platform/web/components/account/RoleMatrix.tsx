@@ -44,14 +44,21 @@ function label(row: RoleMatrixRow): string {
   return DISPLAY_LABEL[row.role] || row.label;
 }
 
-function RoleCard({ row, myRole }: { row: RoleMatrixRow; myRole?: string }) {
+// onboarding — item 6 (MAJOR n=7): the internal role key is NOISE on the
+// default cards, so it only renders when showCode is set (the advanced
+// section). The plain-name ↔ key mapping is preserved — relocated into the
+// "Advanced / vendor roles" expander below, not deleted.
+function RoleCard({ row, myRole, showCode = false }:
+  { row: RoleMatrixRow; myRole?: string; showCode?: boolean }) {
   return (
     <div className="card" style={{ padding: "14px 16px",
       outline: row.role === myRole ? "1px solid var(--accent, #6ea8fe)" : "none" }}>
       <div style={{ display: "flex", gap: 8, alignItems: "baseline",
         flexWrap: "wrap" }}>
         <b style={{ fontSize: 15 }}>{label(row)}</b>
-        <code className="mut" style={{ fontSize: 12 }}>{row.role}</code>
+        {showCode && (
+          <code className="mut" style={{ fontSize: 12 }}>{row.role}</code>
+        )}
         {row.role === myRole && (
           <span className="chip ready" style={{ fontSize: 11 }}>Your role</span>
         )}
@@ -113,37 +120,58 @@ export function RoleMatrix({ myRole }: { myRole?: string }) {
                 <RoleCard key={row.role} row={row} myRole={myRole} />
               ))}
 
-              {/* #3 — the vendor-only "owner" row behind a collapsed expander */}
-              {rows.some((r) => VENDOR_ROLES.has(r.role)) && (
-                <div>
-                  <button className="ghost" style={{ fontSize: 12 }}
-                    aria-expanded={showVendor}
-                    onClick={() => setShowVendor((v) => !v)}>
-                    {showVendor
-                      ? "Hide advanced / vendor roles ▲"
-                      : "Advanced / vendor roles ▼"}
-                  </button>
-                  {showVendor && (
-                    <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
-                      <p className="mut" style={{ fontSize: 12, margin: 0 }}>
-                        This role belongs to the company that hosts the
-                        platform, not to your organisation — you will never be
-                        assigned it. Shown here for completeness.
+              {/* #3 — the vendor-only "owner" row behind a collapsed expander.
+                  item 6 — the internal role keys live HERE now (an "Internal
+                  role keys" list for API/integration work), so the default
+                  cards stay plain-name only while the mapping stays
+                  available. */}
+              <div>
+                <button className="ghost" style={{ fontSize: 12 }}
+                  aria-expanded={showVendor}
+                  onClick={() => setShowVendor((v) => !v)}>
+                  {showVendor
+                    ? "Hide advanced / vendor roles ▲"
+                    : "Advanced / vendor roles ▼"}
+                </button>
+                {showVendor && (
+                  <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
+                    <p className="mut" style={{ fontSize: 12, margin: 0 }}>
+                      This role belongs to the company that hosts the
+                      platform, not to your organisation — you will never be
+                      assigned it. Shown here for completeness.
+                    </p>
+                    {rows.filter((r) => VENDOR_ROLES.has(r.role)).map((row) => (
+                      <RoleCard key={row.role} row={row} myRole={myRole}
+                        showCode />
+                    ))}
+                    <div>
+                      <b style={{ fontSize: 13 }}>
+                        Internal role keys (for API / integration work)
+                      </b>
+                      <ul style={{ margin: "6px 0 0", paddingLeft: 18,
+                        fontSize: 12, display: "grid", gap: 4 }}>
+                        {rows.map((row) => (
+                          <li key={row.role}>
+                            {label(row)} → <code>{row.role}</code>
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="mut" style={{ fontSize: 12,
+                        margin: "6px 0 0" }}>
+                        These code keys (e.g. <code>tenant-admin</code>) are
+                        the internal identifiers the API enforces — you only
+                        need them for API or integration work. Everywhere else
+                        the plain name is what each role means for you.
                       </p>
-                      {rows.filter((r) => VENDOR_ROLES.has(r.role)).map((row) => (
-                        <RoleCard key={row.role} row={row} myRole={myRole} />
-                      ))}
                     </div>
-                  )}
-                </div>
-              )}
+                  </div>
+                )}
+              </div>
 
               <p className="mut" style={{ fontSize: 12, margin: 0 }}>
                 This table is generated from the same capability sets the API
                 enforces on every request — it cannot drift from what is actually
-                allowed. The role code beside each name (e.g.{" "}
-                <code>tenant-admin</code>) is the internal key; the plain name is
-                what it means for you.
+                allowed.
               </p>
             </div>
           )}

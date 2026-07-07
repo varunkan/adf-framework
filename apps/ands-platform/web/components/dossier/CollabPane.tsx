@@ -51,6 +51,11 @@ export function CollabPane({ dossierId }: { dossierId: string }) {
   const [due, setDue] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Round-9 builder_forms MAJOR "PM-level rollup missing — … promote
+  // 'Collaboration & task assignments' out of the one-line expander" (n=3):
+  // the pane is now a first-class rail card (see the module workspace); to
+  // keep the promoted card calm, the add-task form folds behind one toggle.
+  const [showAdd, setShowAdd] = useState(false);
 
   const refresh = useCallback(
     async (user: string) => {
@@ -258,38 +263,44 @@ export function CollabPane({ dossierId }: { dossierId: string }) {
         )}
       </div>
 
-      <div
-        className="mut"
-        style={{ fontSize: 12, fontWeight: 600, marginTop: 14 }}
-      >
-        Add a task
-      </div>
-      <input
-        style={input}
-        placeholder="New task title"
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-      />
-      <input
-        style={input}
-        placeholder="Assignee (email)"
-        value={assignee}
-        onChange={(e) => setAssignee(e.target.value)}
-      />
-      <input
-        style={input}
-        type="date"
-        value={due}
-        onChange={(e) => setDue(e.target.value)}
-      />
       <button
         className="ghost"
-        style={{ marginTop: 8, fontSize: 12, padding: "6px 10px" }}
-        onClick={createTask}
-        disabled={busy || !title.trim() || !assignee.trim()}
+        style={{ marginTop: 12, fontSize: 12, padding: "4px 10px" }}
+        aria-expanded={showAdd}
+        onClick={() => setShowAdd((v) => !v)}
       >
-        {busy ? "Adding…" : "Add task"}
+        {showAdd ? "− Hide add task" : "+ Add a task"}
       </button>
+      {showAdd && (
+        <>
+          <input
+            style={input}
+            placeholder="New task title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+          <input
+            style={input}
+            placeholder="Assignee (email)"
+            value={assignee}
+            onChange={(e) => setAssignee(e.target.value)}
+          />
+          <input
+            style={input}
+            type="date"
+            value={due}
+            onChange={(e) => setDue(e.target.value)}
+          />
+          <button
+            className="ghost"
+            style={{ marginTop: 8, fontSize: 12, padding: "6px 10px" }}
+            onClick={createTask}
+            disabled={busy || !title.trim() || !assignee.trim()}
+          >
+            {busy ? "Adding…" : "Add task"}
+          </button>
+        </>
+      )}
     </div>
   );
 }

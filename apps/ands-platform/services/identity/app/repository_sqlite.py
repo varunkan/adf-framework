@@ -200,16 +200,24 @@ class SqliteIdentityRepository:
     def delete_sessions_for_tenant_without_mfa(self, tenant_id) -> None:
         # WS4 fix (revoke-on-mandate-on): drop full sessions of tenant members
         # who have no verified MFA, so flipping the mandate on takes effect now.
+        # IdP-verified (SSO) sessions are kept — the mandate governs password
+        # credentials; federated authentication strength is the IdP's policy
+        # (mirrors the _session_blocked_by_mandate exemption).
         self.db.execute(
-            "DELETE FROM sessions WHERE tenant_id = ? AND user_id IN ("
+            "DELETE FROM sessions WHERE tenant_id = ? AND "
+            "COALESCE(identity_verified, 0) = 0 AND user_id IN ("
             "SELECT id FROM users WHERE tenant_id = ? AND "
             "COALESCE(mfa_enabled, 0) = 0)", (tenant_id, tenant_id))
 
     # -- tenants ------------------------------------------------------------
     def create_tenant(self, tenant_id, name, plan_id, status) -> dict:
+        # Round-9 onboarding item 4: NEW workspaces default to 'MFA Required'
+        # (require_mfa=1), enforced at sign-in for every member; relaxing it is
+        # an explicit admin action. The DDL default stays 0 so PRE-EXISTING
+        # workspaces are not silently flipped into a lockout.
         self.db.execute(
-            "INSERT INTO tenants (id, name, plan_id, status, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO tenants (id, name, plan_id, status, require_mfa, "
+            "created_at) VALUES (?, ?, ?, ?, 1, ?)",
             (tenant_id, name, plan_id, status, utcnow_iso()))
         return self.get_tenant(tenant_id)
 

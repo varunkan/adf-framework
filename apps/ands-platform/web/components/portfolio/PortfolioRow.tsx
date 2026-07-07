@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { DossierListItem } from "@/lib/dossierTypes";
 import type { DossierTaskSummary } from "@/lib/collabApi";
-import { MiniTower } from "./MiniTower";
+import { MiniTower, type M1Labelling } from "./MiniTower";
 import { ProvenancePopover, type Provenance } from "@/components/ProvenancePopover";
 import { dueMeta } from "@/lib/deadline";
 import { ShieldCheck } from "lucide-react";
@@ -24,6 +24,26 @@ export type NoaClock =
   | { kind: "none" }
   | { kind: "action"; days: number; prov: Provenance }  // brand's 45-day window
   | { kind: "stay"; days: number; prov: Provenance };   // 24-month stay running
+
+// Round-9 (operations minor, n=1; regops_publisher): per-dossier technical-
+// validation status from the dossier's real content state — the STRUCTURAL
+// check this tool runs plus whether a user-attested eValidator pass + report
+// is on file. Absent (undefined) while content loads; never fabricated.
+export type ValState = {
+  passed: boolean;      // structural (presence/format) check
+  errors: number;
+  evalCleared: boolean; // user-attested eValidator PASS + attached report
+};
+
+// Round-9 (operations minor, n=1; cro_pm): which status-report fields are
+// blank on this row (owner / client / due) — "a status report full of blanks".
+export function missingInfoOf(d: DossierListItem): string[] {
+  const out: string[] = [];
+  if (!d.owner) out.push("owner");
+  if (!d.sponsor) out.push("client");
+  if (!d.soonest_due) out.push("due date");
+  return out;
+}
 
 function NoaChip({ clock }: { clock: NoaClock }) {
   if (clock.kind === "none") return null;
@@ -65,8 +85,10 @@ function FeeChip({ state }: { state: FeeState }) {
 // WS6: owner (accountable PM) · client (REP sponsor) · soonest deadline. A PM
 // scanning the portfolio sees ownership and client segregation without opening
 // a dossier. Missing values read as an explicit "—" (unassigned), never blank.
-function PmColumns({ owner, sponsor, due }: {
-  owner?: string | null; sponsor?: string | null; due?: string | null }) {
+function PmColumns({ owner, sponsor, due, missingInfo = [] }: {
+  owner?: string | null; sponsor?: string | null; due?: string | null;
+  // Round-9 (n=1; cro_pm): blank owner/client/due fields, flagged on the row
+  missingInfo?: string[] }) {
   const dm = dueMeta(due);
   return (
     <div style={{ flex: "0 1 220px", minWidth: 160, display: "flex",
@@ -101,6 +123,16 @@ function PmColumns({ owner, sponsor, due }: {
           <span className="mut">none set</span>
         )}
       </div>
+      {/* Round-9 (operations minor, n=1; cro_pm): "owner/client/due values can
+          read '—' or 'none set,' which for me means a status report full of
+          blanks" — flag the blanks on the row so a PM chases them BEFORE
+          exporting the client status report. */}
+      {missingInfo.length > 0 && (
+        <span className="chip blocked" style={{ fontSize: 10, width: "fit-content" }}
+          title={`These fields are blank and will export as empty cells on the client status report: ${missingInfo.join(", ")}. Set them on the dossier before exporting.`}>
+          ⚠ missing: {missingInfo.join(" · ")}
+        </span>
+      )}
     </div>
   );
 }
@@ -129,9 +161,10 @@ function CollabChips({ collab }: { collab?: DossierTaskSummary }) {
   );
 }
 
-export function PortfolioRow({ d, fee, noa = { kind: "none" }, collab }: {
+export function PortfolioRow({ d, fee, noa = { kind: "none" }, collab, val,
+  labelling }: {
   d: DossierListItem; fee: FeeState; noa?: NoaClock;
-  collab?: DossierTaskSummary }) {
+  collab?: DossierTaskSummary; val?: ValState; labelling?: M1Labelling }) {
   const passed = d.tower.filter((t) => t.state === "pass").length;
   const applic = d.tower.filter((t) => t.state !== "na").length;
   const id = encodeURIComponent(d.dossier_id);
@@ -154,10 +187,12 @@ export function PortfolioRow({ d, fee, noa = { kind: "none" }, collab }: {
       </div>
 
       {/* col 2 — WS6 PM columns: owner / client / soonest deadline */}
-      <PmColumns owner={d.owner} sponsor={d.sponsor} due={d.soonest_due} />
+      <PmColumns owner={d.owner} sponsor={d.sponsor} due={d.soonest_due}
+        missingInfo={missingInfoOf(d)} />
 
       {/* col 3 — module tower (fills the cell, right-aligned bars) */}
-      <MiniTower tower={d.tower} missing={d.gate?.missing} />
+      <MiniTower tower={d.tower} missing={d.gate?.missing}
+        labelling={labelling} />
 
       {/* col 4 — ONE primary status chip, in a fixed-width cell so every row's
           status aligns. Blocked collaboration outranks the gate. Round-9: the
@@ -203,12 +238,48 @@ export function PortfolioRow({ d, fee, noa = { kind: "none" }, collab }: {
             {/* non-urgent clocks stay here; urgent ones are on the row face */}
             {!urgentNoa && <NoaChip clock={noa} />}
             <CollabChips collab={collab} />
+            {/* Round-9 (operations MAJOR, n=2): the documented chip semantics
+                — the exact trip rules, what the filing gate evaluates, the
+                N/N→eCTD granularity mapping, and the doc link. */}
+            <p className="mut" style={{ fontSize: 11, margin: "6px 0 0",
+              flexBasis: "100%", lineHeight: 1.5 }}>
+              <b>Chip rules:</b> “Ready to file” = every applicable module has
+              its required documents placed — the filing gate evaluates{" "}
+              <b>internal module completeness only</b>, never an eValidator or
+              Health Canada pass. “Blocked” = an open collaboration task is
+              past due (outranks the gate). “N/N modules” counts CTD Modules
+              1–5 — coarser than eCTD leaf granularity; the per-leaf view lives
+              in the Viewer.{" "}
+              <Link href={`/dossiers/${id}/viewer`}>
+                Full gate &amp; validation detail →
+              </Link>
+            </p>
           </div>
         </details>
         <Link className="chip" href={`/dossiers/${id}/m/1`}
           aria-label={`Open dossier ${d.dossier_id}`}>
           Open →
         </Link>
+        {/* Round-9 (operations minor, n=1; regops_publisher): per-dossier
+            eCTD-technical-validation STATUS beside the cross-link — honest
+            wording: a structural check by this tool + the user-attested
+            eValidator state, never an HC verdict. */}
+        {val && (
+          <span className={`chip ${val.passed ? "ready" : "blocked"}`}
+            style={{ fontSize: 10.5 }}
+            title={
+              (val.passed
+                ? "Structural (presence/format/backbone) check passes on this tool."
+                : `Structural check failing — ${val.errors} error(s).`) +
+              (val.evalCleared
+                ? " A user-attested eValidator PASS with the attached report is on file."
+                : " No user-attested eValidator pass on file yet.") +
+              " Neither is a Health Canada acceptance verdict — full detail in the Viewer."
+            }>
+            {val.passed ? "structural ✓" : `structural ✗ ${val.errors}`}
+            {val.evalCleared ? " · eValidator ✓" : ""}
+          </span>
+        )}
         <Link className="chip" href={`/dossiers/${id}/viewer`}
           aria-label={`Open Application Viewer and eCTD validation for ${d.dossier_id}`}
           title="index.xml backbone, eCTD validation, eValidator handoff and the pre-flight report live here">

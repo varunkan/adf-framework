@@ -53,35 +53,52 @@ STAGES: tuple[dict, ...] = (
      "unlocks": "A submission exists", "cta": "Documents added",
      "next": "validate",
      "checklist": ("Module-1 required items X/Y", "PDF conformance")},
-    {"n": 5, "key": "validate", "label": "Check your submission",
+    # journey · J8 bilingual M1/PM stage · n=5 (round-9 BLOCKER, n=2,
+    # labelling_specialist): bilingual Module 1 / Product Monograph gets a
+    # NAMED, dedicated step — not a footnote inside document assembly.
+    {"n": 5, "key": "bilingual",
+     "label": "Bilingual Module 1 & Product Monograph",
+     "reg": "M1 · PM EN+FR", "route": "/dossiers", "icon": "◫",
+     "purpose": ("Confirm EN + FR Product Monograph parity, the French "
+                 "translation review and the PM/label mock-ups."),
+     "unlocks": "Your content is present", "cta": "Bilingual review confirmed",
+     "next": "validate",
+     "checklist": ("EN + FR PM parity", "French translation review",
+                   "PM/label mock-ups", "PM XML validation")},
+    {"n": 6, "key": "validate", "label": "Check your submission",
      "reg": "Validate", "route": "/validation", "icon": "✓",
      "purpose": "Run validation and fix any issues in plain language.",
-     "unlocks": "Your content is present", "cta": "All checks pass",
+     "unlocks": "Bilingual Module 1 / PM review is confirmed",
+     "cta": "All checks pass",
      "next": "fees",
      "checklist": ("Error list with how-to-fix", "Link & checksum integrity")},
-    {"n": 6, "key": "fees", "label": "Pay the fees", "reg": "Fees",
+    {"n": 7, "key": "fees", "label": "Pay the fees", "reg": "Fees",
      "route": "/fees", "icon": "$",
      "purpose": "Calculate and confirm the ANDS / right-to-sell fees.",
      "unlocks": "Validation is clean (warnings allowed)",
      "cta": "Fees confirmed", "next": "review",
      "checklist": ("Fee breakdown", "Payment status")},
-    {"n": 7, "key": "review", "label": "Get it approved",
+    {"n": 8, "key": "review", "label": "Get it approved",
      "reg": "Review & approve", "route": "/reviews", "icon": "☑",
      "purpose": "Route the submission for internal sign-off.",
      "unlocks": "Fees are confirmed", "cta": "Approved", "next": "sign",
      "checklist": ("Reviewer / approver assignment", "Decisions")},
-    {"n": 8, "key": "sign", "label": "Sign", "reg": "E-signature",
+    {"n": 9, "key": "sign", "label": "Sign", "reg": "E-signature",
      "route": "/esign", "icon": "✍",
      "purpose": "Apply the regulated e-signature.",
      "unlocks": "Approvals are recorded", "cta": "Signed", "next": "transmit",
      "checklist": ("Signer identity", "QA gate")},
-    {"n": 9, "key": "transmit", "label": "Submit to Health Canada",
+    # journey · J3 hard eValidator gate · the unlocks copy names BOTH gates so
+    # the transmit step can never read as "signed = sendable".
+    {"n": 10, "key": "transmit", "label": "Submit to Health Canada",
      "reg": "Assemble & transmit", "route": "/transmission", "icon": "➤",
      "purpose": "Build the CESG package and transmit it via the gateway.",
-     "unlocks": "The submission is signed", "cta": "Transmitted",
+     "unlocks": "The submission is signed and your eValidator run is confirmed",
+     "cta": "Transmitted",
      "next": "track",
-     "checklist": ("Package export", "ESG send", "Acknowledgement")},
-    {"n": 10, "key": "track", "label": "Track & respond", "reg": "Lifecycle",
+     "checklist": ("Package export", "eValidator run confirmed", "ESG send",
+                   "Acknowledgement")},
+    {"n": 11, "key": "track", "label": "Track & respond", "reg": "Lifecycle",
      "route": "/lifecycle", "icon": "↻",
      "purpose": ("Monitor HC review, respond to clarification requests and "
                  "file follow-ups."),
@@ -89,8 +106,8 @@ STAGES: tuple[dict, ...] = (
      "checklist": ("Review status", "Deadlines", "Clarification responses")},
 )
 
-_GATEABLE = len(STAGES) - 1            # stages 0..9 make up the filing path
-_TRACK_N = STAGES[-1]["n"]            # 10
+_GATEABLE = len(STAGES) - 1            # stages 0..10 make up the filing path
+_TRACK_N = STAGES[-1]["n"]            # 11
 
 
 def _s(value) -> str:
@@ -116,6 +133,9 @@ def _completion(payload: dict) -> list[bool]:
         or payload.get("submission_created")
         or (_s(payload.get("applicant")) and _s(payload.get("drug_product"))))
     content_done = bool(payload.get("content_done"))
+    # journey · J8 bilingual stage · completion comes from the recorded
+    # bilingual-review confirmation signal (service.advance "bilingual").
+    bilingual_ok = bool((payload.get("bilingual") or {}).get("confirmed"))
 
     val = payload.get("validation") or {}
     validated = (bool(val.get("ran") or "errors" in val)
@@ -130,7 +150,7 @@ def _completion(payload: dict) -> list[bool]:
     oriented = bool(payload.get("oriented")) or company
 
     return [oriented, company, dossier, submission, content_done,
-            validated, fees_done, approved, signed, transmitted,
+            bilingual_ok, validated, fees_done, approved, signed, transmitted,
             transmitted]
 
 

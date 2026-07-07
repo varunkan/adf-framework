@@ -25,12 +25,12 @@ from fastapi.testclient import TestClient
 
 from ands_shared import InMemoryEventBus, SqliteDb
 
-from app import jwt_rs256, oidc
+from app import jwt_rs256, oidc, security
 from app.api import build_app
 from app.repository_sqlite import SqliteIdentityRepository
 from app.service import IdentityService
 
-from tests.conftest import auth
+from tests.conftest import auth, signup_admin
 
 
 # ---------------------------------------------------------------------------
@@ -130,10 +130,8 @@ def sso():
     service = IdentityService(repo, bus, oidc_provider=idp).register()
     service.ensure_owner("owner@ands.io", "owner-secret")
     client = TestClient(build_app(service))
-    admin = client.post("/api/identity/auth/signup",
-                        json={"email": "admin@acme.io",
-                              "password": "pw12345-2026",
-                              "company_name": "Acme"}).json()
+    # full onboarding (round-9: new workspaces require MFA) → full admin session
+    admin = signup_admin(client, email="admin@acme.io", company="Acme")
     return {"client": client, "service": service, "repo": repo, "idp": idp,
             "admin_token": admin["token"], "tenant_id": admin["tenant"]["id"]}
 
@@ -154,10 +152,24 @@ def test_sso_config_is_admin_gated(sso):
     from app import rbac
     sso["service"]._add_user(sso["tenant_id"], "member@acme.io",
                              "pw12345-2026", rbac.USER_ROLE, "Member")
+    # the workspace requires MFA by default (round-9): the member enrols via
+    # the blocked-login setup token, then signs in with password + TOTP
+    blocked = sso["client"].post(
+        "/api/identity/auth/login",
+        json={"email": "member@acme.io", "password": "pw12345-2026",
+              "tenant_id": sso["tenant_id"]})
+    assert blocked.status_code == 403
+    setup = blocked.json()["setup_token"]
+    enrol = sso["client"].post("/api/identity/auth/mfa/enroll",
+                               headers=auth(setup)).json()
+    sso["client"].post("/api/identity/auth/mfa/verify",
+                       json={"code": security.totp_code(enrol["secret"])},
+                       headers=auth(setup))
     login = sso["client"].post(
         "/api/identity/auth/login",
         json={"email": "member@acme.io", "password": "pw12345-2026",
-              "tenant_id": sso["tenant_id"]}).json()
+              "tenant_id": sso["tenant_id"],
+              "mfa_code": security.totp_code(enrol["secret"])}).json()
     r = sso["client"].post(
         "/api/identity/tenant/sso",
         json={"enabled": True, "issuer": "https://idp.test/ands",

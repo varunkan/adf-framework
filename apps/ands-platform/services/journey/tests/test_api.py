@@ -6,7 +6,8 @@ def test_catalog_exposes_the_whole_spine(client):
     assert r.status_code == 200
     body = r.json()
     keys = [s["key"] for s in body["stages"]]
-    assert keys[0] == "orient" and keys[-1] == "track" and len(keys) == 11
+    # round-9 J8: the spine gained the named bilingual M1/PM stage (12 stages)
+    assert keys[0] == "orient" and keys[-1] == "track" and len(keys) == 12
     assert "ANDS" in body["submission_types"]
     assert any(rs["version"] == "M13A" for rs in body["be_rulesets"])
 
@@ -53,6 +54,9 @@ def test_full_walk_to_ready(client):
     adv("submission", applicant="Acme Pharma", drug_product="Drugazole 10mg")
     _place_required_docs(client, sid)         # required before the content gate
     adv("content")
+    # round-9 J8: the named bilingual M1/PM stage sits between content and
+    # validation — the walk confirms the parity + translation reviews.
+    adv("bilingual", en_fr_parity=True, translation_reviewed=True)
     adv("validate", errors=0)
     adv("fees")
     adv("review")
@@ -61,8 +65,10 @@ def test_full_walk_to_ready(client):
     body = last.json()
     assert body["readiness"]["status"] == "READY"
     assert body["journey"]["position"]["current_key"] == "transmit"
-    # and transmit completes the filing path
-    final = adv("transmit", state="SUBMITTED").json()
+    # round-9 J3: transmit is a hard gate on a confirmed eValidator run — the
+    # filer attests their own run (honest: user-attested, never a tool claim).
+    final = adv("transmit", state="SUBMITTED",
+                evalidator_confirmed=True).json()
     assert final["journey"]["position"]["transmitted"] is True
 
 

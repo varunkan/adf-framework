@@ -8,7 +8,7 @@ from ands_shared import create_app
 
 from .models import (AttachmentIn, CorrespondenceIn, DeadlineIn, DelLinkIn, NoaActionIn,
                      NoaIn, NoaServeIn, NoticeIn, ShortageIn, StartIn,
-                     TransitionIn)
+                     TransitionIn, VerifiedDateIn)
 from .service import LifecycleService
 
 
@@ -84,6 +84,22 @@ def build_app(service: LifecycleService) -> FastAPI:
                                 default="", alias="X-Tenant-Id")):
         return service.list_correspondence(dossier_id, kind,
                                            x_tenant_id or None)
+
+    # -- verified-date overrides + reconciliation (round-9, n=4) --------
+    @router.post("/verified-date", status_code=201)
+    def record_verified_date(body: VerifiedDateIn,
+                             x_tenant_id: str = Header(
+                                 default="", alias="X-Tenant-Id"),
+                             x_user_email: str = Header(
+                                 default="", alias="X-User-Email")):
+        return service.record_verified_date(body.model_dump(),
+                                            x_tenant_id or None, x_user_email)
+
+    @router.get("/verified-dates")
+    def list_verified_dates(dossier_id: str = Query(...),
+                            x_tenant_id: str = Header(
+                                default="", alias="X-Tenant-Id")):
+        return service.list_verified_dates(dossier_id, x_tenant_id or None)
 
     # -- Form V / NOA register (PM(NOC) Regulations) --------------------
     @router.post("/noa", status_code=201)

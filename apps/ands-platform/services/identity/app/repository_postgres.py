@@ -192,15 +192,21 @@ class PostgresIdentityRepository:
     def delete_sessions_for_tenant_without_mfa(self, tenant_id):
         # WS4 fix (revoke-on-mandate-on): drop full sessions of tenant members
         # who have no verified MFA, so flipping the mandate on takes effect now.
+        # IdP-verified (SSO) sessions are kept — the mandate governs password
+        # credentials (mirrors the _session_blocked_by_mandate exemption).
         self._exec(
-            "DELETE FROM sessions WHERE tenant_id = %s AND user_id IN ("
+            "DELETE FROM sessions WHERE tenant_id = %s AND "
+            "COALESCE(identity_verified, 0) = 0 AND user_id IN ("
             "SELECT id FROM users WHERE tenant_id = %s AND "
             "COALESCE(mfa_enabled, 0) = 0)", (tenant_id, tenant_id))
 
     # tenants
     def create_tenant(self, tenant_id, name, plan_id, status):
-        self._exec("INSERT INTO tenants (id, name, plan_id, status, created_at) "
-                   "VALUES (%s,%s,%s,%s,%s)",
+        # Round-9 onboarding item 4: NEW workspaces default to 'MFA Required'
+        # (require_mfa=1); relaxing it is an explicit admin action. The DDL
+        # default stays 0 so pre-existing workspaces are not silently flipped.
+        self._exec("INSERT INTO tenants (id, name, plan_id, status, "
+                   "require_mfa, created_at) VALUES (%s,%s,%s,%s,1,%s)",
                    (tenant_id, name, plan_id, status, utcnow_iso()))
         return self.get_tenant(tenant_id)
 

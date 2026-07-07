@@ -30,7 +30,8 @@
         "-lc",
         "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/web && JOURNEY_BFF_URL=http://127.0.0.1:8011 DOSSIER_BFF_URL=http://127.0.0.1:8010 IDENTITY_BFF_URL=http://127.0.0.1:8014 GOVERNANCE_BFF_URL=http://127.0.0.1:8012 REGISTRY_BFF_URL=http://127.0.0.1:8016 LIFECYCLE_BFF_URL=http://127.0.0.1:8017 COLLAB_BFF_URL=http://127.0.0.1:8018 ANDS_INTERNAL_TOKEN=ands-mesh-dev-7f3a91 exec npm run dev"
       ],
-      "port": 3000
+      "port": 3000,
+      "autoPort": true
     },
     {
       "name": "ands-journey",
@@ -73,7 +74,7 @@
       "runtimeExecutable": "bash",
       "runtimeArgs": [
         "-lc",
-        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/registry && ANDS_INTERNAL_TOKEN=ands-mesh-dev-7f3a91 PYTHONPATH=.:../../libs exec ../../.venv/bin/uvicorn app.main:app --port 8016"
+        "cd /Users/varunkumar/ai_pos_system/adf-framework/apps/ands-platform/services/registry && ANDS_INTERNAL_TOKEN=ands-mesh-dev-7f3a91 IDENTITY_URL=http://127.0.0.1:8014 PYTHONPATH=.:../../libs exec ../../.venv/bin/uvicorn app.main:app --port 8016"
       ],
       "port": 8016
     },

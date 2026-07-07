@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import type { Stage } from "@/lib/types";
 import { Lock, Compass, Unlock } from "lucide-react";
 
@@ -69,14 +70,57 @@ export function StepRail({
           </button>
         )}
       </div>
+      {/* journey · J17 expert non-linear without nagging (round-9 minor, n=2;
+          ra_officer_generic): the intro is neutral — every step opens in any
+          order; the guided order stays available in each step's tooltip
+          rather than as a visible warning label. */}
       {expert && (
         <p
           className="mut"
-          style={{ fontSize: 11, margin: "-8px 0 12px", lineHeight: 1.4 }}
+          style={{ fontSize: 11, margin: "-8px 0 10px", lineHeight: 1.4 }}
         >
-          Expert mode: later steps are navigable but marked{" "}
-          <b>not yet recommended</b> — the guided order is still the safe path.
+          Expert mode: every step opens in any order. The guided order stays
+          in each step&apos;s tooltip if you want it.
         </p>
+      )}
+      {/* journey · J17 fast path: one-click jump chips for high-volume filers.
+          Bulk multi-dossier work lives in the Portfolio (linked) — this rail
+          drives ONE submission; that limit is stated, not papered over. */}
+      {expert && (
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 4,
+            margin: "0 0 12px",
+          }}
+          aria-label="Jump to any step"
+        >
+          {stages.map((s) => (
+            <button
+              key={s.key}
+              className="ghost"
+              style={{
+                fontSize: 10,
+                padding: "1px 7px",
+                borderRadius: 999,
+                fontWeight: s.key === activeKey ? 700 : 400,
+              }}
+              title={`Jump to ${s.label}`}
+              onClick={() => onSelect(s.key)}
+            >
+              {s.n}·{s.label.length > 14 ? `${s.label.slice(0, 13)}…` : s.label}
+            </button>
+          ))}
+          <Link
+            className="chip"
+            href="/portfolio"
+            style={{ fontSize: 10, padding: "1px 7px" }}
+            title="Filing several dossiers at once? The portfolio roll-up is the bulk view — this rail drives one submission."
+          >
+            Bulk / multi-dossier → Portfolio
+          </Link>
+        </div>
       )}
       <ol className="steps">
         {stages.map((s) => {
@@ -90,11 +134,12 @@ export function StepRail({
             s.key === activeKey ? "active-sel" : "",
           ].join(" ");
           // The plain-language reason: a hard barrier when locked in guided
-          // mode; a non-blocking "why it's not yet recommended" warning in
-          // expert mode.
+          // mode. journey · J17: in expert mode the reason lives ONLY in this
+          // tooltip (neutral wording, no warning label) — experts asked for
+          // non-linear work "without 'not yet recommended' nagging".
           const lockedTitle = s.gate
             ? softLocked
-              ? `Not yet recommended — ${s.gate.reason} You can open it anyway in Expert mode.`
+              ? `Open anytime in Expert mode. Guided order: ${s.gate.reason}`
               : s.gate.reason
             : s.purpose;
           return (
@@ -129,20 +174,15 @@ export function StepRail({
               <span>
                 <span className="lbl">{s.label}</span>
                 <br />
-                <span
-                  className="sub"
-                  style={softLocked ? { color: "#e7c778" } : undefined}
-                >
+                <span className="sub">
                   {s.done
                     ? "Done"
                     : s.current
                     ? "You're here"
-                    : softLocked ? (
-                        <>
-                          <span aria-hidden>⚠ </span>
-                          Not yet recommended{s.gate ? ` — ${s.gate.reason}` : ""}
-                        </>
-                      )
+                    : softLocked
+                    // journey · J17: neutral label, no amber ⚠ nag — the
+                    // plain-language reason stays in the tooltip above.
+                    ? "Open anytime · guided order suggests later"
                     : s.gate
                     ? s.gate.reason
                     : s.reg || "Locked"}

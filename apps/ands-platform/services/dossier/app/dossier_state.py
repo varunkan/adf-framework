@@ -70,6 +70,19 @@ def annotate(nodes: list[dict], states: dict) -> list[dict]:
         item["content_origin"] = entry.get("content_origin")
         item["content_confirmed"] = bool(entry.get("content_confirmed"))
         item["needs_review"] = needs_review(entry)
+        # Round-9 ai_draft/builder_forms surfaces: the per-section AI policy
+        # (off-switch), the named attestation, the still-example field list
+        # and the last-touched stamp all travel to the UI with the node.
+        item["ai_disabled"] = bool(entry.get("ai_disabled"))
+        item["attestation"] = entry.get("attestation")
+        item["sample_fields"] = entry.get("sample_fields") or []
+        item["content_author"] = entry.get("content_author")
+        item["updated_at"] = entry.get("updated_at")
+        # Round-9 builder_forms MAJOR "…harder attestation" (n=3, ask 3) +
+        # ai_draft MAJOR "side-by-side comparison" (n=9): the saved AI draft's
+        # exact text — the panel requires it scrolled before attest enables
+        # and renders it beside the cited guidance.
+        item["draft_text"] = entry.get("draft_text")
         out.append(item)
     return out
 

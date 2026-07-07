@@ -20,6 +20,47 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { ShieldCheck, ChevronDown, ChevronRight, Building2 } from "lucide-react";
 import { tenantName } from "@/lib/auth";
+import { ValidationTrustPanel } from "@/components/portfolio/ValidationTrustPanel";
+
+// Round-9 (operations minor, n=1): "expose per-client cost/billing somewhere,
+// since how it scales across sponsors is decisive for a CDMO." Largest honest
+// subset: per-sponsor USAGE (what actually scales) + a plain statement of the
+// billing model — no invented prices, no per-sponsor invoice this instance
+// does not produce.
+function UsageBySponsor({ items }: { items: SponsoredItem[] }) {
+  const rows = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const d of items) {
+      const s = (d.sponsor || "").trim() || "Unassigned";
+      m.set(s, (m.get(s) || 0) + 1);
+    }
+    return Array.from(m.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [items]);
+  if (rows.length === 0) return null;
+  return (
+    <div className="card" style={{ padding: "10px 14px", fontSize: 12 }}>
+      <b>Usage &amp; billing by sponsor.</b>
+      <p className="mut" style={{ margin: "4px 0 6px", lineHeight: 1.5 }}>
+        This instance is <b>self-hosted</b>: the platform does not charge a
+        per-sponsor licence fee here — your cost scales with your own hosting
+        plus the workload below. A per-sponsor billing/usage export is{" "}
+        <b>not built yet</b>; we state that plainly rather than show an
+        invented invoice.
+      </p>
+      <ul style={{ listStyle: "none", margin: 0, padding: 0,
+        display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {rows.map(([s, n]) => (
+          <li key={s}>
+            <span className="chip" style={{ fontSize: 11 }}
+              title={`${n} dossier${n === 1 ? "" : "s"} carried for ${s} in this workspace`}>
+              {s} · {n} dossier{n === 1 ? "" : "s"}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 // The minimal shape this control needs off each dossier — kept component-local
 // so it works for both the Portfolio (DossierListItem) and Correspondence
@@ -163,6 +204,14 @@ export function SponsorScope({
             platform vendor role can see cross-workspace operational metadata for
             support — never your clients&apos; dossier contents.
           </p>
+          {/* Round-9 (operations, n=4): the isolation claim, backed by the
+              enforcement mechanisms + honest attestation status. */}
+          <ValidationTrustPanel />
+          {/* Round-9 (operations minor, n=1; cdmo_ra_manager): per-sponsor
+              usage visibility for multi-sponsor workspaces — honest scope:
+              this instance is self-hosted and charges no per-sponsor licence
+              fee; what scales with sponsors is shown below. */}
+          <UsageBySponsor items={items} />
         </div>
       )}
     </section>

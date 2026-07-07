@@ -33,8 +33,10 @@ def test_company_id_implies_oriented():
 
 
 def test_validation_gate_requires_zero_errors():
+    # round-9 J8: the bilingual M1/PM stage precedes validation in the spine
     base = {"company_id": "1", "dossier_id": "e123456", "applicant": "A",
-            "drug_product": "D", "content_done": True}
+            "drug_product": "D", "content_done": True,
+            "bilingual": {"confirmed": True}}
     with_errors = {**base, "validation": {"ran": True, "errors": 3}}
     stages = {s["key"]: s for s in journey.stages(with_errors)}
     assert stages["validate"]["status"] == "current"   # not done — errors remain
@@ -49,6 +51,7 @@ def test_track_is_current_only_once_transmitted():
     assert stages["track"]["status"] == "locked"
     sent = {"company_id": "1", "dossier_id": "e1", "applicant": "A",
             "drug_product": "D", "content_done": True,
+            "bilingual": {"confirmed": True},
             "validation": {"ran": True, "errors": 0}, "fees": {"paid": True},
             "reviews": {"approved": True}, "esign": {"signed": True},
             "transmission": {"state": "SUBMITTED"}}
@@ -61,6 +64,7 @@ def test_position_percent_progresses():
     assert journey.position({})["percent"] == 0
     half = {"oriented": True, "company_id": "1", "dossier_id": "e1",
             "applicant": "A", "drug_product": "D", "content_done": True}
-    # orient, company, dossier, submission, content done = 5 of 10
+    # orient, company, dossier, submission, content done = 5 of 11 (round-9
+    # J8 added the bilingual M1/PM stage to the filing path)
     assert journey.position(half)["done"] == 5
-    assert journey.position(half)["percent"] == 50
+    assert journey.position(half)["percent"] == 45

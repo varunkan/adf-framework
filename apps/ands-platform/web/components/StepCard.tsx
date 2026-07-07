@@ -7,6 +7,7 @@ import type {
   ContentAuthors,
   EsignManifest,
   EsignVerification,
+  EvalidatorAttestation,
 } from "@/lib/dossierTypes";
 import type { JourneyView, Stage } from "@/lib/types";
 import { toast } from "sonner";
@@ -46,6 +47,37 @@ export function StepCard({
     setLocalErr("");
   }, [stage.key]);
 
+  // journey · J3 hard eValidator gate · when a real dossier exists, read its
+  // recorded USER-ATTESTED external eValidator result so the transmit gate
+  // can honor an attested PASS (and hard-stop on an attested FAIL).
+  const [attestation, setAttestation] =
+    useState<EvalidatorAttestation | null>(null);
+  useEffect(() => {
+    if (stage.key !== "transmit" || !view.journey.dossier_id) {
+      setAttestation(null);
+      return;
+    }
+    let live = true;
+    dossierApi
+      .getEvalidatorAttestation(view.journey.dossier_id)
+      .then((r) => {
+        if (live) setAttestation(r.attestation);
+      })
+      .catch(() => {
+        if (live) setAttestation(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [stage.key, view.journey.dossier_id]);
+  const attPass = attestation?.result === "pass";
+  const attFail = attestation?.result === "fail";
+  // the filer's in-form attestation (fallback when no dossier record exists)
+  const formAttested =
+    !!form.evalidator_confirmed &&
+    (form.evalidator_result ?? "pass") === "pass";
+  const transmitGateOpen = attPass || (!attFail && formAttested);
+
   async function go(data?: Record<string, any>) {
     setLocalErr("");
     try {
@@ -56,6 +88,17 @@ export function StepCard({
       const seeded =
         stage.key === "submission" && sig.drug_product
           ? { drug_product: sig.drug_product, ...form }
+          : // journey · J3 · a dossier-recorded attested PASS travels with the
+            // advance too, so the gate holds even when the journey service
+            // cannot reach the dossier service itself. Honest: this is the
+            // filer's own recorded attestation, never a tool claim.
+            stage.key === "transmit" && attPass
+          ? {
+              evalidator_confirmed: true,
+              evalidator_result: "pass",
+              validator_name: attestation?.validator_name || "",
+              ...form,
+            }
           : form;
       await onAdvance(stage.key, data ?? seeded);
     } catch (e) {
@@ -68,9 +111,12 @@ export function StepCard({
 
   return (
     <div className="card glass stepcard">
+      {/* journey · J12/J8 · the step count derives from the live spine, never
+          a hardcoded total (it drifted to "of 10" when stages changed). */}
       <div className="eyebrow">
         <span aria-hidden>{stage.icon}</span>
-        Step {stage.n} of 10 {stage.reg ? `· ${stage.reg}` : ""}
+        Step {stage.n} of {view.journey.stages.length - 1}{" "}
+        {stage.reg ? `· ${stage.reg}` : ""}
       </div>
       <h2 className="step-title">{stage.label}</h2>
       <p className="lede">{stage.purpose}</p>
@@ -199,6 +245,118 @@ export function StepCard({
         </>
       )}
 
+      {/* journey · J8 bilingual M1/PM stage · n=5 (round-9 BLOCKER,
+          labelling_specialist): a NAMED, dedicated step — EN/FR parity,
+          French translation review, mock-ups, PM XML validation — instead of
+          a footnote inside document assembly. */}
+      {stage.key === "bilingual" && (
+        <>
+          <div className="teach">
+            For a generic manufacturer this is half the pain: the bilingual{" "}
+            <Term k="Product Monograph" /> lives at <b>1.3.1</b> in{" "}
+            <Term k="Module 1" /> and a missing EN <b>or</b> FR version is a{" "}
+            <b>transmission blocker</b>. Confirm the EN + FR parity review
+            (same content, both languages), the French translation review, and
+            your PM/label mock-up review here. PM <b>XML validation</b> against
+            Health Canada&apos;s schema runs in the dossier&apos;s Monograph
+            panel.
+          </div>
+          {sig.bilingual?.confirmed ? (
+            <div className="notice ok">
+              ✓ Bilingual review recorded — EN/FR parity and French
+              translation confirmed
+              {sig.bilingual.reviewer ? ` by ${sig.bilingual.reviewer}` : ""}
+              {sig.bilingual.pm_xml_validated ? " · PM XML validated" : ""}.
+            </div>
+          ) : (
+            <div className="card" style={{ padding: 14, marginTop: 4 }}>
+              <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  style={{ width: "auto" }}
+                  checked={!!form.en_fr_parity}
+                  onChange={(e) => set("en_fr_parity", e.target.checked)}
+                />
+                <span style={{ fontSize: 13 }}>
+                  EN + FR Product Monograph parity reviewed — both languages
+                  present and equivalent
+                </span>
+              </label>
+              <label
+                style={{ display: "flex", gap: 8, alignItems: "center",
+                  marginTop: 8 }}
+              >
+                <input
+                  type="checkbox"
+                  style={{ width: "auto" }}
+                  checked={!!form.translation_reviewed}
+                  onChange={(e) => set("translation_reviewed", e.target.checked)}
+                />
+                <span style={{ fontSize: 13 }}>
+                  French translation reviewed by a qualified reviewer
+                </span>
+              </label>
+              <label
+                style={{ display: "flex", gap: 8, alignItems: "center",
+                  marginTop: 8 }}
+              >
+                <input
+                  type="checkbox"
+                  style={{ width: "auto" }}
+                  checked={form.mockups_state === "reviewed"}
+                  onChange={(e) =>
+                    set("mockups_state", e.target.checked ? "reviewed" : "")
+                  }
+                />
+                <span style={{ fontSize: 13 }}>
+                  PM / label mock-ups reviewed (optional here — recorded)
+                </span>
+              </label>
+              <label
+                style={{ display: "flex", gap: 8, alignItems: "center",
+                  marginTop: 8 }}
+              >
+                <input
+                  type="checkbox"
+                  style={{ width: "auto" }}
+                  checked={!!form.pm_xml_validated}
+                  onChange={(e) => set("pm_xml_validated", e.target.checked)}
+                />
+                <span style={{ fontSize: 13 }}>
+                  PM XML validated against HC&apos;s schema (run it from the
+                  Monograph panel)
+                </span>
+              </label>
+              <label style={{ marginTop: 10 }}>
+                Reviewer (who performed the bilingual review)
+              </label>
+              <input
+                value={form.reviewer || ""}
+                onChange={(e) => set("reviewer", e.target.value)}
+                placeholder="e.g. M. Tremblay, Labelling"
+              />
+              {view.journey.dossier_id && (
+                <div className="cta-row" style={{ marginTop: 10 }}>
+                  <a
+                    className="chip"
+                    href={`/dossiers/${encodeURIComponent(view.journey.dossier_id)}/m/1`}
+                  >
+                    Open Module 1 / Monograph panel (files, EN/FR status, PM
+                    XML validate) →
+                  </a>
+                </div>
+              )}
+              <div className="mut" style={{ fontSize: 11.5, marginTop: 8 }}>
+                Honest scope: the mock-up <b>files</b> and the PM XML validate
+                affordance live in the dossier builder&apos;s Monograph panel —
+                this step records <b>your review</b> on the journey and its
+                audit ledger.
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
       {stage.key === "validate" && (
         <>
           <div className="teach">
@@ -263,6 +421,19 @@ export function StepCard({
               {sig.reviews.reviewer || "sponsor QA"}.
             </div>
           )}
+          {/* journey · J16 reviewer read-only share (round-9 minor, n=2;
+              ra_junior). HONEST SUBSET, limit stated in-UI: the link opens
+              the read-only Application Viewer behind WORKSPACE sign-in —
+              public tokenized share links are not built. */}
+          {view.journey.dossier_id ? (
+            <ReviewerShare dossierId={view.journey.dossier_id} />
+          ) : (
+            <div className="mut" style={{ fontSize: 12, marginTop: 10 }}>
+              Share with your reviewer: once the submission exists, a
+              read-only Application Viewer link appears here for your
+              senior&apos;s sign-off review.
+            </div>
+          )}
         </>
       )}
 
@@ -277,7 +448,14 @@ export function StepCard({
         />
       )}
 
-      {stage.key === "transmit" && <TransmitStep sig={sig} />}
+      {stage.key === "transmit" && (
+        <TransmitStep
+          sig={sig}
+          attestation={attestation}
+          form={form}
+          set={set}
+        />
+      )}
 
       {stage.key === "track" && (
         <>
@@ -296,7 +474,17 @@ export function StepCard({
           <button
             onClick={() => go()}
             disabled={
-              busy || (stage.key === "content" && !view.content.gate.complete)
+              busy ||
+              (stage.key === "content" && !view.content.gate.complete) ||
+              // journey · J8 · the bilingual step needs both required reviews
+              (stage.key === "bilingual" &&
+                !sig.bilingual?.confirmed &&
+                !(form.en_fr_parity && form.translation_reviewed)) ||
+              // journey · J3 · HARD GATE: no transmit without a confirmed
+              // eValidator run (dossier-attested pass, or attested here)
+              (stage.key === "transmit" &&
+                !sig.transmission &&
+                !transmitGateOpen)
             }
           >
             {busy ? "Working…" : `${cta} →`}
@@ -306,6 +494,22 @@ export function StepCard({
               Place the required documents to continue
             </span>
           )}
+          {stage.key === "bilingual" &&
+            !sig.bilingual?.confirmed &&
+            !(form.en_fr_parity && form.translation_reviewed) && (
+              <span className="nexthint">
+                Confirm the EN/FR parity and French translation reviews to
+                continue
+              </span>
+            )}
+          {stage.key === "transmit" &&
+            !sig.transmission &&
+            !transmitGateOpen && (
+              <span className="nexthint">
+                Hard gate: confirm your eValidator run above before
+                transmitting
+              </span>
+            )}
           {stage.next_label &&
             !(stage.key === "content" && !view.content.gate.complete) && (
               <span className="nexthint">
@@ -386,9 +590,66 @@ function DossierStep({
   );
 }
 
-function TransmitStep({ sig }: { sig: Record<string, any> }) {
+// journey · J16 reviewer read-only share · a copyable workspace-auth link to
+// the read-only Application Viewer, with the limit stated plainly.
+function ReviewerShare({ dossierId }: { dossierId: string }) {
+  const [copied, setCopied] = useState(false);
+  const path = `/dossiers/${encodeURIComponent(dossierId)}/viewer`;
+  return (
+    <div className="card" style={{ padding: 12, marginTop: 12 }}>
+      <div className="eyebrow" style={{ display: "flex", gap: 6,
+        alignItems: "center" }}>
+        <Users size={13} aria-hidden /> Share with your reviewer
+      </div>
+      <p className="mut" style={{ fontSize: 12, margin: "6px 0 8px" }}>
+        Your senior reviews the assembled submission in the <b>read-only
+        Application Viewer</b> (backbone, leaves, lifecycle — no edit
+        affordances), then records the sign-off here.
+      </p>
+      <div className="cta-row">
+        <a className="chip" href={path}>
+          Open the read-only Application Viewer →
+        </a>
+        <button
+          className="ghost"
+          style={{ fontSize: 12 }}
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(
+                `${window.location.origin}${path}`);
+              setCopied(true);
+              setTimeout(() => setCopied(false), 2500);
+            } catch {
+              toast.error("Copy failed — copy the address from the viewer tab.");
+            }
+          }}
+        >
+          {copied ? "✓ Link copied" : "Copy reviewer link"}
+        </button>
+      </div>
+      <div className="mut" style={{ fontSize: 11, marginTop: 6 }}>
+        Honest limit: the link requires <b>sign-in to this workspace</b> —
+        public tokenized share links for external reviewers are not built.
+      </div>
+    </div>
+  );
+}
+
+function TransmitStep({
+  sig,
+  attestation,
+  form,
+  set,
+}: {
+  sig: Record<string, any>;
+  attestation: EvalidatorAttestation | null;
+  form: Record<string, any>;
+  set: (k: string, v: any) => void;
+}) {
   const tx = sig.transmission || {};
   const sent = !!sig.transmission;
+  const attPass = attestation?.result === "pass";
+  const attFail = attestation?.result === "fail";
   // real transmission records per-ack flags; the simulation implies all three
   const chain = [
     { k: "FDA MDN", termKey: "MDN",
@@ -410,6 +671,113 @@ function TransmitStep({ sig }: { sig: Record<string, any> }) {
         Health Canada&apos;s official channel for sending an <Term k="eCTD" />.
         Send one sequence at a time and wait for the acknowledgement before the
         next.
+      </div>
+
+      {/* journey · J3 hard eValidator gate (round-9 BLOCKER, n=5): transmit
+          is a HARD GATE on a confirmed eValidator run — enforced server-side
+          (422 without it), mirrored here. Honesty: the result is always the
+          FILER's attested run; ANDS Studio never claims to have run HC's
+          eValidator. */}
+      {!sent && (
+        <div className="card" style={{ padding: 14, marginTop: 4 }}>
+          <div className="eyebrow" style={{ display: "flex", gap: 6,
+            alignItems: "center" }}>
+            <ShieldCheck size={14} aria-hidden /> Hard gate: confirmed
+            eValidator run
+          </div>
+          {attPass ? (
+            <div className="notice ok" style={{ marginTop: 8 }}>
+              ✓ eValidator run attested as <b>PASS</b>
+              {attestation?.validator_name
+                ? ` — ${attestation.validator_name}` : ""}
+              {attestation?.validated_on
+                ? ` (${attestation.validated_on})` : ""}
+              . External, user-attested result recorded on the dossier — the
+              gate is satisfied.
+            </div>
+          ) : attFail ? (
+            <div className="notice bad" style={{ marginTop: 8 }}>
+              ✗ Your attested eValidator run is recorded as <b>FAIL</b> —
+              resolve the findings, re-export, re-run eValidator and re-attest
+              on the validation surface before transmitting. Transmission is
+              blocked until then.
+            </div>
+          ) : (
+            <>
+              <p className="mut" style={{ fontSize: 12.5, margin: "8px 0 0" }}>
+                No eValidator attestation is recorded yet. Run an eValidator on
+                the <b>exported package</b>, then attest your result here — it
+                is recorded as your attestation on the audit ledger.
+              </p>
+              <label style={{ marginTop: 10 }}>Validator you ran</label>
+              <input
+                value={form.validator_name || ""}
+                onChange={(e) => set("validator_name", e.target.value)}
+                placeholder="e.g. Lorenz eValidator, GlobalSubmit VALIDATE"
+              />
+              <label style={{ marginTop: 10 }}>Result</label>
+              <select
+                value={form.evalidator_result ?? "pass"}
+                onChange={(e) => set("evalidator_result", e.target.value)}
+              >
+                <option value="pass">Pass — no errors against HC criteria</option>
+                <option value="fail">Fail — findings remain</option>
+              </select>
+              <label style={{ display: "flex", gap: 8,
+                alignItems: "flex-start", marginTop: 10 }}>
+                <input
+                  type="checkbox"
+                  style={{ width: "auto", marginTop: 3 }}
+                  checked={!!form.evalidator_confirmed}
+                  onChange={(e) => set("evalidator_confirmed", e.target.checked)}
+                />
+                <span style={{ fontSize: 13 }}>
+                  I confirm I ran an eValidator on the exported package and I
+                  attest the result above. (Recorded as my attestation — not a
+                  tool claim.)
+                </span>
+              </label>
+              {(form.evalidator_result ?? "pass") === "fail" && (
+                <div className="notice bad" style={{ marginTop: 8 }}>
+                  A failed run blocks transmission — fix the findings,
+                  re-export and re-run before attesting a pass.
+                </div>
+              )}
+            </>
+          )}
+          {/* J3: where to get eValidator, whether it costs money, and what to
+              do when it disagrees — stated plainly, no expander. */}
+          <div className="mut" style={{ fontSize: 11.5, marginTop: 10,
+            lineHeight: 1.5 }}>
+            <b>Where &amp; cost:</b> Health Canada publishes the eCTD{" "}
+            <b>validation criteria free on canada.ca</b>, but ships no free
+            desktop eValidator — the commonly used validators (e.g. Lorenz
+            eValidator) are <b>commercially licensed</b> (your publisher or
+            CRO usually holds a licence). <b>If eValidator disagrees</b> with
+            ANDS Studio&apos;s readiness verdict, trust eValidator: fix the
+            findings, re-export, re-run.
+          </div>
+        </div>
+      )}
+
+      {/* journey · J23 accountability on HC rejection (round-9 OPEN, n=1;
+          startup_founder): plain copy on WHO is accountable and what record
+          exists if Health Canada rejects or screens out the filing. */}
+      <div className="card" style={{ padding: 12, marginTop: 12 }}>
+        <div className="eyebrow">If Health Canada rejects or screens out</div>
+        <p className="mut" style={{ fontSize: 12, margin: "6px 0 0",
+          lineHeight: 1.55 }}>
+          Health Canada can screen out or reject a submission (e.g. an{" "}
+          <Term k="SDN" />, refusal at screening, or a negative decision) even
+          after every in-app check passes — our checks are structural, and
+          acceptance is always HC&apos;s call. <b>Accountability for the
+          filing&apos;s content sits with you, the sponsor</b>: ANDS Studio
+          prepares, checks and records the package but does not assume
+          regulatory responsibility for HC&apos;s decision. If it happens, you
+          hold the full record to respond: the three transmission receipts,
+          the append-only Part-11 audit ledger, the validation reports and the
+          signed e-signature manifest.
+        </p>
       </div>
       {/* Round-6 WS-A: one primary thing — the receipt progress — with the
           CESG detail + the three receipt tiles collapsed behind an expander.
@@ -457,15 +825,26 @@ function TransmitStep({ sig }: { sig: Record<string, any> }) {
 
 function TrackStep() {
   return (
-    <div className="teach">
-      Now Health Canada reviews. Screening (~45 days) is a completeness check —
-      an <Term k="SDN" /> means &ldquo;something&apos;s missing, 45 days to send
-      it&rdquo;. Then the science review (~180 days for an ANDS); a{" "}
-      <Term k="clarifax" /> asks you to clarify data you already filed. The
-      decisions: <Term k="NOC" /> (approved — you get a DIN), <Term k="NOD" />,
-      or <Term k="NON" />. Remember the <Term k="clock">review clock</Term> counts
-      only Health Canada&apos;s time and pauses while they wait on you.
-    </div>
+    <>
+      <div className="teach">
+        Now Health Canada reviews. Screening (~45 days) is a completeness check —
+        an <Term k="SDN" /> means &ldquo;something&apos;s missing, 45 days to send
+        it&rdquo;. Then the science review (~180 days for an ANDS); a{" "}
+        <Term k="clarifax" /> asks you to clarify data you already filed. The
+        decisions: <Term k="NOC" /> (approved — you get a DIN), <Term k="NOD" />,
+        or <Term k="NON" />. Remember the <Term k="clock">review clock</Term> counts
+        only Health Canada&apos;s time and pauses while they wait on you.
+      </div>
+      {/* journey · J23 · the accountability statement travels to the tracking
+          step too — deficiencies land here, and the answer to "who's
+          accountable?" should be one glance away. */}
+      <p className="mut" style={{ fontSize: 12, margin: "8px 0 0" }}>
+        If HC screens out or rejects: accountability for the filing sits with
+        you, the sponsor — ANDS Studio holds the reconstructable record
+        (receipts, Part-11 ledger, validation reports, signed manifest), and
+        the response paths below walk each notice.
+      </p>
+    </>
   );
 }
 

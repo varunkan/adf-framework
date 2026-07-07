@@ -67,6 +67,17 @@ export function RuleCatalogue({ criteria }: { criteria?: ValidationCriteria }) {
           <details key={fam} style={{ marginTop: 8 }}>
             <summary style={{ cursor: "pointer" }}>
               {fam} — {rs.length} rule{rs.length === 1 ? "" : "s"}
+              {/* ROUND9-VALIDATE item 5: the family's Source citation is
+                  visible on the summary line WITHOUT expanding (per-rule
+                  detail stays collapsed to keep the uncluttered first open). */}
+              {rs[0]?.source && (
+                <span
+                  className="mut"
+                  style={{ display: "block", fontSize: 11, marginTop: 2, fontWeight: 400 }}
+                >
+                  Source: {rs[0].source}
+                </span>
+              )}
             </summary>
             <ul style={{ margin: "8px 0 0", paddingLeft: 18, lineHeight: 1.5 }}>
               {rs.map((r) => (

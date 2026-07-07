@@ -1,8 +1,23 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { api } from "@/lib/api";
 import type { TrackSummary } from "@/lib/types";
+import { citeLine, LAST_VERIFIED, type RegCitation } from "@/lib/regCitations";
 import { Term } from "./Term";
+import { Disclosure } from "./Disclosure";
+
+// journey · J5 post-NOC Level I/II/III (round-9 BLOCKER, n=4; ra_director_cro,
+// regops_publisher) — the citation for the change-classification framework.
+const POST_NOC_FRAMEWORK: RegCitation = {
+  claim:
+    "Post-NOC changes are classified Level I (supplement), Level II " +
+    "(Notifiable Change) or Level III (record at Annual Notification).",
+  source:
+    "Health Canada — Post-Notice of Compliance (NOC) Changes: Framework " +
+    "guidance (with the Quality / Safety-Efficacy appendices)",
+  verified: LAST_VERIFIED,
+};
 
 const NOTICES = [
   { type: "SDN", label: "Log a screening deficiency (SDN)" },
@@ -135,6 +150,57 @@ export function TrackView({ sessionId }: { sessionId: string }) {
         A <Term k="clarifax" /> asks you to clarify data you already filed; the
         decisions are <Term k="NOC" />, <Term k="NOD" /> or <Term k="NON" />.
       </p>
+
+      {/* journey · J5 post-NOC changes · HONEST SUBSET: plain guidance on
+          HC's Level I/II/III classification + the SANDS pathway pointer.
+          Studio does NOT auto-classify a change's level — that limit is
+          stated flatly below, not implied away. Collapsed by default so the
+          tracking view keeps its calm first-open feel. */}
+      <div style={{ marginTop: 14 }}>
+        <Disclosure
+          showLabel="Show the change levels"
+          hideLabel="Hide the change levels"
+          summary={
+            <span style={{ fontSize: 13 }}>
+              <b>After approval — post-NOC changes (Level I / II / III).</b>{" "}
+              Real ANDS work continues after the <Term k="NOC" />.
+            </span>
+          }
+        >
+          <ul style={{ margin: "8px 0 0", paddingLeft: 18, fontSize: 12.5,
+            lineHeight: 1.55 }}>
+            <li>
+              <b>Level I — Supplement (prior approval).</b> Significant
+              quality/labelling changes need Health Canada&apos;s approval
+              BEFORE implementation — for a generic, filed as a{" "}
+              <Term k="SANDS" /> (Supplement to an ANDS).
+            </li>
+            <li style={{ marginTop: 4 }}>
+              <b>Level II — Notifiable Change.</b> Moderate changes are filed
+              as a notification; you may implement per the guidance&apos;s
+              conditions while HC screens it.
+            </li>
+            <li style={{ marginTop: 4 }}>
+              <b>Level III — Annual Notification.</b> Minor changes are
+              recorded and reported in your Annual Notification — no
+              submission at the time of change.
+            </li>
+          </ul>
+          <div className="notice warn" style={{ marginTop: 8, fontSize: 12 }}>
+            Honest limit: ANDS Studio does <b>not</b> auto-classify your
+            change&apos;s level — classify it yourself against the guidance&apos;s
+            appendices, and when in doubt treat it as the higher level.
+          </div>
+          <div className="cta-row" style={{ marginTop: 8 }}>
+            <Link className="chip" href="/dossiers">
+              File a Level I change: SANDS — Supplement to an ANDS →
+            </Link>
+          </div>
+          <p className="mut" style={{ fontSize: 10.5, margin: "8px 0 0" }}>
+            {citeLine(POST_NOC_FRAMEWORK)}
+          </p>
+        </Disclosure>
+      </div>
     </div>
   );
 }

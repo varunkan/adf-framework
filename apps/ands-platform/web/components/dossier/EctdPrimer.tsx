@@ -53,6 +53,34 @@ export function EctdPrimer({
           document), <b>append</b> (adds alongside it) or <b>delete</b>{" "}
           (withdraws it). The app writes the backbone XML that records this.
         </li>
+        {/* Round-9 builder_forms MAJOR "Remaining jargon undefined
+            (md5/fingerprint, backbone, provenance)" (n=5): the last plain-words
+            gaps, in the same voice as leaf and sequence. The hover glossary
+            (lib/terms.ts) carries the same definitions; the primer spells them
+            out for readers who never hover. */}
+        <li>
+          The <Term k="backbone" /> is the pair of XML index files —{" "}
+          <code>index.xml</code> plus the Canadian <code>ca-regional.xml</code>{" "}
+          — listing every leaf, its place, its checksum and its lifecycle
+          operation. Health Canada&apos;s systems read the backbone, not your
+          folder names.
+        </li>
+        <li>
+          An <Term k="md5" /> (fingerprint) is a short code computed from a
+          file&apos;s exact bytes — if the file changes at all, the fingerprint
+          changes. It is used for <b>document control</b> (spotting silent
+          changes), <b>not validation</b> or acceptance.
+        </li>
+        <li>
+          The <Term k="provenance chip" /> on a saved document records how it
+          was made — uploaded, generated from a form, or AI-assisted — and the
+          label is permanent through review, export and audit.
+        </li>
+        <li>
+          A <Term k="module badge" /> shows whether that module&apos;s required
+          documents are placed — a completeness signal only; validation is a
+          separate, explicit step.
+        </li>
       </ul>
       {/* MAJOR: the primer is a door to the real backbone/XML, not a substitute
           for it — link to the Application Viewer where index.xml /

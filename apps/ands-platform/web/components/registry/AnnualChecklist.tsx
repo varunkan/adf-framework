@@ -6,11 +6,26 @@
 // is viewable right here. "A name + UTC stamp … is just decoration."
 import { useEffect, useState } from "react";
 import { auth } from "@/lib/auth";
+import { ProvenancePopover } from "@/components/ProvenancePopover";
 import {
   registryApi,
   type ChecklistItem,
   type SigningLogEntry,
 } from "./registryApi";
+
+// Round-9 (operations BLOCKER, n=15): "the annual-notification checklist has
+// no cited clock at all." The statutory anchor for the ADN / Right-to-Sell
+// cycle is October 1 of the fiscal year — same fiscal-year rule the registry
+// service applies (month >= April ⇒ this year's Oct 1, else last year's).
+function adnClock(now: Date = new Date()) {
+  const fyStart =
+    now.getMonth() + 1 >= 4 ? now.getFullYear() : now.getFullYear() - 1;
+  const due = new Date(Date.UTC(fyStart, 9, 1)); // October 1 (month idx 9)
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  const days = Math.round((due.getTime() - today) / 86400000);
+  return { iso: due.toISOString().slice(0, 10), days, overdue: days < 0,
+           fy: `${fyStart}-${(fyStart + 1) % 100}` };
+}
 
 function signedLine(item: ChecklistItem): string {
   if (!item.done || !item.signed_at) return "";
@@ -86,13 +101,56 @@ export function AnnualChecklist() {
       <h2 style={{ margin: 0, fontSize: 16 }}>
         Annual notification checklist{year ? ` — ${year}` : ""}
       </h2>
-      <p className="mut" style={{ margin: "8px 0 14px", fontSize: 12 }}>
+      <p className="mut" style={{ margin: "8px 0 8px", fontSize: 12 }}>
         Tracked on the registry service for this workspace. Each tick is a
         controlled e-signature: your password is re-verified at the moment of
         signing and a meaning-of-signature is recorded on the append-only
         signing record below. (The filings themselves still happen with
         Health Canada — sources in Help.)
       </p>
+      {/* Round-9 (n=15): the checklist's cited statutory clock, on the face —
+          regulation + day-count basis + input date, calculated-aid stamped. */}
+      {(() => {
+        const c = adnClock();
+        return (
+          <p style={{ margin: "0 0 14px", fontSize: 12, display: "flex",
+            alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            <span className={`notice ${c.overdue ? "" : c.days <= 30 ? "warn" : ""}`}
+              style={{ padding: "4px 10px", fontSize: 12 }}>
+              ⏱ {c.overdue
+                ? <><b>{-c.days}</b> day{c.days === -1 ? "" : "s"} past</>
+                : <><b>{c.days}</b> day{c.days === 1 ? "" : "s"} until</>}{" "}
+              the October 1 annual cycle (FY {c.fy}, due {c.iso})
+              <span className="mut" style={{ marginLeft: 6, fontSize: 10 }}
+                title="Calculated aid — verify against the HC record">
+                · calculated aid
+              </span>
+            </span>
+            <ProvenancePopover
+              prov={{
+                anchorLabel: `Annual notification / Right-to-Sell cycle (FY ${c.fy})`,
+                anchorDate: c.iso,
+                anchorSource: "ingested",
+                basis: "calendar",
+                rule:
+                  "The Annual Drug Notification and Right-to-Sell fee cycle " +
+                  "anchors on October 1 of the fiscal year (April–March); " +
+                  "this is a fixed statutory calendar date, not a business-" +
+                  "day count.",
+                citation:
+                  "Food and Drug Regulations — Annual Drug Notification / " +
+                  "annual Right-to-Sell (statutory October 1)",
+                asOf: null,
+              }}
+            />
+            <span className="mut" style={{ fontSize: 10.5 }}>
+              Basis: Food and Drug Regulations · fixed calendar date (no
+              day-counting) · input: today&apos;s date — verify against the HC
+              record.
+            </span>
+          </p>
+        );
+      })()}
       {err && <div className="notice bad" style={{ fontSize: 12,
         marginBottom: 8 }}>{err}</div>}
       {items === null && !err ? (

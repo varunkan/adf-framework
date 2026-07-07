@@ -26,6 +26,7 @@ class DossierClient(Protocol):
                  sme_granted: bool) -> dict | None: ...
     def record_esign(self, dossier_id: str, manifest: dict,
                      *, actor: str = "") -> dict | None: ...
+    def evalidator_attestation(self, dossier_id: str) -> dict | None: ...
 
 
 class HttpDossierClient:
@@ -90,6 +91,19 @@ class HttpDossierClient:
             pass
         return None
 
+    def evalidator_attestation(self, dossier_id) -> dict | None:
+        """journey · J3 hard eValidator gate · the current USER-ATTESTED
+        external eValidator result recorded on the dossier (or None).
+        Best-effort like every sibling — unreachable means 'no attestation'."""
+        try:
+            r = self._c.get(
+                f"/api/dossier/dossiers/{dossier_id}/evalidator-attestation")
+            if r.status_code == 200:
+                return (r.json() or {}).get("attestation")
+        except Exception:
+            pass
+        return None
+
 
 class InProcessDossierClient:
     """Wraps a live ``DossierService`` — for the integration mesh + unit tests."""
@@ -130,5 +144,13 @@ class InProcessDossierClient:
     def record_esign(self, dossier_id, manifest, *, actor="") -> dict | None:
         try:
             return self.service.record_esign(dossier_id, manifest, actor=actor)
+        except Exception:
+            return None
+
+    def evalidator_attestation(self, dossier_id) -> dict | None:
+        # journey · J3 hard eValidator gate
+        try:
+            res = self.service.get_evalidator_attestation(dossier_id)
+            return (res or {}).get("attestation")
         except Exception:
             return None

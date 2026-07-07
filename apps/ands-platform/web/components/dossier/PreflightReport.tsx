@@ -13,7 +13,9 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { dossierApi } from "@/lib/dossierApi";
+import { auth } from "@/lib/auth";
 import { EvalidatorClearedChip } from "./EvalidatorHandoff";
+import { criteriaStaleness } from "./validationExtras";
 import type {
   PreflightReport as Report,
   SignatureStatus,
@@ -52,16 +54,21 @@ function csvCell(v: unknown): string {
 // Flatten the consolidated report into a QA-readable checklist of rows +
 // findings — the same "stamp provenance into leading # comment lines" pattern
 // the validation report uses, so criteria/version/sync travels with the file.
-function toCsv(r: Report): string {
+function toCsv(r: Report, runBy: string): string {
   const c = r.validation.criteria;
+  // ROUND9-VALIDATE item 1: the staleness warning rides the archived stamp.
+  const stale = criteriaStaleness(c);
   const lines: string[] = [
     `# ANDS Studio pre-flight / QA hand-off report`,
     `# Dossier: ${r.dossier_id} · ${r.title} · generated ${r.generated_at}`,
+    // ROUND9-VALIDATE item 6: who assembled/ran the hand-off artifact.
+    `# Run by: ${runBy}`,
     c
       ? `# Ruleset: ${c.name} v${c.version}${
           c.synced ? ` · synced ${c.synced}` : ""
         } · structural/technical only — NOT Health Canada's official eValidator`
       : `# Ruleset: (unnamed structural check)`,
+    ...(stale?.review_overdue ? [`# ${stale.message}`] : []),
     `# ${r.readiness.summary}`,
     `# ${r.readiness.next_step}`,
     ...Object.values(r.disclaimers).map((d) => `# ${d}`),
@@ -153,8 +160,9 @@ function esc(s: unknown): string {
 // Print-ready HTML — reuses the validation report's print pattern (open a
 // window, "Save as PDF"). We do NOT claim PDF/A conformance; the disclaimers are
 // stamped into a banner so provenance + honest scope travels with the printout.
-function printReport(r: Report) {
+function printReport(r: Report, runBy: string) {
   const c = r.validation.criteria;
+  const stale = criteriaStaleness(c);
   const yesno = (b: boolean) => (b ? "Yes" : "No");
   const findings = [
     ...r.validation.errors.map((f) => ({ sev: "error", f })),
@@ -195,10 +203,14 @@ function printReport(r: Report) {
     `<div class="stamp">Dossier: ${esc(r.dossier_id)} · ${esc(
       r.title
     )} · generated ${esc(r.generated_at)}</div>` +
+    `<div class="stamp">Run by: ${esc(runBy)}</div>` +
     (c
       ? `<div class="stamp">Ruleset: ${esc(c.name)} v${esc(c.version)}${
           c.synced ? ` · synced ${esc(c.synced)}` : ""
         } · structural/technical only — NOT Health Canada's official eValidator</div>`
+      : "") +
+    (stale?.review_overdue
+      ? `<div class="banner"><b>${esc(stale.message)}</b></div>`
       : "") +
     `<div class="banner"><b>${esc(r.readiness.summary)}</b><br/>${esc(
       r.readiness.next_step
@@ -346,6 +358,16 @@ export function PreflightReport({ dossierId }: { dossierId: string }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
+  // ROUND9-VALIDATE item 6: stamp who ran/assembled the artifact into the
+  // CSV / print exports (best-effort — "(not signed in)" when unknown).
+  async function whoAmI(): Promise<string> {
+    try {
+      return (await auth.me()).email || "(not signed in)";
+    } catch {
+      return "(not signed in)";
+    }
+  }
+
   async function load() {
     setBusy(true);
     setErr("");
@@ -372,8 +394,10 @@ export function PreflightReport({ dossierId }: { dossierId: string }) {
             style={{ marginLeft: "auto" }}
             className={`ready-status ${rep.readiness.ready ? "READY" : "BLOCKED"}`}
           >
+            {/* ROUND9-VALIDATE item 5: the limitation is baked INTO the green
+                chip so a clean result is never misread as an HC pass. */}
             {rep.readiness.ready
-              ? "● NO STRUCTURAL ISSUES"
+              ? "● NO STRUCTURAL ISSUES (structural; not HC eValidator)"
               : `● ${rep.readiness.structural_errors} issue(s)`}
           </span>
         )}
@@ -486,7 +510,7 @@ export function PreflightReport({ dossierId }: { dossierId: string }) {
             <button
               className="ghost"
               style={{ fontSize: 12, padding: "6px 10px" }}
-              onClick={() => printReport(rep)}
+              onClick={async () => printReport(rep, await whoAmI())}
               title="Opens a print-ready, disclaimer-stamped report — use your browser's Save as PDF. Not a PDF/A conformance claim."
             >
               <Printer size={13} /> Export (PDF)
@@ -494,11 +518,11 @@ export function PreflightReport({ dossierId }: { dossierId: string }) {
             <button
               className="ghost"
               style={{ fontSize: 12, padding: "6px 10px" }}
-              onClick={() =>
+              onClick={async () =>
                 download(
                   `${dossierId}-preflight-report.csv`,
                   "text/csv;charset=utf-8",
-                  toCsv(rep)
+                  toCsv(rep, await whoAmI())
                 )
               }
             >

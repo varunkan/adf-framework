@@ -11,6 +11,12 @@ import { Term } from "@/components/Term";
 import { CorrespondenceHub } from "@/components/correspondence/CorrespondenceHub";
 import { NoticeInbox } from "@/components/correspondence/NoticeInbox";
 import { NoaRegister, StatutoryClockStrip } from "@/components/correspondence/NoaRegister";
+// Round-9 (operations BLOCKER, n=4): tool dates vs verified official values.
+import { ReconciliationView } from "@/components/correspondence/ReconciliationView";
+// Round-9 (operations MAJOR, n=15): re-launchable 'Start here' guided tour.
+import { StartHereTour } from "@/components/portfolio/StartHereTour";
+// Round-9 (operations MAJOR, n=2): explicit FR-coverage statement.
+import { BilingualNote } from "@/components/portfolio/BilingualNote";
 import {
   SponsorScope,
   ALL_SPONSORS,
@@ -76,7 +82,12 @@ export default function CorrespondencePage() {
             audit trail — actor and workspace stamped, sequence-numbered,
             exportable for inspections (open a dossier → Audit).
           </p>
+          {/* Round-9 (operations MAJOR, n=2): FR coverage, stated plainly */}
+          <BilingualNote />
         </header>
+
+        {/* Round-9 (operations MAJOR, n=15): 'Start here' guided tour */}
+        <StartHereTour page="correspondence" />
 
         <div className="notice" style={{ maxWidth: "72ch", marginTop: 4 }}>
           <b>Record only.</b> Everything on this page logs a record in your own
@@ -205,6 +216,11 @@ export default function CorrespondencePage() {
                 </div>
               )}
             </div>
+
+            {/* Round-9 (operations BLOCKER, n=4): the reconciliation view —
+                calculated tool dates vs the externally verified official
+                values, discrepancies flagged, conflict rule stated. */}
+            <ReconciliationView dossierId={picked} />
           </div>
         )}
       </main>

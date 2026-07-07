@@ -64,6 +64,21 @@ export type NoaRecord = {
   stay_days_remaining?: number | null;
 };
 
+// Round-9 (operations, n=4): a manual verified-date override for one
+// calculated clock — who verified, when, against which external source.
+export type VerifiedDate = {
+  id: string;
+  dossier_id: string;
+  clock_key: string;
+  verified_date: string;
+  calculated_date: string | null;
+  source_ref: string;
+  verified_by: string | null;
+  verified_at: string;
+  discrepancy: boolean;
+  history_count?: number;
+};
+
 // Correspondence kinds, mirrored from the service's correspondence.KINDS
 export const KINDS: Record<string, string> = {
   SDN: "Screening Deficiency Notice",
@@ -165,6 +180,24 @@ export const lifecycleApi = {
     subject?: string;
     reference?: string;
   }) => j<NoticeResult>("/notice", { method: "POST", body: JSON.stringify(body) }),
+
+  // round-9 (n=4): verified-date overrides — append-only reconciliation
+  // records against the external source of truth (HC letter, Vault RIM…)
+  listVerifiedDates: (dossierId: string) =>
+    j<{ verifications: VerifiedDate[]; count: number }>(
+      `/verified-dates?dossier_id=${encodeURIComponent(dossierId)}`),
+
+  setVerifiedDate: (body: {
+    dossier_id: string;
+    clock_key: string;
+    verified_date: string;
+    calculated_date?: string;
+    source_ref: string;
+  }) =>
+    j<VerifiedDate>("/verified-date", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
   listNoa: (dossierId: string, asOf = "") =>
     j<{ allegations: NoaRecord[]; count: number }>(

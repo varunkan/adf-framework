@@ -8,9 +8,39 @@ import type { ModuleTower } from "@/lib/types";
 import { useTowerView } from "@/lib/useTowerView";
 import { TowerChecklist } from "@/components/TowerChecklist";
 
-export function MiniTower({ tower, missing = [] }: {
+// Round-9 (operations MAJOR, n=2; labelling_specialist): Module 1 labelling
+// completeness (PM + labels) with a missing-French flag, derived from the
+// dossier's real section state — never fabricated when content isn't loaded.
+export type M1Labelling = {
+  total: number;    // labelling documents (1.3.x) applicable on this dossier
+  filled: number;   // of those, complete
+  frMissing: string[]; // bilingual labelling sections whose FR version is absent
+};
+
+function LabellingChip({ lab }: { lab?: M1Labelling }) {
+  if (!lab || !lab.total) return null;
+  const bad = lab.frMissing.length > 0 || lab.filled < lab.total;
+  return (
+    <span className={`chip ${bad ? "blocked" : "ready"}`}
+      style={{ fontSize: 10, padding: "0 6px" }}
+      title={
+        `Module 1 labelling (1.3.x — product monograph, labels/mock-ups): ` +
+        `${lab.filled} of ${lab.total} complete.` +
+        (lab.frMissing.length
+          ? ` French version missing on: ${lab.frMissing.join(", ")} — the ` +
+            `EN/FR product monograph pair is required at 1.3.1.`
+          : " French versions present where required.")
+      }>
+      M1 labelling {lab.filled}/{lab.total}
+      {lab.frMissing.length ? " · ⚠ FR missing" : ""}
+    </span>
+  );
+}
+
+export function MiniTower({ tower, missing = [], labelling }: {
   tower: ModuleTower[];
   missing?: { key?: string; title: string; module: string }[];
+  labelling?: M1Labelling;
 }) {
   const [view, setView] = useTowerView();
   const toggle = (
@@ -24,7 +54,9 @@ export function MiniTower({ tower, missing = [] }: {
   if (view === "checklist") {
     return (
       <div style={{ width: "100%", minWidth: 0 }}>
-        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 4 }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 6,
+          marginBottom: 4 }}>
+          <LabellingChip lab={labelling} />
           {toggle}
         </div>
         <TowerChecklist tower={tower} missing={missing} />
@@ -34,7 +66,10 @@ export function MiniTower({ tower, missing = [] }: {
   return (
     <div style={{ width: "100%", display: "flex", flexDirection: "column",
       gap: 4, alignItems: "flex-end" }}>
-      {toggle}
+      <span style={{ display: "inline-flex", gap: 6 }}>
+        <LabellingChip lab={labelling} />
+        {toggle}
+      </span>
       <div
         style={{ display: "flex", gap: 8, alignItems: "flex-end" }}
         aria-label="Module completion, Modules 1 to 5"

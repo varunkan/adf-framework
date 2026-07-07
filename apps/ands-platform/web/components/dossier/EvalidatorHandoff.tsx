@@ -16,6 +16,7 @@
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { dossierApi } from "@/lib/dossierApi";
+import { Term } from "../Term";
 import {
   ShieldAlert,
   ShieldCheck,
@@ -117,10 +118,12 @@ export function EvalidatorClearedChip({
 // family key -> whether HC's official eValidator checks the same class of
 // defect + a plain note. Mirrors ectd_validation._FAMILY_PARITY. `covered`
 // means OVERLAP (eValidator remains authoritative), NOT equivalence.
-const FAMILY_PARITY: Record<string, { covered: boolean; note: string }> = {
+// ROUND9-VALIDATE item 6: exported so the ValidationCard can stamp the
+// parity-gap table into the downloadable CSV/JSON/PDF reports.
+export const FAMILY_PARITY: Record<string, { covered: boolean; note: string }> = {
   "1": {
     covered: true,
-    note: "HC eValidator also checks leaf inventory integrity (href, checksum presence, MD5 format). Overlaps — eValidator remains authoritative.",
+    note: "HC eValidator also checks leaf inventory integrity (href, checksum presence, MD5 format). Overlaps — eValidator remains authoritative. (In ANDS Studio the leaf md5 is document control, not validation.)",
   },
   "2": {
     covered: true,
@@ -162,14 +165,16 @@ function familyKey(ruleId: string): string {
   return digits.startsWith("55") ? "55" : digits.slice(0, 1);
 }
 
-interface ParityRow {
+export interface ParityRow {
   family: string;
   ruleIds: string[];
   covered: boolean;
   note: string;
 }
 
-function buildParity(rules: ValidationRule[]): ParityRow[] {
+// ROUND9-VALIDATE item 6: exported so the exported reports can carry the
+// exact same parity rows the UI table renders (never a divergent copy).
+export function buildParity(rules: ValidationRule[]): ParityRow[] {
   const byFamily: Record<string, ParityRow> = {};
   for (const r of rules) {
     const key = familyKey(r.rule_id);
@@ -645,7 +650,10 @@ export function EvalidatorBanner({ criteria }: { criteria?: ValidationCriteria }
         <div className="mut" style={{ marginTop: 6 }}>
           Next step: export the eCTD package, validate it in HC&apos;s eValidator (or
           your publisher&apos;s validator — e.g. Lorenz eValidator / docuBridge),
-          resolve any findings, then upload through CESG WebTrader.
+          resolve any findings, then upload through{" "}
+          {/* ROUND9-VALIDATE item 4: "CESG WebTrader" was the one flow term
+              with no plain-English tooltip — sentence copy otherwise verbatim. */}
+          <Term k="CESG">CESG WebTrader</Term>.
         </div>
         {criteria?.synced && (
           <div className="mut" style={{ marginTop: 6, fontSize: 12 }}>
@@ -701,7 +709,10 @@ export function EvalidatorHandoff({
 }) {
   const [rules, setRules] = useState<ValidationRule[] | null>(null);
   const [err, setErr] = useState("");
-  const [open, setOpen] = useState(false);
+  // ROUND9-VALIDATE item 5 (n=10, "people skip what is collapsed"): the
+  // parity-gap table defaults OPEN — it renders on the clean/pass state,
+  // exactly where the 'no HC counterpart' rows matter most.
+  const [open, setOpen] = useState(true);
   const [att, setAtt] = useState<EvalidatorAttestation | null>(attestation ?? null);
 
   useEffect(() => {

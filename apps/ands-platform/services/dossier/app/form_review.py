@@ -24,6 +24,41 @@ URLS = {
     "forms": f"{_APPS}/forms.html",
 }
 
+# Round-9 ai_draft BLOCKER "Criteria 'last verified' date and HC guidance
+# version are buried" (n=13) + MAJOR "Review step lacks guidance clause
+# citations" (n=9): every finding now carries a NAMED, DATED guidance citation.
+# One shared re-verification stamp (mirrors web/lib/regCitations.LAST_VERIFIED —
+# update both when the guidance set is re-checked against canada.ca).
+LAST_VERIFIED = "2026-07-03"
+
+# The named guidance document + a TOPIC-level pointer per url-key. HONESTY BAR:
+# refs are topic pointers within the real, named guidance — we never fabricate
+# section/clause numbers we have not pinned against the published document.
+GUIDANCE_META = {
+    "m1": {"source": "Health Canada — Guidance Document: Organization and "
+                     "Document Placement for Canadian Module 1",
+           "ref": "Module 1 administrative content requirements"},
+    "rep": {"source": "Health Canada — Regulatory Enrolment Process (REP) "
+                      "guidance and web templates",
+            "ref": "Regulatory Transaction identifiers (Company ID / "
+                   "Dossier ID)"},
+    "patent": {"source": "Health Canada — Patented Medicines (Notice of "
+                         "Compliance) Regulations (SOR/93-133)",
+               "ref": "Section 5 declarations (Form V) and Notice of "
+                      "Allegation service"},
+    "babe": {"source": "Health Canada — Guidance Document: Conduct and "
+                       "Analysis of Comparative Bioavailability Studies",
+             "ref": "Comparative bioequivalence summary (AUC / Cmax 90% "
+                    "confidence intervals)"},
+    "qos": {"source": "Health Canada — Quality Overall Summary templates "
+                      "(QOS-CE(BE))",
+            "ref": "QOS-CE(BE) template structure"},
+    "forms": {"source": "Health Canada — Applications and submissions: "
+                        "forms",
+              "ref": "Sponsor attestation / signatory requirements"},
+}
+_URL_TO_KEY = {url: key for key, url in URLS.items()}
+
 
 def _s(v) -> str:
     return str(v if v is not None else "").strip()
@@ -34,8 +69,15 @@ def _has(fields: dict, *keys) -> bool:
 
 
 def _finding(sev, rule, message, url, suggested_edit) -> dict:
+    # Round-9 (ai_draft n=9): each finding cites the named guidance document
+    # it derives from, with a topic pointer and the shared verified stamp.
+    meta = GUIDANCE_META.get(_URL_TO_KEY.get(url, ""), {})
     return {"severity": sev, "rule": rule, "message": message,
-            "hc_url": url, "suggested_edit": suggested_edit}
+            "hc_url": url, "suggested_edit": suggested_edit,
+            "guidance": {"source": meta.get("source",
+                                            "Health Canada guidance"),
+                         "ref": meta.get("ref", "required-element rule"),
+                         "verified": LAST_VERIFIED, "url": url}}
 
 
 def _review_cover_letter(f: dict) -> list:
@@ -159,4 +201,13 @@ def review(generator_key: str, fields: dict) -> dict:
     errors = [x for x in findings if x["severity"] == "error"]
     return {"passed": not errors, "findings": findings,
             "error_count": len(errors),
-            "warning_count": len(findings) - len(errors)}
+            "warning_count": len(findings) - len(errors),
+            # Round-9 (ai_draft n=13): the criteria verification stamp rides
+            # on EVERY review result so the UI can show it beside the verdict
+            # instead of burying it in muted expander text.
+            "criteria": {
+                "verified": LAST_VERIFIED,
+                "basis": "Required-element rules derived from the named "
+                         "Health Canada guidance documents cited per finding "
+                         "— a content-completeness heuristic, not a "
+                         "screening clearance."}}

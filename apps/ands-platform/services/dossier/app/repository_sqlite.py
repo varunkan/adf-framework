@@ -89,6 +89,11 @@ CREATE TABLE IF NOT EXISTS dossier_index (
     company_id      TEXT,
     sponsor         TEXT,
     drug_product    TEXT,
+    -- R9-CATALOG "No bilingual/French support surfaced anywhere on the page"
+    -- (n=2): the governed FRENCH product name (paired with title) + the
+    -- accountable labelling owner, both captured on the New dossier form.
+    title_fr        TEXT,
+    labelling_owner TEXT,
     -- WS6 portfolio: the accountable PM/owner for this dossier (one value per
     -- dossier; distinct from the many per-plan-item assignees and the sponsor)
     owner           TEXT,
@@ -194,6 +199,9 @@ class SqliteDossierRepository:
         "ALTER TABLE dossier_index ADD COLUMN uid TEXT",
         # WS3 uid-keyed ledger: pre-existing events rows lack the uid column
         "ALTER TABLE dossier_events ADD COLUMN uid TEXT",
+        # R9-CATALOG bilingual (n=2): governed FR product name + labelling owner
+        "ALTER TABLE dossier_index ADD COLUMN title_fr TEXT",
+        "ALTER TABLE dossier_index ADD COLUMN labelling_owner TEXT",
     )
 
     # DDL that must run on pre-existing DBs too (the durable audit ledger +
@@ -461,8 +469,9 @@ class SqliteDossierRepository:
         self.db.execute(
             "INSERT INTO dossier_index (dossier_id, uid, title, submission_type, "
             "cs_be_only, din, company_id, sponsor, drug_product, owner, "
+            "title_fr, labelling_owner, "
             "tenant_id, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(dossier_id) DO UPDATE SET title=excluded.title, "
             # a re-create keeps the original uid — never re-key the ledger
             "uid=COALESCE(dossier_index.uid, excluded.uid), "
@@ -476,6 +485,10 @@ class SqliteDossierRepository:
             "dossier_index.drug_product), "
             # WS6: preserve the owner across upserts that omit it (COALESCE)
             "owner=COALESCE(excluded.owner, dossier_index.owner), "
+            # R9-CATALOG bilingual (n=2): preserve FR name/labelling owner too
+            "title_fr=COALESCE(excluded.title_fr, dossier_index.title_fr), "
+            "labelling_owner=COALESCE(excluded.labelling_owner, "
+            "dossier_index.labelling_owner), "
             # an upsert never re-homes a dossier to another tenant
             "tenant_id=COALESCE(dossier_index.tenant_id, excluded.tenant_id), "
             "updated_at=excluded.updated_at",
@@ -483,6 +496,7 @@ class SqliteDossierRepository:
              1 if rec.get("cs_be_only", True) else 0, rec.get("din"),
              rec.get("company_id") or None, rec.get("sponsor") or None,
              rec.get("drug_product") or None, rec.get("owner") or None,
+             rec.get("title_fr") or None, rec.get("labelling_owner") or None,
              rec.get("tenant_id") or None, now, now))
         return self.get_dossier_index(rec["dossier_id"])
 
@@ -774,6 +788,27 @@ class SqliteDossierRepository:
         with self.db.transaction():
             if not self.archive_dossier(dossier_id, actor=actor, reason=reason):
                 return None   # rolls back — no phantom event
+            return self.append_event(event_type, dossier_id, actor=actor,
+                                     reason=reason, tenant_id=tenant_id,
+                                     data=data)
+
+    def set_owner_with_event(self, dossier_id: str, owner: str | None, *,
+                             actor: str, reason: str, event_type: str,
+                             tenant_id: str, data: dict) -> dict | None:
+        """R9-CATALOG "No user roles, permissions, or e-signatures on
+        workspace actions" (n=6): reassign the accountable Owner (PM) AND
+        record the durable audit event atomically (old/new owner in ``data``).
+        Returns the appended event, or None if the dossier is absent."""
+        with self.db.transaction():
+            row = self.db.fetchone(
+                "SELECT 1 FROM dossier_index WHERE dossier_id = ?",
+                (dossier_id,))
+            if not row:
+                return None
+            self.db.execute(
+                "UPDATE dossier_index SET owner = ?, updated_at = ? "
+                "WHERE dossier_id = ?",
+                (owner, utcnow_iso(), dossier_id))
             return self.append_event(event_type, dossier_id, actor=actor,
                                      reason=reason, tenant_id=tenant_id,
                                      data=data)

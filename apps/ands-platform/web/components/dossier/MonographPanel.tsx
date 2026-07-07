@@ -64,6 +64,21 @@ export function MonographPanel({ dossierId }: { dossierId: string }) {
         )}
       </div>
 
+      {/* Round-9 builder_forms BLOCKER "Bilingual/XML Product Monograph
+          handling unclear and unenforced" (n=4): the explicit scope statement
+          on the face of the (now first-class, centre-panel — see the module
+          workspace) section — what 1.3.1 actually produces: a PDF/A leaf per
+          language, plus a separate structured-XML-PM build & validate. */}
+      <div className="mut" style={{ fontSize: 12, marginTop: 6, lineHeight: 1.55 }}>
+        <b>Scope:</b> your reviewed Product Monograph is placed as a{" "}
+        <b>PDF/A leaf</b> at 1.3.1 — English and French tracked separately
+        below, and a missing language is a transmission blocker. The XML
+        affordance below separately <b>builds &amp; validates a structured XML
+        PM</b> against Health Canada&apos;s stylesheet package; it starts from
+        placeholder sections, not your draft content, so align it with the
+        reviewed PM before filing.
+      </div>
+
       {error && (
         <div className="mut" style={{ fontSize: 11, marginTop: 6 }}>
           Monograph status unavailable — {error}

@@ -5,27 +5,23 @@
 // _workspace_requires_mfa) and cannot be bypassed from the browser. Non-admins
 // see the current policy read-only.
 //
-// WS-ONBOARDING (round-8) #5 — session/MFA policy:
-//  - MFA is presented as Required-by-default: when a workspace is still on the
-//    optional setting we show a "Recommended: Required" prompt so a new admin
-//    lands on the secure posture rather than discovering it buried in settings.
-//  - session length + idle-lockout become an admin-configurable, DOCUMENTED
-//    policy (1/4/8/12h + idle timeout). We are honest that this is a declared
-//    workspace policy (the live session is still 12h server-side today); the
-//    dropdown records the policy the workspace commits to and is surfaced during
-//    onboarding via <OnboardingSecuritySummary/>.
+// onboarding — MFA default is now Required, server-enforced for NEW workspaces
+// (round-9 item 4, BLOCKER n=4): the identity service creates every new
+// workspace with require_mfa on, so this card REPORTS the enforced default and
+// makes relaxation the explicit admin action (the panel rejected the old
+// "Optional per member" + "Recommended: Required" chip pattern).
+//
+// onboarding — enforced session value in place of a bare dropdown (round-9
+// item 7, MAJOR n=6): the session length is a FACT (12 h, SESSION_TTL in the
+// identity service, enforced on every request) and is stated as such with no
+// 'documented target' caveat. Idle lockout remains genuinely unshipped
+// enforcement, so ONLY it keeps the admin-set documented-policy dropdown with
+// a caveat narrowed to idle alone.
 import { useEffect, useState } from "react";
 import { auth, type TenantSecurity } from "@/lib/auth";
 
-const SESSION_KEY = "ands.sessionPolicy";
 const IDLE_KEY = "ands.idlePolicy";
 
-const SESSION_OPTS = [
-  { v: "1", label: "1 hour" },
-  { v: "4", label: "4 hours" },
-  { v: "8", label: "8 hours" },
-  { v: "12", label: "12 hours" },
-];
 const IDLE_OPTS = [
   { v: "15", label: "15 minutes" },
   { v: "30", label: "30 minutes" },
@@ -44,13 +40,12 @@ export function WorkspaceMfaPolicy() {
   const [sec, setSec] = useState<TenantSecurity | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  // #5 — documented session policy (declared, admin-configurable)
-  const [sessionHrs, setSessionHrs] = useState("12");
+  // item 7 — only IDLE lockout remains a documented (declared) policy; the
+  // session length is server-enforced and stated as a fact below.
   const [idleMin, setIdleMin] = useState("30");
 
   useEffect(() => {
     auth.tenantSecurity().then(setSec).catch((e) => setErr(String(e)));
-    setSessionHrs(readPolicy(SESSION_KEY, "12"));
     setIdleMin(readPolicy(IDLE_KEY, "30"));
   }, []);
 
@@ -96,18 +91,14 @@ export function WorkspaceMfaPolicy() {
           <div style={{ display: "flex", gap: 8, alignItems: "center",
             flexWrap: "wrap" }}>
             <span className={sec.require_mfa ? "chip ready" : "chip"}>
-              {sec.require_mfa ? "Required for all members ✓"
-                : "Optional per member"}
+              {sec.require_mfa ? "Required for all members ✓ (secure default)"
+                : "Optional per member — relaxed by an admin"}
             </span>
-            {!sec.require_mfa && (
-              <span className="chip blocked" style={{ fontSize: 11 }}>
-                Recommended: Required
-              </span>
-            )}
             {canManage && (
               <button disabled={busy} onClick={() => toggle(!sec.require_mfa)}>
                 {busy ? "Saving…"
-                  : sec.require_mfa ? "Make MFA optional"
+                  : sec.require_mfa
+                  ? "Relax MFA to optional (records an explicit admin decision)"
                   : "Require MFA for everyone →"}
               </button>
             )}
@@ -116,11 +107,14 @@ export function WorkspaceMfaPolicy() {
             {sec.require_mfa
               ? "Members without a verified authenticator cannot complete " +
                 "sign-in — they are guided to set one up first. Enforced by " +
-                "the identity service on every login, not just hidden in the UI."
-              : "The secure default for a regulated workspace is Required. Turn " +
-                "this on to block password-only sign-in — members are then " +
-                "required to enrol TOTP MFA before they can continue. Enforced " +
-                "server-side on every login."}
+                "the identity service on every login, not just hidden in the UI. " +
+                "This is the default for every new workspace; relaxing it is an " +
+                "explicit admin decision."
+              : "The default for new workspaces is Required — this workspace " +
+                "was relaxed to optional by an admin. Turn it back on to block " +
+                "password-only sign-in — members are then required to enrol " +
+                "TOTP MFA before they can continue. Enforced server-side on " +
+                "every login."}
           </p>
           </div>
 
@@ -158,23 +152,20 @@ export function WorkspaceMfaPolicy() {
           </p>
           </div>
 
-          {/* ---- Session length + idle lockout (documented policy) ---- */}
+          {/* ---- Session length (enforced fact) + idle lockout (documented
+                  policy) — round-9 item 7: the enforced number replaces the
+                  bare dropdown; the caveat is narrowed to idle lockout, the
+                  only genuinely unshipped enforcement. ---- */}
           <div>
           <h3 style={{ margin: "0 0 8px" }}>
             Session length &amp; idle lockout
           </h3>
+          <p style={{ margin: "0 0 10px", fontSize: 13 }}>
+            <b>Session length: 12 h</b> — enforced server-side by the identity
+            service on every request.
+          </p>
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap",
             alignItems: "flex-end" }}>
-            <label style={{ display: "grid", gap: 3, fontSize: 12 }}>
-              <span className="mut">Sign-in valid for</span>
-              <select value={sessionHrs} disabled={!canManage}
-                onChange={(e) => { setSessionHrs(e.target.value);
-                  writePolicy(SESSION_KEY, e.target.value); }}>
-                {SESSION_OPTS.map((o) => (
-                  <option key={o.v} value={o.v}>{o.label}</option>
-                ))}
-              </select>
-            </label>
             <label style={{ display: "grid", gap: 3, fontSize: 12 }}>
               <span className="mut">Idle lockout after</span>
               <select value={idleMin} disabled={!canManage}
@@ -187,11 +178,10 @@ export function WorkspaceMfaPolicy() {
             </label>
           </div>
           <p className="mut" style={{ marginTop: 8, fontSize: 12 }}>
-            This is your workspace&apos;s <b>documented policy</b> for auditors and
-            SOPs. Being honest: sessions today expire server-side after 12 hours;
-            the policy you set here is recorded as the target and is surfaced to
-            members during onboarding. Configurable enforcement of shorter
-            windows and idle timeout is on the roadmap.
+            Idle lockout is your workspace&apos;s <b>documented policy</b> for
+            auditors and SOPs; enforcement of the idle timeout is on the
+            roadmap. The 12-hour session length above needs no such caveat —
+            it is live, server-enforced behaviour.
           </p>
           </div>
 
@@ -217,21 +207,22 @@ export function WorkspaceMfaPolicy() {
 // and the server MFA state.
 export function OnboardingSecuritySummary() {
   const [sec, setSec] = useState<TenantSecurity | null>(null);
-  const [sessionHrs, setSessionHrs] = useState("12");
   const [idleMin, setIdleMin] = useState("30");
 
   useEffect(() => {
     auth.tenantSecurity().then(setSec).catch(() => {});
-    setSessionHrs(readPolicy(SESSION_KEY, "12"));
     setIdleMin(readPolicy(IDLE_KEY, "30"));
   }, []);
 
   const idleLabel = IDLE_OPTS.find((o) => o.v === idleMin)?.label || idleMin;
   return (
     <div className="mut" style={{ fontSize: 12, marginTop: 4 }}>
-      <b>Security here:</b> sign-in valid for {sessionHrs}h · idle lockout{" "}
-      {idleLabel} · workspace MFA{" "}
-      {sec ? (sec.require_mfa ? "Required ✓" : "Optional (Required recommended)")
+      {/* item 7 — the summary states the ENFORCED session value, not the old
+          localStorage-declared one; idle lockout stays the documented policy */}
+      <b>Security here:</b> sign-in valid for 12 h (server-enforced) · idle
+      lockout {idleLabel} (documented policy) · workspace MFA{" "}
+      {sec ? (sec.require_mfa ? "Required ✓ (secure default)"
+        : "Optional — relaxed by an admin (default is Required)")
         : "—"}
       {" "}· segregation of duties{" "}
       {sec ? (sec.require_sod ? "Enforced ✓" : "Advisory") : "—"}.

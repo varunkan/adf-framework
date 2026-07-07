@@ -4,10 +4,29 @@
 // action window after NOA service, and the 24-month stay once an action is
 // commenced. Serve/action buttons drive the real lifecycle endpoints.
 import { useCallback, useEffect, useState } from "react";
-import { ALLEGATIONS, lifecycleApi, today, type NoaRecord } from "./api";
+import { ALLEGATIONS, lifecycleApi, today, type NoaRecord,
+         type VerifiedDate } from "./api";
 import { ProvenancePopover, type Provenance } from "@/components/ProvenancePopover";
 import { Term } from "@/components/Term";
 import { actionProvenance, stayProvenance } from "@/lib/noaProvenance";
+import { VerifiedDateControl } from "./VerifiedDate";
+
+// Round-9 (n=4): one fetch of the dossier's verified-date overrides, keyed by
+// clock_key, shared by the strip and the register rows.
+function useVerifications(dossierId: string) {
+  const [byKey, setByKey] = useState<Record<string, VerifiedDate>>({});
+  const refresh = useCallback(() => {
+    lifecycleApi.listVerifiedDates(dossierId)
+      .then((r) => {
+        const m: Record<string, VerifiedDate> = {};
+        r.verifications.forEach((v) => { m[v.clock_key] = v; });
+        setByKey(m);
+      })
+      .catch(() => {});    // additive — clocks render without verifications
+  }, [dossierId]);
+  useEffect(() => { refresh(); }, [refresh]);
+  return { byKey, refresh };
+}
 
 // WS-OPS-PROV (Round-8 BLOCKER, n=14): the base provenance helpers already carry
 // the counting rule + citation; here we enrich them, per clock, with (a) the
@@ -118,6 +137,7 @@ export function StatutoryClockStrip({ dossierId, onUrgent }: {
   onUrgent?: () => void;
 }) {
   const [items, setItems] = useState<NoaRecord[]>([]);
+  const { byKey, refresh } = useVerifications(dossierId);
   useEffect(() => {
     let alive = true;
     lifecycleApi.listNoa(dossierId)
@@ -161,6 +181,17 @@ export function StatutoryClockStrip({ dossierId, onUrgent }: {
                   days={n.stay_days_remaining} end={n.stay_end}
                   prov={stayProvenanceFull(n)} />
               )}
+              {/* round-9 (n=4): record the externally verified end date */}
+              <VerifiedDateControl
+                dossierId={dossierId}
+                clockKey={n.status === "served"
+                  ? `noa:${n.id}:action_window` : `noa:${n.id}:stay`}
+                calculated={n.status === "served"
+                  ? n.action_window_end : n.stay_end}
+                latest={byKey[n.status === "served"
+                  ? `noa:${n.id}:action_window` : `noa:${n.id}:stay`] || null}
+                onSaved={refresh}
+              />
             </div>
           ))}
       </div>
@@ -170,6 +201,7 @@ export function StatutoryClockStrip({ dossierId, onUrgent }: {
 
 export function NoaRegister({ dossierId }: { dossierId: string }) {
   const [items, setItems] = useState<NoaRecord[]>([]);
+  const { byKey, refresh } = useVerifications(dossierId);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [adding, setAdding] = useState(false);
@@ -365,21 +397,41 @@ export function NoaRegister({ dossierId }: { dossierId: string }) {
                 }}
               >
                 {n.status === "served" && (
-                  <Clock
-                    label="45-day action window"
-                    days={n.action_days_remaining}
-                    end={n.action_window_end}
-                    prov={actionProvenanceFull(n)}
-                  />
+                  <>
+                    <Clock
+                      label="45-day action window"
+                      days={n.action_days_remaining}
+                      end={n.action_window_end}
+                      prov={actionProvenanceFull(n)}
+                    />
+                    {/* round-9 (n=4): reconcile against the external record */}
+                    <VerifiedDateControl
+                      dossierId={dossierId}
+                      clockKey={`noa:${n.id}:action_window`}
+                      calculated={n.action_window_end}
+                      latest={byKey[`noa:${n.id}:action_window`] || null}
+                      onSaved={refresh}
+                    />
+                  </>
                 )}
                 {(n.status === "stay_running" ||
                   n.status === "action_commenced") && (
-                  <Clock
-                    label="24-month stay"
-                    days={n.stay_days_remaining}
-                    end={n.stay_end}
-                    prov={stayProvenanceFull(n)}
-                  />
+                  <>
+                    <Clock
+                      label="24-month stay"
+                      days={n.stay_days_remaining}
+                      end={n.stay_end}
+                      prov={stayProvenanceFull(n)}
+                    />
+                    {/* round-9 (n=4): reconcile against the external record */}
+                    <VerifiedDateControl
+                      dossierId={dossierId}
+                      clockKey={`noa:${n.id}:stay`}
+                      calculated={n.stay_end}
+                      latest={byKey[`noa:${n.id}:stay`] || null}
+                      onSaved={refresh}
+                    />
+                  </>
                 )}
                 {n.status === "draft" && n.noa_required && (
                   <>

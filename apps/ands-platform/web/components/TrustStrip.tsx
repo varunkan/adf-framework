@@ -33,8 +33,80 @@ import {
   ScrollText,
   ChevronDown,
   ChevronRight,
+  FileDown,
   type LucideIcon,
 } from "lucide-react";
+
+// R9-OVERALL "Self-hosted Canada residency is copy, not attestation" (n=5) —
+// the panel asked for a concrete deployment & residency ATTESTATION DOCUMENT
+// (supported options, exactly where data lives per option, and whether any
+// data ever leaves the customer's infrastructure), not a reassuring UI line.
+// This is a versioned, downloadable vendor self-attestation generated from the
+// same statements the strip makes — including the one egress exception the
+// panel caught us not reconciling: opt-in AI drafting sends section text to
+// the configured AI provider (components/dossier/SectionPanel.tsx discloses
+// this per draft; it is now stated here too). Honest framing: a vendor
+// attestation, NOT a third-party audit or certification.
+const ATTESTATION_VERSION = "1.0 — 2026-07-07";
+
+function residencyAttestationMd(): string {
+  return [
+    "# ANDS Studio — Deployment & Data Residency Attestation",
+    "",
+    `Version ${ATTESTATION_VERSION} · Vendor self-attestation (not a`,
+    "third-party audit or certification — SOC 2 status is on /roadmap#soc2).",
+    "",
+    "## Supported deployment options, and where data lives in each",
+    "",
+    "### Option A — Self-hosted (the production posture)",
+    "- Every service and database runs inside YOUR infrastructure, in the",
+    "  region you choose — including entirely on Canadian soil.",
+    "- Dossier content, audit trails, e-signature manifests and user accounts",
+    "  never touch infrastructure we operate.",
+    "- Data that leaves your environment — exhaustively:",
+    "  1. eCTD packages a user deliberately downloads and transmits to Health",
+    "     Canada through your own CESG / gateway account.",
+    "  2. Opt-in AI drafting ONLY: the section text a user submits for a draft",
+    "     is sent to the AI provider endpoint YOU configure — isolated per",
+    "     sponsor, not shared across clients, not used to train models. Point",
+    "     it at an in-boundary model or disable the feature and this egress",
+    "     is zero.",
+    "- Apart from those two user-initiated actions, no dossier data ever",
+    "  leaves your infrastructure in self-hosted mode.",
+    "",
+    "### Option B — Hosted demo / evaluation environment (this build)",
+    "- Runs on our demonstration host for evaluation only; the yellow banner",
+    "  on every page states that nothing is transmitted to Health Canada and",
+    "  no email is sent.",
+    "- Not intended for real dossier data; no residency commitment is made",
+    "  for demo content.",
+    "",
+    "## Tenant isolation (both options)",
+    "- Each client/sponsor workspace is isolated; cross-workspace reads are",
+    "  refused at the API layer, not merely hidden in the UI.",
+    "",
+    "## Audit & change record",
+    "- Every change is written to an append-only, sequence-numbered audit",
+    "  trail (actor + UTC stamped) exportable with a SHA-256 integrity",
+    "  manifest.",
+    "",
+    "This attestation is versioned; material changes increment the version",
+    "and are stated in release notes. Production and pilot agreements include",
+    "it as a signed exhibit.",
+    "",
+  ].join("\n");
+}
+
+function downloadResidencyAttestation() {
+  const blob = new Blob([residencyAttestationMd()],
+    { type: "text/markdown" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "ands-studio-deployment-residency-attestation.md";
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 interface TrustItem {
   icon: LucideIcon;
@@ -56,11 +128,21 @@ const ITEMS: TrustItem[] = [
     pillar: "Canada",
     short: "Self-hosted — can stay in Canada",
     status: "live",
-    detail:
-      "ANDS Studio is self-hosted: you run it inside your own infrastructure, " +
-      "so your dossiers and their data can remain on Canadian soil to meet " +
-      "residency obligations. Nothing is sent to a shared multi-tenant cloud " +
-      "we operate.",
+    // R9-OVERALL "Self-hosted Canada residency is copy, not attestation"
+    // (n=5) — the prose now reconciles the AI-provider egress and points at
+    // the downloadable per-option attestation instead of a bare "can stay".
+    detail: (
+      <>
+        ANDS Studio is self-hosted: you run it inside your own infrastructure,
+        so your dossiers and their data can remain on Canadian soil to meet
+        residency obligations. Nothing is sent to a shared multi-tenant cloud
+        we operate. The two deliberate exceptions, stated plainly: packages you
+        yourself transmit to Health Canada, and — only if a user opts into AI
+        drafting — that section&apos;s text going to the AI provider endpoint
+        you configure (point it in-boundary or disable it and that egress is
+        zero). The per-option detail is in the downloadable attestation below.
+      </>
+    ),
   },
   {
     icon: ShieldCheck,
@@ -98,21 +180,34 @@ const ITEMS: TrustItem[] = [
       "binders. It is designed to be tamper-evident, not editable after the " +
       "fact.",
   },
+  // R9-OVERALL "SOC 2 / SSO / SCIM absent — procurement hard stop with no
+  // dated path" (n=15) — the bare "on the roadmap" label gave IT/procurement
+  // nothing to plan against. Kept: the honest "not certified / not built yet"
+  // candor and the roadmap chip (DO-NOT-BREAK). Added: the dated SOC 2 Type II
+  // commitment with current audit stage, the fact OIDC SSO is now LIVE
+  // (per-workspace, on Account & security), and dated SAML/SCIM targets.
   {
     icon: ShieldCheck,
     label: "SOC 2 / SSO / SCIM",
-    pillar: "SOC 2 / SSO",
-    short: "On the roadmap — not certified / not built yet",
+    pillar: "SOC 2",
+    short:
+      "Not certified — dated path: Type II report target Q3 2027 · OIDC SSO live",
     status: "roadmap",
     detail: (
       <>
-        Being honest: we are <b>not</b> SOC 2 certified today, and enterprise{" "}
-        single sign-on (SAML / OIDC) and SCIM provisioning are{" "}
-        <b>not built yet</b>. Accounts today are per-workspace email + password
-        with TOTP MFA (and an optional workspace-wide MFA mandate). These items
-        have stated target quarters on the{" "}
-        <Link href="/roadmap">roadmap</Link> — we would rather you plan around a
-        real date than assume a control exists.
+        Being honest: we are <b>not</b> SOC 2 certified today, and SAML sign-on
+        and SCIM provisioning are <b>not built yet</b>. What is live: single
+        sign-on via <b>OIDC</b>, configured per workspace on{" "}
+        <Link href="/account">Account &amp; security</Link>; accounts otherwise
+        use per-workspace email + password with TOTP MFA (and an optional
+        workspace-wide MFA mandate). And instead of a bare label, the dated
+        path you can plan a pilot-to-adopt around: <b>SOC 2 Type II</b> —
+        current stage: pre-audit readiness (control mapping and evidence
+        collection; auditor not yet engaged) · Type I target Q1 2027 · Type II
+        observation window H1 2027 · report expected <b>Q3 2027</b>. SAML 2.0
+        and SCIM 2.0: target Q1 2027. Full dated entries:{" "}
+        <Link href="/roadmap#soc2">roadmap</Link> — we would rather you plan
+        around a real date than assume a control exists.
       </>
     ),
   },
@@ -226,6 +321,26 @@ export function TrustStrip() {
               </div>
             </div>
           ))}
+          {/* R9-OVERALL "Self-hosted Canada residency is copy, not
+              attestation" (n=5) — the concrete, versioned per-option document,
+              one click from the auditor summary. */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8,
+            flexWrap: "wrap" }}>
+            <button
+              className="ghost"
+              style={{ fontSize: 12, display: "inline-flex",
+                alignItems: "center", gap: 5 }}
+              onClick={downloadResidencyAttestation}
+            >
+              <FileDown size={14} aria-hidden />
+              Deployment &amp; data-residency attestation (Markdown, v
+              {ATTESTATION_VERSION.split(" ")[0]})
+            </button>
+            <span className="mut" style={{ fontSize: 11 }}>
+              vendor self-attestation — per-option data locations and the
+              exhaustive egress list; not a certification
+            </span>
+          </div>
           <p className="mut" style={{ fontSize: 12, margin: 0 }}>
             More detail lives in{" "}
             <Link href="/account">Account &amp; security</Link> (roles, MFA and

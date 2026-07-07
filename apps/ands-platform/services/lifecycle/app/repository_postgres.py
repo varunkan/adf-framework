@@ -19,6 +19,11 @@ CREATE TABLE IF NOT EXISTS correspondence_attachments (
     correspondence_id TEXT PRIMARY KEY, filename TEXT NOT NULL,
     content_type TEXT NOT NULL, data BYTEA NOT NULL, sha256 TEXT NOT NULL,
     uploaded_by TEXT, uploaded_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS clock_verifications (
+    id TEXT PRIMARY KEY, dossier_id TEXT NOT NULL, clock_key TEXT NOT NULL,
+    verified_date TEXT NOT NULL, calculated_date TEXT,
+    source_ref TEXT NOT NULL, verified_by TEXT, verified_at TEXT NOT NULL,
+    tenant_id TEXT);
 """
 
 # pre-tenancy databases lack the column; ALTER IF NOT EXISTS is idempotent.
@@ -150,6 +155,37 @@ class PostgresLifecycleRepository:
         elif isinstance(rec.get("data"), memoryview):
             rec["data"] = bytes(rec["data"])
         return rec
+
+    # -- verified-date overrides (round-9, operations n=4) -------------------
+    # APPEND-ONLY: a re-verification INSERTs a new row (see SQLite adapter).
+    def add_verified_date(self, record: dict,
+                          tenant_id: str | None = None) -> dict:
+        record = dict(record, id=new_id(), verified_at=utcnow_iso())
+        with self._lock:
+            cur = self._conn.cursor()
+            cur.execute(
+                "INSERT INTO clock_verifications (id, dossier_id, clock_key, "
+                "verified_date, calculated_date, source_ref, verified_by, "
+                "verified_at, tenant_id) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (record["id"], record["dossier_id"], record["clock_key"],
+                 record["verified_date"], record.get("calculated_date"),
+                 record["source_ref"], record.get("verified_by"),
+                 record["verified_at"], tenant_id or None))
+            self._conn.commit()
+        return record
+
+    def list_verified_dates(self, dossier_id: str,
+                            tenant_id: str | None = None) -> list[dict]:
+        sql = "SELECT * FROM clock_verifications WHERE dossier_id = %s"
+        params: list = [dossier_id]
+        if tenant_id:   # strict: a tenant sees ONLY its own verifications
+            sql += " AND tenant_id = %s"
+            params.append(tenant_id)
+        rows = self._all(sql + " ORDER BY verified_at, id", tuple(params))
+        for r in rows:
+            r.pop("tenant_id", None)
+        return rows
 
     def list_correspondence(self, dossier_id: str, kind: str = "",
                             tenant_id: str | None = None) -> list[dict]:

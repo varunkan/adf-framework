@@ -42,6 +42,16 @@ def build_app(service: DossierService) -> FastAPI:
     def placement():
         return ectd.module1_placement_table()
 
+    # Round-9 ai_draft BLOCKER "AI provider identity, data residency and DPA
+    # not verifiable" (n=8): the inspectable AI-provider disclosure — named
+    # provider, model, region, leaves-Canada answer, retention, and the
+    # downloadable data-processing document. Static (no dossier/tenant scope).
+    @router.get("/ai-provider")
+    def ai_provider():
+        from . import ai_draft_meta
+        return {**ai_draft_meta.provider_disclosure(),
+                "dpa_text": ai_draft_meta.dpa_text()}
+
     # -- content plans (REQ-103) ----------------------------------------
     @router.post("/content-plans", status_code=201)
     def create_plan(body: ContentPlanIn, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
@@ -185,10 +195,14 @@ def build_app(service: DossierService) -> FastAPI:
         # WS3: a delete is a RECOVERABLE soft-archive requiring a reason AND a
         # server-side typed-id confirmation (confirm_id must equal dossier_id) —
         # a direct API DELETE cannot bypass the client's "type the ID" gate.
+        # R9-CATALOG "No user roles, permissions, or e-signatures on workspace
+        # actions" (n=6): the optional typed-name e-signature capture rides
+        # along and lands verbatim on the durable ledger event.
         return service.delete_dossier(
             dossier_id, x_tenant_id or None,
             reason=str((body or {}).get("reason", "")),
-            confirm_id=str((body or {}).get("confirm_id", "")))
+            confirm_id=str((body or {}).get("confirm_id", "")),
+            esign=(body or {}).get("esign"))
 
     @router.get("/dossiers/{dossier_id}/history")
     def dossier_history(dossier_id: str,
@@ -202,9 +216,22 @@ def build_app(service: DossierService) -> FastAPI:
     def restore_dossier(dossier_id: str, body: dict | None = None,
                         x_tenant_id: str = Header(default="",
                                                   alias="X-Tenant-Id")):
+        # R9-CATALOG (n=6): optional typed-name e-signature capture on restore.
         return service.restore_dossier(
             dossier_id, x_tenant_id or None,
-            reason=str((body or {}).get("reason", "")))
+            reason=str((body or {}).get("reason", "")),
+            esign=(body or {}).get("esign"))
+
+    # R9-CATALOG "No user roles, permissions, or e-signatures on workspace
+    # actions" (n=6): Owner (PM) is reassignable after creation — an
+    # accountability label (NOT a permission source; roles govern permissions),
+    # with the old/new values + reason on the durable ledger.
+    @router.post("/dossiers/{dossier_id}/owner")
+    def set_owner(dossier_id: str, body: dict | None = None,
+                  x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        return service.set_owner(
+            dossier_id, str((body or {}).get("owner", "")),
+            str((body or {}).get("reason", "")), x_tenant_id or None)
 
     @router.get("/validation/rules")
     def validation_rules():
@@ -430,11 +457,45 @@ def build_app(service: DossierService) -> FastAPI:
                                    x_tenant_id or None)
 
     @router.post("/ectd/{dossier_id}/section/{section}/confirm-content")
-    def confirm_content(dossier_id: str, section: str, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+    def confirm_content(dossier_id: str, section: str, body: dict | None = None,
+                        x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
         # the explicit "I reviewed & edited this — it is my content" action that
         # clears the sample/AI review block (recorded to the audit trail).
+        # Round-9 ai_draft BLOCKER (n=4): the optional attest body carries the
+        # reviewer's typed name + credential for an inspection-grade record.
         service.assert_access(dossier_id, x_tenant_id or None)
-        return service.confirm_content(dossier_id, section)
+        return service.confirm_content(dossier_id, section, attest=body or {})
+
+    # Round-9 builder_forms MAJOR (n=3, ask 2): per-section AI off-switch.
+    @router.post("/ectd/{dossier_id}/section/{section}/ai-policy")
+    def set_ai_policy(dossier_id: str, section: str, body: dict | None = None,
+                      x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        service.assert_access(dossier_id, x_tenant_id or None)
+        return service.set_ai_policy(
+            dossier_id, section, bool((body or {}).get("disabled")),
+            reason=str((body or {}).get("reason", "")))
+
+    # Round-9 builder_forms MAJOR (n=3, ask 1): what ONE draft is generated
+    # from — the per-draft source/context disclosure.
+    @router.get("/ectd/{dossier_id}/section/{section}/draft-context")
+    def draft_context(dossier_id: str, section: str,
+                      x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        service.assert_access(dossier_id, x_tenant_id or None)
+        return service.draft_context(dossier_id, section)
+
+    # Round-9 ai_draft BLOCKER (n=4): one-click per-section audit record.
+    @router.get("/ectd/{dossier_id}/section/{section}/audit-record")
+    def section_audit_record(dossier_id: str, section: str,
+                             x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        return service.section_audit_record(dossier_id, section,
+                                            x_tenant_id or None)
+
+    # Round-9 ai_draft BLOCKER (n=2) + MAJOR (n=6): the cross-section roll-up
+    # (state / owner / last-touched) + the bulk-attest review queue.
+    @router.get("/dossiers/{dossier_id}/sections-rollup")
+    def sections_rollup(dossier_id: str,
+                        x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        return service.sections_rollup(dossier_id, x_tenant_id or None)
 
     @router.post("/ectd/{dossier_id}/section/{section}/mark-na")
     def mark_na_section(dossier_id: str, section: str, body: MarkNaIn, x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):

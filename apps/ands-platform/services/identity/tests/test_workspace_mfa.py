@@ -8,13 +8,7 @@ MFA path (a user who has MFA on still gets the mfa_required challenge).
 
 from app import rbac, security
 
-from tests.conftest import auth, owner_token
-
-
-def _signup(client, email="ra@acme.io", company="Acme"):
-    return client.post("/api/identity/auth/signup",
-                       json={"email": email, "password": "pw12345-2026",
-                             "company_name": company}).json()
+from tests.conftest import auth, owner_token, signup_admin
 
 
 def _enable_mfa(client, token):
@@ -29,27 +23,33 @@ def _enable_mfa(client, token):
 # -- the flag itself ------------------------------------------------------
 
 def test_tenant_admin_can_set_and_read_require_mfa(client):
-    body = _signup(client)
-    tok = body["token"]
-    # default is off
+    # Round-9 item 4: a NEW workspace starts with the mandate ON (the enforced
+    # default); relaxing is an explicit admin decision, and it can be
+    # re-required afterwards.
+    admin = signup_admin(client)
+    tok = admin["token"]
     sec = client.get("/api/identity/tenant/security", headers=auth(tok)).json()
-    assert sec["require_mfa"] is False
-    # the admin enrols MFA first — the mandate is airtight and applies to the
-    # admin too, so an admin without MFA would lock its own session out.
-    _enable_mfa(client, tok)
-    # tenant-admin turns it on
+    assert sec["require_mfa"] is True
+    # relaxation is an explicit admin action
     r = client.post("/api/identity/tenant/security/require-mfa",
-                    json={"require_mfa": True}, headers=auth(tok))
-    assert r.status_code == 200 and r.json()["require_mfa"] is True
+                    json={"require_mfa": False}, headers=auth(tok))
+    assert r.status_code == 200 and r.json()["require_mfa"] is False
+    # ... and the admin can re-require it
+    r2 = client.post("/api/identity/tenant/security/require-mfa",
+                     json={"require_mfa": True}, headers=auth(tok))
+    assert r2.status_code == 200 and r2.json()["require_mfa"] is True
     sec2 = client.get("/api/identity/tenant/security", headers=auth(tok)).json()
     assert sec2["require_mfa"] is True
 
 
 def test_plain_user_cannot_set_require_mfa(ctx):
     client = ctx.client
-    admin = _signup(client)
-    # provision a plain USER in the same tenant via the service seam
+    admin = signup_admin(client)
+    # provision a plain USER in the same tenant via the service seam; the admin
+    # relaxes the (default-on) mandate so the member can hold a plain session
     tid = admin["tenant"]["id"]
+    client.post("/api/identity/tenant/security/require-mfa",
+                json={"require_mfa": False}, headers=auth(admin["token"]))
     ctx.service._add_user(tid, "member@acme.io", "pw12345-2026",
                           rbac.USER_ROLE, "Member")
     login = client.post("/api/identity/auth/login",
@@ -64,11 +64,9 @@ def test_plain_user_cannot_set_require_mfa(ctx):
 
 def test_login_blocked_when_workspace_requires_mfa_and_member_has_none(ctx):
     client = ctx.client
-    admin = _signup(client)
+    admin = signup_admin(client)
     tid = admin["tenant"]["id"]
-    # admin turns the workspace mandate on
-    client.post("/api/identity/tenant/security/require-mfa",
-                json={"require_mfa": True}, headers=auth(admin["token"]))
+    # the mandate is ON by default for a fresh workspace (round-9 item 4)
     # a member with NO MFA is added
     ctx.service._add_user(tid, "member@acme.io", "pw12345-2026",
                           rbac.USER_ROLE, "Member")
@@ -85,10 +83,8 @@ def test_member_can_enrol_via_setup_token_then_login(ctx):
     """The blocked member still gets a path: a short-lived setup token is
     returned so they can enrol MFA, after which login succeeds."""
     client = ctx.client
-    admin = _signup(client)
+    admin = signup_admin(client)
     tid = admin["tenant"]["id"]
-    client.post("/api/identity/tenant/security/require-mfa",
-                json={"require_mfa": True}, headers=auth(admin["token"]))
     ctx.service._add_user(tid, "member@acme.io", "pw12345-2026",
                           rbac.USER_ROLE, "Member")
     blocked = client.post("/api/identity/auth/login",
@@ -108,8 +104,11 @@ def test_member_can_enrol_via_setup_token_then_login(ctx):
 
 def test_workspace_mandate_does_not_break_member_with_mfa(ctx):
     client = ctx.client
-    admin = _signup(client)
+    admin = signup_admin(client)
     tid = admin["tenant"]["id"]
+    # relax the default-on mandate so the member can hold a plain session
+    client.post("/api/identity/tenant/security/require-mfa",
+                json={"require_mfa": False}, headers=auth(admin["token"]))
     ctx.service._add_user(tid, "member@acme.io", "pw12345-2026",
                           rbac.USER_ROLE, "Member")
     login = client.post("/api/identity/auth/login",
@@ -147,14 +146,12 @@ def test_require_mfa_flag_survives_owner_scope(ctx):
 # acceptance gate.
 
 def _blocked_setup_token(ctx):
-    """Turn the mandate on (admin has MFA) then return a fresh member's
-    scope='mfa_setup' token from the login block-branch."""
+    """With the mandate on (the round-9 default for a fresh workspace; the
+    admin has MFA), return a fresh member's scope='mfa_setup' token from the
+    login block-branch."""
     client = ctx.client
-    admin = _signup(client)
+    admin = signup_admin(client)
     tid = admin["tenant"]["id"]
-    _enable_mfa(client, admin["token"])
-    client.post("/api/identity/tenant/security/require-mfa",
-                json={"require_mfa": True}, headers=auth(admin["token"]))
     ctx.service._add_user(tid, "member@acme.io", "pw12345-2026",
                           rbac.USER_ROLE, "Member")
     blocked = client.post("/api/identity/auth/login",
@@ -203,11 +200,13 @@ def test_preexisting_full_session_dies_when_mandate_turned_on(ctx):
     must STOP working the moment it is on, for a member without MFA — while a
     member WITH verified MFA is unaffected."""
     client = ctx.client
-    admin = _signup(client)
+    admin = signup_admin(client)
     tid = admin["tenant"]["id"]
-    _enable_mfa(client, admin["token"])
+    # relax the default-on mandate first so plain sessions can exist
+    client.post("/api/identity/tenant/security/require-mfa",
+                json={"require_mfa": False}, headers=auth(admin["token"]))
 
-    # a member with NO MFA logs in NORMALLY (mandate still off) -> full session
+    # a member with NO MFA logs in NORMALLY (mandate now off) -> full session
     ctx.service._add_user(tid, "nomfa@acme.io", "pw12345-2026",
                           rbac.USER_ROLE, "NoMfa")
     nomfa_tok = client.post("/api/identity/auth/login",
@@ -254,8 +253,11 @@ def test_resolve_backstop_blocks_nonmfa_session_even_without_revoke(ctx):
     survives (revoke skipped), it must be rejected 403 the instant the mandate
     is on. We flip the tenant flag directly at the repo so no revoke runs."""
     client = ctx.client
-    admin = _signup(client)
+    admin = signup_admin(client)
     tid = admin["tenant"]["id"]
+    # relax the default-on mandate so the member can mint a plain full session
+    client.post("/api/identity/tenant/security/require-mfa",
+                json={"require_mfa": False}, headers=auth(admin["token"]))
     ctx.service._add_user(tid, "member@acme.io", "pw12345-2026",
                           rbac.USER_ROLE, "Member")
     tok = client.post("/api/identity/auth/login",

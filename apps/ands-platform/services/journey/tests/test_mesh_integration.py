@@ -18,11 +18,13 @@ from app.service import JourneyService
 class FakeDossierClient:
     """Dossier double with controllable validation + fee results."""
 
-    def __init__(self, *, errors=None, warnings=None) -> None:
+    def __init__(self, *, errors=None, warnings=None, attestation=None) -> None:
         self.errors = errors or []
         self.warnings = warnings or []
         self.fees_set: list[tuple] = []
         self.esigned: list[tuple] = []
+        # round-9 J3: the recorded user-attested external eValidator result
+        self.attestation = attestation
 
     def ensure_dossier(self, dossier_id, **kw) -> None: ...
 
@@ -48,6 +50,9 @@ class FakeDossierClient:
                 "manifest_id": manifest.get("manifest_id"),
                 "leaf_count": manifest.get("leaf_count"),
                 "signed_at": manifest.get("at")}
+
+    def evalidator_attestation(self, dossier_id):
+        return self.attestation
 
 
 def _mesh(dossier=None, governance=None, transmission=None):
@@ -173,7 +178,11 @@ def test_sign_threads_reason_and_records_durable_part11_event():
 # -- transmit: real state machine ---------------------------------------------
 def test_transmit_runs_full_ack_chain():
     tx = FakeTransmissionClient()
-    m = _mesh(dossier=FakeDossierClient(), transmission=tx)
+    # round-9 J3: the transmit hard gate reads the dossier's recorded
+    # user-attested eValidator PASS, so no per-request confirmation is needed.
+    m = _mesh(dossier=FakeDossierClient(
+        attestation={"result": "pass", "validator_name": "HC eValidator"}),
+        transmission=tx)
     for s in ("validate", "fees", "review", "sign"):
         _advance(m, s)
     r = _advance(m, "transmit")
@@ -187,8 +196,12 @@ def test_transmit_runs_full_ack_chain():
 
 def test_stages_fall_back_without_mesh_services():
     m = _mesh(dossier=FakeDossierClient())   # no governance/transmission
-    for s in ("validate", "fees", "review", "sign", "transmit"):
+    for s in ("validate", "fees", "review", "sign"):
         assert _advance(m, s).status_code == 200, s
+    # round-9 J3: no dossier attestation recorded — the filer's own attested
+    # pass satisfies the hard gate (user-attested, never a tool claim).
+    assert _advance(m, "transmit",
+                    {"evalidator_confirmed": True}).status_code == 200
     sig = m.client.get(f"/api/journey/{m.sid}").json()["signals"]
     assert sig["reviews"]["real"] is False
     assert sig["esign"]["real"] is False

@@ -254,6 +254,30 @@ export const TERMS: Record<string, string> = {
     "The per-module status marker in the builder — whether that module's " +
     "required documents are placed (a completeness signal only; validation " +
     "is a separate, explicit step).",
+  // Round-9 ai_draft MAJOR "eCTD jargon undefined for non-experts" (n=9) +
+  // builder_forms MAJOR "Remaining jargon undefined" (n=5): the last glossary
+  // gaps — eCTD placement, the applicability badge and the md5 fingerprint —
+  // in the same plain voice as leaf and sequence.
+  "eCTD placement":
+    "WHERE a document sits in the eCTD structure: its folder (node), its " +
+    "leaf id, and the href path recorded in the backbone XML. The app " +
+    "writes the placement automatically when you attach a document — you " +
+    "never hand-edit the XML.",
+  "applicability badge":
+    "The small chip saying whether Health Canada expects this section for " +
+    "YOUR submission type: required (must be filed), optional (include when " +
+    "it applies, else Mark N/A with a reason), or n/a (not part of this " +
+    "submission model).",
+  "md5 fingerprint":
+    "A short digital fingerprint computed from a file's exact bytes — if " +
+    "the file changes at all, the fingerprint changes. Used here for " +
+    "document control (spotting silent changes), NOT as validation or " +
+    "acceptance. The eCTD 3.2.2 backbone itself uses md5 checksums.",
+  STF:
+    "Study Tagging File — an extra XML file some regulators (US FDA, Japan " +
+    "PMDA) require to tag study reports in Modules 4/5. Health Canada's " +
+    "eCTD guidance does not use STFs — Canadian study data is placed " +
+    "directly at its CTD headings, so this tool does not generate them.",
 };
 
 export const TERM_KEYS = Object.keys(TERMS).sort((a, b) => b.length - a.length);

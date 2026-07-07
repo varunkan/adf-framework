@@ -273,7 +273,14 @@ export function ShadowRun({
                     <Th>leaf_id</Th>
                     <Th>op</Th>
                     <Th>href</Th>
-                    <Th>md5</Th>
+                    {/* ROUND9-VALIDATE item 16 (consultant_ex_hc): the md5
+                        column is labeled document control — enforced by the
+                        copy-rule lint in the service suite. */}
+                    <Th>
+                      <span title="content fingerprint for document control — NOT validation or acceptance">
+                        md5 (document control)
+                      </span>
+                    </Th>
                   </tr>
                 </thead>
                 <tbody>

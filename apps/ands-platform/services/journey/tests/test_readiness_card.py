@@ -13,8 +13,10 @@ def test_new_submission_is_blocked_with_current_blocker():
 
 
 def test_ready_once_signed():
+    # round-9 J8: the bilingual M1/PM review is part of READY's tile set
     signed = {"company_id": "1", "dossier_id": "e123456", "applicant": "A",
               "drug_product": "D", "content_done": True,
+              "bilingual": {"confirmed": True},
               "validation": {"ran": True, "errors": 0}, "fees": {"paid": True},
               "reviews": {"approved": True}, "esign": {"signed": True}}
     c = readiness_card.card(signed)
@@ -25,6 +27,7 @@ def test_ready_once_signed():
 def test_blocked_at_validation_lists_it():
     blocked = {"company_id": "1", "dossier_id": "e1", "applicant": "A",
                "drug_product": "D", "content_done": True,
+               "bilingual": {"confirmed": True},
                "validation": {"ran": True, "errors": 2}}
     c = readiness_card.card(blocked)
     assert c["status"] == "BLOCKED"

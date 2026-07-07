@@ -225,6 +225,59 @@ class LifecycleService:
                 "uploaded_at": att["uploaded_at"],
                 "data_base64": base64.b64encode(att["data"]).decode()}
 
+    # -- verified-date overrides + reconciliation (round-9, n=4) -------------
+    # "otherwise it's a parallel truth that drifts": a user records the date
+    # they verified against the EXTERNAL source of truth (HC correspondence,
+    # Vault RIM, the filed sequence), with who/when/source. Append-only.
+    def record_verified_date(self, data: dict, tenant_id: str | None = None,
+                             user_email: str = "") -> dict:
+        from datetime import date as _date
+        dossier_id = _s(data.get("dossier_id"))
+        clock_key = _s(data.get("clock_key"))
+        verified = _s(data.get("verified_date"))
+        source_ref = _s(data.get("source_ref"))
+        if not dossier_id or not clock_key or not verified or not source_ref:
+            raise ProblemError(
+                422, "dossier_id, clock_key, verified_date and source_ref "
+                     "are required — a verification without its source is "
+                     "not evidence", rule="verified_date_missing_fields")
+        calculated = _s(data.get("calculated_date")) or None
+        for label, value in (("verified_date", verified),
+                             ("calculated_date", calculated)):
+            if value:
+                try:
+                    _date.fromisoformat(value)
+                except ValueError:
+                    raise ProblemError(422, f"{label} must be YYYY-MM-DD",
+                                       rule="verified_date_invalid")
+        rec = self.repo.add_verified_date(
+            {"dossier_id": dossier_id, "clock_key": clock_key,
+             "verified_date": verified, "calculated_date": calculated,
+             "source_ref": source_ref,
+             "verified_by": _s(user_email) or None},
+            tenant_id)
+        return {**rec, "discrepancy": bool(calculated)
+                and calculated != verified}
+
+    def list_verified_dates(self, dossier_id: str,
+                            tenant_id: str | None = None) -> dict:
+        """Latest verification per clock_key (newest wins for display) plus
+        how deep its append-only history runs."""
+        rows = self.repo.list_verified_dates(_s(dossier_id), tenant_id)
+        latest: dict[str, dict] = {}
+        counts: dict[str, int] = {}
+        for r in rows:                      # rows are ordered oldest → newest
+            key = r["clock_key"]
+            counts[key] = counts.get(key, 0) + 1
+            latest[key] = r
+        out = []
+        for key, r in latest.items():
+            calculated = r.get("calculated_date")
+            out.append({**r, "history_count": counts[key],
+                        "discrepancy": bool(calculated)
+                        and calculated != r["verified_date"]})
+        return {"verifications": out, "count": len(out)}
+
     # -- Form V / NOA register (PM(NOC) Regulations) ------------------------
     def create_noa(self, data: dict, tenant_id: str | None = None) -> dict:
         res = noa.validate_allegation(data)

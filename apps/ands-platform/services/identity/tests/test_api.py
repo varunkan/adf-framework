@@ -2,7 +2,9 @@
 
 from ands_shared import EventType
 
-from tests.conftest import auth, owner_token
+from app import security
+
+from tests.conftest import auth, owner_token, signup_admin
 
 
 # -- self-serve auth ---------------------------------------------------------
@@ -15,7 +17,21 @@ def test_signup_creates_tenant_admin_and_session(client):
     assert body["user"]["role"] == "tenant-admin"
     assert body["tenant"]["status"] == "trial"
     assert body["token"]
-    me = client.get("/api/identity/auth/me", headers=auth(body["token"]))
+    # round-9 item 4: new workspaces require MFA, so the signup token is
+    # setup-scoped — the admin completes enrolment, then logs in with TOTP.
+    assert body["mfa_setup_required"] is True
+    enrol = client.post("/api/identity/auth/mfa/enroll",
+                        headers=auth(body["token"])).json()
+    client.post("/api/identity/auth/mfa/verify",
+                json={"code": security.totp_code(enrol["secret"])},
+                headers=auth(body["token"]))
+    full = client.post("/api/identity/auth/login",
+                       json={"email": "ra@acme.io", "password": "pw12345-2026",
+                             "tenant_id": body["tenant"]["id"],
+                             "mfa_code": security.totp_code(enrol["secret"])})
+    assert full.status_code == 200
+    me = client.get("/api/identity/auth/me",
+                    headers=auth(full.json()["token"]))
     assert me.status_code == 200
     assert me.json()["email"] == "ra@acme.io"
     # workspace identity is server-side: the header chip renders THIS, not a
@@ -47,9 +63,7 @@ def test_me_without_token_401(client):
 
 
 def test_logout_invalidates_session(client):
-    token = client.post("/api/identity/auth/signup",
-                        json={"email": "ra@acme.io", "password": "pw12345-2026",
-                              "company_name": "Acme"}).json()["token"]
+    token = signup_admin(client)["token"]
     client.post("/api/identity/auth/logout", headers=auth(token))
     assert client.get("/api/identity/auth/me",
                       headers=auth(token)).status_code == 401
@@ -57,9 +71,7 @@ def test_logout_invalidates_session(client):
 
 # -- entitlements ------------------------------------------------------------
 def test_new_tenant_has_all_features(client):
-    body = client.post("/api/identity/auth/signup",
-                       json={"email": "ra@acme.io", "password": "pw12345-2026",
-                             "company_name": "Acme"}).json()
+    body = signup_admin(client)
     ent = client.get("/api/identity/entitlements",
                      params={"tenant_id": body["tenant"]["id"]},
                      headers=auth(body["token"])).json()
@@ -68,12 +80,8 @@ def test_new_tenant_has_all_features(client):
 
 
 def test_entitlements_cross_tenant_denied(client):
-    a = client.post("/api/identity/auth/signup",
-                    json={"email": "a@a.io", "password": "pw12345-2026",
-                          "company_name": "A"}).json()
-    b = client.post("/api/identity/auth/signup",
-                    json={"email": "b@b.io", "password": "pw12345-2026",
-                          "company_name": "B"}).json()
+    a = signup_admin(client, email="a@a.io", company="A")
+    b = signup_admin(client, email="b@b.io", company="B")
     r = client.get("/api/identity/entitlements",
                    params={"tenant_id": a["tenant"]["id"]},
                    headers=auth(b["token"]))
@@ -96,9 +104,7 @@ def test_owner_provisions_tenant_and_lists(ctx):
 
 def test_owner_endpoints_forbidden_without_owner(client):
     # a tenant-admin token must not reach the owner console
-    tok = client.post("/api/identity/auth/signup",
-                      json={"email": "ra@acme.io", "password": "pw12345-2026",
-                            "company_name": "Acme"}).json()["token"]
+    tok = signup_admin(client)["token"]
     r = client.get("/api/identity/owner/tenants", headers=auth(tok))
     assert r.status_code == 403
 

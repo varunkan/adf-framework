@@ -18,6 +18,10 @@ class CreateDossierIn(BaseModel):
     sponsor: str = ""
     # WS6 portfolio: the accountable PM/owner for this dossier
     owner: str = ""
+    # R9-CATALOG "No bilingual/French support surfaced anywhere on the page"
+    # (n=2): governed FRENCH product name (pairs with title) + labelling owner
+    title_fr: str = ""
+    labelling_owner: str = ""
 
 
 class FeeStatusIn(BaseModel):

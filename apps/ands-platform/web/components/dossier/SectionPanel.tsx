@@ -2,16 +2,20 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { dossierApi } from "@/lib/dossierApi";
-import type { CurrentViewLeaf, DocMeta, FeesBlock, SectionNode } from "@/lib/dossierTypes";
+import type { CurrentView, CurrentViewLeaf, DocMeta, FeesBlock, SectionNode } from "@/lib/dossierTypes";
 import { DraftChat } from "./DraftChat";
 import { FormFill } from "./FormFill";
 import { EctdPrimer } from "./EctdPrimer";
 import { useDossier } from "./DossierContext";
 import { Disclosure } from "../Disclosure";
-import { Upload, Sparkles, Ban, AlertTriangle, FileSearch } from "lucide-react";
+import { Upload, Sparkles, Ban, AlertTriangle, FileSearch, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
-import { MODULE_4_NOTE, citeLine } from "@/lib/regCitations";
-import { opMeta } from "@/lib/leafStatus";
+import { MODULE_4_NOTE, citeLine, LAST_VERIFIED } from "@/lib/regCitations";
+import { opMeta, applicabilityHelp } from "@/lib/leafStatus";
+import { TERMS } from "@/lib/terms";
+import { draftApi, type SectionNodeR9 } from "./draftApi";
+import { RollupQueue } from "./RollupQueue";
+import { openPrintWindow, escapeHtml } from "./printView";
 
 function fmtSize(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -19,10 +23,39 @@ function fmtSize(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// Round-9 ai_draft MAJOR "Key info buried under nested toggles" (n=13):
+// ONE level of authoring choice — Upload / Draft with AI / Fill the form /
+// Mark N/A side by side, no toggles-inside-toggles (the old Author-in-app →
+// AI-vs-form second layer is gone).
+type AuthorTab = "upload" | "ai" | "form" | "mark_na";
+
+function authorTabs(node: SectionNode): AuthorTab[] {
+  const affs = node.affordances;
+  const out: AuthorTab[] = [];
+  if (affs.includes("upload")) out.push("upload");
+  if (affs.includes("generate") && node.ai_draftable) out.push("ai");
+  if (affs.includes("generate")) out.push("form");
+  if (affs.includes("mark_na")) out.push("mark_na");
+  return out;
+}
+
+// After switching to the form tab, focus the named field once FormFill has
+// rendered it (schema loads async — retry briefly, then give up quietly).
+function focusFormField(name: string, attempt = 0): void {
+  const el = document.getElementById(name);
+  if (el) {
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    (el as HTMLElement).focus();
+    return;
+  }
+  if (attempt < 12) setTimeout(() => focusFormField(name, attempt + 1), 200);
+}
+
 export function SectionPanel({ node, op }: { node: SectionNode; op?: string }) {
   const { dossierId, content, setContent } = useDossier();
-  const affs = node.affordances;
-  const [tab, setTab] = useState<string>(affs[0] || "upload");
+  const nodeR9 = node as SectionNodeR9;
+  const tabs = authorTabs(node);
+  const [tab, setTab] = useState<AuthorTab>(tabs[0] || "upload");
   const [err, setErr] = useState("");
   const [announce, setAnnounce] = useState("");
   const stepTitleRef = useRef<HTMLHeadingElement>(null);
@@ -49,10 +82,63 @@ export function SectionPanel({ node, op }: { node: SectionNode; op?: string }) {
     // Reset the active tab to the section's first affordance ONLY when the
     // section changes — not on every render (node.affordances is a fresh array
     // reference each render, so depending on it would clobber the user's tab).
-    setTab(node.affordances[0] || "upload");
+    setTab(authorTabs(node)[0] || "upload");
     setErr("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [node.section]);
+
+  // Round-9 builder_forms "Leaf placement details hidden behind collapsed
+  // expander" (n=1) + ai_draft "Leaf metadata … not visible" (n=3): the live
+  // current-view is fetched ONCE per section here (not lazily inside the
+  // expander) so placement facts can show by default AND on the saved-doc
+  // card. Refetches when the placed content changes (checksums change).
+  const docChecksums = [
+    ...(node.documents
+      ? Object.values(node.documents).map((d) => d.checksum)
+      : node.document
+      ? [node.document.checksum]
+      : []),
+  ].join("|");
+  const [cv, setCv] = useState<CurrentView | null>(null);
+  const [cvErr, setCvErr] = useState("");
+  useEffect(() => {
+    if (!node.leaf_id) {
+      setCv(null);
+      return;
+    }
+    let live = true;
+    dossierApi
+      .currentView(dossierId)
+      .then((v) => {
+        if (!live) return;
+        setCv(v);
+        setCvErr("");
+      })
+      .catch((e) => {
+        if (!live) return;
+        setCvErr(String(e));
+      });
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dossierId, node.leaf_id, docChecksums]);
+
+  const leafFor = (lang?: string): CurrentViewLeaf | null =>
+    cv?.live.find(
+      (l) => l.leaf_id === node.leaf_id + (lang ? `-${lang}` : "")
+    ) || null;
+  const leaf = leafFor() || leafFor("en") || leafFor("fr");
+  const leafHistory =
+    cv?.history.filter((l) => l.leaf_id === leaf?.leaf_id) || [];
+  // Round-9 builder_forms MAJOR "Lifecycle operator lineage" (n=2): the
+  // specific PRIOR sequence number a REPL/APP/DEL acts on — resolved from the
+  // tracked back-pointer (modified_leaf) against the real lifecycle history.
+  const priorTarget = leaf?.modified_leaf
+    ? [...(cv?.history || []), ...(cv?.live || [])]
+        .reverse()
+        .find((l) => l.leaf_id === leaf.modified_leaf) || null
+    : null;
 
   const upload = async (file: File, lang?: string) => {
     setErr("");
@@ -70,16 +156,27 @@ export function SectionPanel({ node, op }: { node: SectionNode; op?: string }) {
     }
   };
 
+  const authorDone = (c: any, msg: string) => {
+    setContent(c);
+    setAnnounce(msg);
+    toast.success(msg);
+  };
+
   return (
     <div className="card glass section-panel">
       <div className="sr-only" aria-live="polite">{announce}</div>
       <div className="eyebrow">
         Module {node.module} · Section {node.section} ·{" "}
-        <span className={`applic ${node.applicability}`}>{node.applicability}</span>
-        {/* R9 DENSITY: the concrete eCTD placement (folder / leaf id) is real
-            substance but not first-view chrome — it moved down into the "eCTD
-            placement" expander (Node placement + Leaf id rows), so the eyebrow
-            reads calm and the leaf/folder detail is one click away. */}
+        {/* Round-9 ai_draft MAJOR "eCTD jargon undefined" (n=9): the
+            applicability badge now explains itself on hover/focus, in the
+            same plain words as the glossary. */}
+        <span
+          className={`applic ${node.applicability}`}
+          tabIndex={0}
+          title={`${applicabilityHelp(node.applicability)} — ${TERMS["applicability badge"]}`}
+        >
+          {node.applicability}
+        </span>
       </div>
       <h2 className="step-title" ref={stepTitleRef} tabIndex={-1}>
         {node.title}
@@ -114,7 +211,14 @@ export function SectionPanel({ node, op }: { node: SectionNode; op?: string }) {
             {node.bilingual && <span className="fmt">Bilingual: EN + FR</span>}
             <a href={node.source_url} target="_blank" rel="noopener noreferrer">
               Health Canada guidance ↗
-            </a>
+            </a>{" "}
+            {/* Round-9 builder_forms BLOCKER "Target HC submission model /
+                M1 backbone version not visible or dated" (n=3): the guidance
+                link carries its verification stamp instead of dangling
+                undated. */}
+            <span className="mut" style={{ fontSize: 11 }}>
+              (guidance set verified {LAST_VERIFIED})
+            </span>
           </div>
         </Disclosure>
         <EctdPrimer compact dossierId={dossierId} />
@@ -131,7 +235,7 @@ export function SectionPanel({ node, op }: { node: SectionNode; op?: string }) {
             </div>
           )}
         </div>
-      ) : affs.length === 0 ? (
+      ) : tabs.length === 0 ? (
         <div className="notice">
           This section is generated automatically as part of the eCTD backbone
           (index.xml / ca-regional.xml) — there is nothing to upload. Open the{" "}
@@ -149,9 +253,22 @@ export function SectionPanel({ node, op }: { node: SectionNode; op?: string }) {
           {node.section === "1.3.1" && (
             <PmXmlPanel dossierId={dossierId} title={content?.dossier_id || ""} />
           )}
+
+          {/* Round-9 ai_draft minor "No list-view checker for unreplaced
+              'example' placeholders" (n=2): every still-example field by
+              name, one click from its form input. */}
+          <ExampleFieldChecker
+            node={nodeR9}
+            onJump={(field) => {
+              setTab("form");
+              focusFormField(field);
+            }}
+          />
+
           <AttachedDocs
             node={node}
             dossierId={dossierId}
+            leafFor={leafFor}
             onConfirm={(c) => {
               setContent(c);
               const msg = `${node.section} confirmed as your content`;
@@ -163,24 +280,51 @@ export function SectionPanel({ node, op }: { node: SectionNode; op?: string }) {
 
           {/* P1-8 — real toggle-button group (not a false tablist): the panel
               below is switched in place, so `aria-pressed` matches the keyboard
-              behaviour where `role=tab` would have promised arrow-key roving. */}
+              behaviour where `role=tab` would have promised arrow-key roving.
+              Round-9 ai_draft MAJOR (n=13): ONE level of choice — Draft with AI
+              and Fill the form are first-class options here, not a second
+              toggle nested under "Author in-app". */}
           <div className="affordance-bar" role="group" aria-label="Choose how to complete this section">
-            {affs.includes("upload") && (
+            {tabs.includes("upload") && (
               <button type="button" aria-pressed={tab === "upload"}
                 className={tab === "upload" ? "on" : ""}
                 onClick={() => setTab("upload")}><Upload size={14} aria-hidden /> Upload</button>
             )}
-            {affs.includes("generate") && (
-              <button type="button" aria-pressed={tab === "generate"}
-                className={tab === "generate" ? "on" : ""}
-                onClick={() => setTab("generate")}><Sparkles size={14} aria-hidden /> Author in-app</button>
+            {tabs.includes("ai") && (
+              <button type="button" aria-pressed={tab === "ai"}
+                className={tab === "ai" ? "on" : ""}
+                title={nodeR9.ai_disabled
+                  ? "AI drafting is disabled for this section (client filing policy)."
+                  : undefined}
+                onClick={() => setTab("ai")}><MessageSquare size={14} aria-hidden /> Draft with AI{nodeR9.ai_disabled ? " (off)" : ""}</button>
             )}
-            {affs.includes("mark_na") && (
+            {tabs.includes("form") && (
+              <button type="button" aria-pressed={tab === "form"}
+                className={tab === "form" ? "on" : ""}
+                onClick={() => setTab("form")}><Sparkles size={14} aria-hidden /> Fill the form</button>
+            )}
+            {tabs.includes("mark_na") && (
               <button type="button" aria-pressed={tab === "mark_na"}
                 className={tab === "mark_na" ? "on" : ""}
                 onClick={() => setTab("mark_na")}><Ban size={14} aria-hidden /> Mark N/A</button>
             )}
           </div>
+
+          {/* Round-9 builder_forms MAJOR "AI drafting lacks … per-section
+              off-switch" (n=3, ask 2): the per-section AI policy, enforced
+              server-side on BOTH draft paths — chat drafting AND the form's
+              per-field "Draft with AI" — so it shows on form sections too. */}
+          {(tabs.includes("ai") || tabs.includes("form")) && (
+            <AiPolicyRow
+              node={nodeR9}
+              dossierId={dossierId}
+              onChange={(c, disabled) => {
+                setContent(c);
+                if (disabled && tab === "ai") setTab("form");
+              }}
+              onError={fail}
+            />
+          )}
 
           {err && <div className="notice bad" role="alert">{err}</div>}
 
@@ -200,10 +344,21 @@ export function SectionPanel({ node, op }: { node: SectionNode; op?: string }) {
                 onFile={(f) => upload(f)} />
             ))}
 
-          {tab === "generate" && (
-            <AuthorForm node={node} op={op}
-              onDone={(c, msg) => { setContent(c); setAnnounce(msg); toast.success(msg); }}
-              onError={fail} dossierId={dossierId} />
+          {tab === "ai" &&
+            (nodeR9.ai_disabled ? (
+              <div className="notice" role="status">
+                <b>AI drafting is disabled for this section</b> (client filing
+                policy) — the server refuses both chat and per-field drafts.
+                Author it by upload or the form instead, or re-enable AI above.
+              </div>
+            ) : (
+              <DraftChat node={node} dossierId={dossierId} onDone={authorDone}
+                onError={fail} onFallback={() => setTab("form")} />
+            ))}
+
+          {tab === "form" && (
+            <FormFill node={node} op={op} dossierId={dossierId}
+              onDone={authorDone} onError={fail} />
           )}
 
           {tab === "mark_na" && (
@@ -218,18 +373,30 @@ export function SectionPanel({ node, op }: { node: SectionNode; op?: string }) {
         </>
       )}
 
-      {/* R9 DENSITY (builder_forms ease/trust regression): the real eCTD
-          substance — leaf id, href, node placement, lifecycle operation written
-          to the backbone XML, plus the honest PDF/A scope note — is kept in full
-          but sits BELOW the task and behind a collapsed "eCTD placement"
-          expander (closed by default). The first view now shows the task
-          (upload / author / mark N/A + the one-line purpose) first; the depth is
-          one click away. MAJOR (n=8) wants real eCTD, not eye-candy — it is all
-          still here, just not forced into the first view. Lazily loaded on
-          expand so it never slows the primary form. */}
+      {/* Round-9 builder_forms "Workspace density" (n=22, remaining ask) +
+          "Leaf placement details hidden" (n=1) + ai_draft "Key info buried"
+          (n=13): the eCTD placement panel — leaf id, href, node placement,
+          lifecycle operation and the honest PDF/A scope note — is now OPEN BY
+          DEFAULT (a critical-caveat panel, per-user collapsible with the
+          preference persisted), and its collapsed summary line still shows
+          leaf id · sequence · operation so nothing is ever fully hidden. */}
       {node.leaf_id && (
-        <EctdPlacement node={node} op={op} dossierId={dossierId} />
+        <EctdPlacement
+          node={node}
+          op={op}
+          dossierId={dossierId}
+          leaf={leaf}
+          history={leafHistory}
+          priorTarget={priorTarget}
+          loaded={cv !== null || !!cvErr}
+          err={cvErr}
+        />
       )}
+
+      {/* Round-9 ai_draft BLOCKER "No project-level roll-up" (n=2) + MAJOR
+          "no bulk attest" (n=6): the dossier-wide roll-up + team-review
+          queue, reachable from every section panel (one collapsed line). */}
+      <RollupQueue dossierId={dossierId} onContent={setContent} />
     </div>
   );
 }
@@ -248,43 +415,42 @@ function PlaceRow({ label, children }: { label: string; children: React.ReactNod
 // lifecycle operation as WRITTEN TO THE BACKBONE XML for this section, plus an
 // explicit statement of the operation against the prior active sequence. Also
 // carries the honest PDF/A scope note (MAJOR): what the tool checks vs. what it
-// does NOT. Loaded lazily on expand from the live current-view so it reflects
-// the same operators the eValidator handoff / Application Viewer show.
+// does NOT. Round-9: data comes from the panel-level current-view fetch (so the
+// saved-doc card shares it) and the panel is open by default — the per-user
+// collapse preference persists in localStorage.
 function EctdPlacement({
   node,
   op,
   dossierId,
+  leaf,
+  history,
+  priorTarget,
+  loaded,
+  err,
 }: {
   node: SectionNode;
   op?: string;
   dossierId: string;
+  leaf: CurrentViewLeaf | null;
+  history: CurrentViewLeaf[];
+  priorTarget: CurrentViewLeaf | null;
+  loaded: boolean;
+  err: string;
 }) {
-  const [open, setOpen] = useState(false);
-  const [leaf, setLeaf] = useState<CurrentViewLeaf | null>(null);
-  const [history, setHistory] = useState<CurrentViewLeaf[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [err, setErr] = useState("");
-
-  useEffect(() => {
-    if (!open || loaded) return;
-    let live = true;
-    dossierApi
-      .currentView(dossierId)
-      .then((cv) => {
-        if (!live) return;
-        setLeaf(cv.live.find((l) => l.leaf_id === node.leaf_id) || null);
-        setHistory(cv.history.filter((l) => l.leaf_id === node.leaf_id));
-        setLoaded(true);
-      })
-      .catch((e) => {
-        if (!live) return;
-        setErr(String(e));
-        setLoaded(true);
-      });
-    return () => {
-      live = false;
-    };
-  }, [open, loaded, dossierId, node.leaf_id]);
+  const [open, setOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    try {
+      return window.localStorage.getItem("ands.placement.open") !== "0";
+    } catch {
+      return true;
+    }
+  });
+  const toggle = (o: boolean) => {
+    setOpen(o);
+    try {
+      window.localStorage.setItem("ands.placement.open", o ? "1" : "0");
+    } catch {}
+  };
 
   // The operation this leaf carries (from the live view once loaded, else the
   // parent-supplied hint). replace/append/delete act against a prior active
@@ -292,6 +458,7 @@ function EctdPlacement({
   const operation = leaf?.operation || op || "new";
   const om = opMeta(operation);
   const actsOnPrior = operation === "replace" || operation === "append" || operation === "delete";
+  const ext = leaf?.href ? leaf.href.split(".").pop() || "" : "";
 
   return (
     <Disclosure
@@ -299,11 +466,12 @@ function EctdPlacement({
       showLabel="Show eCTD placement & lifecycle"
       hideLabel="Hide eCTD placement & lifecycle"
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={toggle}
       summary={
-        <span>
+        <span title={TERMS["eCTD placement"]}>
           <FileSearch size={13} aria-hidden style={{ verticalAlign: "-2px", marginRight: 5 }} />
-          <b>eCTD placement</b> — leaf, href &amp; lifecycle operation
+          <b>eCTD placement</b> — leaf <code>{node.leaf_id}</code> · seq{" "}
+          <code>{leaf?.sequence || "0000"}</code>
           {om ? (
             <span className={om.risk ? "t-op warn" : "t-op"} style={{ marginLeft: 8 }}>
               {om.label}
@@ -352,6 +520,17 @@ function EctdPlacement({
               <span className={om?.risk ? "t-op warn" : "t-op"}>{om?.label || operation.toUpperCase()}</span>{" "}
               <b>{om?.word || operation}</b>
             </PlaceRow>
+            {/* Round-9 ai_draft MAJOR "Leaf metadata … STF/file-format details"
+                (n=3): the honest file-format + STF answer, on the face. */}
+            <PlaceRow label="File format / STF">
+              {leaf?.href ? <b>{ext.toUpperCase()}</b> : <span className="mut">—</span>}
+              {" · "}
+              <span className="mut" title={TERMS.STF}>
+                no STF — Health Canada&apos;s eCTD does not use Study Tagging
+                Files (FDA/PMDA constructs); this leaf sits directly at its CTD
+                heading
+              </span>
+            </PlaceRow>
             <PlaceRow label="File fingerprint (md5)">
               {leaf?.checksum ? (
                 <code title="md5 is a content fingerprint that matches the placed leaf — document control, NOT validation or acceptance.">
@@ -365,7 +544,9 @@ function EctdPlacement({
 
           {/* MAJOR: make the operation against a prior active sequence explicit
               per leaf — new (nothing to supersede) vs replace/append/delete
-              acting on an earlier transmitted document. */}
+              acting on an earlier transmitted document. Round-9 builder_forms
+              "Lifecycle operator lineage" (n=2): the specific prior sequence
+              number the operation acts on, from the tracked back-pointer. */}
           <div className={`notice ${actsOnPrior ? "warn" : ""}`} style={{ fontSize: 12, marginTop: 8 }}>
             {operation === "new" && (
               <>This leaf is filed <b>new</b> — there is no prior active
@@ -377,14 +558,16 @@ function EctdPlacement({
               the replace operation so Health Canada&apos;s reviewer sees the new
               document in place of the old one.
               {leaf?.modified_leaf ? (
-                <> Replaces leaf <code>{leaf.modified_leaf}</code>.</>
+                <> Replaces leaf <code>{leaf.modified_leaf}</code>
+                {priorTarget ? <> placed in sequence <code>{priorTarget.sequence}</code></> : null}.</>
               ) : null}</>
             )}
             {operation === "append" && (
               <><b>Append</b> — this leaf is added <i>alongside</i> a prior
               active leaf, not replacing it; both remain part of the record.
               {leaf?.modified_leaf ? (
-                <> Appends to leaf <code>{leaf.modified_leaf}</code>.</>
+                <> Appends to leaf <code>{leaf.modified_leaf}</code>
+                {priorTarget ? <> placed in sequence <code>{priorTarget.sequence}</code></> : null}.</>
               ) : null}</>
             )}
             {operation === "delete" && (
@@ -392,7 +575,8 @@ function EctdPlacement({
               sequence. It stays in the audit history but is removed from the
               current view.
               {leaf?.modified_leaf ? (
-                <> Withdraws leaf <code>{leaf.modified_leaf}</code>.</>
+                <> Withdraws leaf <code>{leaf.modified_leaf}</code>
+                {priorTarget ? <> placed in sequence <code>{priorTarget.sequence}</code></> : null}.</>
               ) : null}</>
             )}
           </div>
@@ -449,26 +633,335 @@ function EctdPlacement({
 // The honest AI provenance tooltip: what the chip means + where AI-processed
 // dossier text goes and how per-sponsor isolation holds. md5 is NOT claimed as
 // validation anywhere — it is only a content fingerprint.
+// Round-9 ai_draft MAJOR "'Confirmed' state can be misread as validated" (n=6):
+// the tooltip now states explicitly that confirmed is NOT validated.
 const AI_PROVENANCE_TOOLTIP =
   "Drafted interactively with the AI assistant under your direction, and " +
   "recorded in the audit trail. Data residency: your dossier text is sent to " +
   "the configured AI provider for this draft only, isolated per sponsor — it " +
   "is never shared across clients or used to train models. This is assistance, " +
   "not a filing: review it against the Health Canada guidance and confirm it " +
-  "as your own content before filing.";
+  "as your own content before filing. Confirmed is NOT validated — Health " +
+  "Canada eValidator conformance must still be run before you transmit.";
 
-function AttachedDocs({
+// Round-9 ai_draft minor (n=2): the list-view checker for unreplaced
+// worked-example fields — enumerated by label, one-click jump-to-fix.
+function ExampleFieldChecker({
+  node,
+  onJump,
+}: {
+  node: SectionNodeR9;
+  onJump: (field: string) => void;
+}) {
+  const fields = node.sample_fields || [];
+  const show =
+    fields.length > 0 && !!node.needs_review && node.content_origin === "sample";
+  const [labels, setLabels] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!show) return;
+    let live = true;
+    dossierApi
+      .sectionFormSchema(node.section)
+      .then((s) => {
+        if (!live) return;
+        setLabels(
+          Object.fromEntries(s.schema.fields.map((f) => [f.name, f.label]))
+        );
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [node.section, show]);
+  if (!show) return null;
+  return (
+    <div className="notice warn" role="status" style={{ fontSize: 12 }}>
+      <AlertTriangle size={14} aria-hidden style={{ verticalAlign: "-2px", marginRight: 4 }} />
+      <b>{fields.length} field{fields.length > 1 ? "s" : ""} still carr{fields.length > 1 ? "y" : "ies"} the worked example</b>{" "}
+      — the section stays <b>not filable</b> and export is blocked until every
+      one is replaced with your product&apos;s real data:
+      <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+        {fields.map((f) => (
+          <li key={f}>
+            <button
+              type="button"
+              className="ghost"
+              style={{ fontSize: 12, padding: "1px 6px" }}
+              title="Open the form and jump to this field"
+              onClick={() => onJump(f)}
+            >
+              {labels[f] || f} →
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// Round-9 builder_forms MAJOR (n=3, ask 2): the per-section AI off-switch row.
+function AiPolicyRow({
+  node,
+  dossierId,
+  onChange,
+  onError,
+}: {
+  node: SectionNodeR9;
+  dossierId: string;
+  onChange: (c: any, disabled: boolean) => void;
+  onError: (e: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const disabled = !!node.ai_disabled;
+  async function toggle() {
+    setBusy(true);
+    try {
+      const c = await draftApi.setAiPolicy(
+        dossierId, node.section, !disabled,
+        disabled ? "re-enabled from section panel" : "client filing policy");
+      onChange(c, !disabled);
+      toast.success(
+        !disabled
+          ? `AI drafting disabled for ${node.section} — recorded to the audit trail`
+          : `AI drafting re-enabled for ${node.section} — recorded to the audit trail`);
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="mut" style={{ fontSize: 12, display: "flex", gap: 8, alignItems: "center" }}>
+      {disabled ? (
+        <>AI drafting is <b style={{ color: "var(--warn)" }}>off</b> for this
+        section (client filing policy — enforced server-side on chat and
+        per-field drafts, recorded to the audit trail).</>
+      ) : (
+        <>AI drafting is allowed for this section.</>
+      )}
+      <button type="button" className="ghost" style={{ fontSize: 12 }}
+        onClick={toggle} disabled={busy}>
+        {busy ? "Saving…" : disabled ? "Re-enable AI drafting" : "Disable AI for this section"}
+      </button>
+    </div>
+  );
+}
+
+// Round-9 builder_forms MAJOR "…harder attestation" (n=3, ask 3): the full
+// draft must actually be read — the box tracks scroll-to-end (a draft short
+// enough to need no scrolling counts as read once rendered).
+function ScrollGate({
+  text,
+  onRead,
+}: {
+  text: string;
+  onRead: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (el && el.scrollHeight <= el.clientHeight + 4) onRead();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text]);
+  return (
+    <div
+      ref={ref}
+      className="teach"
+      tabIndex={0}
+      aria-label="The full AI draft — scroll to the end before attesting"
+      style={{ maxHeight: 180, overflowY: "auto", whiteSpace: "pre-wrap", fontSize: 12 }}
+      onScroll={(e) => {
+        const el = e.currentTarget;
+        if (el.scrollTop + el.clientHeight >= el.scrollHeight - 4) onRead();
+      }}
+    >
+      {text}
+    </div>
+  );
+}
+
+// Round-9 ai_draft BLOCKER "Attestation is a button click, not an inspection-
+// grade e-signature with exportable audit record" (n=4) + builder_forms MAJOR
+// (n=3, ask 3): the attest step now (a) requires the FULL draft scrolled,
+// (b) records the reviewer's typed name + credential with a UTC timestamp on
+// the Part-11 ledger, and (c) offers the printable side-by-side review before
+// the button. HONEST LIMIT stated in-UI: identity-stamped attestation, not a
+// cryptographic signature — the transmit-gate Part-11 e-sign covers that.
+function AiAttest({
   node,
   dossierId,
   onConfirm,
   onError,
 }: {
-  node: SectionNode;
+  node: SectionNodeR9;
   dossierId: string;
   onConfirm: (c: any) => void;
   onError: (e: string) => void;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const [name, setName] = useState("");
+  const [credential, setCredential] = useState("");
+  const [scrolled, setScrolled] = useState(false);
+  const [readLegacy, setReadLegacy] = useState(false);
+  const draft = node.draft_text || "";
+  const readOk = draft ? scrolled : readLegacy;
+
+  function printSideBySide() {
+    openPrintWindow(
+      `Side-by-side review — ${node.section} ${node.title}`,
+      `<h1>Side-by-side review — ${escapeHtml(node.section)} ${escapeHtml(node.title)}</h1>
+       <div class="mut">The saved AI draft (left) against the Health Canada
+       guidance this section is checked against (right). Guidance set verified
+       ${escapeHtml(LAST_VERIFIED)}. The whole document is AI-assisted; it
+       becomes your reviewed content only on the named attestation.</div>
+       <div class="cols" style="margin-top:12px">
+         <div class="col"><h2>AI draft (unreviewed)</h2>
+           <div class="box">${escapeHtml(draft)}</div></div>
+         <div class="col"><h2>What Health Canada needs here</h2>
+           <div class="box">${escapeHtml(node.guidance)}</div>
+           <div class="mut" style="margin-top:6px">Source: ${escapeHtml(node.source_url)}</div></div>
+       </div>`
+    );
+  }
+
+  async function confirm() {
+    setConfirming(true);
+    try {
+      onConfirm(
+        await draftApi.confirmContentAttested(dossierId, node.section, {
+          attest_name: name.trim(),
+          attest_credential: credential.trim(),
+          attest_meaning: "I have reviewed this AI draft — it is my content",
+        })
+      );
+      toast.success(`${node.section} confirmed as your reviewed content`);
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      setConfirming(false);
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 8, display: "grid", gap: 8 }}>
+      {draft ? (
+        <>
+          <div className="mut" style={{ fontSize: 12 }}>
+            Read the <b>full draft</b> below (scroll to the end), then attest
+            by name:
+          </div>
+          <ScrollGate text={draft} onRead={() => setScrolled(true)} />
+        </>
+      ) : (
+        // drafts saved before draft-text capture: an explicit read
+        // acknowledgement replaces the scroll gate — never a free pass.
+        <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12 }}>
+          <input type="checkbox" style={{ width: "auto" }} checked={readLegacy}
+            onChange={(e) => setReadLegacy(e.target.checked)} />
+          <span>I opened the saved draft document and read it in full.</span>
+        </label>
+      )}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <input value={name} placeholder="Your full name (required)"
+          style={{ width: 200 }} disabled={confirming}
+          aria-label="Attesting reviewer's full name"
+          onChange={(e) => setName(e.target.value)} />
+        <input value={credential} placeholder="Credential / role (e.g. RAC)"
+          style={{ width: 180 }} disabled={confirming}
+          aria-label="Attesting reviewer's credential"
+          onChange={(e) => setCredential(e.target.value)} />
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button onClick={confirm}
+          disabled={confirming || !readOk || !name.trim()}
+          title={!readOk
+            ? "Read the full draft first — the button enables once you reach the end."
+            : !name.trim()
+            ? "Type your full name — the attestation is recorded by name."
+            : undefined}>
+          {confirming
+            ? "Recording…"
+            : "I have reviewed this AI draft — it is my content"}
+        </button>
+        {draft && (
+          <button type="button" className="ghost" onClick={printSideBySide}
+            title="Print the draft next to the Health Canada guidance — paper review before you attest.">
+            Print side-by-side review
+          </button>
+        )}
+      </div>
+      <div className="mut" style={{ fontSize: 11 }}>
+        Recorded with your name, credential and a UTC timestamp on the
+        append-only Part-11 audit trail — an identity-stamped attestation (the
+        cryptographic e-signature happens at the transmit gate). Attesting does{" "}
+        <b>not</b> validate the section: run Health Canada&apos;s eValidator
+        before you transmit.
+      </div>
+    </div>
+  );
+}
+
+// Round-9 ai_draft MAJOR "'Confirmed' can be misread as validated" (n=6): the
+// states legend — what each state and action actually commits you to.
+function StatesLegend() {
+  return (
+    <Disclosure
+      showLabel="Show"
+      hideLabel="Hide"
+      summary={
+        <span className="mut" style={{ fontSize: 12 }}>
+          <b>What these states commit you to</b> — not filable / confirmed /
+          export-ready
+        </span>
+      }
+    >
+      <ul style={{ margin: "4px 0 0", paddingLeft: 18, fontSize: 12, display: "grid", gap: 5 }}>
+        <li>
+          <b>Not yet filable — review required:</b> the section holds an
+          unconfirmed AI draft or worked-example content. It cannot count as
+          complete and export is blocked.
+        </li>
+        <li>
+          <b>&ldquo;Use this draft&rdquo;</b> commits nothing — it only saves
+          an UNCONFIRMED AI draft into the section; the section stays not
+          filable until attested.
+        </li>
+        <li>
+          <b>Confirmed (AI-assisted · confirmed):</b> a named attestation that
+          YOU reviewed the draft as your own content, recorded on the audit
+          trail. <b>Confirmed is NOT validated</b> — Health Canada eValidator
+          conformance must still be run before filing; the structural check
+          here is not HC&apos;s eValidator.
+        </li>
+        <li>
+          <b>Export-ready:</b> the gate (documents · fee · structural check)
+          passes, so a sequence can be exported — you still run HC&apos;s
+          official eValidator on the exported package before transmit.
+        </li>
+        <li>
+          <b>Review-vs-HC findings</b> are advisory content-completeness
+          heuristics, not a screening clearance — act on them per your
+          organisation&apos;s review SOP (senior review where it requires it).
+        </li>
+      </ul>
+    </Disclosure>
+  );
+}
+
+function AttachedDocs({
+  node,
+  dossierId,
+  leafFor,
+  onConfirm,
+  onError,
+}: {
+  node: SectionNode;
+  dossierId: string;
+  leafFor: (lang?: string) => CurrentViewLeaf | null;
+  onConfirm: (c: any) => void;
+  onError: (e: string) => void;
+}) {
+  const nodeR9 = node as SectionNodeR9;
   const docs: { lang?: string; meta: DocMeta }[] = [];
   if (node.documents) {
     for (const [lang, meta] of Object.entries(node.documents)) docs.push({ lang, meta });
@@ -488,16 +981,23 @@ function AttachedDocs({
   // This is NOT a screen-reader-only region — it must block the eye too.
   const needsReview = !!node.needs_review;
   const isAi = node.content_origin === "ai_draft";
+  const att = nodeR9.attestation;
 
-  async function confirm() {
-    setConfirming(true);
+  // Round-9 ai_draft BLOCKER (n=4): the one-click per-section audit record —
+  // who drafted, who reviewed, when, md5, provider path — as a JSON download.
+  async function exportAuditRecord() {
     try {
-      onConfirm(await dossierApi.confirmContent(dossierId, node.section));
-      toast.success(`${node.section} confirmed as your reviewed content`);
+      const rec = await draftApi.sectionAuditRecord(dossierId, node.section);
+      const blob = new Blob([JSON.stringify(rec, null, 2)],
+        { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `${dossierId}-${node.section}-audit-record.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      toast.success(`Audit record for ${node.section} exported`);
     } catch (e) {
       onError(String(e));
-    } finally {
-      setConfirming(false);
     }
   }
 
@@ -518,13 +1018,8 @@ function AttachedDocs({
             <>
               you review it against the Health Canada guidance and attest it as
               your own content:
-              <div style={{ marginTop: 8 }}>
-                <button onClick={confirm} disabled={confirming}>
-                  {confirming
-                    ? "Recording…"
-                    : "I have reviewed this AI draft — it is my content"}
-                </button>
-              </div>
+              <AiAttest node={nodeR9} dossierId={dossierId}
+                onConfirm={onConfirm} onError={onError} />
             </>
           ) : (
             <>
@@ -538,7 +1033,9 @@ function AttachedDocs({
           </span>
         </div>
       )}
-      {docs.map(({ lang, meta }) => (
+      {docs.map(({ lang, meta }) => {
+        const leaf = leafFor(lang);
+        return (
         <div key={meta.doc_id} className="attached-doc">
           <span className="ad-icon" aria-hidden>
             {meta.origin === "ai_draft" ? "💬"
@@ -550,7 +1047,17 @@ function AttachedDocs({
           <span className="ad-meta mut">
             {/* md5 is a content fingerprint (matches the placed leaf), NOT a
                 validation or acceptance signal — labelled as such. */}
-            {fmtSize(meta.size)} · fingerprint md5 {meta.checksum.slice(0, 8)}…
+            {fmtSize(meta.size)} ·{" "}
+            <span title={TERMS["md5 fingerprint"]}>
+              fingerprint md5 {meta.checksum.slice(0, 8)}…
+            </span>
+            {/* Round-9 ai_draft MAJOR "Leaf metadata … not visible" (n=3):
+                the real leaf metadata ON the saved-document card — operation,
+                sequence and href from the live current-view. */}
+            {leaf && (
+              <> · {opMeta(leaf.operation)?.label || leaf.operation.toUpperCase()}{" "}
+              @ seq {leaf.sequence} · <code style={{ fontSize: 10 }}>{leaf.href}</code></>
+            )}
           </span>
           {/* provenance travels with every document — who/what produced it,
               and whether the filer has confirmed it as their own content. */}
@@ -574,7 +1081,36 @@ function AttachedDocs({
           <a className="ad-dl" href={dossierApi.documentUrl(meta.doc_id)}
             target="_blank" rel="noopener noreferrer">Download</a>
         </div>
-      ))}
+        );
+      })}
+      {/* Round-9 ai_draft MAJOR (n=6): confirmed ≠ validated, stated in
+          always-visible text right where the confirmed chip renders — plus
+          the recorded named attestation for the inspection record. */}
+      {!needsReview && node.content_confirmed && isAi && (
+        <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>
+          {att ? (
+            <>Attested by <b>{att.name}</b>
+            {att.credential ? `, ${att.credential}` : ""} · {att.attested_at} —
+            recorded on the audit trail. </>
+          ) : null}
+          <b>Confirmed ≠ validated</b> — run Health Canada&apos;s eValidator on
+          the exported package before you transmit.
+        </div>
+      )}
+      <div style={{ marginTop: 8, display: "grid", gap: 4 }}>
+        <div>
+          <button type="button" className="ghost" style={{ fontSize: 12 }}
+            onClick={exportAuditRecord}
+            title="Download this section's audit record: who drafted, who reviewed/attested, when, md5 fingerprints and every ledger event for the section.">
+            Export audit record (JSON)
+          </button>
+        </div>
+        <div className="mut" style={{ fontSize: 11 }}>
+          This record and the full dossier trail are stored in the append-only,
+          actor-stamped Part-11 ledger — exportable for inspection at any time.
+        </div>
+        <StatesLegend />
+      </div>
     </div>
   );
 }
@@ -641,65 +1177,13 @@ function Dropzone({
   );
 }
 
-// The "Author in-app" panel. Every content section is now form-fillable: the
-// schema-driven FormFill component renders each field by type, offers per-prose-
-// field AI drafting, and generates the document into the eCTD leaf. For a whole-
-// document AI-draftable prose doc (e.g. the cover letter / Form V), the filer can
-// ALSO draft the entire document conversationally — the "Draft with AI" (chat)
-// vs "Fill the form" toggle. Both save an unconfirmed draft the review/confirm
-// gate on the saved-doc card then blocks until confirmed.
-function AuthorForm({
-  node,
-  op,
-  dossierId,
-  onDone,
-  onError,
-}: {
-  node: SectionNode;
-  op?: string;
-  dossierId: string;
-  onDone: (c: any, msg: string) => void;
-  onError: (e: string) => void;
-}) {
-  const aiDraftable = !!node.ai_draftable;
-  const [mode, setMode] = useState<"ai" | "template">(aiDraftable ? "ai" : "template");
-
-  // reset to the section's default mode when the section changes.
-  useEffect(() => {
-    setMode(aiDraftable ? "ai" : "template");
-  }, [node.section, aiDraftable]);
-
-  const formFill = (
-    <FormFill node={node} op={op} dossierId={dossierId}
-      onDone={onDone} onError={onError} />
-  );
-
-  if (aiDraftable) {
-    return (
-      <div className="author-form">
-        {/* Two ways to author the SAME leaf: a conversational whole-document AI
-            draft, or the structured form (with per-field AI drafting). */}
-        <div className="affordance-bar" role="group" aria-label="How to author this section">
-          <button type="button" aria-pressed={mode === "ai"}
-            className={mode === "ai" ? "on" : ""}
-            onClick={() => setMode("ai")}>💬 Draft with AI</button>
-          <button type="button" aria-pressed={mode === "template"}
-            className={mode === "template" ? "on" : ""}
-            onClick={() => setMode("template")}><Sparkles size={14} aria-hidden /> Fill the form</button>
-        </div>
-        {mode === "ai" ? (
-          <DraftChat node={node} dossierId={dossierId} onDone={onDone}
-            onError={onError} onFallback={() => setMode("template")} />
-        ) : (
-          formFill
-        )}
-      </div>
-    );
-  }
-
-  return formFill;
-}
-
+// Round-9 builder_forms BLOCKER "Bilingual/XML Product Monograph handling
+// unclear" (n=4) + ai_draft BLOCKER "No bilingual French / XML PM support
+// signals" (n=2): promoted to a FIRST-CLASS block at 1.3.1 (no longer a
+// collapsed <details>) with an explicit XML-PM-vs-PDF/A-leaf scope statement
+// and the named HC template/stylesheet package the build maps to. HONEST:
+// the XML built here starts from placeholder sections — it is not yet
+// generated from the AI/form draft content, and the panel says so.
 function PmXmlPanel({ dossierId }: { dossierId: string; title?: string }) {
   const { index } = useDossier();
   const [lang, setLang] = useState<"en" | "fr">("en");
@@ -728,9 +1212,22 @@ function PmXmlPanel({ dossierId }: { dossierId: string; title?: string }) {
 
   const findings = result?.validation?.findings || [];
   return (
-    <details className="teach" style={{ marginTop: 8 }}>
-      <summary><b>XML Product Monograph</b> — build &amp; validate (HC mandate
-        is phasing in for generics)</summary>
+    <div className="teach" style={{ marginTop: 8 }}>
+      <b>XML Product Monograph — build &amp; validate</b>{" "}
+      <span className="mut">(HC mandate is phasing in for generics)</span>
+      <div style={{ fontSize: 12, marginTop: 6 }}>
+        <b>Scope — what this tool produces at 1.3.1:</b> it places your
+        reviewed PM document as a <b>PDF/A leaf</b>, and it separately{" "}
+        <b>builds &amp; validates a structured XML PM</b> (pm-en.xml /
+        pm-fr.xml) against Health Canada&apos;s stylesheet package{" "}
+        (<code>pharmabio_stylesheets</code>, published 2025-09-10 — controlled
+        PM section codes, EN/FR editions).
+      </div>
+      <div className="mut" style={{ fontSize: 12, marginTop: 4 }}>
+        Honest limit: the XML below starts from placeholder sections — it is{" "}
+        <b>not yet generated from your AI/form draft content</b>. Align the
+        final XML PM with your reviewed PM before filing.
+      </div>
       <div className="cta-row" style={{ marginTop: 8 }}>
         <select value={lang} onChange={(e) => setLang(e.target.value as any)}
           style={{ width: "auto" }} aria-label="XML PM language">
@@ -756,7 +1253,7 @@ function PmXmlPanel({ dossierId }: { dossierId: string; title?: string }) {
                 .map((f: any) => f.rule).join(", ")}
         </div>
       )}
-    </details>
+    </div>
   );
 }
 

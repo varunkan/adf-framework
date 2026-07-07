@@ -1,11 +1,15 @@
 """Password policy + self-serve reset flow (usability-panel fix F2)."""
 
+from app import security
+
+from tests.conftest import signup_admin
+
 
 def _signup(client, email="reset@acme.example", password="Reset-2026-ok1"):
-    r = client.post("/api/identity/auth/signup", json={
-        "email": email, "password": password, "company_name": "Acme RA"})
-    assert r.status_code == 201, r.text
-    return r.json()
+    # full onboarding (round-9: new workspaces require MFA) — returns a dict
+    # with a FULL session token plus the TOTP secret for follow-up logins
+    return signup_admin(client, email=email, password=password,
+                        company="Acme RA")
 
 
 def test_signup_enforces_password_policy(client):
@@ -28,7 +32,7 @@ def test_reset_request_never_reveals_accounts(client):
 
 
 def test_full_reset_flow(client):
-    _signup(client)
+    acct = _signup(client)
     r = client.post("/api/identity/auth/reset/request",
                     json={"email": "reset@acme.example"})
     assert r.status_code == 200
@@ -59,12 +63,14 @@ def test_full_reset_flow(client):
         "new_password": "Fresh-2026-pw9"})
     assert again.status_code == 422
 
-    # old password dead, new one works
+    # old password dead, new one works (the account has MFA from onboarding,
+    # so the fresh login supplies the current TOTP code)
     old = client.post("/api/identity/auth/login", json={
         "email": "reset@acme.example", "password": "Reset-2026-ok1"})
     assert old.status_code == 401
     new = client.post("/api/identity/auth/login", json={
-        "email": "reset@acme.example", "password": "Fresh-2026-pw9"})
+        "email": "reset@acme.example", "password": "Fresh-2026-pw9",
+        "mfa_code": security.totp_code(acct["secret"])})
     assert new.status_code == 200
 
 

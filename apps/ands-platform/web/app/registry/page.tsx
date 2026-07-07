@@ -16,6 +16,10 @@ import { RegisterForm } from "@/components/registry/RegisterForm";
 import { RegistrationRow } from "@/components/registry/RegistrationRow";
 import { DeadlinesStrip } from "@/components/registry/DeadlinesStrip";
 import { AnnualChecklist } from "@/components/registry/AnnualChecklist";
+// Round-9 (operations MAJOR, n=15): re-launchable 'Start here' guided tour.
+import { StartHereTour } from "@/components/portfolio/StartHereTour";
+// Round-9 (operations MAJOR, n=2): explicit FR-coverage statement.
+import { BilingualNote } from "@/components/portfolio/BilingualNote";
 
 export default function RegistryPage() {
   const [regs, setRegs] = useState<Registration[]>([]);
@@ -103,7 +107,12 @@ export default function RegistryPage() {
             audit trail — actor and workspace stamped, sequence-numbered,
             exportable for inspections (open a dossier → Audit).
           </p>
+          {/* Round-9 (operations MAJOR, n=2): FR coverage, stated plainly */}
+          <BilingualNote />
         </header>
+
+        {/* Round-9 (operations MAJOR, n=15): 'Start here' guided tour */}
+        <StartHereTour page="registry" />
 
         <div className="notice" style={{ maxWidth: "72ch", marginTop: 4 }}>
           <b>Record only.</b> Registering a product or changing its status here

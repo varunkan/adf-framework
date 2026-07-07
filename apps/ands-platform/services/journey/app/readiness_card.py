@@ -12,8 +12,10 @@ from __future__ import annotations
 from . import journey as J
 
 # The stages whose completion the readiness card surfaces as tiles, in order.
-_TILE_KEYS = ("company", "dossier", "submission", "content", "validate", "fees",
-              "review", "sign")
+# journey · J8 bilingual stage · the bilingual M1/PM review is a first-class
+# readiness tile between content and validation.
+_TILE_KEYS = ("company", "dossier", "submission", "content", "bilingual",
+              "validate", "fees", "review", "sign")
 
 
 def card(payload: dict) -> dict:
@@ -30,7 +32,7 @@ def card(payload: dict) -> dict:
         tiles.append({"key": key, "label": st["label"], "state": state,
                       "reg": st.get("reg", "")})
 
-    # READY to file once orient..sign (stages 0..8) are all done — transmit open.
+    # READY to file once orient..sign (stages 0..9) are all done — transmit open.
     # The 'validate' stage is 'done' only when the REAL eCTD validation ran with
     # zero errors (see service.advance 'validate'), so READY is already gated on
     # validation passing — the `validation` tier below makes that legible instead

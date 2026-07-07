@@ -51,6 +51,21 @@ function esc(s: string): string {
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] || c));
 }
 
+// onboarding — audit log rides along in the inspection PDF (round-9 item 1,
+// BLOCKER n=8): the export now appends the latest 200 events of the FULL,
+// unfiltered audit event log (seq / when UTC / category / action / actor), so
+// the binder artifact evidences the trail itself, not just the settings.
+function auditRowsHtml(events: AuditEvent[]): string {
+  return events.slice(0, 200).map((e) => `
+    <tr>
+      <td>${esc(String(e.seq))}</td>
+      <td>${esc(e.at)}</td>
+      <td>${esc(e.category || "")}</td>
+      <td>${esc(e.action || "")}</td>
+      <td>${esc(actorOf(e))}</td>
+    </tr>`).join("");
+}
+
 // Build a clean printable HTML doc of the security settings + role table and
 // hand it to the browser print dialog ("Save as PDF"). Honest: this is a
 // browser print export, not a server-signed PDF.
@@ -58,6 +73,7 @@ function exportSecurityPdf(
   me: Principal | null,
   roles: RoleMatrixRow[],
   requireMfa: boolean | null,
+  auditEvents: AuditEvent[],
 ) {
   const now = new Date().toLocaleString();
   const roleRows = roles.map((r) => `
@@ -96,6 +112,18 @@ function exportSecurityPdf(
       <th>Role</th><th>What it is</th><th>Capabilities (enforced by API)</th>
       <th>Who assigns it</th></tr></thead>
       <tbody>${roleRows}</tbody></table>
+    <h2>Audit event log (latest 200)</h2>
+    <div class="mut">The full workspace event log — every domain event
+      (dossier changes, documents, validation, sign-offs and sign-ins), not
+      just the security-filtered view. Append-only, with monotonic sequence
+      numbers assigned on insert: a deleted record leaves a gap in the
+      store's sequence.</div>
+    ${auditEvents.length ? `<table><thead><tr>
+      <th>Seq</th><th>When (UTC)</th><th>Category</th><th>Action</th>
+      <th>Actor</th></tr></thead>
+      <tbody>${auditRowsHtml(auditEvents)}</tbody></table>`
+      : `<div class="mut" style="margin-top:6px">No audit events recorded
+        for this workspace yet.</div>`}
     <div class="foot">
       Compliance posture: this deployment maintains an append-only, actor- and
       workspace-stamped audit trail and role-based access control aligned to the
@@ -118,6 +146,10 @@ function exportSecurityPdf(
 
 export function SecurityCompliance() {
   const [events, setEvents] = useState<AuditEvent[] | null>(null);
+  // item 1 — the FULL unfiltered event list rides along in the PDF export
+  // (the on-card list below stays security-filtered so an inspector sees
+  // sign-ins/policy/role changes without noise).
+  const [allEvents, setAllEvents] = useState<AuditEvent[]>([]);
   const [roles, setRoles] = useState<RoleMatrixRow[]>([]);
   const [me, setMe] = useState<Principal | null>(null);
   const [requireMfa, setRequireMfa] = useState<boolean | null>(null);
@@ -125,7 +157,7 @@ export function SecurityCompliance() {
 
   useEffect(() => {
     governanceApi.listAudit(200)
-      .then((all) => setEvents(all.filter(isSecurityEvent)))
+      .then((all) => { setAllEvents(all); setEvents(all.filter(isSecurityEvent)); })
       .catch((e) => { setEvents([]); setErr(String(e?.message || e)); });
     auth.roleMatrix().then((r) => setRoles(r.roles)).catch(() => {});
     auth.me().then(setMe).catch(() => {});
@@ -141,8 +173,8 @@ export function SecurityCompliance() {
         <span className="spacer" style={{ marginLeft: "auto" }} />
         <button className="ghost" style={{ fontSize: 12 }}
           disabled={!roles.length}
-          onClick={() => exportSecurityPdf(me, roles, requireMfa)}>
-          Export security settings &amp; role table (PDF)
+          onClick={() => exportSecurityPdf(me, roles, requireMfa, allEvents)}>
+          Export security settings, role table &amp; audit log (PDF)
         </button>
       </div>
 
@@ -157,6 +189,33 @@ export function SecurityCompliance() {
         cryptographically-bound e-signatures are on the roadmap — do not treat
         this as a completed Part-11 e-signature system.
       </p>
+
+      {/* onboarding — event-log guarantees (round-9 item 1, BLOCKER n=8):
+          "I'd need to know that log is tamper-evident, retained, and covers
+          every change to a dossier, not just logins." The mechanism, retention,
+          location and scope stated HONESTLY: tamper-EVIDENT (gapless sequence
+          + hashed exports), not hash-chained/signed — that stays roadmap. */}
+      <h3 style={{ margin: "20px 0 6px" }}>Event-log guarantees</h3>
+      <ul className="mut" style={{ margin: "0 0 4px", paddingLeft: 20,
+        fontSize: 13, display: "grid", gap: 6 }}>
+        <li><b>Mechanism.</b> The event store is append-only (INSERT-only —
+          the application has no update or delete path for events), every
+          event carries a monotonic sequence number assigned on insert, and
+          CSV exports embed a SHA-256 integrity manifest. That makes it{" "}
+          <b>tamper-evident</b>: a deleted record leaves a gap in the
+          store&apos;s sequence and any edit to an export breaks its hash.
+          Being honest: records are not yet hash-chained or cryptographically
+          signed — that is on the roadmap, and this page does not claim
+          it.</li>
+        <li><b>Retention.</b> Events are never deleted by the application —
+          they are retained for the life of the workspace. Self-hosted: your
+          own backup and retention policy governs the stored copy.</li>
+        <li><b>Where it lives.</b> In the governance service&apos;s event store
+          inside your own deployment — it never leaves your environment.</li>
+        <li><b>Scope.</b> Every domain event — dossier changes, document
+          uploads, validation runs, sign-offs AND sign-ins — not just
+          logins.</li>
+      </ul>
 
       {/* (a) security event log — who / what / when */}
       <h3 style={{ margin: "20px 0 6px" }}>

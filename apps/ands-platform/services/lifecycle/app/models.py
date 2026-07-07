@@ -43,6 +43,16 @@ class AttachmentIn(BaseModel):
     data_base64: str = ""
 
 
+class VerifiedDateIn(BaseModel):
+    # Round-9 (operations, n=4): a manual verified-date override for one
+    # calculated clock — records the externally-verified value + its source.
+    dossier_id: str = ""
+    clock_key: str = ""       # e.g. noa:{id}:action_window · rts:{reg}:{fy}
+    verified_date: str = ""   # the value the user verified externally
+    calculated_date: str = "" # what the tool showed at verification time
+    source_ref: str = ""      # where it was verified (HC letter, Vault RIM…)
+
+
 class NoticeIn(BaseModel):
     dossier_id: str = ""
     notice: str = ""          # SAL/SDN/SRL/NOC/NOD/NON

@@ -2,7 +2,7 @@
 
 from app import billing
 
-from tests.conftest import auth, owner_token
+from tests.conftest import auth, owner_token, signup_admin
 
 
 def test_active_allows_everything():
@@ -40,6 +40,29 @@ def test_owner_sets_billing_and_tenant_reads_it(ctx):
                             params={"tenant_id": tenant["id"]},
                             headers=auth(tok)).json()
     assert access["state"] == "blocked" and "transmit" in access["blocked"]
+
+
+# Round-9 onboarding item 17 — the Account page's "Plan & billing status" line
+# reads GET /billing for the CALLER'S OWN workspace. Pins the contract: a
+# tenant admin can read their own tenant's billing (same-tenant is allowed at
+# api.py's cross-tenant gate) and the shape carries state + billing_status.
+def test_tenant_admin_reads_own_billing_status(ctx):
+    client = ctx.client
+    admin = signup_admin(client)
+    tid = admin["tenant"]["id"]
+    r = client.get("/api/identity/billing", params={"tenant_id": tid},
+                   headers=auth(admin["token"]))
+    assert r.status_code == 200
+    body = r.json()
+    assert body["tenant_id"] == tid
+    assert body["state"] in ("ok", "grace", "blocked")
+    assert "billing_status" in body
+    # ... and a foreign tenant's billing stays denied
+    other = signup_admin(client, email="b@b.io", company="B")
+    denied = client.get("/api/identity/billing",
+                        params={"tenant_id": tid},
+                        headers=auth(other["token"]))
+    assert denied.status_code == 403
 
 
 def test_set_billing_invalid_status_422(ctx):

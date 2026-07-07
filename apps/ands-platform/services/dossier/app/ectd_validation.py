@@ -57,6 +57,7 @@ from __future__ import annotations
 
 import re
 import xml.etree.ElementTree as ET
+from datetime import date
 
 from . import assembly, ectd
 
@@ -264,6 +265,61 @@ def _review_block() -> dict:
     return dict(CRITERIA_REVIEW)
 
 
+# ROUND9-VALIDATE item 1 (BLOCKER, n=14): the LOUD staleness warning. The asked
+# fix — "warn whenever the ruleset trails Health Canada's current published
+# version" — is not fully computable offline: ANDS Studio has no feed of HC
+# republications. The largest honest subset is REVIEW-OVERDUE staleness: when
+# today's month passes CRITERIA_REVIEW['next_review'] without a completed
+# review, the ruleset can no longer claim to be maintained-current, and the UI/
+# reports must say so loudly — plus an explicit limitation statement pointing
+# at canada.ca as the authoritative place to verify the current criteria.
+_CRITERIA_VERIFY_AT = (
+    "canada.ca — Health Canada, 'Preparation of Regulatory Activities in eCTD "
+    "Format' (where HC publishes the current eCTD Validation Criteria)"
+)
+
+
+def staleness(today: date | None = None) -> dict:
+    """The review-overdue staleness verdict for the criteria profile.
+
+    Compares today's ``YYYY-MM`` against ``CRITERIA_REVIEW['next_review']``
+    (lexicographic comparison is correct for zero-padded ``YYYY-MM``). The
+    review month itself is not overdue; the first month after it is.
+    """
+    t = today or date.today()
+    as_of = f"{t.year:04d}-{t.month:02d}"
+    next_review = CRITERIA_REVIEW["next_review"]
+    overdue = as_of > next_review
+    if overdue:
+        message = (
+            f"RULESET REVIEW OVERDUE — the scheduled review ({next_review}) "
+            f"has not been completed as of {as_of}. This catalogue may trail "
+            "Health Canada's current published eCTD Validation Criteria. "
+            "Verify the current criteria at canada.ca before relying on this "
+            "profile."
+        )
+    else:
+        message = (
+            f"Ruleset review is current as of {as_of} (next scheduled review: "
+            f"{next_review})."
+        )
+    return {
+        "review_overdue": overdue,
+        "as_of": as_of,
+        "synced_to": CRITERIA_SYNCED,
+        "next_review": next_review,
+        "message": message,
+        "verify_at": _CRITERIA_VERIFY_AT,
+        "limitation": (
+            "ANDS Studio cannot detect a Health Canada republication of the "
+            "eCTD Validation Criteria automatically — this staleness signal "
+            "only tracks whether the scheduled review cadence has been kept. "
+            "The authoritative source is always the current criteria HC "
+            "publishes at canada.ca."
+        ),
+    }
+
+
 def criteria_history() -> dict:
     """The auditable criteria-sync trail + the review-cadence commitment.
 
@@ -291,6 +347,10 @@ def criteria() -> dict:
         # versioned profile so provenance-of-maintenance (last/next review) is
         # stamped onto every validation report, not only a separate endpoint.
         "review": _review_block(),
+        # ROUND9-VALIDATE item 1: the staleness verdict travels with criteria()
+        # so every surface/report that stamps the profile can also warn loudly
+        # when the scheduled review is overdue.
+        "staleness": staleness(),
         "modeled_on": "Health Canada eCTD Validation Criteria v5.3 rule scheme "
                       "(CA-<severity>-<block> ids), CA Module 1 v2.2 regional "
                       "backbone and the ICH eCTD 3.2.2 index",
@@ -310,15 +370,46 @@ def criteria() -> dict:
                 "JavaScript / embedded files / launch actions)",
             ],
             "not_checked": [
+                # ROUND9-VALIDATE item 12 (labelling_specialist): the PROMINENT
+                # bilingual flag, listed FIRST. EN/FR Product Monograph pairing
+                # IS enforced separately by the Module 1 builder's bilingual
+                # monograph gate (a missing FR or EN PM blocks there) — but this
+                # CA-E/CA-W catalogue does not check bilingual content, and
+                # French mock-up presence/placement is not checked anywhere.
+                "Bilingual (EN/FR) content — this catalogue does NOT check "
+                "EN/FR leaf pairing or the presence/placement of French "
+                "Product Monograph mock-ups; those remain manual here. (EN/FR "
+                "Product Monograph pairing IS enforced separately by the "
+                "Module 1 builder's bilingual monograph gate; French mock-ups "
+                "are not checked anywhere.)",
                 "Scientific, clinical or quality adequacy of the content",
                 "Full PDF/A-1 (ISO 19005-1) conformance — only structural "
                 "PDF/A-1b markers are checked, not the full ISO profile "
                 "(fonts embedded, colour spaces, transparency, tagging, etc.); "
                 "run a real PDF/A validator before you rely on conformance",
-                "Cross-document hyperlink target resolution",
+                # ROUND9-VALIDATE item 10 (ra_officer_generic, regops_publisher):
+                # name the asked specifics explicitly instead of a generic line.
+                "PDF bookmarks / outline structure",
+                "Hyperlink integrity — intra-document link targets and "
+                "cross-document hyperlink target resolution",
+                "Page dimensions / page size",
+                "Folder depth and path-length limits",
                 "Health Canada screening or review acceptance",
             ],
         },
+        # ROUND9-VALIDATE item 10: document that the leaf md5 is computed
+        # exactly as the eCTD 3.2.2 backbone convention expects. Grounded in
+        # assembly.md5_hex (hashlib.md5 over the exact bytes, hexdigest) and
+        # assembly.CHECKSUM_TYPE == "md5". Copy rule: always "document
+        # control, not validation", never adjacent to the word banned by the
+        # consultant_ex_hc ask.
+        "checksum_note": (
+            "Leaf checksums are computed exactly as the eCTD 3.2.2 backbone "
+            "convention expects: a standard MD5 digest over the leaf file's "
+            "exact bytes, rendered as 32 lowercase hex digits and declared "
+            'with checksum-type="md5". The checksum is used for document '
+            "control, not validation."
+        ),
     }
 
 
@@ -368,6 +459,91 @@ _RULE_DESCRIPTIONS = {
 }
 
 
+# ROUND9-VALIDATE item 14 (ra_junior): findings must name the FIX, not only
+# the problem. One plain, one-line how-to-fix hint per rule — surfaced beside
+# the rule message in the UI and stamped into exported reports.
+_RULE_FIXES = {
+    "href_required": "Re-place the document from its module page so the leaf "
+                     "gets a file path (href) written automatically.",
+    "checksum_required": "Re-place or re-upload the document — the md5 is "
+                         "computed automatically when the leaf is placed.",
+    "duplicate_leaf_id": "Remove or re-place one of the duplicated documents "
+                         "so each leaf keeps a unique ID.",
+    "checksum_not_md5": "Re-upload the document so a fresh 32-hex-digit md5 "
+                        "is computed; do not hand-edit checksums.",
+    "leaf_id_required": "Re-place the document from its module page — every "
+                        "placement writes a leaf ID automatically.",
+    "operation_invalid": "Re-do the change from the module page so the leaf "
+                         "gets a legal operation (new/replace/append/delete).",
+    "prior_leaf_required": "Pick the prior document this change acts on "
+                           "(replace/append/delete must name the leaf they "
+                           "modify) — redo the change from the module page.",
+    "prior_leaf_unknown": "Point the change at a leaf that exists in an "
+                          "earlier sequence, or place the document as 'new'.",
+    "new_has_prior": "Place the document as a replace/append if it modifies "
+                     "a prior leaf, or clear the prior-leaf reference.",
+    "href_not_lowercase": "Rename the file/folders to all-lowercase before "
+                          "uploading, then re-place the document.",
+    "href_has_space": "Rename the file/folders to remove spaces (use '-'), "
+                      "then re-place the document.",
+    "href_module_folder": "Place the document from its module page so it "
+                          "lands under the right m1..m5 folder.",
+    "sequence_not_numeric": "Rename the sequence to a four-digit number "
+                            "(e.g. 0000) from the Sequences panel.",
+    "sequence_wrong_width": "Use exactly four digits for the sequence name "
+                            "(e.g. 0001, not 1).",
+    "sequence_duplicate": "Renumber the newer sequence to the next unused "
+                          "four-digit number.",
+    "sequence_not_contiguous": "Create the missing sequence number(s), or "
+                               "renumber so sequences run without gaps.",
+    "sequence_start_not_0000": "Start the dossier at sequence 0000 (create "
+                               "it, or renumber the first sequence).",
+    "backbone_malformed": "Re-export the sequence so the backbone XML is "
+                          "regenerated; do not hand-edit index.xml.",
+    "index_root_unexpected": "Re-export the sequence — the app regenerates "
+                             "index.xml with the correct eCTD root element.",
+    "index_leaf_incomplete": "Re-place the affected document so its leaf "
+                             "carries ID, href, checksum and title.",
+    "index_admin_missing": "Set the dossier's identification (Dossier ID) "
+                           "and re-export so index.xml carries it.",
+    "leaf_operation_missing": "Re-place the affected document — every "
+                              "placement writes the eCTD operation attribute.",
+    "leaf_modified_file_missing": "Redo the replace/append/delete from the "
+                                  "module page so the backbone records the "
+                                  "prior-leaf back-pointer.",
+    "leaf_href_dangling": "Re-upload the missing file, or delete the leaf "
+                          "that points at it and re-place the document.",
+    "index_doctype_missing": "Re-export the sequence — the app writes the "
+                             "ICH eCTD DOCTYPE into index.xml.",
+    "ca_root_unexpected": "Re-export the sequence — ca-regional.xml is "
+                          "regenerated against the CA Module 1 v2.2 schema.",
+    "ca_dossier_id_missing": "Set the dossier's Dossier ID (Catalog page), "
+                             "then re-export the sequence.",
+    "ca_company_id_missing": "Set the company ID on the dossier (REP "
+                             "enrolment details), then re-export.",
+    "ca_product_missing": "Name the drug product (place the 1.3.1 Product "
+                          "Monograph or supply the product on export).",
+    "pdf_header": "Replace the file with a real PDF export (print/save as "
+                  "PDF) — the bytes must start with %PDF.",
+    "pdf_encrypted": "Remove the password/security from the PDF (re-export "
+                     "it unencrypted), then re-upload.",
+    "pdfa_javascript": "Re-export the PDF without JavaScript/active content "
+                       "(most tools: save/print as PDF/A or flatten).",
+    "pdfa_embedded_file": "Remove embedded file attachments from the PDF, "
+                          "then re-upload.",
+    "pdfa_launch_action": "Remove launch/remote-goto actions (re-export the "
+                          "PDF from the source document), then re-upload.",
+    "pdfa_xmp_missing": "Re-export the document as PDF/A-1b so it carries "
+                        "the XMP pdfaid identification packet (advisory).",
+    "pdfa_xmp_part_wrong": "Re-export as PDF/A-1b so the pdfaid packet "
+                           "declares both part and conformance (advisory).",
+    "pdfa_outputintent_missing": "Re-export as PDF/A-1b so an OutputIntent "
+                                 "declares the output colour space (advisory).",
+    "pdfa_version": "Re-export the PDF as version 1.4 (the PDF/A-1 "
+                    "baseline) if your process requires PDF/A-1 (advisory).",
+}
+
+
 # The governing HC/ICH source each rule family is modeled on. Regulatory-
 # operations personas (regops_publisher, consultant_ex_hc, ra_officer_generic)
 # evaluate a validator by whether every rule cites a real, checkable clause —
@@ -407,6 +583,10 @@ def rule_catalog() -> dict:
             "severity": "warning" if "-W-" in rule_id else "error",
             "description": _RULE_DESCRIPTIONS.get(rule, ""),
             "source": _FAMILY_SOURCE[fam_key],
+            # ROUND9-VALIDATE item 14: the one-line how-to-fix hint.
+            "how_to_fix": _RULE_FIXES.get(
+                rule, "Re-do the change from the owning module page, then "
+                      "re-run the completeness check."),
         })
     rules.append({
         "rule": "placeholder_dossier_id", "rule_id": "CA-REP-0001",
@@ -416,6 +596,9 @@ def rule_catalog() -> dict:
                        "ID instead of the Health Canada-issued one (REP).",
         "source": "HC Dossier Identifier guidance — Regulatory Enrolment "
                   "Process (REP); Dossier ID issued on request via the REP",
+        "how_to_fix": "Request the real Dossier ID via the REP (Dossier ID "
+                      "Request on the Catalog page), then replace the "
+                      "placeholder ID with the HC-issued one.",
     })
     return {"count": len(rules), "rules": rules, "criteria": criteria()}
 

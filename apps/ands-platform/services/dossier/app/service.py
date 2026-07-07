@@ -4,15 +4,16 @@ from __future__ import annotations
 
 from ands_shared import EventEnvelope, EventType, ProblemError, utcnow_iso
 
+import os
 import re
 import secrets
 from datetime import date
 
-from . import (admin_sequence, archive, assembly, content_model, content_plan,
-               dossier_state, drafting, ectd_validation, export_pkg, fees,
-               form_review, form_samples, form_schemas, generators,
-               import_compat, llm_provider, monograph, pm_xml, pm_xref,
-               section_tree, shadow_run)
+from . import (admin_sequence, ai_draft_meta, archive, assembly, content_model,
+               content_plan, dossier_state, drafting, ectd_validation,
+               export_pkg, fees, form_review, form_samples, form_schemas,
+               generators, import_compat, llm_provider, monograph, pm_xml,
+               pm_xref, section_tree, shadow_run)
 from . import audit_hook
 from .document_store import SqliteBlobStore
 from .ports import DossierRepository
@@ -299,9 +300,16 @@ class DossierService:
     def _write_entry(self, dossier_id, section, node, *, action, meta=None,
                      lang=None, leaf_id=None, na_reason=None,
                      content_origin=None, content_confirmed=None,
-                     record_author=False) -> dict:
+                     record_author=False, extras=None) -> dict:
         entry = self.repo.get_section_state(_s(dossier_id), _s(section)) or {}
         entry["action"] = action
+        # Round-9 ai_draft "No project-level roll-up" (n=2): every write stamps
+        # a last-touched time so the roll-up can show real dates per section.
+        entry["updated_at"] = utcnow_iso()
+        # additive per-feature keys (attestation, sample_fields, …) — merged
+        # verbatim so callers stay explicit about what they persist.
+        for k, v in (extras or {}).items():
+            entry[k] = v
         if na_reason is not None:
             entry["na_reason"] = na_reason
         # SAFETY provenance: what produced this section's content, and whether
@@ -337,6 +345,23 @@ class DossierService:
         self.repo.upsert_section_state(_s(dossier_id), _s(section), entry)
         return entry
 
+    def _record_content_event(self, event_type: str, dossier_id: str,
+                              data: dict) -> None:
+        """Round-9 ai_draft BLOCKER 'Attestation is a button click, not an
+        inspection-grade e-signature with exportable audit record' (n=4):
+        content-lifecycle events (upload / AI-draft generation / attestation /
+        AI-policy toggles) land on the DURABLE local Part-11 ledger — not only
+        the best-effort governance forward — so the per-section audit record
+        and /history can prove who drafted, who reviewed and when, even
+        through a governance outage. Same durable-then-forward pattern as
+        shadow_run/e-sign."""
+        self.repo.append_event(event_type, _s(dossier_id),
+                               actor=_s(audit_hook._actor.get()),
+                               tenant_id=_s(audit_hook._tenant.get()),
+                               data=dict(data or {}))
+        # SECONDARY best-effort forward to governance.
+        audit_hook.record(event_type, _s(dossier_id), dict(data or {}))
+
     def upload_document(self, dossier_id, section, filename, content_type,
                         body, lang=None) -> dict:
         node = self._node(dossier_id, section)
@@ -367,10 +392,16 @@ class DossierService:
         self._write_entry(dossier_id, section, node, action="uploaded",
                           meta=meta, lang=lang, leaf_id=leaf_id,
                           content_origin="uploaded", content_confirmed=True,
-                          record_author=True)
-        audit_hook.record("dossier.document_uploaded", _s(dossier_id),
-                          {"section": _s(section), "filename": _s(filename),
-                           "lang": lang or ""})
+                          record_author=True,
+                          # Round-9 ai_draft: an upload supersedes any prior
+                          # AI draft — its text, attestation and example-field
+                          # list must not linger on the fresh uploaded entry.
+                          extras={"draft_text": None, "attestation": None,
+                                  "sample_fields": []})
+        self._record_content_event("dossier.document_uploaded", dossier_id,
+                                   {"section": _s(section),
+                                    "filename": _s(filename),
+                                    "lang": lang or ""})
         return self.content_state(dossier_id)
 
     def generate_document(self, dossier_id, section, payload) -> dict:
@@ -414,18 +445,47 @@ class DossierService:
         self._write_entry(dossier_id, section, node, action="generated",
                           meta=meta, leaf_id=node["leaf_id"],
                           content_origin=origin, content_confirmed=confirmed,
-                          record_author=True)
-        audit_hook.record("dossier.document_generated", _s(dossier_id),
-                          {"section": _s(section),
-                           "generator": _s(node.get("generator_key")),
-                           "content_origin": origin,
-                           "confirmed": confirmed,
-                           "ai_draft": is_ai})
+                          record_author=True,
+                          # Round-9 ai_draft minor "No list-view checker for
+                          # unreplaced 'example' placeholders" (n=2): persist
+                          # WHICH fields still equal the worked example so the
+                          # section panel can enumerate them by name.
+                          extras={"sample_fields": unedited_samples,
+                                  # a fresh save resets any prior attestation
+                                  "attestation": None,
+                                  # Round-9 builder_forms MAJOR "AI drafting
+                                  # lacks … harder attestation" (n=3, ask 3) +
+                                  # ai_draft MAJOR "side-by-side comparison"
+                                  # (n=9): keep the exact AI draft text so the
+                                  # panel can require the full draft scrolled
+                                  # before attest enables and render it beside
+                                  # the cited guidance.
+                                  "draft_text": (_s(payload.get("llm_draft"))
+                                                 or None)})
+        # Round-9 ai_draft BLOCKER "Attestation … exportable audit record"
+        # (n=4): generation lands on the DURABLE Part-11 ledger too (not only
+        # the best-effort governance forward) so the per-section audit record
+        # can prove who drafted and when.
+        self._record_content_event("dossier.document_generated", dossier_id,
+                                   {"section": _s(section),
+                                    "generator": _s(node.get("generator_key")),
+                                    "content_origin": origin,
+                                    "confirmed": confirmed,
+                                    "ai_draft": is_ai})
         return self.content_state(dossier_id)
 
-    def confirm_content(self, dossier_id, section) -> dict:
+    def confirm_content(self, dossier_id, section, attest=None) -> dict:
         """The explicit 'I have reviewed this AI-assisted draft — it is my
         content' attestation, recorded to the audit stream.
+
+        Round-9 ai_draft BLOCKER "Attestation is a button click, not an
+        inspection-grade e-signature" (n=4): the attestation now records the
+        reviewer's typed full name + credential and a UTC timestamp alongside
+        the signed-in actor, both on the section entry and in the ledger
+        event. ``attest`` is optional for backward compatibility (a legacy
+        click still confirms, without the name block). Honest limit: this is
+        an identity-stamped attestation, not a cryptographically-bound
+        signature — the Part-11 e-sign at the transmit gate covers signing.
 
         SAFETY: attestation is only meaningful for an AI draft (freeform prose a
         human must vouch for). A SAMPLE fill still carrying worked-example values
@@ -449,11 +509,30 @@ class DossierService:
                 "them in the form and re-author. There is nothing to attest as "
                 "your own content until the example is edited.",
                 rule="worked_example_not_replaced", detail=_s(section))
+        attest = attest or {}
+        attestation = None
+        if _s(attest.get("attest_name")):
+            attestation = {
+                "name": _s(attest.get("attest_name")),
+                "credential": _s(attest.get("attest_credential")),
+                "meaning": _s(attest.get("attest_meaning")) or
+                           "I have reviewed this AI draft — it is my content",
+                "attested_at": utcnow_iso(),
+                "actor": _s(audit_hook._actor.get())}
         self._write_entry(dossier_id, section, node,
                           action=entry.get("action") or "generated",
-                          content_confirmed=True, record_author=True)
-        audit_hook.record("dossier.content_confirmed", _s(dossier_id),
-                          {"section": _s(section), "prior_origin": origin})
+                          content_confirmed=True, record_author=True,
+                          extras=({"attestation": attestation}
+                                  if attestation else None))
+        # Round-9 ai_draft BLOCKER (n=4): the attestation lands on the DURABLE
+        # Part-11 ledger so /history and the per-section audit record carry it.
+        self._record_content_event(
+            "dossier.content_confirmed", dossier_id,
+            {"section": _s(section), "prior_origin": origin,
+             **({"attest_name": attestation["name"],
+                 "attest_credential": attestation["credential"],
+                 "attested_at": attestation["attested_at"]}
+                if attestation else {})})
         return self.content_state(dossier_id)
 
     def prepare_draft_chat(self, dossier_id: str, section: str) -> tuple[dict, dict]:
@@ -470,10 +549,130 @@ class DossierService:
                                "AI chat drafting only applies to prose "
                                "documents", rule="section_not_ai_draftable",
                                detail=_s(section))
+        self._assert_ai_allowed(dossier_id, section)
         if not llm_provider.is_configured():
             raise ProblemError(503, "AI drafting is not configured "
                                "(GROQ_API_KEY unset)", rule="llm_not_configured")
         return node, self._ctx_for(dossier_id)
+
+    # Round-9 builder_forms MAJOR "AI drafting lacks source transparency,
+    # per-section off-switch, harder attestation" (n=3, ask 2): a per-section
+    # AI OFF-SWITCH for client filings, enforced server-side on BOTH draft
+    # paths (chat + per-field) so a client cannot bypass the workspace policy.
+    def _assert_ai_allowed(self, dossier_id: str, section: str) -> None:
+        entry = self.repo.get_section_state(_s(dossier_id), _s(section)) or {}
+        if entry.get("ai_disabled"):
+            raise ProblemError(
+                403, "AI drafting is disabled for this section (client "
+                "filing policy) — author it by upload or the form instead, "
+                "or re-enable AI for this section",
+                rule="ai_drafting_disabled", detail=_s(section))
+
+    def set_ai_policy(self, dossier_id: str, section: str, disabled: bool,
+                      reason: str = "") -> dict:
+        """Toggle the per-section AI-drafting policy; recorded to the ledger
+        so a client audit can show exactly when AI was allowed on a section."""
+        self._node(dossier_id, section)   # 404s an unknown section
+        entry = self.repo.get_section_state(_s(dossier_id), _s(section)) or {}
+        entry["ai_disabled"] = bool(disabled)
+        entry["updated_at"] = utcnow_iso()
+        self.repo.upsert_section_state(_s(dossier_id), _s(section), entry)
+        # durable Part-11 ledger + governance forward — a client audit reads
+        # the policy history from /history (Round-9 builder_forms n=3, ask 2).
+        self._record_content_event("dossier.ai_policy_set", dossier_id,
+                                   {"section": _s(section),
+                                    "disabled": bool(disabled),
+                                    "reason": _s(reason)})
+        return self.content_state(dossier_id)
+
+    # Round-9 builder_forms MAJOR (n=3, ask 1) + ai_draft BLOCKER "AI provider
+    # identity, data residency and DPA not verifiable" (n=8): the inspectable
+    # per-draft context disclosure — exactly what a draft is generated from.
+    def draft_context(self, dossier_id: str, section: str) -> dict:
+        node = self._node(dossier_id, section)
+        return ai_draft_meta.draft_context(node, self._ctx_for(dossier_id))
+
+    # Round-9 ai_draft BLOCKER "Attestation … exportable audit record" (n=4):
+    # ONE per-section audit record — who drafted, who reviewed/attested, when,
+    # md5, plus every ledger event for the section — exportable in one click.
+    def section_audit_record(self, dossier_id: str, section: str,
+                             tenant_id: str | None = None) -> dict:
+        self._tenant_guard(dossier_id, tenant_id)
+        node = self._node(dossier_id, section)
+        entry = self.repo.get_section_state(_s(dossier_id), _s(section)) or {}
+        docs = []
+        if entry.get("documents"):
+            for lang, meta in sorted((entry.get("documents") or {}).items()):
+                docs.append({**meta, "lang": lang})
+        elif entry.get("document"):
+            docs.append(dict(entry["document"]))
+        events = [e for e in self.repo.list_events(_s(dossier_id))
+                  if (e.get("data") or {}).get("section") == _s(section)]
+        return {
+            "dossier_id": _s(dossier_id), "section": _s(section),
+            "title": node.get("title"),
+            "content_origin": entry.get("content_origin"),
+            "content_confirmed": bool(entry.get("content_confirmed")),
+            "content_author": entry.get("content_author"),
+            "attestation": entry.get("attestation"),
+            "updated_at": entry.get("updated_at"),
+            # the exact AI draft text under attestation (None for uploads /
+            # deterministic fills) — Round-9 ai_draft BLOCKER (n=4).
+            "draft_text": entry.get("draft_text"),
+            "documents": docs,
+            "events": events,
+            "generated_at": utcnow_iso(),
+            "storage": (
+                "Stored in this dossier's append-only, sequence-numbered "
+                "Part-11 ledger (durable, actor-stamped, gap-detectable). "
+                "This record and the full dossier trail are exportable for "
+                "inspection at any time."),
+        }
+
+    # Round-9 ai_draft BLOCKER "No project-level roll-up of section states,
+    # owners and dates" (n=2) + MAJOR "Per-leaf attestation click-tax; no bulk
+    # attest" (n=6): every section's state / owner / last-touched in one call,
+    # plus the review queue of AI-drafted sections awaiting confirmation.
+    def sections_rollup(self, dossier_id: str,
+                        tenant_id: str | None = None) -> dict:
+        self._tenant_guard(dossier_id, tenant_id)
+        states = self.repo.list_section_state(_s(dossier_id))
+        rows, queue = [], []
+        counts = {"total": 0, "complete": 0, "needs_review": 0, "empty": 0,
+                  "na": 0, "partial": 0}
+        for n in section_tree.all_nodes(
+                cs_be_only=self._cs_be_only(dossier_id)):
+            if n.get("kind") != "document":
+                continue
+            entry = states.get(n["section"]) or {}
+            status = dossier_state.resolve_status(n, entry)
+            needs_review = dossier_state.needs_review(entry)
+            att = entry.get("attestation") or {}
+            row = {"section": n["section"], "module": n["module"],
+                   "title": n["title"], "status": status,
+                   "applicability": n.get("applicability"),
+                   "content_origin": entry.get("content_origin"),
+                   "content_confirmed": bool(entry.get("content_confirmed")),
+                   "needs_review": needs_review,
+                   "owner": entry.get("content_author") or "",
+                   "attested_by": att.get("name") or "",
+                   "updated_at": entry.get("updated_at") or ""}
+            rows.append(row)
+            counts["total"] += 1
+            counts[status] = counts.get(status, 0) + 1
+            if needs_review:
+                counts["needs_review"] += 1
+            if needs_review and entry.get("content_origin") == "ai_draft":
+                docs = []
+                if entry.get("documents"):
+                    docs = [{**m, "lang": lang} for lang, m in
+                            sorted((entry["documents"] or {}).items())]
+                elif entry.get("document"):
+                    docs = [dict(entry["document"])]
+                queue.append({**row, "documents": docs})
+        return {"dossier_id": _s(dossier_id), "rows": rows,
+                "counts": counts, "review_queue": queue,
+                "generated_at": utcnow_iso()}
 
     def stream_draft_chat(self, node: dict, ctx: dict, messages: list[dict]):
         system = drafting.system_prompt(node, ctx)
@@ -502,6 +701,9 @@ class DossierService:
         the drafting prompt tells the model never to invent regulatory facts —
         it is a DRAFT for the filer to review, not a filable value."""
         node = self._node(dossier_id, section)   # 404s an unknown section
+        # Round-9 builder_forms (n=3, ask 2): the per-section AI off-switch
+        # covers the per-field path too — not just chat drafting.
+        self._assert_ai_allowed(dossier_id, section)
         ctx = self._ctx_for(dossier_id)
         try:
             system = drafting.draft_field(_s(section), _s(field_name), ctx)
@@ -1678,16 +1880,61 @@ class DossierService:
 
     # -- dossier + sequence management (home catalog) ----------------------
     def create_dossier(self, data: dict, tenant_id: str | None = None) -> dict:
-        dossier_id = _s(data.get("dossier_id"))
+        # R9-CATALOG "Dossier ID validation is format-only" (n=5): normalize
+        # exactly like the set-real-ID (rename) path, then enforce the same
+        # one-letter + 6-7-digit format at CREATE. HONEST: a pattern check
+        # only — ANDS Studio cannot verify an ID against Health Canada's REP
+        # records (the UI says so next to the field).
+        dossier_id = _s(data.get("dossier_id")).lower()
         if not dossier_id:
             raise ProblemError(422, "dossier_id is required",
                                rule="dossier_id_required")
+        if not _ID_RE.match(dossier_id):
+            raise ProblemError(422, "Dossier ID must be one letter + 6-7 "
+                               "digits (e.g. e123456)",
+                               rule="dossier_id_format")
         din = _s(data.get("din"))
         if din and not _DIN_RE.match(din):
             raise ProblemError(422, "DIN must be exactly 8 digits (note: a DIN "
                                "is assigned by Health Canada at NOC, not filed)",
                                rule="din_invalid")
         self._tenant_guard(dossier_id, tenant_id)   # no cross-tenant upsert
+        # R9-CATALOG "Dossier ID validation is format-only" (n=5): a workspace
+        # must never hold two dossiers against the same Health Canada file —
+        # reject collisions instead of silently upserting over the existing
+        # record. An ARCHIVED row collides too: restore it, don't shadow it.
+        # (Placed AFTER the tenant guard so cross-tenant probes still see the
+        # existence-hiding 404, never a 409 that confirms the id exists.)
+        existing = self.repo.get_dossier_index(dossier_id)
+        if existing is not None:
+            if existing.get("archived"):
+                raise ProblemError(
+                    409, f"an archived dossier with ID {dossier_id} exists",
+                    detail="Restore it from the archive instead of creating a "
+                           "second dossier against the same Health Canada "
+                           "file.",
+                    rule="dossier_id_archived")
+            raise ProblemError(
+                409, f"a dossier with ID {dossier_id} already exists",
+                rule="dossier_id_taken")
+        # R9-CATALOG (same item): admin-configurable workspace ID convention —
+        # an ADDITIONAL regex real ids must match (client-mandated numbering
+        # conventions at a CRO/CDMO). Draft 'd…' placeholders are exempt: they
+        # are never a client-issued id. A broken admin regex must never block
+        # creation (fail open on re.error).
+        convention = os.environ.get("ANDS_DOSSIER_ID_CONVENTION_RE", "").strip()
+        if convention and not dossier_id.startswith("d"):
+            try:
+                convention_ok = bool(re.match(convention, dossier_id))
+            except re.error:
+                convention_ok = True
+            if not convention_ok:
+                note = _s(os.environ.get("ANDS_DOSSIER_ID_CONVENTION_NOTE"))
+                raise ProblemError(
+                    422, "Dossier ID does not match this workspace's "
+                         "configured ID convention",
+                    detail=note or f"configured rule: {convention}",
+                    rule="dossier_id_convention")
         rec = self.repo.create_dossier_index({
             "dossier_id": dossier_id,
             "title": _s(data.get("title")) or dossier_id,
@@ -1702,6 +1949,11 @@ class DossierService:
             "sponsor": _s(data.get("sponsor")) or None,
             # WS6 portfolio: the accountable PM/owner for this dossier
             "owner": _s(data.get("owner")) or None,
+            # R9-CATALOG "No bilingual/French support surfaced anywhere on the
+            # page" (n=2): governed FRENCH product name (pairs with title) +
+            # the accountable labelling owner, both first-class at creation.
+            "title_fr": _s(data.get("title_fr")) or None,
+            "labelling_owner": _s(data.get("labelling_owner")) or None,
             "tenant_id": _s(tenant_id) or None})
         model = self._dossier_model(dossier_id, create=True)
         assembly.add_sequence(model, "0000")
@@ -1747,8 +1999,26 @@ class DossierService:
         return {"dossier_id": _s(dossier_id), "events": events,
                 "count": len(events)}
 
+    @staticmethod
+    def _esign_capture(esign: dict | None) -> dict | None:
+        """R9-CATALOG "No user roles, permissions, or e-signatures on
+        workspace actions" (n=6): normalize a typed-name e-signature capture
+        for the durable ledger. HONEST: this records the signer's typed full
+        name + the displayed meaning VERBATIM (a Part-11-style name/UTC/
+        meaning record via the ledger row) — a typed-name capture, not a
+        cryptographic certificate, and labeled as such."""
+        if not isinstance(esign, dict):
+            return None
+        name = _s(esign.get("signed_name"))
+        if not name:
+            return None
+        return {"signed_name": name,
+                "meaning": _s(esign.get("meaning")),
+                "method": "typed-name"}
+
     def delete_dossier(self, dossier_id: str, tenant_id: str | None = None,
-                       reason: str = "", confirm_id: str = "") -> dict:
+                       reason: str = "", confirm_id: str = "",
+                       esign: dict | None = None) -> dict:
         """RECORD-INTEGRITY (WS3): a destructive delete on a regulated dossier
         is RECOVERABLE — it soft-archives (actor + timestamp + reason) instead
         of purging. The dossier drops out of the working catalog but stays
@@ -1783,6 +2053,12 @@ class DossierService:
         # actor from the request contextvar so the stored stamp is
         # reconstructable offline (who), independent of the audit forward.
         actor = audit_hook._actor.get()
+        # R9-CATALOG (n=6): the OPTIONAL typed-name e-signature travels on the
+        # durable event verbatim (signed_name + meaning + method).
+        data: dict = {"recoverable": True}
+        sig = self._esign_capture(esign)
+        if sig:
+            data["esign"] = sig
         # ATOMIC: the soft-archive state flip AND the durable audit write commit
         # in ONE transaction — either both persist or neither. A ledger-write
         # failure rolls the archive back (no mutation without a record); a
@@ -1792,16 +2068,16 @@ class DossierService:
         ev = self.repo.archive_with_event(
             _s(dossier_id), actor=actor, reason=reason,
             event_type="dossier.archived",
-            tenant_id=audit_hook._tenant.get(), data={"recoverable": True})
+            tenant_id=audit_hook._tenant.get(), data=data)
         if ev is None:
             raise ProblemError(404, "no such dossier", detail=_s(dossier_id))
         self._forward_governance("dossier.archived", _s(dossier_id),
-                                 reason=reason, data={"recoverable": True})
+                                 reason=reason, data=data)
         return {"archived": _s(dossier_id), "reason": reason,
                 "recoverable": True}
 
     def restore_dossier(self, dossier_id: str, tenant_id: str | None = None,
-                        reason: str = "") -> dict:
+                        reason: str = "", esign: dict | None = None) -> dict:
         """Undo a soft-delete: return the dossier to the working catalog. The
         restore is itself recorded to the DURABLE local audit ledger (who/when/
         why). RESTORE MUST NOT DESTROY EVIDENCE: flipping ``archived_at`` back
@@ -1820,6 +2096,10 @@ class DossierService:
         prior = {"prior_archived_at": idx.get("archived_at"),
                  "prior_archived_by": idx.get("archived_by"),
                  "prior_archive_reason": idx.get("archive_reason")}
+        # R9-CATALOG (n=6): optional typed-name e-signature on restore too.
+        sig = self._esign_capture(esign)
+        if sig:
+            prior["esign"] = sig
         actor = audit_hook._actor.get()
         # ATOMIC restore + durable audit (prior archive evidence captured above,
         # BEFORE the repo NULLs it). One transaction: a raced/failed restore
@@ -1837,10 +2117,53 @@ class DossierService:
                                  reason=_s(reason), data=prior)
         return {"restored": _s(dossier_id), "reason": _s(reason)}
 
+    def set_owner(self, dossier_id: str, owner: str, reason: str,
+                  tenant_id: str | None = None) -> dict:
+        """R9-CATALOG "No user roles, permissions, or e-signatures on
+        workspace actions" (n=6): reassign the accountable Owner (PM) after
+        creation. Owner is an ACCOUNTABILITY LABEL — permissions come from the
+        workspace role matrix (owner / tenant-admin / user), never from this
+        field; the catalog UI states that plainly. A reason is required and
+        the old/new values land on the durable Part-11 ledger."""
+        self._tenant_guard(dossier_id, tenant_id)
+        reason = _s(reason)
+        if not reason:
+            raise ProblemError(
+                422, "a reason is required to reassign the owner",
+                rule="owner_reason_required",
+                detail="Owner (PM) changes are recorded on the audit trail — "
+                       "state why (e.g. PM handover).")
+        idx = self.repo.get_dossier_index(_s(dossier_id))
+        if not idx:
+            raise ProblemError(404, "no such dossier", detail=_s(dossier_id))
+        new_owner = _s(owner) or None
+        data = {"old_owner": idx.get("owner"), "new_owner": new_owner}
+        actor = audit_hook._actor.get()
+        # ATOMIC owner flip + durable ledger event (same pattern as archive/
+        # restore/rename — no mutation without a record).
+        ev = self.repo.set_owner_with_event(
+            _s(dossier_id), new_owner, actor=actor, reason=reason,
+            event_type="dossier.owner_changed",
+            tenant_id=audit_hook._tenant.get(), data=data)
+        if ev is None:
+            raise ProblemError(404, "no such dossier", detail=_s(dossier_id))
+        self._forward_governance("dossier.owner_changed", _s(dossier_id),
+                                 reason=reason, data=data)
+        return {"dossier_id": _s(dossier_id), "owner": new_owner,
+                "reason": reason}
+
     def list_archived(self, tenant_id: str | None = None) -> dict:
         """The recoverable 'trash' view — soft-archived dossiers a user can
-        restore, each carrying its archive stamp (who/when/why)."""
-        rows = self.repo.list_archived_index(_s(tenant_id) or None)
+        restore, each carrying its archive stamp (who/when/why).
+
+        R9-CATALOG "Due/overdue flags absent from the audit view" (n=1): each
+        archived row now also carries its soonest-due named-clock meta so the
+        archive surfaces the same overdue signal as the working Grid/List."""
+        rows = []
+        for r in self.repo.list_archived_index(_s(tenant_id) or None):
+            meta = self._soonest_due_meta(r["dossier_id"])
+            rows.append({**r, "soonest_due": (meta or {}).get("date"),
+                         "soonest_due_meta": meta})
         return {"dossiers": rows, "count": len(rows)}
 
     def rename_dossier(self, dossier_id: str, new_id: str,
@@ -1889,12 +2212,36 @@ class DossierService:
     def list_dossiers(self, tenant_id: str | None = None) -> dict:
         out = []
         for idx in self.repo.list_dossier_index(_s(tenant_id) or None):
-            states = self.repo.list_section_state(idx["dossier_id"])
+            did = idx["dossier_id"]
+            states = self.repo.list_section_state(did)
+            # one model read shared by the lifecycle + structural blocks
+            model = self.repo.get_dossier(did)
+            due_meta = self._soonest_due_meta(did)
             out.append({**idx,
                         # WS6 portfolio: the soonest upcoming deadline for this
                         # dossier — DERIVED from its content-plan items, not
                         # stored (owner/sponsor pass through from the index).
-                        "soonest_due": self._soonest_due(idx["dossier_id"]),
+                        "soonest_due": (due_meta or {}).get("date"),
+                        # R9-CATALOG "'Soonest due' dates have no defined
+                        # source or regulatory clock" (n=8): the NAMED clock
+                        # behind that date (source + driving plan item).
+                        "soonest_due_meta": due_meta,
+                        # R9-CATALOG "REP Dossier ID Request flow unexplained
+                        # and untracked" (n=7): the prepared (never
+                        # transmitted) REP request status for the tile.
+                        "rep_request": self._rep_request_summary(did),
+                        # R9-CATALOG "List view lacks sequence/lifecycle and
+                        # validation status" (n=4): eCTD sequence/lifecycle +
+                        # a LIVE structural-check summary (same structural
+                        # validator as the workspace — honestly NOT an HC
+                        # eValidator pass) + the user-attested eValidator
+                        # cleared state.
+                        "lifecycle": self._lifecycle_block(idx, model),
+                        **self._structural_summary(did, model),
+                        # R9-CATALOG "No bilingual/French support surfaced
+                        # anywhere on the page" (n=2): the governed bilingual
+                        # PM (EN+FR at 1.3.1) language status for a List badge.
+                        "bilingual_pm": self._bilingual_pm_block(did),
                         "tower": dossier_state.tower_view(
                             cs_be_only=idx["cs_be_only"], states=states),
                         "gate": dossier_state.completeness_gate(
@@ -1906,14 +2253,94 @@ class DossierService:
         content-plan items, or None. A completed item is not an upcoming
         deadline. Pure read — no new storage; the deadline is the truth already
         held on the plan items (see ``assign_item``)."""
+        return (self._soonest_due_meta(dossier_id) or {}).get("date")
+
+    def _soonest_due_meta(self, dossier_id: str) -> dict | None:
+        """R9-CATALOG "'Soonest due' dates have no defined source or regulatory
+        clock" (n=8): the NAMED clock behind a catalog due date. Every catalog
+        soonest-due is a CLIENT-SET TARGET carried on a content-plan item — we
+        name the source and the driving item instead of showing a free date.
+        HONEST: HC statutory clocks (45-day screening, response windows) are
+        sourced from real HC notices on the Portfolio/Correspondence surfaces;
+        the catalog never fabricates one."""
         plan = self.repo.get_plan_by_dossier(_s(dossier_id))
         if not plan:
             return None
-        due = [d for d in (
-                _s(i.get("due_date")) for i in plan.get("items", [])
-                if i.get("status") != content_plan.ITEM_COMPLETE)
-               if d]
-        return min(due) if due else None
+        best = None
+        for item in plan.get("items", []):
+            if item.get("status") == content_plan.ITEM_COMPLETE:
+                continue   # a completed item is not an upcoming deadline
+            d = _s(item.get("due_date"))
+            if d and (best is None or d < _s(best.get("due_date"))):
+                best = item
+        if best is None:
+            return None
+        return {"date": _s(best.get("due_date")),
+                "clock_type": "client-set target",
+                "item_id": best.get("id"),
+                "item_title": best.get("title"),
+                "assignee": _s(best.get("assignee")) or None}
+
+    def _rep_request_summary(self, dossier_id: str) -> dict | None:
+        """R9-CATALOG "REP Dossier ID Request flow unexplained and untracked"
+        (n=7): a compact per-dossier REP request status for the catalog tile —
+        requested when/by whom. HONEST: ``transmitted`` stays False verbatim;
+        this is a PREPARED request, never a transmission to Health Canada."""
+        rep = self.repo.get_rep_request(_s(dossier_id))
+        if not rep:
+            return None
+        return {"transmitted": False,
+                "requested_at": rep.get("requested_at"),
+                "requested_by": rep.get("requested_by"),
+                "activity_type": rep.get("activity_type")}
+
+    @staticmethod
+    def _lifecycle_block(idx: dict, model: dict | None) -> dict:
+        """R9-CATALOG "List view lacks sequence/lifecycle and validation
+        status" (n=4): the eCTD lifecycle position for a List column — active
+        working sequence, how many sequences exist, and the active sequence's
+        regulatory purpose (initial / response / supplement / annual-
+        notification)."""
+        seqs = (model or {}).get("sequences") or []
+        active = idx.get("active_sequence") or "0000"
+        purpose = next((s.get("purpose") or "initial" for s in seqs
+                        if s.get("sequence") == active), "initial")
+        return {"active_sequence": active, "sequence_count": len(seqs),
+                "purpose": purpose}
+
+    def _structural_summary(self, dossier_id: str, model: dict | None) -> dict:
+        """R9-CATALOG "List view lacks sequence/lifecycle and validation
+        status" (n=4): a LIVE structural-check summary for a List column —
+        the same structural validator content_state runs (no PDF-byte checks).
+        HONEST: a structural check, never an HC eValidator pass — the
+        user-attested eValidator cleared state travels alongside, clearly
+        labeled with its source."""
+        v = (ectd_validation.validate(model) if model
+             else {"passed": True, "errors": [], "warnings": []})
+        ev = self.evalidator_cleared_state(
+            self.repo.get_evalidator_attestation(_s(dossier_id)))
+        return {"structural": {"passed": bool(v.get("passed")),
+                               "error_count": len(v.get("errors") or []),
+                               "warning_count": len(v.get("warnings") or [])},
+                "evalidator": {"source": ev["source"],
+                               "cleared": ev["cleared"],
+                               "result": ev["result"],
+                               "validated_on": ev.get("validated_on")}}
+
+    def _bilingual_pm_block(self, dossier_id: str) -> dict:
+        """R9-CATALOG "No bilingual/French support surfaced anywhere on the
+        page" (n=2): the governed bilingual Product Monograph status (EN+FR
+        pair at Module 1 heading 1.3.1, REQ-098) as a compact language-status
+        badge source. 'none' = no PM leaves yet (early-stage dossier, not a
+        defect); 'blocked'/'complete' mirror the monograph engine verbatim."""
+        leaves = self.repo.list_pm_leaves(_s(dossier_id))
+        if not leaves:
+            return {"status": "none", "en": False, "fr": False}
+        result = monograph.validate_bilingual_monograph(leaves)
+        pair = result.get("pair") or {}
+        return {"status": result.get("status"),
+                "en": pair.get("en") is not None,
+                "fr": pair.get("fr") is not None}
 
     def get_dossier_full(self, dossier_id: str,
                          tenant_id: str | None = None) -> dict:

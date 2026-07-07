@@ -1,7 +1,7 @@
 "use client";
 // Right-to-Sell due dates for every marketable registration, straight from
 // the registry service's /right-to-sell endpoint (statutory October 1).
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   RTS_STATUSES,
   registryApi,
@@ -9,10 +9,29 @@ import {
   type RightToSell,
 } from "./registryApi";
 import { ProvenancePopover } from "@/components/ProvenancePopover";
+import { lifecycleApi, type VerifiedDate } from "../correspondence/api";
+import { VerifiedDateControl } from "../correspondence/VerifiedDate";
 
 export function DeadlinesStrip({ regs }: { regs: Registration[] }) {
   const [rts, setRts] = useState<Record<string, RightToSell>>({});
   const marketable = regs.filter((r) => RTS_STATUSES.includes(r.status));
+  // Round-9 (n=4): verified-date overrides for the RTS clocks, one fetch per
+  // distinct dossier (clock_key rts:{registration}:{fy} is globally unique).
+  const [verified, setVerified] = useState<Record<string, VerifiedDate>>({});
+  const dossierIds = Array.from(
+    new Set(marketable.map((r) => r.dossier_id).filter(Boolean))).sort();
+  const refreshVerified = useCallback(() => {
+    dossierIds.forEach((d) =>
+      lifecycleApi.listVerifiedDates(d)
+        .then((res) => setVerified((m) => {
+          const next = { ...m };
+          res.verifications.forEach((v) => { next[v.clock_key] = v; });
+          return next;
+        }))
+        .catch(() => {}));   // additive — chips render without verifications
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dossierIds.join(",")]);
+  useEffect(() => { refreshVerified(); }, [refreshVerified]);
 
   useEffect(() => {
     let alive = true;
@@ -39,9 +58,18 @@ export function DeadlinesStrip({ regs }: { regs: Registration[] }) {
       <h2 style={{ margin: "0 0 2px", fontSize: 15, fontWeight: 700 }}>
         Right-to-Sell deadlines
       </h2>
-      <p className="mut" style={{ fontSize: 12, margin: "0 0 10px" }}>
+      <p className="mut" style={{ fontSize: 12, margin: "0 0 4px" }}>
         Annual Right-to-Sell fee per marketable DIN — due October 1 of the
         fiscal year. Amounts are billed by the fees service.
+      </p>
+      {/* Round-9 (operations BLOCKER, n=15): the statutory basis on the face
+          of the strip, not only inside the per-chip popover — regulation,
+          day-count convention, and the inputs the date derives from. */}
+      <p className="mut" style={{ fontSize: 10.5, margin: "0 0 10px" }}>
+        Basis: Food and Drug Regulations — annual Right-to-Sell / DIN
+        notification · fixed calendar date (October 1 of the fiscal year, no
+        day-counting) · inputs: registration status (post-NOC marketable) +
+        today&apos;s date · calculated aid — verify against the HC record.
       </p>
       <div className="tile-strip">
         {marketable.map((r) => {
@@ -88,6 +116,16 @@ export function DeadlinesStrip({ regs }: { regs: Registration[] }) {
                   asOf: null,
                 }}
               />
+              {/* round-9 (n=4): reconcile against the real RTS status */}
+              {r.dossier_id && (
+                <VerifiedDateControl
+                  dossierId={r.dossier_id}
+                  clockKey={`rts:${r.id}:${o.fiscal_year}`}
+                  calculated={o.due_date}
+                  latest={verified[`rts:${r.id}:${o.fiscal_year}`] || null}
+                  onSaved={refreshVerified}
+                />
+              )}
             </span>
           );
         })}

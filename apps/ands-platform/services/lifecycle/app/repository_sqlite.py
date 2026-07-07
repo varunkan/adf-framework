@@ -36,6 +36,17 @@ CREATE TABLE IF NOT EXISTS correspondence_attachments (
     uploaded_by  TEXT,
     uploaded_at  TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS clock_verifications (
+    id              TEXT PRIMARY KEY,
+    dossier_id      TEXT NOT NULL,
+    clock_key       TEXT NOT NULL,
+    verified_date   TEXT NOT NULL,
+    calculated_date TEXT,
+    source_ref      TEXT NOT NULL,
+    verified_by     TEXT,
+    verified_at     TEXT NOT NULL,
+    tenant_id       TEXT
+);
 CREATE TABLE IF NOT EXISTS noa_allegations (
     id         TEXT PRIMARY KEY,
     dossier_id TEXT NOT NULL,
@@ -175,6 +186,33 @@ class SqliteLifecycleRepository:
             rec["attachment_sha256"] = att["sha256"] if att else None
             out.append(rec)
         return out
+
+    # -- verified-date overrides (round-9, operations n=4) -------------------
+    # APPEND-ONLY: a re-verification INSERTs a new row; nothing is updated or
+    # deleted, so the who/when/source history is inspection-grade.
+    def add_verified_date(self, record: dict,
+                          tenant_id: str | None = None) -> dict:
+        record = dict(record, id=new_id(), verified_at=utcnow_iso())
+        self.db.execute(
+            "INSERT INTO clock_verifications (id, dossier_id, clock_key, "
+            "verified_date, calculated_date, source_ref, verified_by, "
+            "verified_at, tenant_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (record["id"], record["dossier_id"], record["clock_key"],
+             record["verified_date"], record.get("calculated_date"),
+             record["source_ref"], record.get("verified_by"),
+             record["verified_at"], tenant_id or None))
+        return record
+
+    def list_verified_dates(self, dossier_id: str,
+                            tenant_id: str | None = None) -> list[dict]:
+        sql = "SELECT * FROM clock_verifications WHERE dossier_id = ?"
+        params: list = [dossier_id]
+        if tenant_id:   # strict: a tenant sees ONLY its own verifications
+            sql += " AND tenant_id = ?"
+            params.append(tenant_id)
+        rows = self.db.fetchall(sql + " ORDER BY verified_at, id",
+                                tuple(params))
+        return [_public(r) for r in rows]
 
     # -- Form V / NOA register (PM(NOC) Regulations) -------------------------
     def add_noa(self, record: dict, tenant_id: str | None = None) -> dict:
