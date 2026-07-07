@@ -37,6 +37,12 @@ class CorrespondenceIn(BaseModel):
     reference: str = ""
 
 
+class AttachmentIn(BaseModel):
+    filename: str = ""
+    content_type: str = ""
+    data_base64: str = ""
+
+
 class NoticeIn(BaseModel):
     dossier_id: str = ""
     notice: str = ""          # SAL/SDN/SRL/NOC/NOD/NON

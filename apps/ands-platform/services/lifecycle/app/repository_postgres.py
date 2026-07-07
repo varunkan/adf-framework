@@ -15,6 +15,10 @@ CREATE TABLE IF NOT EXISTS correspondence (
     kind_label TEXT NOT NULL, subject TEXT NOT NULL, body TEXT,
     direction TEXT NOT NULL, received_at TEXT, reference TEXT,
     created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS correspondence_attachments (
+    correspondence_id TEXT PRIMARY KEY, filename TEXT NOT NULL,
+    content_type TEXT NOT NULL, data BYTEA NOT NULL, sha256 TEXT NOT NULL,
+    uploaded_by TEXT, uploaded_at TEXT NOT NULL);
 """
 
 # pre-tenancy databases lack the column; ALTER IF NOT EXISTS is idempotent.
@@ -110,6 +114,43 @@ class PostgresLifecycleRepository:
         row.pop("tenant_id", None)   # keep the public response shape identical
         return row
 
+    def get_correspondence_raw(self, cid: str) -> dict | None:
+        rows = self._all("SELECT * FROM correspondence WHERE id = %s", (cid,))
+        return rows[0] if rows else None
+
+    def put_attachment(self, cid: str, filename: str, content_type: str,
+                       data: bytes, sha256: str,
+                       uploaded_by: str | None) -> dict:
+        with self._lock:
+            cur = self._conn.cursor()
+            cur.execute(
+                "INSERT INTO correspondence_attachments (correspondence_id, "
+                "filename, content_type, data, sha256, uploaded_by, "
+                "uploaded_at) VALUES (%s,%s,%s,%s,%s,%s,%s) "
+                "ON CONFLICT (correspondence_id) DO UPDATE SET "
+                "filename = EXCLUDED.filename, "
+                "content_type = EXCLUDED.content_type, data = EXCLUDED.data, "
+                "sha256 = EXCLUDED.sha256, "
+                "uploaded_by = EXCLUDED.uploaded_by, "
+                "uploaded_at = EXCLUDED.uploaded_at",
+                (cid, filename, content_type, data, sha256, uploaded_by,
+                 utcnow_iso()))
+            self._conn.commit()
+        return self.get_attachment(cid, meta_only=True)  # type: ignore
+
+    def get_attachment(self, cid: str, meta_only: bool = False) -> dict | None:
+        rows = self._all(
+            "SELECT * FROM correspondence_attachments "
+            "WHERE correspondence_id = %s", (cid,))
+        if not rows:
+            return None
+        rec = rows[0]
+        if meta_only:
+            rec.pop("data", None)
+        elif isinstance(rec.get("data"), memoryview):
+            rec["data"] = bytes(rec["data"])
+        return rec
+
     def list_correspondence(self, dossier_id: str, kind: str = "",
                             tenant_id: str | None = None) -> list[dict]:
         sql = "SELECT * FROM correspondence WHERE dossier_id = %s"
@@ -123,4 +164,8 @@ class PostgresLifecycleRepository:
         rows = self._all(sql + " ORDER BY created_at", tuple(params))
         for r in rows:
             r.pop("tenant_id", None)
+            att = self.get_attachment(r["id"], meta_only=True)
+            r["has_attachment"] = att is not None
+            r["attachment_filename"] = att["filename"] if att else None
+            r["attachment_sha256"] = att["sha256"] if att else None
         return rows

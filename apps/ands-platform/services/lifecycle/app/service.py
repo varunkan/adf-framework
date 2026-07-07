@@ -173,6 +173,58 @@ class LifecycleService:
         items = self.repo.list_correspondence(_s(dossier_id), kind, tenant_id)
         return {"correspondence": items, "count": len(items)}
 
+    # -- notice/correspondence document attachments (round-9 BLOCKER) --------
+    # "let me attach the actual SDN/SAL/NON PDF … the first thing an
+    # inspector asks for." Stored with a SHA-256 of the exact bytes.
+    def attach_correspondence_document(self, cid: str, data: dict,
+                                       tenant_id: str | None = None,
+                                       user_email: str = "") -> dict:
+        import base64
+        import hashlib
+        rec = self.repo.get_correspondence_raw(_s(cid))
+        if not rec:
+            raise ProblemError(404, "correspondence record not found")
+        self._tenant_guard(rec.get("tenant_id"), tenant_id,
+                           "correspondence record not found")
+        filename = _s(data.get("filename"))
+        if not filename:
+            raise ProblemError(422, "a filename is required",
+                               rule="attachment_filename_required")
+        try:
+            blob = base64.b64decode(_s(data.get("data_base64")), validate=True)
+        except Exception:
+            raise ProblemError(422, "data_base64 is not valid base64",
+                               rule="attachment_data_invalid")
+        if not blob:
+            raise ProblemError(422, "attachment is empty",
+                               rule="attachment_data_invalid")
+        sha = hashlib.sha256(blob).hexdigest()
+        meta = self.repo.put_attachment(
+            _s(cid), filename,
+            _s(data.get("content_type")) or "application/octet-stream",
+            blob, sha, _s(user_email) or None)
+        return {"correspondence_id": _s(cid), "filename": meta["filename"],
+                "content_type": meta["content_type"], "sha256": meta["sha256"],
+                "uploaded_by": meta.get("uploaded_by"),
+                "uploaded_at": meta["uploaded_at"]}
+
+    def get_correspondence_document(self, cid: str,
+                                    tenant_id: str | None = None) -> dict:
+        import base64
+        rec = self.repo.get_correspondence_raw(_s(cid))
+        if not rec:
+            raise ProblemError(404, "correspondence record not found")
+        self._tenant_guard(rec.get("tenant_id"), tenant_id,
+                           "correspondence record not found")
+        att = self.repo.get_attachment(_s(cid))
+        if not att:
+            raise ProblemError(404, "no document attached to this record")
+        return {"correspondence_id": _s(cid), "filename": att["filename"],
+                "content_type": att["content_type"], "sha256": att["sha256"],
+                "uploaded_by": att.get("uploaded_by"),
+                "uploaded_at": att["uploaded_at"],
+                "data_base64": base64.b64encode(att["data"]).decode()}
+
     # -- Form V / NOA register (PM(NOC) Regulations) ------------------------
     def create_noa(self, data: dict, tenant_id: str | None = None) -> dict:
         res = noa.validate_allegation(data)

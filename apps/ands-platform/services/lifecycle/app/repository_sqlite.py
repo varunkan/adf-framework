@@ -27,6 +27,15 @@ CREATE TABLE IF NOT EXISTS correspondence (
     reference   TEXT,
     created_at  TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS correspondence_attachments (
+    correspondence_id TEXT PRIMARY KEY,
+    filename     TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    data         BLOB NOT NULL,
+    sha256       TEXT NOT NULL,
+    uploaded_by  TEXT,
+    uploaded_at  TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS noa_allegations (
     id         TEXT PRIMARY KEY,
     dossier_id TEXT NOT NULL,
@@ -114,6 +123,38 @@ class SqliteLifecycleRepository:
         return _public(self.db.fetchone(
             "SELECT * FROM correspondence WHERE id = ?", (cid,)))
 
+    def get_correspondence_raw(self, cid: str) -> dict | None:
+        row = self.db.fetchone(
+            "SELECT * FROM correspondence WHERE id = ?", (cid,))
+        return dict(row) if row else None
+
+    def put_attachment(self, cid: str, filename: str, content_type: str,
+                       data: bytes, sha256: str,
+                       uploaded_by: str | None) -> dict:
+        self.db.execute(
+            "INSERT INTO correspondence_attachments (correspondence_id, "
+            "filename, content_type, data, sha256, uploaded_by, uploaded_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (correspondence_id) DO UPDATE SET "
+            "filename = excluded.filename, "
+            "content_type = excluded.content_type, data = excluded.data, "
+            "sha256 = excluded.sha256, uploaded_by = excluded.uploaded_by, "
+            "uploaded_at = excluded.uploaded_at",
+            (cid, filename, content_type, data, sha256, uploaded_by,
+             utcnow_iso()))
+        return self.get_attachment(cid, meta_only=True)  # type: ignore
+
+    def get_attachment(self, cid: str, meta_only: bool = False) -> dict | None:
+        row = self.db.fetchone(
+            "SELECT * FROM correspondence_attachments "
+            "WHERE correspondence_id = ?", (cid,))
+        if not row:
+            return None
+        rec = dict(row)
+        if meta_only:
+            rec.pop("data", None)
+        return rec
+
     def list_correspondence(self, dossier_id: str, kind: str = "",
                             tenant_id: str | None = None) -> list[dict]:
         sql = "SELECT * FROM correspondence WHERE dossier_id = ?"
@@ -125,7 +166,15 @@ class SqliteLifecycleRepository:
             sql += " AND tenant_id = ?"
             params.append(tenant_id)
         rows = self.db.fetchall(sql + " ORDER BY created_at", tuple(params))
-        return [_public(r) for r in rows]
+        out = []
+        for r in rows:
+            rec = _public(r)
+            att = self.get_attachment(rec["id"], meta_only=True)
+            rec["has_attachment"] = att is not None
+            rec["attachment_filename"] = att["filename"] if att else None
+            rec["attachment_sha256"] = att["sha256"] if att else None
+            out.append(rec)
+        return out
 
     # -- Form V / NOA register (PM(NOC) Regulations) -------------------------
     def add_noa(self, record: dict, tenant_id: str | None = None) -> dict:

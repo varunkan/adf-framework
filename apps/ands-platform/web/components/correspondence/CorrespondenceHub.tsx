@@ -9,6 +9,57 @@ import {
   type CorrespondenceRecord,
 } from "./api";
 
+// Upload / download the source document (SDN/SAL/NON PDF…) on one record.
+// SHA-256 of the exact bytes is stored server-side and shown in the tooltip.
+function AttachmentCell({ record, onChanged }: {
+  record: CorrespondenceRecord; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false);
+
+  async function pick(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setBusy(true);
+    try {
+      const buf = new Uint8Array(await f.arrayBuffer());
+      let bin = "";
+      for (let i = 0; i < buf.length; i += 0x8000)
+        bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+      await lifecycleApi.attachDocument(
+        record.id, f.name, f.type || "application/octet-stream", btoa(bin));
+      onChanged();
+    } finally {
+      setBusy(false);
+      e.target.value = "";
+    }
+  }
+
+  async function download() {
+    const d = await lifecycleApi.getDocument(record.id);
+    const bin = atob(d.data_base64);
+    const buf = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([buf], { type: d.content_type }));
+    a.download = d.filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  return record.has_attachment ? (
+    <button className="ghost" style={{ fontSize: 12 }} onClick={download}
+      title={`SHA-256 ${record.attachment_sha256 || ""} — stored with the record`}>
+      📎 {record.attachment_filename}
+    </button>
+  ) : (
+    <label className="chip" style={{ cursor: "pointer", fontSize: 11 }}
+      title="Attach the actual notice document (PDF) to this record">
+      {busy ? "Attaching…" : "Attach document"}
+      <input type="file" style={{ display: "none" }} onChange={pick}
+        disabled={busy} />
+    </label>
+  );
+}
+
 export function CorrespondenceHub({
   dossierId,
   sponsor,
@@ -228,6 +279,9 @@ export function CorrespondenceHub({
               <span className="mut" style={{ fontSize: 12 }}>
                 {c.received_at || c.created_at.slice(0, 10)}
               </span>
+              {/* round-9 BLOCKER: the actual notice document travels with
+                  the record — "the first thing an inspector asks for". */}
+              <AttachmentCell record={c} onChanged={load} />
             </li>
           ))}
         </ul>

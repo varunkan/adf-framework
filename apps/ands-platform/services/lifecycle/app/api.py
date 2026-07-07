@@ -6,7 +6,7 @@ from fastapi import APIRouter, FastAPI, Header, Query
 
 from ands_shared import create_app
 
-from .models import (CorrespondenceIn, DeadlineIn, DelLinkIn, NoaActionIn,
+from .models import (AttachmentIn, CorrespondenceIn, DeadlineIn, DelLinkIn, NoaActionIn,
                      NoaIn, NoaServeIn, NoticeIn, ShortageIn, StartIn,
                      TransitionIn)
 from .service import LifecycleService
@@ -62,6 +62,21 @@ def build_app(service: LifecycleService) -> FastAPI:
                                default="", alias="X-Tenant-Id")):
         return service.log_correspondence(body.model_dump(),
                                           x_tenant_id or None)
+
+    @router.post("/correspondence/{cid}/attachment", status_code=201)
+    def attach_document(cid: str, body: AttachmentIn,
+                        x_tenant_id: str = Header(default="",
+                                                  alias="X-Tenant-Id"),
+                        x_user_email: str = Header(default="",
+                                                   alias="X-User-Email")):
+        return service.attach_correspondence_document(
+            cid, body.model_dump(), x_tenant_id or None, x_user_email)
+
+    @router.get("/correspondence/{cid}/attachment")
+    def get_document(cid: str,
+                     x_tenant_id: str = Header(default="",
+                                               alias="X-Tenant-Id")):
+        return service.get_correspondence_document(cid, x_tenant_id or None)
 
     @router.get("/correspondence")
     def list_correspondence(dossier_id: str = Query(...), kind: str = "",

@@ -13,6 +13,10 @@ export type CorrespondenceRecord = {
   received_at: string | null;
   reference: string | null;
   created_at: string;
+  // round-9: the actual HC notice document, stored with the record
+  has_attachment?: boolean;
+  attachment_filename?: string | null;
+  attachment_sha256?: string | null;
 };
 
 export type LifecycleState = {
@@ -126,6 +130,19 @@ export const lifecycleApi = {
       `/correspondence?dossier_id=${encodeURIComponent(dossierId)}` +
         (kind ? `&kind=${encodeURIComponent(kind)}` : "")
     ),
+
+  attachDocument: (cid: string, filename: string, contentType: string,
+    dataBase64: string) =>
+    j<{ sha256: string; filename: string }>(
+      `/correspondence/${encodeURIComponent(cid)}/attachment`,
+      { method: "POST",
+        body: JSON.stringify({ filename, content_type: contentType,
+                               data_base64: dataBase64 }) }),
+
+  getDocument: (cid: string) =>
+    j<{ filename: string; content_type: string; data_base64: string;
+        sha256: string }>(
+      `/correspondence/${encodeURIComponent(cid)}/attachment`),
 
   logCorrespondence: (body: {
     dossier_id: string;
