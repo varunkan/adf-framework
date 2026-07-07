@@ -50,10 +50,20 @@ FEE_GROUPINGS = {
                       "examined under the Schedule 1 'Comparative studies' "
                       "grouping."),
         "amounts": {"2025-26": 70750.0, "2026-27": 71953.0}},
+    # Amounts per Health Canada, "Fees for Drug Master Files" (page dated
+    # 2025-12-01): New Master File Registration $1,407 (as of April 1, 2025)
+    # / $1,436 (as of April 1, 2026); Update $611 / $624; Letter of Access
+    # $200 / $204.
+    # https://www.canada.ca/en/health-canada/services/drugs-health-products/funding-fees/fees-respect-human-drugs-medical-devices/fees-master-files-human-drugs.html
     "drug-master-file": {
-        "label": "Drug Master File", "basis": BASIS_MINISTERIAL_2PCT,
-        "rationale": "DMF fees escalate at the fixed 2% ministerial rate.",
-        "amounts": {"2025-26": 2231.0, "2026-27": 2276.0}},
+        "label": "Drug Master File (new registration)",
+        "basis": BASIS_MINISTERIAL_2PCT,
+        "rationale": ("New Master File registration fee; DMF fees escalate "
+                      "at the fixed 2% ministerial rate. Other DMF fee "
+                      "categories: Update $611 (2025-26) / $624 (2026-27); "
+                      "Letter of Access $200 / $204. Source: Health Canada, "
+                      "'Fees for Drug Master Files'."),
+        "amounts": {"2025-26": 1407.0, "2026-27": 1436.0}},
 }
 ANDS_FEE_GROUPING = "comparative-studies"
 

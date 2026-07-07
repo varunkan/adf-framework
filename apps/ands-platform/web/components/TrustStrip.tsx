@@ -67,10 +67,17 @@ function residencyAttestationMd(): string {
     "  1. eCTD packages a user deliberately downloads and transmits to Health",
     "     Canada through your own CESG / gateway account.",
     "  2. Opt-in AI drafting ONLY: the section text a user submits for a draft",
-    "     is sent to the AI provider endpoint YOU configure — isolated per",
-    "     sponsor, not shared across clients, not used to train models. Point",
-    "     it at an in-boundary model or disable the feature and this egress",
-    "     is zero.",
+    "     is sent to the vendor-fixed Groq API endpoint (api.groq.com,",
+    "     US-hosted inference — this data leaves Canada for the duration of",
+    "     the request) under your deployment's single GROQ_API_KEY. Requests",
+    "     are scoped to one dossier in one workspace and never reused across",
+    "     sponsors, but all workspaces share the deployment's one provider",
+    "     account. Provider-side retention and training use are governed by",
+    "     Groq's own terms (Groq Services Agreement / Data Processing",
+    "     Addendum; privacy policy at groq.com/privacy-policy) — we link",
+    "     them and do not attest them as our own. Leave GROQ_API_KEY unset",
+    "     to disable the feature and this egress is zero. A",
+    "     customer-configurable / in-boundary endpoint is roadmap, not built.",
     "- Apart from those two user-initiated actions, no dossier data ever",
     "  leaves your infrastructure in self-hosted mode.",
     "",
@@ -138,9 +145,11 @@ const ITEMS: TrustItem[] = [
         residency obligations. Nothing is sent to a shared multi-tenant cloud
         we operate. The two deliberate exceptions, stated plainly: packages you
         yourself transmit to Health Canada, and — only if a user opts into AI
-        drafting — that section&apos;s text going to the AI provider endpoint
-        you configure (point it in-boundary or disable it and that egress is
-        zero). The per-option detail is in the downloadable attestation below.
+        drafting — that section&apos;s text going to the vendor-fixed Groq API
+        (US-hosted; it leaves Canada per request) — disable AI drafting (leave
+        GROQ_API_KEY unset) and that egress is zero; a configurable /
+        in-boundary endpoint is on the roadmap. The per-option detail is in
+        the downloadable attestation below.
       </>
     ),
   },

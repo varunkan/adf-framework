@@ -44,7 +44,7 @@ export const TERMS: Record<string, string> = {
     "before the Health Canada acknowledgement routes back. Applies at the " +
     "transmit step.",
   MDN:
-    "Message Delivery Notification — the first receipt from the FDA ESG " +
+    "Message Disposition Notification — the first receipt from the FDA ESG " +
     "confirming your transmission physically arrived at the shared gateway. It " +
     "proves delivery, not acceptance. Applies at the transmit step; a Canadian " +
     "ANDS gets an FDA-side MDN because CESG rides the shared FDA ESG.",
@@ -147,18 +147,25 @@ export const TERMS: Record<string, string> = {
     "(new strength, new indication text, manufacturing change requiring " +
     "review).",
   OSIP:
-    "Health Canada's Office of Submission and Intellectual Property — the " +
+    "Health Canada's Office of Submissions and Intellectual Property — the " +
     "office that issues Company IDs and Dossier IDs and runs intake for " +
     "submissions.",
   "Product Monograph":
     "The authoritative bilingual label: Part I for practitioners, Part II " +
     "science, Part III patient information. Generics align theirs to the " +
-    "reference product's monograph. Filed as structured XML (XML PM) on " +
-    "Health Canada's mandated stylesheet.",
+    "reference product's monograph. Filed today as conventional English and " +
+    "French PDF (plus Word) documents in the eCTD; Health Canada is phasing " +
+    "in the structured XML Product Monograph (XML PM) — mandatory for " +
+    "NDS/EUNDS filings since July 18, 2025, but not yet in force for generic " +
+    "(ANDS) filings, where it remains voluntary.",
   "CS-BE":
-    "Comparative Studies–Bioequivalence: the study package (design, AUC and " +
-    "Cmax 90% confidence intervals vs the 80.00–125.00% window) that proves " +
-    "your generic performs the same in the body.",
+    "Comparative Studies–Bioequivalence: the study package (design plus the " +
+    "pharmacokinetic comparison — the AUC 90% confidence interval within " +
+    "80.00–125.00%, and, for immediate-release solid orals filed from " +
+    "2025-12-27 under ICH M13A, the Cmax 90% CI within the same window; the " +
+    "pre-M13A Canadian standard required only the Cmax point-estimate/" +
+    "geometric-mean ratio within 80–125%) that proves your generic performs " +
+    "the same in the body.",
 
   // Round-6 C (CLARITY) — enterprise / crypto acronyms, glossed in plain
   // language so onboarding + Account don't read as unexplained jargon.

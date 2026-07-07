@@ -147,12 +147,12 @@ def test_stylesheet_package_registry_is_versioned_data(monkeypatch):
     assert pm_xml.active_stylesheet_version() == \
         pm_xml.BUNDLED_STYLESHEET_VERSION
     newer = pm_xml.load_stylesheet()
-    newer["published"] = "2026-01-01"
-    pm_xml.register_stylesheet_package("2026-01-01", newer)
-    assert pm_xml.active_stylesheet_version() == "2026-01-01"
+    newer["version"] = "v_2_0"
+    pm_xml.register_stylesheet_package("v_2_0", newer)
+    assert pm_xml.active_stylesheet_version() == "v_2_0"
     # a doc stamped with the freshly registered edition now validates
     xml = pm_xml.build_monograph_xml(_good_pm())
-    assert 'stylesheet-version="2026-01-01"' in xml
+    assert 'stylesheet-version="v_2_0"' in xml
     assert pm_xml.validate_monograph_xml(xml)["valid"] is True
 
 

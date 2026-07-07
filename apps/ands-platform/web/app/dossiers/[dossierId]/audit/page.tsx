@@ -121,10 +121,10 @@ export default function AuditPage() {
 
   return (
     <main className="viewer">
-      <p className="eyebrow">Audit · Part-11 record</p>
+      <p className="eyebrow">Audit · Part-11-aligned record</p>
       <h1>Audit Trail</h1>
       <p className="lede">
-        The durable, append-only <Term k="Part-11" /> record for this dossier — written
+        The durable, append-only, <Term k="Part-11" />-aligned audit record for this dossier — written
         synchronously alongside each change and preserved even if the central
         governance service is unreachable. Newest first; chained across a
         Dossier ID re-key so history for the prior ID still resolves.
@@ -133,8 +133,9 @@ export default function AuditPage() {
       <div className="notice" style={{ fontSize: 13 }}>
         Append-only, gap-detectable sequence numbers · every event stamped
         with actor and workspace · covers document creation/upload/AI-draft,
-        review, e-signature, validation, fees and transmission events ·
-        export below for inspection records.
+        review, e-signature and validation-evidence events (shadow runs,
+        eValidator attestations); fee and transmission events are not yet
+        captured on this ledger · export below for inspection records.
       </div>
       {/* Round-9 (operations, n=4): the guarantees above, backed by the HOW —
           enforcement mechanisms, validation evidence, and the honest
@@ -235,7 +236,8 @@ export default function AuditPage() {
         {events !== null && !error && (
           <div className="mut" style={{ marginTop: 10, fontSize: 13 }}>
             {events.length} event{events.length === 1 ? "" : "s"} · durable
-            dossier-local ledger, mirrored to the central governance trail
+            dossier-local ledger, forwarded best-effort to the central
+            governance trail
           </div>
         )}
       </div>

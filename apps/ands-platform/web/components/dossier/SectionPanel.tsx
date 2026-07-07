@@ -1181,7 +1181,8 @@ function Dropzone({
 // unclear" (n=4) + ai_draft BLOCKER "No bilingual French / XML PM support
 // signals" (n=2): promoted to a FIRST-CLASS block at 1.3.1 (no longer a
 // collapsed <details>) with an explicit XML-PM-vs-PDF/A-leaf scope statement
-// and the named HC template/stylesheet package the build maps to. HONEST:
+// and the named HC XML PM resources (SPL schema/CV; SPL Canada stylesheet
+// renders the view) the build maps to. HONEST:
 // the XML built here starts from placeholder sections — it is not yet
 // generated from the AI/form draft content, and the panel says so.
 function PmXmlPanel({ dossierId }: { dossierId: string; title?: string }) {
@@ -1219,9 +1220,12 @@ function PmXmlPanel({ dossierId }: { dossierId: string; title?: string }) {
         <b>Scope — what this tool produces at 1.3.1:</b> it places your
         reviewed PM document as a <b>PDF/A leaf</b>, and it separately{" "}
         <b>builds &amp; validates a structured XML PM</b> (pm-en.xml /
-        pm-fr.xml) against Health Canada&apos;s stylesheet package{" "}
-        (<code>pharmabio_stylesheets</code>, published 2025-09-10 — controlled
-        PM section codes, EN/FR editions).
+        pm-fr.xml) against Health Canada&apos;s published XML PM resources —
+        the HL7 SPL-based schema and controlled vocabulary of PM section
+        codes, rendered EN/FR with HC&apos;s XML PM stylesheet package (SPL
+        Canada stylesheet, <code>v_1_0</code>) — per Health Canada&apos;s{" "}
+        <i>Guidance Document: Preparation of the XML Product Monograph
+        (XML PM)</i>.
       </div>
       <div className="mut" style={{ fontSize: 12, marginTop: 4 }}>
         Honest limit: the XML below starts from placeholder sections — it is{" "}
@@ -1248,7 +1252,7 @@ function PmXmlPanel({ dossierId }: { dossierId: string; title?: string }) {
         <div className={`notice ${result.validation?.valid ? "ok" : "bad"}`}
           style={{ marginTop: 8 }}>
           {result.validation?.valid
-            ? "✓ XML PM validates against the stylesheet package."
+            ? "✓ XML PM validates against the schema and controlled vocabulary."
             : `✗ ${findings.length} finding(s): ` + findings.slice(0, 3)
                 .map((f: any) => f.rule).join(", ")}
         </div>

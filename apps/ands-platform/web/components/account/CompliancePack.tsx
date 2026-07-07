@@ -26,14 +26,18 @@ function esc(s: string): string {
 // compliance card (SecurityCompliance.tsx). DO-NOT-BREAK: alignment wording,
 // "explicitly not a certification".
 const PART11_STATEMENT =
-  "21 CFR Part 11 / GxP alignment. Security-relevant actions land on an " +
-  "append-only, actor- and workspace-stamped audit trail (below), access is " +
-  "governed by role-based capabilities enforced at the API, and stored " +
-  "records carry integrity metadata. This aligns with the audit-trail and " +
-  "access-control expectations of 21 CFR Part 11 and GxP. Being honest: " +
-  "this is an alignment statement, not a certification, and validated " +
-  "cryptographically-bound e-signatures are on the roadmap — do not treat " +
-  "this as a completed Part-11 e-signature system.";
+  "21 CFR Part 11 / GxP alignment. Dossier and document actions land on an " +
+  "append-only, actor- and workspace-stamped audit trail (below) — aligned " +
+  "to 21 CFR 11.10(e)'s requirement to audit-trail operator actions that " +
+  "create, modify, or delete electronic records; sign-in and " +
+  "security-settings events (sign-ins, MFA-policy changes, role changes) " +
+  "are not yet captured on the audit trail — that coverage is on the " +
+  "roadmap. Access is governed by role-based capabilities enforced at the " +
+  "API, and stored records carry integrity metadata. This aligns with the " +
+  "audit-trail and access-control expectations of 21 CFR Part 11 and GxP. " +
+  "Being honest: this is an alignment statement, not a certification, and " +
+  "validated cryptographically-bound e-signatures are on the roadmap — do " +
+  "not treat this as a completed Part-11 e-signature system.";
 
 function exportCompliancePack(me: Principal | null) {
   const now = new Date().toLocaleString();
@@ -63,9 +67,15 @@ function exportCompliancePack(me: Principal | null) {
     <h2>1 · Data processing &amp; residency statement</h2>
     <p>ANDS Studio is a <b>self-hosted</b> product: every service and database
       runs inside the deploying organisation's own environment. Nothing leaves
-      that environment except packages a user deliberately transmits to Health
-      Canada. Because hosting is operator-controlled, data CAN be kept
-      resident in Canada by deploying in a Canadian environment.</p>
+      that environment except, exhaustively: (1) eCTD packages a user
+      deliberately transmits to Health Canada, and (2) under opt-in AI
+      drafting only, the section text a user submits for a draft, which is
+      sent to the external AI provider configured for this deployment
+      (currently Groq's hosted API); the drafting text is isolated per sponsor
+      and not used to train models, and if the feature is left unconfigured or
+      disabled this second egress is zero. Because hosting is
+      operator-controlled, data CAN be kept resident in Canada by deploying in
+      a Canadian environment.</p>
     <p>${residency}</p>
     <p>Workspace isolation: every record is stamped with its workspace id and
       every service refuses cross-workspace reads at the API. One workspace =

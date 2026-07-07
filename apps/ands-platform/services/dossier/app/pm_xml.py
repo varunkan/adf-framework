@@ -9,10 +9,12 @@ Hardened with the monolith's stylesheet-package machinery
 (apps/ands-submission-portal/rep_stylesheet.py, REQ-065/REQ-040) applied to
 the XML PM view:
 
-  * The HC stylesheet package (``pharmabio_stylesheets``, published
-    2025-09-10) is held as VERSIONED REFERENCE DATA — a registry keyed by
-    publish date; a newer HC edition is registered as data, never a code
-    change (REQ-040).
+  * HC's XML PM stylesheet package (SPL Canada stylesheet,
+    ``spl_canada`` version ``v_1_0``) is held as VERSIONED REFERENCE
+    DATA — a registry keyed by package version; a newer HC edition is
+    registered as data, never a code change (REQ-040). The stylesheet
+    RENDERS the HC view; validation is against the SPL schema /
+    validation rules / controlled vocabulary.
   * The PM "view" is expressed as DATA (field rules) and drives the
     structure/style checks: version-matched stylesheet selection, blank-value
     style findings (blanks render as "—" in the HC view), duplicate section
@@ -44,16 +46,18 @@ def _s(v) -> str:
 # Stylesheet package registry (rep_stylesheet.py port — REQ-065/REQ-040)
 # ---------------------------------------------------------------------------
 
-# HC's published XML stylesheet package name and the bundled edition's publish
-# date — the same package identity the monolith bundles for REP XML.
-STYLESHEET_PACKAGE = "pharmabio_stylesheets"
-BUNDLED_STYLESHEET_VERSION = "2025-09-10"
+# HC's published XML PM stylesheet package identity: the SPL Canada
+# stylesheet, style-sheet/v_1_0/ in the HPFB XML-PM repo
+# (https://github.com/hpfb-dgpsa/XML-PM). The stylesheet renders the EN/FR
+# view; validation is against the SPL schema / validation rules / CV.
+STYLESHEET_PACKAGE = "spl_canada"
+BUNDLED_STYLESHEET_VERSION = "v_1_0"
 
 # The PM view as DATA: an ordered list of field rules a generic checker
 # interprets. Adding/renaming a rule is a DATA edit — no checker change.
-_PM_VIEW_2025_09_10 = {
+_PM_VIEW_V_1_0 = {
     "package": STYLESHEET_PACKAGE,
-    "published": BUNDLED_STYLESHEET_VERSION,
+    "version": BUNDLED_STYLESHEET_VERSION,
     "title": "Health Canada XML PM stylesheet view",
     "root_tag": ROOT_TAG,
     "version_attr": "stylesheet-version",
@@ -66,10 +70,10 @@ _PM_VIEW_2025_09_10 = {
     "section_fields": ("title", "text"),
 }
 
-# The version registry. Keyed by package version (publish date). A newer HC
+# The version registry. Keyed by package version. A newer HC
 # package is added with ``register_stylesheet_package`` — no call site changes.
 _STYLESHEET_PACKAGES = {
-    BUNDLED_STYLESHEET_VERSION: _PM_VIEW_2025_09_10,
+    BUNDLED_STYLESHEET_VERSION: _PM_VIEW_V_1_0,
 }
 
 
@@ -83,12 +87,12 @@ class UnsafeXmlError(ValueError):
 
 
 def available_stylesheet_versions() -> list:
-    """Every bundled stylesheet package version, newest publish date last."""
+    """Every bundled stylesheet package version, newest version last."""
     return sorted(_STYLESHEET_PACKAGES)
 
 
 def active_stylesheet_version() -> str:
-    """The most recent bundled package version (latest publish date)."""
+    """The most recent bundled package version (latest in sort order)."""
     return available_stylesheet_versions()[-1]
 
 

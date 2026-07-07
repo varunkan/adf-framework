@@ -1,6 +1,7 @@
 "use client";
-// Right-to-Sell due dates for every marketable registration, straight from
-// the registry service's /right-to-sell endpoint (statutory October 1).
+// Right-to-Sell fee due dates straight from the registry service's
+// /right-to-sell endpoint — payable October 1, fixed by the Fees Order
+// (SOR/2019-124 s. 52(3)).
 import { useCallback, useEffect, useState } from "react";
 import {
   RTS_STATUSES,
@@ -59,17 +60,27 @@ export function DeadlinesStrip({ regs }: { regs: Registration[] }) {
         Right-to-Sell deadlines
       </h2>
       <p className="mut" style={{ fontSize: 12, margin: "0 0 4px" }}>
-        Annual Right-to-Sell fee per marketable DIN — due October 1 of the
-        fiscal year. Amounts are billed by the fees service.
+        Annual Right-to-Sell fee per marketed DIN — payable October 1
+        (SOR/2019-124 s. 52(3)). The fee is owed only if the DIN holder has
+        sold the drug since DIN issuance (s. 52(2)); no fee applies while the
+        product is dormant as of October 1 — i.e. Health Canada was notified
+        under FDR C.01.014.71 of 12 consecutive months without sale, within
+        the 12 months preceding October 1 (s. 52(4), until a C.01.014.72
+        resumption notice). A post-NOC product never
+        marketed, and a suspended/dormant DIN, owe no fee. Invoices issue on
+        October 1 from the marketed status reported on the Annual Drug
+        Notification; amounts are billed by the fees service.
       </p>
       {/* Round-9 (operations BLOCKER, n=15): the statutory basis on the face
           of the strip, not only inside the per-chip popover — regulation,
           day-count convention, and the inputs the date derives from. */}
       <p className="mut" style={{ fontSize: 10.5, margin: "0 0 10px" }}>
-        Basis: Food and Drug Regulations — annual Right-to-Sell / DIN
-        notification · fixed calendar date (October 1 of the fiscal year, no
-        day-counting) · inputs: registration status (post-NOC marketable) +
-        today&apos;s date · calculated aid — verify against the HC record.
+        Basis: Fees in Respect of Drugs and Medical Devices Order
+        (SOR/2019-124), s. 52 — annual Right-to-Sell fee for a marketed DIN,
+        payable October 1 (s. 52(3)) · fixed calendar date set by regulation
+        (October 1, no day-counting) · inputs: registration status (marketed;
+        sold since DIN issuance, not dormant) + today&apos;s date · calculated
+        aid — verify against the HC record.
       </p>
       <div className="tile-strip">
         {marketable.map((r) => {
@@ -88,6 +99,17 @@ export function DeadlinesStrip({ regs }: { regs: Registration[] }) {
               </span>
             );
           }
+          // Health Canada issues invoices each October 1 (from the Annual
+          // Drug Notification), payment due 30 days from issuance — inside
+          // that window an unpaid fee is "unpaid/due", not OVERDUE. NOTE:
+          // o.overdue is still date-derived by the registry service; the fees
+          // service's payment state (right_to_sell_status: overdue =
+          // outstanding AND past due) is the source of truth — the
+          // service-side join is tracked against registry.py.
+          const daysPastDue = Math.floor(
+            (Date.now() - new Date(`${o.due_date}T00:00:00`).getTime()) /
+              86400000);
+          const inInvoiceWindow = o.overdue && daysPastDue <= 30;
           return (
             <span key={r.id}
               style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
@@ -95,11 +117,16 @@ export function DeadlinesStrip({ regs }: { regs: Registration[] }) {
                 {r.product}
                 {o.din ? ` (${o.din})` : ""} · due {o.due_date}
                 {" · FY "}{o.fiscal_year}
-                {o.overdue ? " · OVERDUE" : ""}
+                {o.overdue
+                  ? inInvoiceWindow
+                    ? " · unpaid — invoiced Oct 1, payment due 30 days from issuance"
+                    : " · OVERDUE"
+                  : ""}
               </span>
-              {/* WS3 provenance: the RTS due date is a fixed statutory anchor
-                  (October 1 of the fiscal year) from the registry service — not
-                  a computed running clock, so the anchor IS the due date. */}
+              {/* WS3 provenance: the RTS due date is a fixed regulatory anchor
+                  — October 1, set by the Fees Order (SOR/2019-124 s. 52(3)) —
+                  from the registry service, not a computed running clock, so
+                  the anchor IS the due date. */}
               <ProvenancePopover
                 prov={{
                   anchorLabel: `Right-to-Sell due (FY ${o.fiscal_year})`,
@@ -107,12 +134,15 @@ export function DeadlinesStrip({ regs }: { regs: Registration[] }) {
                   anchorSource: "ingested",
                   basis: "calendar",
                   rule:
-                    "The annual Right-to-Sell fee for a marketable DIN falls " +
-                    "due on October 1 of the fiscal year; the registry service " +
-                    "fixes this date per registration.",
+                    "The annual Right-to-Sell fee for a marketed DIN is " +
+                    "payable on October 1 (SOR/2019-124 s. 52(3)), owed only " +
+                    "if the drug has been sold since DIN issuance (s. 52(2)) " +
+                    "and is not dormant as of October 1 (s. 52(4)); the " +
+                    "registry service fixes this date per registration.",
                   citation:
-                    "Food and Drug Regulations — annual Right-to-Sell / DIN " +
-                    "notification (statutory October 1)",
+                    "Fees in Respect of Drugs and Medical Devices Order " +
+                    "(SOR/2019-124), s. 52 — annual Right-to-Sell fee, " +
+                    "payable October 1 (s. 52(3))",
                   asOf: null,
                 }}
               />

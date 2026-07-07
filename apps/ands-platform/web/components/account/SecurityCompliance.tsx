@@ -113,11 +113,19 @@ function exportSecurityPdf(
       <th>Who assigns it</th></tr></thead>
       <tbody>${roleRows}</tbody></table>
     <h2>Audit event log (latest 200)</h2>
-    <div class="mut">The full workspace event log — every domain event
-      (dossier changes, documents, validation, sign-offs and sign-ins), not
-      just the security-filtered view. Append-only, with monotonic sequence
-      numbers assigned on insert: a deleted record leaves a gap in the
-      store's sequence.</div>
+    <div class="mut">The full workspace event log — every dossier-domain
+      event (dossier changes, documents, validation and sign-offs), not
+      just the security-filtered view. Sign-in and security-settings events
+      (sign-ins, MFA-policy changes, role changes) are not yet captured on
+      the audit trail — that coverage is on the roadmap. Append-only, with
+      monotonic sequence numbers assigned on insert: tamper-evident for
+      edits and in-sequence deletions — any edit to an export breaks its
+      SHA-256 hash, and a record deleted from within the sequence leaves a
+      detectable gap. On the default (SQLite) event store, deletion of the
+      most recent record(s) is not gap-detectable today, because the next
+      insert reuses the freed sequence number (the opt-in Postgres store
+      uses a non-reusing BIGSERIAL sequence and does not have this gap);
+      per-record hash-chaining (roadmap, Q2 2027) closes this fully.</div>
     ${auditEvents.length ? `<table><thead><tr>
       <th>Seq</th><th>When (UTC)</th><th>Category</th><th>Action</th>
       <th>Actor</th></tr></thead>
@@ -180,10 +188,14 @@ export function SecurityCompliance() {
 
       {/* (b) named 21 CFR Part 11 / GxP statement — honest scope */}
       <p className="mut" style={{ marginTop: 12, fontSize: 14 }}>
-        <b>21 CFR Part 11 / GxP alignment.</b> Security-relevant actions land on
-        an append-only, actor- and workspace-stamped audit trail (below), access
-        is governed by role-based capabilities enforced at the API, and stored
-        records carry integrity metadata. This aligns with the audit-trail and
+        <b>21 CFR Part 11 / GxP alignment.</b> Dossier and document actions land
+        on an append-only, actor- and workspace-stamped audit trail (below) —
+        aligned to 21 CFR 11.10(e)&apos;s requirement to audit-trail operator
+        actions that create, modify, or delete electronic records; sign-in and
+        security-settings events (sign-ins, MFA-policy changes, role changes)
+        are not yet captured on the audit trail — that coverage is on the
+        roadmap. Access is governed by role-based capabilities enforced at the
+        API, and stored records carry integrity metadata. This aligns with the audit-trail and
         access-control expectations of 21 CFR Part 11 and GxP. Being honest:
         this is an <b>alignment statement, not a certification</b>, and validated
         cryptographically-bound e-signatures are on the roadmap — do not treat
@@ -202,28 +214,36 @@ export function SecurityCompliance() {
           the application has no update or delete path for events), every
           event carries a monotonic sequence number assigned on insert, and
           CSV exports embed a SHA-256 integrity manifest. That makes it{" "}
-          <b>tamper-evident</b>: a deleted record leaves a gap in the
-          store&apos;s sequence and any edit to an export breaks its hash.
-          Being honest: records are not yet hash-chained or cryptographically
-          signed — that is on the roadmap, and this page does not claim
-          it.</li>
+          <b>tamper-evident for edits and in-sequence deletions</b>: any edit
+          to an export breaks its SHA-256 hash, and a record deleted from
+          within the sequence leaves a detectable gap. Being honest: on the
+          default (SQLite) event store, deletion of the most recent record(s)
+          is not gap-detectable today, because the next insert reuses the
+          freed sequence number (the opt-in Postgres store uses a non-reusing
+          BIGSERIAL sequence and does not have this gap); per-record
+          hash-chaining (roadmap, Q2 2027) closes this fully. Records are not
+          yet hash-chained or cryptographically signed — this page does not
+          claim it.</li>
         <li><b>Retention.</b> Events are never deleted by the application —
           they are retained for the life of the workspace. Self-hosted: your
           own backup and retention policy governs the stored copy.</li>
         <li><b>Where it lives.</b> In the governance service&apos;s event store
           inside your own deployment — it never leaves your environment.</li>
-        <li><b>Scope.</b> Every domain event — dossier changes, document
-          uploads, validation runs, sign-offs AND sign-ins — not just
-          logins.</li>
+        <li><b>Scope.</b> Every dossier-domain event — dossier changes,
+          document uploads, validation runs and sign-offs. Sign-in and
+          security-settings events (sign-ins, MFA-policy changes, role
+          changes) are not yet captured on the audit trail — that coverage
+          is on the roadmap.</li>
       </ul>
 
       {/* (a) security event log — who / what / when */}
       <h3 style={{ margin: "20px 0 6px" }}>
-        Sign-in &amp; security-settings event log
+        Security-relevant event log (sign-in events: roadmap)
       </h3>
       <p className="mut" style={{ margin: "0 0 10px", fontSize: 13 }}>
-        Sign-ins, MFA-policy changes and role changes for this workspace —
-        who, what and when. Narrowed from the full audit trail below.
+        Sign-in, MFA-policy and role-change events are not yet captured on
+        the audit trail (roadmap) — the log below shows security-relevant
+        dossier events only.
       </p>
       {events === null ? (
         <div className="mut" style={{ fontSize: 13 }}>Loading security events…</div>

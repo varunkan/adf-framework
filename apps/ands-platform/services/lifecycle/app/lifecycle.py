@@ -100,7 +100,7 @@ def _timer(kind, start, days, notice_type) -> dict:
 
 def start(dossier_id: str, submission_type: str, received_date: str,
           *, fee_paid=None) -> dict:
-    """Begin the lifecycle at receipt: Screening phase + a 45-business-day
+    """Begin the lifecycle at receipt: Screening phase + a 45-calendar-day
     screening target."""
     t = submission_class(submission_type)
     fee = float(fee_paid) if fee_paid not in (None, "") else \

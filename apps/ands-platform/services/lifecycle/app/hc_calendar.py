@@ -15,7 +15,7 @@ BUSINESS = "business"
 
 NOTICE_BASIS = {
     "clarifax": CALENDAR, "sdn": CALENDAR, "nod": CALENDAR, "non": CALENDAR,
-    "screening_target": BUSINESS, "processing_target": BUSINESS,
+    "screening_target": CALENDAR, "processing_target": CALENDAR,
 }
 
 

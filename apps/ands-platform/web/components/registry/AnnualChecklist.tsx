@@ -14,16 +14,24 @@ import {
 } from "./registryApi";
 
 // Round-9 (operations BLOCKER, n=15): "the annual-notification checklist has
-// no cited clock at all." The statutory anchor for the ADN / Right-to-Sell
-// cycle is October 1 of the fiscal year — same fiscal-year rule the registry
-// service applies (month >= April ⇒ this year's Oct 1, else last year's).
+// no cited clock at all." VERIFIED correction: the cycle has TWO distinct
+// dates, not one. The ADN is due by September 30 — FDR C.01.014.5 requires
+// notification "annually before the first day of October" (Health Canada
+// requests the completed ADNF by mid-August so invoices can issue
+// October 1) — while the Right-to-Sell fee is payable October 1 (Fees in
+// Respect of Drugs and Medical Devices Order, SOR/2019-124, s.52(3)). Same
+// fiscal-year rule the registry service applies (month >= April ⇒ this
+// year's cycle, else last year's). The ADN clock counts down to
+// September 30 and goes overdue from October 1.
 function adnClock(now: Date = new Date()) {
   const fyStart =
     now.getMonth() + 1 >= 4 ? now.getFullYear() : now.getFullYear() - 1;
-  const due = new Date(Date.UTC(fyStart, 9, 1)); // October 1 (month idx 9)
+  const due = new Date(Date.UTC(fyStart, 8, 30)); // ADN due September 30
+  const fee = new Date(Date.UTC(fyStart, 9, 1)); // fee payable October 1
   const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
   const days = Math.round((due.getTime() - today) / 86400000);
   return { iso: due.toISOString().slice(0, 10), days, overdue: days < 0,
+           feeIso: fee.toISOString().slice(0, 10),
            fy: `${fyStart}-${(fyStart + 1) % 100}` };
 }
 
@@ -120,7 +128,7 @@ export function AnnualChecklist() {
               ⏱ {c.overdue
                 ? <><b>{-c.days}</b> day{c.days === -1 ? "" : "s"} past</>
                 : <><b>{c.days}</b> day{c.days === 1 ? "" : "s"} until</>}{" "}
-              the October 1 annual cycle (FY {c.fy}, due {c.iso})
+              the September 30 ADN deadline (FY {c.fy}, due {c.iso})
               <span className="mut" style={{ marginLeft: 6, fontSize: 10 }}
                 title="Calculated aid — verify against the HC record">
                 · calculated aid
@@ -128,25 +136,35 @@ export function AnnualChecklist() {
             </span>
             <ProvenancePopover
               prov={{
-                anchorLabel: `Annual notification / Right-to-Sell cycle (FY ${c.fy})`,
+                anchorLabel: `Annual Drug Notification / Right-to-Sell cycle (FY ${c.fy})`,
                 anchorDate: c.iso,
                 anchorSource: "ingested",
                 basis: "calendar",
                 rule:
-                  "The Annual Drug Notification and Right-to-Sell fee cycle " +
-                  "anchors on October 1 of the fiscal year (April–March); " +
-                  "this is a fixed statutory calendar date, not a business-" +
-                  "day count.",
+                  "Two distinct fixed calendar dates, not a business-day " +
+                  "count: the Annual Drug Notification is due by " +
+                  "September 30 — FDR C.01.014.5 requires notification " +
+                  "“annually before the first day of October” " +
+                  "(Health Canada requests the completed ADNF by mid-August " +
+                  "so invoices can issue October 1) — and the Right-to-Sell " +
+                  "fee is payable October 1 (Fees in Respect of Drugs and " +
+                  "Medical Devices Order, SOR/2019-124, s.52(3)).",
                 citation:
-                  "Food and Drug Regulations — Annual Drug Notification / " +
-                  "annual Right-to-Sell (statutory October 1)",
+                  "Food and Drug Regulations, C.01.014.5 (ADN annually " +
+                  "before the first day of October) · Fees in Respect of " +
+                  "Drugs and Medical Devices Order, SOR/2019-124, s.52(3) " +
+                  "(fee payable on October 1)",
                 asOf: null,
               }}
             />
             <span className="mut" style={{ fontSize: 10.5 }}>
-              Basis: Food and Drug Regulations · fixed calendar date (no
-              day-counting) · input: today&apos;s date — verify against the HC
-              record.
+              ADN due by September 30 (FDR C.01.014.5: notification required
+              &ldquo;annually before the first day of October&rdquo;; Health
+              Canada requests the completed ADNF by mid-August so invoices can
+              issue October 1) · Right-to-Sell fee payable October 1
+              ({c.feeIso}) (Fees in Respect of Drugs and Medical Devices
+              Order, SOR/2019-124, s.52(3)) · input:
+              today&apos;s date — verify against the HC record.
             </span>
           </p>
         );
