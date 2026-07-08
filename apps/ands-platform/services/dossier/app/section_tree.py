@@ -244,7 +244,15 @@ _MODULES: list[dict] = [
     {"module": "4", "title": "Module 4 — Nonclinical Study Reports", "nodes": [
         {"s": "4", "t": "Nonclinical Study Reports", "k": "group", "a": _O, "na": True,
          "p": "Animal pharmacology/toxicology study reports.",
-         "g": "NOT applicable to a generic ANDS relying on comparative bioequivalence — the generic relies on the reference product's established nonclinical profile.",
+         "g": "NOT applicable to a generic ANDS relying on comparative bioequivalence — the generic relies on the reference product's established nonclinical profile. An innovator New Drug Submission (NDS) DOES file the full nonclinical dossier here.",
+         "u": "ectd"},
+        # Innovator-only document slot: required for an NDS, na on the generic
+        # ANDS/supplement paths (resolved by _applicability on module "4").
+        {"s": "4.2", "t": "Nonclinical Study Reports (pharmacology, pharmacokinetics, toxicology)",
+         "k": "document", "a": _R, "aff": [_UP, _NA], "gen": None, "fmt": ["pdf"],
+         "bi": False, "na": True,
+         "p": "The pivotal nonclinical (animal) pharmacology, PK and toxicology study reports.",
+         "g": "Filed by an innovator New Drug Submission; a generic ANDS relies on the reference product's established nonclinical profile and marks Module 4 not applicable.",
          "u": "ectd"},
     ]},
     {"module": "5", "title": "Module 5 — Clinical Study Reports", "nodes": [
@@ -253,6 +261,15 @@ _MODULES: list[dict] = [
          "p": "The pivotal comparative BA/BE study report(s) — the core evidence for an ANDS.",
          "g": "REQUIRED for every ANDS. The pivotal PK crossover study vs. the Canadian Reference Product; the 90% CI for AUC and Cmax must fall within 80–125% (log-scale). Includes protocol, PK data, statistics and safety. Upload the study report(s).",
          "u": "babe"},
+        # Innovator-only clinical evidence: the controlled clinical trials that
+        # are the core of an NDS. Required for an NDS; a generic files comparative
+        # BE (5.3.1) instead, so this is na on the generic path.
+        {"s": "5.3.5", "t": "Clinical Study Reports — Controlled Clinical Trials (efficacy & safety)",
+         "k": "document", "a": _R, "aff": [_UP, _NA], "gen": None, "fmt": ["pdf"],
+         "bi": False,
+         "p": "The pivotal controlled clinical efficacy/safety trials supporting a New Drug Submission.",
+         "g": "Filed by an innovator NDS. A generic ANDS does not repeat clinical trials — it demonstrates comparative bioequivalence (5.3.1) to the reference product instead.",
+         "u": "ectd"},
     ]},
 ]
 
@@ -283,6 +300,9 @@ def _leaf_id(section: str) -> str:
 # declaration (1.2.4, PM(NOC) s.5), the Comprehensive Summary–Bioequivalence
 # (1.6) and the comparative-BE study report (5.3.1).
 _GENERIC_ONLY = {"1.2.4", "1.6", "5.3.1"}
+# INNOVATOR-ONLY clinical evidence: the controlled clinical trials (5.3.5) that
+# are the core of an NDS. A generic demonstrates comparative BE (5.3.1) instead.
+_INNOVATOR_ONLY = {"5.3.5"}
 _GENERIC_FAMILY = {"ANDS", "SANDS"}
 
 # Honest scope: ANDS Studio is purpose-built for ANDS (generics). It reports the
@@ -322,6 +342,14 @@ def _applicability(node: dict, module: str, cs_be_only: bool,
         if st == "SANDS":
             return "conditional"              # a generic supplement may not touch these
         return "na"                           # NDS / SNDS / DIN never file these
+    # innovator-only controlled clinical trials (5.3.5): NDS core evidence; a
+    # generic files comparative BE (5.3.1) instead, so this is na for generics.
+    if sec in _INNOVATOR_ONLY:
+        if st == "NDS":
+            return "required"
+        if st == "SNDS":
+            return "conditional"              # a brand supplement may add trials
+        return "na"                           # ANDS / SANDS / DIN never file these
     # 2.4–2.7 nonclinical/clinical summaries (base-flagged cs_be_suppressed):
     # an innovator NDS requires the full set; the generic path suppresses them.
     if node.get("sup"):

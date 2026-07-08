@@ -105,7 +105,10 @@ def test_structured_generator_carries_draft_watermark():
 #               there is no honest prose document to author here
 #   (1.3.1 — the XML Product Monograph — is now authorable via the pm_xml
 #    generator (FORMS-PM workstream 2); it exposes generate like the rest.)
-_UPLOAD_ONLY_BY_DESIGN = {"1.1", "2.1", "1.2.2"}
+# 4.2 (nonclinical study reports) and 5.3.5 (controlled clinical trials) are the
+# innovator NDS's own study documents — ANDS Studio honestly does not author
+# clinical/nonclinical study reports, so these are upload-only by design.
+_UPLOAD_ONLY_BY_DESIGN = {"1.1", "2.1", "1.2.2", "4.2", "5.3.5"}
 
 
 def test_every_content_section_exposes_generate():

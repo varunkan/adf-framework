@@ -46,6 +46,16 @@ def test_nds_requires_nonclinical_and_clinical_not_generic_artifacts():
     assert _ap("NDS", "2.7", cs_be=False) == "required" # clinical summary
     assert _ap("NDS", "2.3", cs_be=False) == "required" # full QOS
     assert _ap("NDS", "3.2.P.8", cs_be=False) == "required"  # full CMC
+    assert _ap("NDS", "4.2", cs_be=False) == "required"   # nonclinical study reports
+    assert _ap("NDS", "5.3.5", cs_be=False) == "required" # controlled clinical trials
+
+
+def test_generic_never_files_innovator_clinical_trials():
+    # a generic ANDS demonstrates comparative BE (5.3.1), never controlled trials
+    assert _ap("ANDS", "5.3.5") == "na"
+    assert _ap("ANDS", "4.2") == "na"
+    assert _ap("SANDS", "5.3.5", cs_be=True) == "na"
+    assert _ap("DIN", "5.3.5", cs_be=False) == "na"
 
 
 # -- SNDS (brand supplement) -------------------------------------------------
