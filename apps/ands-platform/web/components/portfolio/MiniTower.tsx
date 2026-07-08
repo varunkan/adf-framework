@@ -1,12 +1,15 @@
 "use client";
 // Compact Module 1–5 roll-up for a portfolio row — five tiny progress bars
 // (same .progress pattern as the readiness card), one per eCTD module.
-// WS6: a per-row toggle swaps the bars for the plain module→requirement
-// checklist (the "gimmick" personas' preferred serious view); the choice is
-// the same persisted preference the 3D SubmissionTower uses.
+//
+// Visual-QA fix (2026-07-07): a portfolio row is a fixed-height, scan-at-a-
+// glance roll-up. An earlier change wired the shared `useTowerView` toggle in
+// here, and because that preference DEFAULTS to "checklist", every row rendered
+// a full ~1,600px module→requirement TABLE inside this ~230px cell — blowing
+// each row to 1625px tall and pushing the grid off-screen. The eCTD-substance
+// checklist already lives (correctly, full-width) on the builder's
+// SubmissionTower; the portfolio glance stays the compact bars, always.
 import type { ModuleTower } from "@/lib/types";
-import { useTowerView } from "@/lib/useTowerView";
-import { TowerChecklist } from "@/components/TowerChecklist";
 
 // Round-9 (operations MAJOR, n=2; labelling_specialist): Module 1 labelling
 // completeness (PM + labels) with a missing-French flag, derived from the
@@ -39,36 +42,16 @@ function LabellingChip({ lab }: { lab?: M1Labelling }) {
 
 export function MiniTower({ tower, missing = [], labelling }: {
   tower: ModuleTower[];
+  // `missing` is accepted for API compatibility with the builder tower but the
+  // compact portfolio glance does not render the per-requirement list.
   missing?: { key?: string; title: string; module: string }[];
   labelling?: M1Labelling;
 }) {
-  const [view, setView] = useTowerView();
-  const toggle = (
-    <button type="button" className="chip" style={{ fontSize: 10, padding: "0 6px" }}
-      aria-pressed={view === "checklist"}
-      title={view === "checklist" ? "Show the module bars" : "Show the module → requirement checklist"}
-      onClick={() => setView(view === "checklist" ? "tower" : "checklist")}>
-      {view === "checklist" ? "Bars" : "Checklist"}
-    </button>
-  );
-  if (view === "checklist") {
-    return (
-      <div style={{ width: "100%", minWidth: 0 }}>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 6,
-          marginBottom: 4 }}>
-          <LabellingChip lab={labelling} />
-          {toggle}
-        </div>
-        <TowerChecklist tower={tower} missing={missing} />
-      </div>
-    );
-  }
   return (
     <div style={{ width: "100%", display: "flex", flexDirection: "column",
       gap: 4, alignItems: "flex-end" }}>
       <span style={{ display: "inline-flex", gap: 6 }}>
         <LabellingChip lab={labelling} />
-        {toggle}
       </span>
       <div
         style={{ display: "flex", gap: 8, alignItems: "flex-end" }}
