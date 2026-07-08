@@ -365,8 +365,10 @@ def _applicability(node: dict, module: str, cs_be_only: bool,
         # a locally-acting topical generic can demonstrate equivalence by a
         # comparative CLINICAL endpoint — that report lives in 5.3.5, so it is a
         # reachable conditional arm for such an ANDS (not hard na).
-        if st == "ANDS" and comparative_evidence.route(
-                dosage_form_class)["route"] == "topical_clinical_invitro":
+        if st == "ANDS" and comparative_evidence.route(dosage_form_class)["route"] \
+                in ("topical_clinical_invitro", "oip_studies"):
+            # a topical (clinical endpoint) or an orally-inhaled (comparative
+            # clinical/PD) generic places that evidence in 5.3.5 — reachable
             return "conditional"
         return "na"                           # ANDS / SANDS / DIN never file these
     # 2.4–2.7 nonclinical/clinical summaries (base-flagged cs_be_suppressed):
@@ -459,6 +461,13 @@ def _build_node(module: str, node: dict, cs_be_only: bool,
                      if section == "5.3.1"
                      else "Summarise this evidence in the CS-BE (1.6).")
             item["guidance"] = f"{r['evidence']} ({r['citation']}) {where}"
+    # 3.2.P.2: the ICH M9 BCS-based biowaiver applies ONLY to immediate-release
+    # solid oral products — do not recommend it for any other dosage form.
+    if section == "3.2.P.2" and str(dosage_form_class or "") != "ir_solid_oral":
+        item["guidance"] = ("Justify formulation equivalence to the reference. "
+                            "Note: the ICH M9 BCS-based biowaiver applies only to "
+                            "immediate-release solid oral products and does not "
+                            "apply to this dosage form.")
     return item
 
 
