@@ -14,7 +14,7 @@ Modules 2.4–2.7 and never needs Module 4; Modules 1, 2.3, 3 and 5.3.1 are requ
 
 from __future__ import annotations
 
-from . import ectd
+from . import comparative_evidence, ectd
 from .generators import LLM_DRAFTABLE
 
 SECTION_TREE_VERSION = "2024-04-23"   # HC Module-1 placement + CTD structure
@@ -326,8 +326,14 @@ _SCOPE_NOTES = {
 }
 
 
+# the comparative-evidence artifacts whose applicability depends on dosage form
+# (a biowaiver route makes the in-vivo BE study conditional, not required)
+_BE_EVIDENCE = {"1.6", "5.3.1"}   # CS-BE summary, comparative-BE study report
+
+
 def _applicability(node: dict, module: str, cs_be_only: bool,
-                   submission_type: str = "ANDS") -> str:
+                   submission_type: str = "ANDS",
+                   dosage_form_class: str = "ir_solid_oral") -> str:
     st = str(submission_type or "ANDS").upper()
     sec = node["s"]
     # Module 4 (nonclinical study reports): only the innovator NDS requires it.
@@ -338,7 +344,14 @@ def _applicability(node: dict, module: str, cs_be_only: bool,
     # generic-only artifacts (Form V / CS-BE / comparative-BE study report)
     if sec in _GENERIC_ONLY:
         if st == "ANDS":
-            return node.get("a", _O)          # required for a generic ANDS
+            # Tier A: the CS-BE summary / comparative-BE study (1.6 / 5.3.1) are
+            # required for a PK-BE dosage form, but only CONDITIONAL when a
+            # biowaiver or non-PK evidence route applies (parenteral/aqueous
+            # solutions, topical) — never force a study HC may waive.
+            if sec in _BE_EVIDENCE:
+                return comparative_evidence.be_study_applicability(
+                    dosage_form_class)
+            return node.get("a", _O)          # Form V (1.2.4) always required for ANDS
         if st == "SANDS":
             return "conditional"              # a generic supplement may not touch these
         return "na"                           # NDS / SNDS / DIN never file these
@@ -366,7 +379,8 @@ def _applicability(node: dict, module: str, cs_be_only: bool,
 
 
 def _build_node(module: str, node: dict, cs_be_only: bool,
-                submission_type: str = "ANDS") -> dict:
+                submission_type: str = "ANDS",
+                dosage_form_class: str = "ir_solid_oral") -> dict:
     section = node["s"]
     url_key = node.get("u", "ectd")
     return {
@@ -376,7 +390,7 @@ def _build_node(module: str, node: dict, cs_be_only: bool,
         "title": node["t"],
         "kind": node["k"],
         "depth": section.count("."),
-        "applicability": _applicability(node, module, cs_be_only, submission_type),
+        "applicability": _applicability(node, module, cs_be_only, submission_type, dosage_form_class),
         "affordances": list(node.get("aff", [])),
         "generator_key": node.get("gen"),
         "ai_draftable": node.get("gen") in LLM_DRAFTABLE,
@@ -391,48 +405,57 @@ def _build_node(module: str, node: dict, cs_be_only: bool,
 
 
 def section_tree(*, cs_be_only: bool = True,
-                 submission_type: str = "ANDS") -> dict:
+                 submission_type: str = "ANDS",
+                 dosage_form_class: str = "ir_solid_oral") -> dict:
     """The full versioned M1–M5 tree with per-section applicability resolved for
-    the submission type (NDS / ANDS / SANDS / SNDS / DIN)."""
+    the submission type (NDS / ANDS / SANDS / SNDS / DIN) and dosage form."""
     st = str(submission_type or "ANDS").upper()
     modules = []
     for mod in _MODULES:
-        nodes = [_build_node(mod["module"], n, cs_be_only, st)
+        nodes = [_build_node(mod["module"], n, cs_be_only, st, dosage_form_class)
                  for n in mod["nodes"]]
         modules.append({"module": mod["module"], "title": mod["title"], "nodes": nodes})
     return {"version": SECTION_TREE_VERSION, "cs_be_only": bool(cs_be_only),
             "submission_type": st, "scope_note": _SCOPE_NOTES.get(st),
+            "comparative_evidence": comparative_evidence.route(dosage_form_class)
+            if st in _GENERIC_FAMILY else None,
             "modules": modules}
 
 
-def all_nodes(*, cs_be_only: bool = True,
-              submission_type: str = "ANDS") -> list[dict]:
+def all_nodes(*, cs_be_only: bool = True, submission_type: str = "ANDS",
+              dosage_form_class: str = "ir_solid_oral") -> list[dict]:
     return [n for m in section_tree(cs_be_only=cs_be_only,
-                                    submission_type=submission_type)["modules"]
+                                    submission_type=submission_type,
+                                    dosage_form_class=dosage_form_class)["modules"]
             for n in m["nodes"]]
 
 
 def module_sections(module: str, *, cs_be_only: bool = True,
-                    submission_type: str = "ANDS") -> list[dict]:
+                    submission_type: str = "ANDS",
+                    dosage_form_class: str = "ir_solid_oral") -> list[dict]:
     module = str(module or "").strip()
-    for m in section_tree(cs_be_only=cs_be_only,
-                          submission_type=submission_type)["modules"]:
+    for m in section_tree(cs_be_only=cs_be_only, submission_type=submission_type,
+                          dosage_form_class=dosage_form_class)["modules"]:
         if m["module"] == module:
             return m["nodes"]
     return []
 
 
 def node_for(section: str, *, cs_be_only: bool = True,
-             submission_type: str = "ANDS") -> dict | None:
+             submission_type: str = "ANDS",
+             dosage_form_class: str = "ir_solid_oral") -> dict | None:
     section = str(section or "").strip()
     return next((n for n in all_nodes(cs_be_only=cs_be_only,
-                                      submission_type=submission_type)
+                                      submission_type=submission_type,
+                                      dosage_form_class=dosage_form_class)
                  if n["section"] == section), None)
 
 
 def node_for_id(node_id: str, *, cs_be_only: bool = True,
-                submission_type: str = "ANDS") -> dict | None:
+                submission_type: str = "ANDS",
+                dosage_form_class: str = "ir_solid_oral") -> dict | None:
     node_id = str(node_id or "").strip()
     return next((n for n in all_nodes(cs_be_only=cs_be_only,
-                                      submission_type=submission_type)
+                                      submission_type=submission_type,
+                                      dosage_form_class=dosage_form_class)
                  if n["id"] == node_id), None)

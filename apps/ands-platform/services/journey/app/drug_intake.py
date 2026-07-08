@@ -202,6 +202,108 @@ def list_be_rulesets() -> list:
     return [dict(BE_RULESETS[v]) for v in ("M13A", "legacy")]
 
 
+# -- comparative-evidence route by dosage form (biowaivers) ------------------
+# Health Canada does NOT require an in-vivo comparative bioequivalence (PK) study
+# for every generic dosage form. This maps a dosage form to the comparative-
+# evidence ROUTE and to whether a PK BE study (eCTD 5.3.1) is REQUIRED or a
+# biowaiver / non-PK evidence route may apply. Mirrors the dossier service's
+# ``comparative_evidence`` model (each service owns its copy of the HC rule).
+CE_PARENTERAL_SOLUTION = "parenteral_solution"
+CE_ORAL_SOLUTION = "oral_solution"
+CE_OPHTHALMIC_OTIC_SOLUTION = "ophthalmic_otic_solution"
+CE_ORALLY_INHALED = "orally_inhaled"
+CE_TOPICAL_LOCAL = "topical_local"
+CE_MR_SOLID_ORAL = "mr_solid_oral"
+
+# route -> (requires_be_study, label, evidence, citation)
+_CE_ROUTES = {
+    "pk_be_study": (
+        True, "Comparative bioequivalence (PK) study",
+        "A pivotal comparative PK study vs. the Canadian Reference Product "
+        "(AUC/Cmax 90% CI within 80.00-125.00%) is required.",
+        "HC Comparative Bioavailability Standards; ICH M13A (IR solid oral)."),
+    "mr_pk_be_study": (
+        True, "Comparative bioequivalence (PK) study - fed & fasting",
+        "A modified-release generic requires comparative PK studies under BOTH "
+        "fed and fasting conditions, plus a dose-dumping assessment.",
+        "HC Conduct and Analysis of Comparative Bioavailability Studies (MR)."),
+    "oip_studies": (
+        True, "Orally-inhaled comparative studies",
+        "An orally-inhaled generic follows the dedicated OIP guidance: "
+        "comparative PK (Cmax/AUC) plus in-vitro characterisation and, "
+        "typically, comparative clinical/pharmacodynamic evidence.",
+        "HC Comparative Pharmacokinetic Studies for Orally Inhaled Products (2020)."),
+    "parenteral_biowaiver": (
+        False, "Parenteral biowaiver (confirm)",
+        "For a parenteral aqueous solution that is qualitatively and "
+        "quantitatively the same as the reference, the in-vivo BE study may be "
+        "WAIVED - provide the biowaiver justification instead of a PK study.",
+        "HC Submissions for Generic Parenteral Drugs."),
+    "aqueous_solution_biowaiver": (
+        False, "Aqueous-solution biowaiver (confirm)",
+        "For an aqueous solution (oral, ophthalmic, otic) whose non-medicinal "
+        "ingredients are qualitatively identical to the reference, the in-vivo "
+        "BE study may be WAIVED - provide the biowaiver justification.",
+        "HC Comparative Bioavailability Standards (aqueous solutions)."),
+    "topical_clinical_invitro": (
+        False, "Topical comparative evidence (not PK BE)",
+        "A locally-acting topical generic demonstrates equivalence by "
+        "comparative CLINICAL endpoint or in-vitro release/permeation - not a "
+        "systemic PK bioequivalence study.",
+        "HC guidance for topical / locally-acting products."),
+}
+
+_CE_FORM_TO_ROUTE = {
+    IR_SOLID_ORAL: "pk_be_study",
+    CE_MR_SOLID_ORAL: "mr_pk_be_study",
+    "non_ir": "pk_be_study",
+    CE_ORALLY_INHALED: "oip_studies",
+    CE_PARENTERAL_SOLUTION: "parenteral_biowaiver",
+    CE_ORAL_SOLUTION: "aqueous_solution_biowaiver",
+    CE_OPHTHALMIC_OTIC_SOLUTION: "aqueous_solution_biowaiver",
+    CE_TOPICAL_LOCAL: "topical_clinical_invitro",
+}
+
+
+def comparative_evidence_route(dosage_form_class: str) -> dict:
+    """The comparative-evidence route for a dosage form: a plain-language plan +
+    HC citation + whether an in-vivo BE study (5.3.1) is required. Unknown forms
+    default conservatively to the PK-study route."""
+    df = _s(dosage_form_class)
+    key = _CE_FORM_TO_ROUTE.get(df, "pk_be_study")   # conservative default
+    requires, label, evidence, citation = _CE_ROUTES[key]
+    return {"dosage_form_class": df or "other", "route": key,
+            "requires_be_study": requires, "label": label,
+            "evidence": evidence, "citation": citation}
+
+
+# Ordered for the intake dosage-form select: (value, human label)
+DOSAGE_FORMS = (
+    (IR_SOLID_ORAL, "Immediate-release solid oral (tablet/capsule)"),
+    (CE_MR_SOLID_ORAL, "Modified-release solid oral"),
+    (CE_ORAL_SOLUTION, "Oral solution / aqueous liquid"),
+    (CE_PARENTERAL_SOLUTION, "Parenteral (injectable) aqueous solution"),
+    (CE_OPHTHALMIC_OTIC_SOLUTION, "Ophthalmic / otic solution"),
+    (CE_ORALLY_INHALED, "Orally inhaled product"),
+    (CE_TOPICAL_LOCAL, "Topical / locally-acting (dermal)"),
+    ("other", "Other / not sure"),
+)
+
+
+def list_dosage_forms() -> list:
+    """Every intake dosage form + its comparative-evidence route, so the UI can
+    render the select and preview whether a PK BE study is required or a
+    biowaiver may apply — before the filer commits to a study."""
+    out = []
+    for value, label in DOSAGE_FORMS:
+        r = comparative_evidence_route(value)
+        out.append({"value": value, "label": label,
+                    "requires_be_study": r["requires_be_study"],
+                    "route": r["route"], "evidence": r["evidence"],
+                    "citation": r["citation"]})
+    return out
+
+
 def _to_float(v):
     try:
         return float(v)
@@ -282,10 +384,20 @@ def assess(answers: dict) -> dict:
             result["eligible_ands"] = False
 
     study = answers.get("be_study")
-    if study is not None or answers.get("dosage_form_class"):
+    dosage_form_class = _s(answers.get("dosage_form_class"))
+    if dosage_form_class:
+        ce = comparative_evidence_route(dosage_form_class)
+        result["checks"]["comparative_evidence"] = ce
+        if not ce["requires_be_study"]:
+            # steer the filer to the biowaiver / non-PK evidence route so they do
+            # NOT needlessly run an in-vivo study Health Canada may waive
+            result["advisories"].append({
+                "rule": "comparative_evidence_biowaiver",
+                "message": f"{ce['label']}: {ce['evidence']} ({ce['citation']})"})
+
+    if study is not None or dosage_form_class:
         be = evaluate_bioequivalence(
-            study or {}, _s(answers.get("submission_date")),
-            _s(answers.get("dosage_form_class")))
+            study or {}, _s(answers.get("submission_date")), dosage_form_class)
         result["checks"]["bioequivalence"] = be
         if study is not None and not be["bioequivalent"]:
             result["advisories"].append({

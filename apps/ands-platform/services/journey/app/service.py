@@ -130,6 +130,7 @@ class JourneyService:
             "stages": [dict(s) for s in journey.STAGES],
             "submission_types": drug_intake.SUBMISSION_TYPES,
             "be_rulesets": drug_intake.list_be_rulesets(),
+            "dosage_forms": drug_intake.list_dosage_forms(),
             "dossier_branches": dossier_id.list_branches(),
         }
 

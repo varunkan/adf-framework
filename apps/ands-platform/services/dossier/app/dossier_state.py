@@ -104,7 +104,8 @@ def unconfirmed_sample_count(states: dict) -> int:
 
 
 def completeness_gate(*, cs_be_only: bool, states: dict,
-                      submission_type: str = "ANDS") -> dict:
+                      submission_type: str = "ANDS",
+                      dosage_form_class: str = "ir_solid_oral") -> dict:
     """Which required sections across all modules are still incomplete.
 
     A required section holding an unconfirmed sample/AI draft is reported as
@@ -112,7 +113,8 @@ def completeness_gate(*, cs_be_only: bool, states: dict,
     'review your sample' blocker distinct from a genuinely empty section."""
     missing = []
     for n in _required_docs(section_tree.all_nodes(
-            cs_be_only=cs_be_only, submission_type=submission_type)):
+            cs_be_only=cs_be_only, submission_type=submission_type,
+            dosage_form_class=dosage_form_class)):
         entry = states.get(n["section"])
         if resolve_status(n, entry) != COMPLETE:
             missing.append({"section": n["section"], "title": n["title"],
@@ -126,10 +128,12 @@ PASS, TODO = "pass", "todo"
 
 
 def tower_view(*, cs_be_only: bool, states: dict,
-               submission_type: str = "ANDS") -> list[dict]:
+               submission_type: str = "ANDS",
+               dosage_form_class: str = "ir_solid_oral") -> list[dict]:
     """Per-module 1–5 roll-up: pass / partial / todo / na (content_slots contract)."""
     tree = section_tree.section_tree(cs_be_only=cs_be_only,
-                                     submission_type=submission_type)
+                                     submission_type=submission_type,
+                                     dosage_form_class=dosage_form_class)
     out = []
     for m in tree["modules"]:
         req = _required_docs(m["nodes"])
