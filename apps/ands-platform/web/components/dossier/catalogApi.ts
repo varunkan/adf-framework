@@ -115,6 +115,8 @@ export interface CreateDossierBody {
   cs_be_only?: boolean;
   // TIER-A: dosage form driving the comparative-evidence route (generic family)
   dosage_form_class?: string;
+  // TIER-B: product class (for the honest out-of-core scope note)
+  product_class?: string;
   sponsor?: string;
   owner?: string;
   labelling_owner?: string;

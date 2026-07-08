@@ -47,6 +47,14 @@ export function RegistrationRow({
             {reg.dossier_id}
           </Link>
         </div>
+        {/* TIER-B: honest note that a disinfectant/biocide DIN is NNHPD-assessed,
+            NOT an ANDS/NDS eCTD review — so a registry row never implies one. */}
+        {reg.regulatory_note && (
+          <div className="notice warn"
+            style={{ marginTop: 8, fontSize: 12, lineHeight: 1.45 }}>
+            {reg.regulatory_note}
+          </div>
+        )}
       </div>
 
       {/* col 2 — status chip in a fixed-width cell so every row's status aligns */}

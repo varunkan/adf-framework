@@ -310,6 +310,16 @@ ${outstanding ? `<ul>${outstanding}</ul>` : "<p>Nothing outstanding — every re
               {content.scope_note}
             </div>
           )}
+          {/* TIER-B product-class scope: an honest caveat when the dossier is a
+              biologic / biosimilar / radiopharm / veterinary / disinfectant / NHP
+              — the eCTD shell is correct but the science belongs to that regime.
+              None for the in-core generic small-molecule chemical drug. */}
+          {content.product_class_note && (
+            <div className="notice warn" style={{ marginBottom: 14, fontSize: 13 }}>
+              <b>Product class outside ANDS Studio&apos;s core scope.</b>{" "}
+              {content.product_class_note}
+            </div>
+          )}
           {/* TIER-A comparative-evidence route: for a generic, the dosage form
               decides whether Health Canada expects an in-vivo BE (PK) study or a
               biowaiver / non-PK route applies. Shown once at the top of the

@@ -41,6 +41,9 @@ export interface Registration {
   dossier_id: string;
   din: string | null;
   drug_type: string | null;
+  // TIER-B: honest NNHPD/Biocides pathway note for a disinfectant/biocide DIN
+  // (null for a chemical drug that went through the ANDS/NDS eCTD review)
+  regulatory_note?: string | null;
   status: RegistrationStatus;
   created_at: string;
   updated_at: string;

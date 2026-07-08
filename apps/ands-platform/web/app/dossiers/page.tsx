@@ -66,6 +66,41 @@ const DOSAGE_FORMS = [
 ] as const;
 const GENERIC_FAMILY = new Set(["ANDS", "SANDS"]);
 
+// TIER-B: the product class. inScope=true is ANDS Studio's core generic small-
+// molecule chemical-drug authoring; the others are real Health Canada regimes
+// with different directorates/instruments — surfaced honestly, never hollow.
+// Mirrors journey.product_class (the catalog is authoritative; this is the
+// create-form fallback so the banner shows without a round-trip).
+const PRODUCT_CLASSES = [
+  { code: "small_molecule", label: "Small-molecule chemical drug", inScope: true,
+    note: "" },
+  { code: "biologic", label: "Biologic (Schedule D)", inScope: false,
+    note: "A biologic is reviewed by the BRDD and filed as an NDS/SNDS, not an "
+      + "ANDS. ANDS Studio gives you the correct eCTD shell, validation and fees, "
+      + "but the science is authored to the biologics guidance." },
+  { code: "biosimilar", label: "Biosimilar (subsequent-entry biologic)",
+    inScope: false,
+    note: "A biosimilar is NOT a generic: Health Canada authorizes it through a "
+      + "full New Drug Submission (NDS) with a similarity package vs. the "
+      + "reference biologic — the ANDS bioequivalence pathway does not apply." },
+  { code: "radiopharmaceutical", label: "Radiopharmaceutical (Schedule C)",
+    inScope: false,
+    note: "A radiopharmaceutical carries the additional Part C, Division 3 "
+      + "requirements under BRDD review, which ANDS Studio does not model — "
+      + "treat its output as the eCTD shell only." },
+  { code: "veterinary", label: "Veterinary drug", inScope: false,
+    note: "A veterinary drug is reviewed by the Veterinary Drugs Directorate "
+      + "through its own stream, not the human-drug ANDS pathway." },
+  { code: "disinfectant", label: "Surface disinfectant / biocide", inScope: false,
+    note: "A surface disinfectant is an NNHPD-assessed DIN (transitioning to the "
+      + "Biocides Regulations), not an ANDS/NDS eCTD review — outside ANDS "
+      + "Studio's authoring model." },
+  { code: "natural_health_product", label: "Natural health product (NHP)",
+    inScope: false,
+    note: "An NHP is regulated under the Natural Health Products Regulations "
+      + "(NPN, not a DIN) by the NNHPD — an entirely separate regime." },
+] as const;
+
 // R9-CATALOG "Archive/delete reason is pure free text" (n=2): a controlled
 // vocabulary keeps archive reasons auditable and consistent; free-text detail
 // stays available but optional.
@@ -211,6 +246,8 @@ export default function DossiersHome() {
   const [csBeOnly, setCsBeOnly] = useState(true);
   // TIER-A: dosage form → comparative-evidence route (generic families only)
   const [dosageForm, setDosageForm] = useState<string>("ir_solid_oral");
+  // TIER-B: product class → honest out-of-core scope banner
+  const [productClass, setProductClass] = useState<string>("small_molecule");
   const [sponsor, setSponsor] = useState("");
   const [owner, setOwner] = useState("");
   const [busy, setBusy] = useState(false);
@@ -407,6 +444,8 @@ export default function DossiersHome() {
         // TIER-A: the dosage form is a generic-family property (drives the
         // comparative-evidence route); default the innovator paths to solid oral
         dosage_form_class: GENERIC_FAMILY.has(subType) ? dosageForm : "ir_solid_oral",
+        // TIER-B: the product class (for the honest out-of-core scope note)
+        product_class: productClass,
         sponsor: sponsor.trim() || undefined,
         owner: owner.trim() || undefined,
       });
@@ -753,6 +792,32 @@ export default function DossiersHome() {
                     })()}
                   </div>
                 )}
+                {/* TIER-B: product class → honest scope. ANDS Studio authors a
+                    GENERIC small-molecule chemical drug; other classes are real
+                    HC regimes with different directorates/instruments. Say so at
+                    the point of choice rather than pretending or offering a
+                    hollow option. */}
+                <div style={{ marginTop: 10 }}>
+                  <label>Product class <span className="mut"
+                    style={{ fontWeight: 400 }}>(regulatory scope)</span></label>
+                  <select value={productClass}
+                    onChange={(e) => setProductClass(e.target.value)}
+                    style={{ width: "100%" }}>
+                    {PRODUCT_CLASSES.map((p) => (
+                      <option key={p.code} value={p.code}>{p.label}</option>
+                    ))}
+                  </select>
+                  {(() => {
+                    const p = PRODUCT_CLASSES.find((x) => x.code === productClass);
+                    if (!p || p.inScope) return null;
+                    return (
+                      <div className="notice warn"
+                        style={{ marginTop: 6, fontSize: 12, lineHeight: 1.45 }}>
+                        <b>Outside ANDS Studio&apos;s core scope.</b> {p.note}
+                      </div>
+                    );
+                  })()}
+                </div>
               </div>
               <div>
                 <label>Client / sponsor <span className="mut"

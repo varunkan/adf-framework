@@ -629,6 +629,10 @@ export interface ContentState {
   // "a biowaiver may apply" builder banner and whether 5.3.1/1.6 is required.
   dosage_form_class?: string;
   comparative_evidence?: ComparativeEvidence | null;
+  // TIER-B: the product class + an honest scope note when it is outside ANDS
+  // Studio's core generic small-molecule authoring (null for the in-core case).
+  product_class?: string;
+  product_class_note?: string | null;
   version: string;
   modules: ModuleView[];
   gate: {

@@ -100,6 +100,16 @@ export function RegisterForm({
               <option key={t} value={t}>{t}</option>
             ))}
           </select>
+          {/* TIER-B: honest note at the point of choice — a disinfectant/biocide
+              DIN comes from the NNHPD, not the ANDS/NDS eCTD review. */}
+          {(drugType === "disinfectant" || drugType === "biocide") && (
+            <div className="notice warn"
+              style={{ marginTop: 6, fontSize: 12, lineHeight: 1.45 }}>
+              A {drugType} is assessed by the NNHPD (transitioning to the Biocides
+              Regulations), not through the ANDS/NDS eCTD review — this registry
+              row records its status only.
+            </div>
+          )}
         </div>
       </div>
       <p className="mut" style={{ fontSize: 12, margin: "10px 0 0" }}>
