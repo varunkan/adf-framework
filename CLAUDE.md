@@ -25,6 +25,22 @@ and weigh all data points that bear on it (code, tests, git history, memory,
 prior results, live process/env/config state), form an explicit plan, then
 execute. Never blind-fire, and never re-derive facts already established.
 
+**Graph-first — consult the knowledge graph BEFORE proposing, changing,
+validating, or reviewing ANY code.** This is a hard, standing gate on every code
+task, not a suggestion. Before you PROPOSE a change: query the code-review-graph
+MCP tools (`semantic_search_nodes`, `query_graph` for callers/callees/imports/
+tests, `get_impact_radius`, `get_review_context`, `get_architecture_overview`) to
+establish the real structure, callers, dependents, and test coverage — so you act
+on the actual graph of the code, not an assumption. Before you VALIDATE or REVIEW
+a change: use `detect_changes` + `get_impact_radius` + `get_affected_flows` +
+`query_graph pattern=tests_for` to see the full blast radius and what must be
+re-checked. Only fall back to Grep/Glob/Read for what the graph genuinely does not
+cover (e.g. non-indexed TSX/asset details) — and say so. Then: gather full context
+via the graph → form the plan → make the change → validate the change against the
+graph's impact set. After every commit, update the graph
+(`build_or_update_graph_tool`) so the next task's context is accurate. A change
+proposed or reviewed without first consulting the graph is incomplete work.
+
 **Look at all data points that can influence the decision.** Base every call on
 the full evidence, not the first signal found. Cross-check independent sources
 before asserting a conclusion — e.g. a claim about a running tool is verified via
