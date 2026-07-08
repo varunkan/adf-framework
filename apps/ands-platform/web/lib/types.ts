@@ -132,9 +132,12 @@ export interface Slot {
 
 export interface ModuleTower {
   module: string;
-  state: "pass" | "partial" | "todo" | "na";
+  // "conditional" = no REQUIRED docs but applicable conditional/optional
+  // sections (in-scope, filer judgement) — distinct from "na" (inapplicable).
+  state: "pass" | "partial" | "todo" | "na" | "conditional";
   required_total: number;
   required_filled: number;
+  conditional_total?: number;
 }
 
 export interface ContentView {

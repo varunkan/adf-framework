@@ -22,6 +22,7 @@ type Missing = { key?: string; title: string; module: string };
 
 const STATE_LABEL: Record<string, string> = {
   pass: "Complete", partial: "In progress", todo: "Not started", na: "N/A",
+  conditional: "Change-dependent",
 };
 
 export function TowerChecklist({ tower, missing = [], status }: {

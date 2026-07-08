@@ -65,7 +65,9 @@ export function MiniTower({ tower, missing = [], labelling }: {
         const label =
           t.state === "na"
             ? `Module ${t.module}: not applicable`
-            : `Module ${t.module}: ${t.required_filled} of ${t.required_total} required documents`;
+            : t.state === "conditional"
+              ? `Module ${t.module}: conditional — change-dependent sections apply (filer judgement)`
+              : `Module ${t.module}: ${t.required_filled} of ${t.required_total} required documents`;
         return (
           <div key={t.module} style={{ textAlign: "center" }} title={label}>
             <div

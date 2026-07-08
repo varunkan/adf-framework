@@ -1817,10 +1817,14 @@ class DossierService:
         submission_type = _s(idx.get("submission_type")).upper() or "ANDS"
         dosage_form_class = _s(idx.get("dosage_form_class")) or "ir_solid_oral"
         product_class = _s(idx.get("product_class")) or "small_molecule"
+        # an out-of-core product class (biologic/biosimilar/…) is not a generic
+        # small-molecule: the ANDS comparative-BE artifacts do not apply
+        product_in_scope = product_class == "small_molecule"
         states = self.repo.list_section_state(dossier_id)
         tree = section_tree.section_tree(cs_be_only=cs_be_only,
                                          submission_type=submission_type,
-                                         dosage_form_class=dosage_form_class)
+                                         dosage_form_class=dosage_form_class,
+                                         product_in_scope=product_in_scope)
         modules = []
         for m in tree["modules"]:
             modules.append({
@@ -1832,7 +1836,8 @@ class DossierService:
         section_gate = dossier_state.completeness_gate(
             cs_be_only=cs_be_only, states=states,
             submission_type=submission_type,
-            dosage_form_class=dosage_form_class)
+            dosage_form_class=dosage_form_class,
+            product_in_scope=product_in_scope)
         today = date.today().isoformat()
         # submission-type-aware: the ANDS comparative-studies fee is emitted only
         # for an ANDS; other types name their HC Schedule 1 grouping (amount None)
@@ -1905,7 +1910,8 @@ class DossierService:
             "version": tree["version"], "modules": modules, "gate": gate,
             "tower": dossier_state.tower_view(cs_be_only=cs_be_only, states=states,
                                               submission_type=submission_type,
-                                              dosage_form_class=dosage_form_class),
+                                              dosage_form_class=dosage_form_class,
+                                              product_in_scope=product_in_scope),
             "fees": fees_block, "validation": validation, "din": idx.get("din"),
             "evalidator": evalidator_cleared,
             # POLISH-SIGN-BANNER: ambient signature-readiness signal so the

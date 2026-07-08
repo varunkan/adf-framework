@@ -105,7 +105,8 @@ def unconfirmed_sample_count(states: dict) -> int:
 
 def completeness_gate(*, cs_be_only: bool, states: dict,
                       submission_type: str = "ANDS",
-                      dosage_form_class: str = "ir_solid_oral") -> dict:
+                      dosage_form_class: str = "ir_solid_oral",
+                      product_in_scope: bool = True) -> dict:
     """Which required sections across all modules are still incomplete.
 
     A required section holding an unconfirmed sample/AI draft is reported as
@@ -114,7 +115,8 @@ def completeness_gate(*, cs_be_only: bool, states: dict,
     missing = []
     for n in _required_docs(section_tree.all_nodes(
             cs_be_only=cs_be_only, submission_type=submission_type,
-            dosage_form_class=dosage_form_class)):
+            dosage_form_class=dosage_form_class,
+            product_in_scope=product_in_scope)):
         entry = states.get(n["section"])
         if resolve_status(n, entry) != COMPLETE:
             missing.append({"section": n["section"], "title": n["title"],
@@ -125,23 +127,35 @@ def completeness_gate(*, cs_be_only: bool, states: dict,
 
 
 PASS, TODO = "pass", "todo"
+# a module with no REQUIRED docs but applicable conditional/optional sections —
+# in scope, filer judgement needed (distinct from 'na' = genuinely inapplicable)
+CONDITIONAL = "conditional"
 
 
 def tower_view(*, cs_be_only: bool, states: dict,
                submission_type: str = "ANDS",
-               dosage_form_class: str = "ir_solid_oral") -> list[dict]:
+               dosage_form_class: str = "ir_solid_oral",
+               product_in_scope: bool = True) -> list[dict]:
     """Per-module 1–5 roll-up: pass / partial / todo / na (content_slots contract)."""
     tree = section_tree.section_tree(cs_be_only=cs_be_only,
                                      submission_type=submission_type,
-                                     dosage_form_class=dosage_form_class)
+                                     dosage_form_class=dosage_form_class,
+                                     product_in_scope=product_in_scope)
     out = []
     for m in tree["modules"]:
         req = _required_docs(m["nodes"])
         total = len(req)
         filled = sum(1 for n in req
                      if resolve_status(n, states.get(n["section"])) == COMPLETE)
+        # a module with NO required docs but applicable CONDITIONAL/OPTIONAL doc
+        # nodes (e.g. a SANDS Module 3 — the change locus — where CMC sections are
+        # change-dependent) is IN SCOPE and needs filer judgement; it must NOT roll
+        # up as 'na' (genuinely inapplicable, like Module 4 for a generic).
+        conditional = sum(1 for n in m["nodes"]
+                          if n.get("kind") == "document"
+                          and n.get("applicability") in ("conditional", "optional"))
         if total == 0:
-            state = NA
+            state = CONDITIONAL if conditional else NA
         elif filled == total:
             state = PASS
         elif filled == 0:
@@ -149,5 +163,6 @@ def tower_view(*, cs_be_only: bool, states: dict,
         else:
             state = PARTIAL
         out.append({"module": m["module"], "state": state,
-                    "required_total": total, "required_filled": filled})
+                    "required_total": total, "required_filled": filled,
+                    "conditional_total": conditional})
     return out

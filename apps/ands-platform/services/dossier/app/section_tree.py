@@ -333,7 +333,8 @@ _BE_EVIDENCE = {"1.6", "5.3.1"}   # CS-BE summary, comparative-BE study report
 
 def _applicability(node: dict, module: str, cs_be_only: bool,
                    submission_type: str = "ANDS",
-                   dosage_form_class: str = "ir_solid_oral") -> str:
+                   dosage_form_class: str = "ir_solid_oral",
+                   product_in_scope: bool = True) -> str:
     st = str(submission_type or "ANDS").upper()
     sec = node["s"]
     # Module 4 (nonclinical study reports): only the innovator NDS requires it.
@@ -344,6 +345,11 @@ def _applicability(node: dict, module: str, cs_be_only: bool,
     # generic-only artifacts (Form V / CS-BE / comparative-BE study report)
     if sec in _GENERIC_ONLY:
         if st == "ANDS":
+            # An out-of-core product class (biologic/biosimilar/radiopharm/…) is
+            # NOT a generic small-molecule: the ANDS comparative-BE artifacts do
+            # not apply (a biosimilar files an NDS + comparability, no BE claims).
+            if not product_in_scope:
+                return "na"
             # Tier A: the CS-BE summary / comparative-BE study (1.6 / 5.3.1) are
             # required for a PK-BE dosage form, but only CONDITIONAL when a
             # biowaiver or non-PK evidence route applies (parenteral/aqueous
@@ -420,7 +426,8 @@ _LABEL_ADAPT = {
 
 def _build_node(module: str, node: dict, cs_be_only: bool,
                 submission_type: str = "ANDS",
-                dosage_form_class: str = "ir_solid_oral") -> dict:
+                dosage_form_class: str = "ir_solid_oral",
+                product_in_scope: bool = True) -> dict:
     section = node["s"]
     url_key = node.get("u", "ectd")
     gen = node.get("gen")
@@ -431,7 +438,7 @@ def _build_node(module: str, node: dict, cs_be_only: bool,
         "title": node["t"],
         "kind": node["k"],
         "depth": section.count("."),
-        "applicability": _applicability(node, module, cs_be_only, submission_type, dosage_form_class),
+        "applicability": _applicability(node, module, cs_be_only, submission_type, dosage_form_class, product_in_scope),
         "affordances": list(node.get("aff", [])),
         "generator_key": gen,
         "ai_draftable": gen in LLM_DRAFTABLE,
@@ -473,28 +480,32 @@ def _build_node(module: str, node: dict, cs_be_only: bool,
 
 def section_tree(*, cs_be_only: bool = True,
                  submission_type: str = "ANDS",
-                 dosage_form_class: str = "ir_solid_oral") -> dict:
+                 dosage_form_class: str = "ir_solid_oral",
+                 product_in_scope: bool = True) -> dict:
     """The full versioned M1–M5 tree with per-section applicability resolved for
     the submission type (NDS / ANDS / SANDS / SNDS / DIN) and dosage form."""
     st = str(submission_type or "ANDS").upper()
     modules = []
     for mod in _MODULES:
-        nodes = [_build_node(mod["module"], n, cs_be_only, st, dosage_form_class)
+        nodes = [_build_node(mod["module"], n, cs_be_only, st, dosage_form_class,
+                             product_in_scope)
                  for n in mod["nodes"]]
         modules.append({"module": mod["module"], "title": mod["title"], "nodes": nodes})
     return {"version": SECTION_TREE_VERSION, "cs_be_only": bool(cs_be_only),
             "submission_type": st, "scope_note": _SCOPE_NOTES.get(st),
             "comparative_evidence": comparative_evidence.route(
                 dosage_form_class, submission_type=st)
-            if st in _GENERIC_FAMILY else None,
+            if (st in _GENERIC_FAMILY and product_in_scope) else None,
             "modules": modules}
 
 
 def all_nodes(*, cs_be_only: bool = True, submission_type: str = "ANDS",
+              product_in_scope: bool = True,
               dosage_form_class: str = "ir_solid_oral") -> list[dict]:
     return [n for m in section_tree(cs_be_only=cs_be_only,
                                     submission_type=submission_type,
-                                    dosage_form_class=dosage_form_class)["modules"]
+                                    dosage_form_class=dosage_form_class,
+                                    product_in_scope=product_in_scope)["modules"]
             for n in m["nodes"]]
 
 
