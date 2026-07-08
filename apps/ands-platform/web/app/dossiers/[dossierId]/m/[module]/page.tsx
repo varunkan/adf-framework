@@ -436,8 +436,20 @@ ${outstanding ? `<ul>${outstanding}</ul>` : "<p>Nothing outstanding — every re
                     gap: 3,
                   }}
                 >
-                  {g.missing.map((m) => (
-                    <li key={`${m.module}-${m.section}`} style={{ fontSize: 12 }}>
+                  {/* Real document-section gaps only. The fee (1.2.2), the
+                      structural-validation summary (pseudo-section "validation")
+                      and the unconfirmed-sample count (pseudo-section
+                      "unconfirmed_sample", empty module) each have their OWN
+                      affordance below / in the gate card — rendering them here
+                      too both duplicated the row AND, for the empty-module
+                      pseudo-sections, produced a broken /m/?sec=… link (no
+                      module segment → 404). The index key stays as a defensive
+                      guard because g.missing can legitimately hold two entries
+                      for the same section. */}
+                  {g.missing
+                    .filter((m) => m.module && m.section !== "1.2.2")
+                    .map((m, i) => (
+                    <li key={`${m.module}-${m.section}-${i}`} style={{ fontSize: 12 }}>
                       {blockerLink(
                         String(m.module),
                         m.section,
