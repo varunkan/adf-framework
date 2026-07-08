@@ -1964,7 +1964,12 @@ class DossierService:
                                  or "ir_solid_oral",
             # Tier B: the product class (for the honest out-of-core scope note)
             "product_class": _s(data.get("product_class")) or "small_molecule",
-            "cs_be_only": bool(data.get("cs_be_only", True)),
+            # cs_be_only is an ANDS-only comparative-BE concept. Force it FALSE
+            # for every non-ANDS type so a direct API create can never leak
+            # 'CS-BE' onto an innovator NDS / DIN (backend enforcement — not
+            # reliant on the web form remembering to send false).
+            "cs_be_only": (_s(data.get("submission_type")).upper() or "ANDS")
+                          == "ANDS" and bool(data.get("cs_be_only", True)),
             "din": din or None,
             # the real product name — distinct from a display title
             "drug_product": (_s(data.get("drug_product"))

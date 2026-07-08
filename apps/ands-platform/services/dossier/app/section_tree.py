@@ -375,6 +375,11 @@ def _applicability(node: dict, module: str, cs_be_only: bool,
     # route — keep admin + product info required, downgrade heavy technical.
     if st == "DIN" and module in ("3", "5") and node.get("a") == _R:
         return "optional"
+    # SANDS is a post-NOC supplement: it scopes to the CHANGED modules, so the
+    # full fresh-ANDS Module 3 CMC set is CHANGE-DEPENDENT (conditional), not all
+    # unconditionally required (HC Post-NOC Changes guidance).
+    if st == "SANDS" and module == "3" and node.get("a") == _R:
+        return "conditional"
     return node.get("a", _O)
 
 
@@ -417,7 +422,8 @@ def section_tree(*, cs_be_only: bool = True,
         modules.append({"module": mod["module"], "title": mod["title"], "nodes": nodes})
     return {"version": SECTION_TREE_VERSION, "cs_be_only": bool(cs_be_only),
             "submission_type": st, "scope_note": _SCOPE_NOTES.get(st),
-            "comparative_evidence": comparative_evidence.route(dosage_form_class)
+            "comparative_evidence": comparative_evidence.route(
+                dosage_form_class, submission_type=st)
             if st in _GENERIC_FAMILY else None,
             "modules": modules}
 

@@ -98,10 +98,32 @@ def _norm(dosage_form_class: str) -> str:
     return df if df in _VALID else OTHER
 
 
-def route(dosage_form_class: str) -> dict:
-    """The comparative-evidence route for a dosage form: a plain-language plan +
-    HC citation + whether an in-vivo BE study (5.3.1) is required."""
+# A SANDS is a POST-NOC supplement, not a fresh generic filing. Health Canada's
+# Post-NOC Changes: Quality guidance supports a manufacturing/formulation change
+# with comparative IN-VITRO dissolution (f2 similarity) in the general case; a
+# fresh in-vivo comparative bioequivalence study is only triggered by specific
+# higher-risk changes. So for a SANDS the BE study is CHANGE-DEPENDENT
+# (conditional), never unconditionally "required".
+_SUPPLEMENT_ROUTE = (
+    False, "Post-NOC change — comparative evidence is change-dependent",
+    "For a post-NOC supplement the comparative evidence depends on the change: "
+    "many changes are supported by comparative in-vitro dissolution (f2 "
+    "similarity 50-100) against the previously-approved product; a fresh in-vivo "
+    "comparative bioequivalence study is required only for specific higher-risk "
+    "changes. Scope the evidence to your change.",
+    "HC Post-NOC Changes: Quality guidance.")
+
+
+def route(dosage_form_class: str, submission_type: str = "ANDS") -> dict:
+    """The comparative-evidence route for a dosage form + submission type: a
+    plain-language plan + HC citation + whether an in-vivo BE study (5.3.1) is
+    required. A SANDS (post-NOC supplement) is change-dependent, not required."""
     df = _norm(dosage_form_class)
+    if str(submission_type or "").upper() == "SANDS":
+        requires, label, evidence, citation = _SUPPLEMENT_ROUTE
+        return {"dosage_form_class": df, "route": "post_noc_supplement",
+                "requires_be_study": requires, "label": label,
+                "evidence": evidence, "citation": citation}
     key = _FORM_TO_ROUTE[df]
     requires, label, evidence, citation = _ROUTES[key]
     return {"dosage_form_class": df, "route": key, "requires_be_study": requires,
