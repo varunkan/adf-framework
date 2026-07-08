@@ -274,15 +274,71 @@ def _leaf_id(section: str) -> str:
     return ectd.leaf_id_for(section) or f"m{_slug(section)}"
 
 
-def _applicability(node: dict, module: str, cs_be_only: bool) -> str:
+# --- submission-type applicability overlay (comprehensive drug-type support) --
+# The eCTD backbone (M1–M5, every section) is SHARED across submission types;
+# what differs per type is which sections are required / optional / na. These are
+# deterministic Health Canada / ICH module-applicability facts — not authoring.
+#
+# GENERIC-ONLY artifacts a brand/DIN filing never carries: the Form V patent
+# declaration (1.2.4, PM(NOC) s.5), the Comprehensive Summary–Bioequivalence
+# (1.6) and the comparative-BE study report (5.3.1).
+_GENERIC_ONLY = {"1.2.4", "1.6", "5.3.1"}
+_GENERIC_FAMILY = {"ANDS", "SANDS"}
+
+# Honest scope: ANDS Studio is purpose-built for ANDS (generics). It reports the
+# CORRECT eCTD structure/applicability + validation + fees for other types, but
+# its in-app authoring generators are ANDS-tuned — stated plainly, never hidden.
+_SCOPE_NOTES = {
+    "NDS": "ANDS Studio is purpose-built for Abbreviated New Drug Submissions "
+           "(generics). This New Drug Submission (innovator) shows the correct "
+           "eCTD module applicability — the full nonclinical (Module 4) and "
+           "clinical/nonclinical summaries (2.4–2.7) are required, and no Form V "
+           "or comparative-bioequivalence study applies — but the scientific "
+           "dossier is authored outside ANDS Studio.",
+    "SNDS": "ANDS Studio is purpose-built for Abbreviated New Drug Submissions "
+            "(generics). This Supplement to a New Drug Submission (brand change) "
+            "carries no Form V or comparative-bioequivalence study; the changed "
+            "scientific modules are authored outside ANDS Studio.",
+    "DIN": "ANDS Studio is purpose-built for Abbreviated New Drug Submissions "
+           "(generics). A DIN Application is a lighter regulatory route — the "
+           "administrative Module 1 and product information apply; the full "
+           "CMC/clinical generic dossier does not.",
+}
+
+
+def _applicability(node: dict, module: str, cs_be_only: bool,
+                   submission_type: str = "ANDS") -> str:
+    st = str(submission_type or "ANDS").upper()
+    sec = node["s"]
+    # Module 4 (nonclinical study reports): only the innovator NDS requires it.
     if module == "4" or node.get("na"):
+        if st == "NDS" and module == "4":
+            return "required"
         return "na"
-    if cs_be_only and node.get("sup"):
-        return "suppressed"
+    # generic-only artifacts (Form V / CS-BE / comparative-BE study report)
+    if sec in _GENERIC_ONLY:
+        if st == "ANDS":
+            return node.get("a", _O)          # required for a generic ANDS
+        if st == "SANDS":
+            return "conditional"              # a generic supplement may not touch these
+        return "na"                           # NDS / SNDS / DIN never file these
+    # 2.4–2.7 nonclinical/clinical summaries (base-flagged cs_be_suppressed):
+    # an innovator NDS requires the full set; the generic path suppresses them.
+    if node.get("sup"):
+        if st == "NDS":
+            return "required"
+        if st in _GENERIC_FAMILY and cs_be_only:
+            return "suppressed"
+        return node.get("a", _O)
+    # DIN Application: the heavy CMC (M3) / clinical (M5) dossier is not the DINA
+    # route — keep admin + product info required, downgrade heavy technical.
+    if st == "DIN" and module in ("3", "5") and node.get("a") == _R:
+        return "optional"
     return node.get("a", _O)
 
 
-def _build_node(module: str, node: dict, cs_be_only: bool) -> dict:
+def _build_node(module: str, node: dict, cs_be_only: bool,
+                submission_type: str = "ANDS") -> dict:
     section = node["s"]
     url_key = node.get("u", "ectd")
     return {
@@ -292,7 +348,7 @@ def _build_node(module: str, node: dict, cs_be_only: bool) -> dict:
         "title": node["t"],
         "kind": node["k"],
         "depth": section.count("."),
-        "applicability": _applicability(node, module, cs_be_only),
+        "applicability": _applicability(node, module, cs_be_only, submission_type),
         "affordances": list(node.get("aff", [])),
         "generator_key": node.get("gen"),
         "ai_draftable": node.get("gen") in LLM_DRAFTABLE,
@@ -306,36 +362,49 @@ def _build_node(module: str, node: dict, cs_be_only: bool) -> dict:
     }
 
 
-def section_tree(*, cs_be_only: bool = True) -> dict:
-    """The full versioned M1–M5 tree with per-section applicability resolved."""
+def section_tree(*, cs_be_only: bool = True,
+                 submission_type: str = "ANDS") -> dict:
+    """The full versioned M1–M5 tree with per-section applicability resolved for
+    the submission type (NDS / ANDS / SANDS / SNDS / DIN)."""
+    st = str(submission_type or "ANDS").upper()
     modules = []
     for mod in _MODULES:
-        nodes = [_build_node(mod["module"], n, cs_be_only) for n in mod["nodes"]]
+        nodes = [_build_node(mod["module"], n, cs_be_only, st)
+                 for n in mod["nodes"]]
         modules.append({"module": mod["module"], "title": mod["title"], "nodes": nodes})
     return {"version": SECTION_TREE_VERSION, "cs_be_only": bool(cs_be_only),
+            "submission_type": st, "scope_note": _SCOPE_NOTES.get(st),
             "modules": modules}
 
 
-def all_nodes(*, cs_be_only: bool = True) -> list[dict]:
-    return [n for m in section_tree(cs_be_only=cs_be_only)["modules"]
+def all_nodes(*, cs_be_only: bool = True,
+              submission_type: str = "ANDS") -> list[dict]:
+    return [n for m in section_tree(cs_be_only=cs_be_only,
+                                    submission_type=submission_type)["modules"]
             for n in m["nodes"]]
 
 
-def module_sections(module: str, *, cs_be_only: bool = True) -> list[dict]:
+def module_sections(module: str, *, cs_be_only: bool = True,
+                    submission_type: str = "ANDS") -> list[dict]:
     module = str(module or "").strip()
-    for m in section_tree(cs_be_only=cs_be_only)["modules"]:
+    for m in section_tree(cs_be_only=cs_be_only,
+                          submission_type=submission_type)["modules"]:
         if m["module"] == module:
             return m["nodes"]
     return []
 
 
-def node_for(section: str, *, cs_be_only: bool = True) -> dict | None:
+def node_for(section: str, *, cs_be_only: bool = True,
+             submission_type: str = "ANDS") -> dict | None:
     section = str(section or "").strip()
-    return next((n for n in all_nodes(cs_be_only=cs_be_only)
+    return next((n for n in all_nodes(cs_be_only=cs_be_only,
+                                      submission_type=submission_type)
                  if n["section"] == section), None)
 
 
-def node_for_id(node_id: str, *, cs_be_only: bool = True) -> dict | None:
+def node_for_id(node_id: str, *, cs_be_only: bool = True,
+                submission_type: str = "ANDS") -> dict | None:
     node_id = str(node_id or "").strip()
-    return next((n for n in all_nodes(cs_be_only=cs_be_only)
+    return next((n for n in all_nodes(cs_be_only=cs_be_only,
+                                      submission_type=submission_type)
                  if n["id"] == node_id), None)

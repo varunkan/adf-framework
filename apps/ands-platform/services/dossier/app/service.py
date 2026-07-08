@@ -1804,8 +1804,12 @@ class DossierService:
         dossier_id = _s(dossier_id)
         idx = self.repo.get_dossier_index(dossier_id) or {}
         cs_be_only = self._cs_be_only(dossier_id)
+        # submission-type-aware content model: an NDS / SNDS / DIN gets a
+        # correct, DIFFERENT plan (not the generic-ANDS plan) — see section_tree.
+        submission_type = _s(idx.get("submission_type")).upper() or "ANDS"
         states = self.repo.list_section_state(dossier_id)
-        tree = section_tree.section_tree(cs_be_only=cs_be_only)
+        tree = section_tree.section_tree(cs_be_only=cs_be_only,
+                                         submission_type=submission_type)
         modules = []
         for m in tree["modules"]:
             modules.append({
@@ -1814,8 +1818,9 @@ class DossierService:
                 "progress": dossier_state.module_progress(m["nodes"], states)})
         model = self.repo.get_dossier(dossier_id)
 
-        section_gate = dossier_state.completeness_gate(cs_be_only=cs_be_only,
-                                                       states=states)
+        section_gate = dossier_state.completeness_gate(
+            cs_be_only=cs_be_only, states=states,
+            submission_type=submission_type)
         today = date.today().isoformat()
         review_fee = fees.ands_review_fee(today)
         fee_paid = bool(idx.get("fee_paid"))
@@ -1866,8 +1871,12 @@ class DossierService:
             self.repo.get_evalidator_attestation(dossier_id))
         return {
             "dossier_id": dossier_id, "cs_be_only": cs_be_only,
+            "submission_type": submission_type,
+            # honest scope note for non-ANDS submission types (None for ANDS)
+            "scope_note": tree.get("scope_note"),
             "version": tree["version"], "modules": modules, "gate": gate,
-            "tower": dossier_state.tower_view(cs_be_only=cs_be_only, states=states),
+            "tower": dossier_state.tower_view(cs_be_only=cs_be_only, states=states,
+                                              submission_type=submission_type),
             "fees": fees_block, "validation": validation, "din": idx.get("din"),
             "evalidator": evalidator_cleared,
             # POLISH-SIGN-BANNER: ambient signature-readiness signal so the
@@ -2243,9 +2252,13 @@ class DossierService:
                         # PM (EN+FR at 1.3.1) language status for a List badge.
                         "bilingual_pm": self._bilingual_pm_block(did),
                         "tower": dossier_state.tower_view(
-                            cs_be_only=idx["cs_be_only"], states=states),
+                            cs_be_only=idx["cs_be_only"], states=states,
+                            submission_type=_s(idx.get("submission_type")).upper()
+                            or "ANDS"),
                         "gate": dossier_state.completeness_gate(
-                            cs_be_only=idx["cs_be_only"], states=states)})
+                            cs_be_only=idx["cs_be_only"], states=states,
+                            submission_type=_s(idx.get("submission_type")).upper()
+                            or "ANDS")})
         return {"dossiers": out, "count": len(out)}
 
     def _soonest_due(self, dossier_id: str) -> str | None:

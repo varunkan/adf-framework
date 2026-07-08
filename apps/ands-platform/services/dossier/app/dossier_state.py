@@ -103,14 +103,16 @@ def unconfirmed_sample_count(states: dict) -> int:
     return sum(1 for entry in (states or {}).values() if needs_review(entry))
 
 
-def completeness_gate(*, cs_be_only: bool, states: dict) -> dict:
+def completeness_gate(*, cs_be_only: bool, states: dict,
+                      submission_type: str = "ANDS") -> dict:
     """Which required sections across all modules are still incomplete.
 
     A required section holding an unconfirmed sample/AI draft is reported as
     still-missing AND flagged with ``needs_review`` so the caller can render a
     'review your sample' blocker distinct from a genuinely empty section."""
     missing = []
-    for n in _required_docs(section_tree.all_nodes(cs_be_only=cs_be_only)):
+    for n in _required_docs(section_tree.all_nodes(
+            cs_be_only=cs_be_only, submission_type=submission_type)):
         entry = states.get(n["section"])
         if resolve_status(n, entry) != COMPLETE:
             missing.append({"section": n["section"], "title": n["title"],
@@ -123,9 +125,11 @@ def completeness_gate(*, cs_be_only: bool, states: dict) -> dict:
 PASS, TODO = "pass", "todo"
 
 
-def tower_view(*, cs_be_only: bool, states: dict) -> list[dict]:
+def tower_view(*, cs_be_only: bool, states: dict,
+               submission_type: str = "ANDS") -> list[dict]:
     """Per-module 1–5 roll-up: pass / partial / todo / na (content_slots contract)."""
-    tree = section_tree.section_tree(cs_be_only=cs_be_only)
+    tree = section_tree.section_tree(cs_be_only=cs_be_only,
+                                     submission_type=submission_type)
     out = []
     for m in tree["modules"]:
         req = _required_docs(m["nodes"])
