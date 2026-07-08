@@ -28,6 +28,16 @@ class RegistryService:
     def register(self) -> "RegistryService":
         return self
 
+    @staticmethod
+    def _enrich(reg: dict | None) -> dict | None:
+        """TIER-B: re-derive the honest NNHPD/Biocides regulatory note from the
+        row's drug_type on the way out. The note is not a stored column (it is a
+        pure function of drug_type), so deriving it here keeps every read path —
+        create, get, list, set_status — honestly annotated without a migration."""
+        if reg is not None:
+            reg["regulatory_note"] = registry.regulatory_note(reg.get("drug_type"))
+        return reg
+
     def create(self, data: dict, tenant_id: str | None = None) -> dict:
         res = registry.new_registration(data)
         if not res["valid"]:
@@ -35,7 +45,7 @@ class RegistryService:
                                errors=res["errors"])
         reg_data = dict(res["registration"])
         reg_data["tenant_id"] = _s(tenant_id) or None
-        reg = self.repo.add(reg_data)
+        reg = self._enrich(self.repo.add(reg_data))
         self._emit(reg, "created")
         return reg
 
@@ -43,10 +53,11 @@ class RegistryService:
         reg = self.repo.get(_s(reg_id))
         if not reg or not self._tenant_ok(reg, tenant_id):
             raise ProblemError(404, "registration not found", detail=_s(reg_id))
-        return reg
+        return self._enrich(reg)
 
     def list(self, *, tenant_id: str | None = None, **filters) -> dict:
-        regs = self.repo.list(tenant_id=_s(tenant_id), **filters)
+        regs = [self._enrich(r) for r in self.repo.list(tenant_id=_s(tenant_id),
+                                                         **filters)]
         return {"registrations": regs, "count": len(regs)}
 
     def set_status(self, reg_id: str, status: str,
@@ -58,7 +69,7 @@ class RegistryService:
         if not check["valid"]:
             http = 422 if check["rule"] == "status_unknown" else 409
             raise ProblemError(http, check["message"], rule=check["rule"])
-        reg = self.repo.set_status(reg_id, _s(status))
+        reg = self._enrich(self.repo.set_status(reg_id, _s(status)))
         self._emit(reg, "status_changed")
         return reg
 

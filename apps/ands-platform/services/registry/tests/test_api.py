@@ -56,3 +56,23 @@ def test_status_change_emits_event(ctx):
     # one on create, one on status change
     assert len(events) == 2
     assert events[-1].data["status"] == "NOC-Issued"
+
+
+def test_disinfectant_note_survives_to_get_and_list(client):
+    # TIER-B: the honest NNHPD note must reach the API read boundary, not just
+    # new_registration() (the note is re-derived on the way out — no DB column)
+    rid = client.post("/api/registry/registrations",
+                      json={"product": "SaniClean", "dossier_id": "e9",
+                            "din": "02439991", "drug_type": "disinfectant"}
+                      ).json()["id"]
+    got = client.get(f"/api/registry/registrations/{rid}").json()
+    assert "NNHPD" in (got.get("regulatory_note") or "")
+    listed = client.get("/api/registry/registrations",
+                        params={"din": "02439991"}).json()["registrations"][0]
+    assert "NNHPD" in (listed.get("regulatory_note") or "")
+
+
+def test_prescription_note_is_absent_at_the_api(client):
+    rid = _create(client, din="02439992").json()["id"]
+    got = client.get(f"/api/registry/registrations/{rid}").json()
+    assert not got.get("regulatory_note")

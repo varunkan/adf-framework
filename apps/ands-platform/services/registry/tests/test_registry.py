@@ -39,3 +39,39 @@ def test_right_to_sell_only_post_noc():
     assert ob["overdue"] is False
     assert registry.right_to_sell_obligation(marketed, "2025-11-01")["overdue"] \
         is True
+
+
+# -- TIER-B: honest note for NNHPD-assessed disinfectant / biocide DINs --------
+def test_disinfectant_registration_carries_an_honest_nnhpd_note():
+    out = registry.new_registration({"product": "SaniClean surface disinfectant",
+                                     "dossier_id": "e223456", "din": "02439999",
+                                     "drug_type": "disinfectant"})
+    assert out["valid"]
+    note = out["registration"].get("regulatory_note")
+    assert note and "NNHPD" in note
+    # the honest boundary: a disinfectant DIN is NOT an ANDS/NDS eCTD review
+    assert "ANDS" in note or "eCTD" in note
+
+
+def test_biocide_registration_carries_an_honest_note():
+    out = registry.new_registration({"product": "BioGuard biocide",
+                                     "dossier_id": "e223457", "din": "02439998",
+                                     "drug_type": "biocide"})
+    assert out["valid"]
+    note = out["registration"].get("regulatory_note")
+    assert note and ("NNHPD" in note or "Biocides Regulations" in note)
+
+
+def test_prescription_registration_has_no_scope_note():
+    out = registry.new_registration({"product": "Metformin 500mg",
+                                     "dossier_id": "e123456", "din": "02431234",
+                                     "drug_type": "prescription"})
+    assert out["valid"]
+    assert out["registration"].get("regulatory_note") in (None, "")
+
+
+def test_regulatory_note_is_public_helper():
+    assert registry.regulatory_note("disinfectant")
+    assert registry.regulatory_note("biocide")
+    assert registry.regulatory_note("prescription") in (None, "")
+    assert registry.regulatory_note("") in (None, "")

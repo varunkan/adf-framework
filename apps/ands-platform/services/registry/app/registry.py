@@ -28,6 +28,29 @@ _TRANSITIONS = {
 
 DRUG_TYPES = ("prescription", "non-prescription", "disinfectant", "biocide")
 
+# TIER-B honest scope: disinfectant/biocide DINs are assessed by the Natural and
+# Non-prescription Health Products Directorate (NNHPD), not through the ANDS/NDS
+# eCTD drug-submission review this tool models — and are transitioning to the
+# Biocides Regulations. Surface that plainly so a registry row never implies an
+# eCTD review it never had. (Web-verified vs canada.ca, Jul 2026.)
+_REGULATORY_NOTES = {
+    "disinfectant":
+        "Surface disinfectant: assessed by the NNHPD and granted a DIN through a "
+        "disinfectant application — not an ANDS/NDS eCTD review. Disinfectants "
+        "and sanitizers are transitioning to the Biocides Regulations. "
+        "Contact hc.nnhpd.consultation-dpsnso.sc@canada.ca.",
+    "biocide":
+        "Biocide: subject to a pre-market assessment by the NNHPD under the "
+        "Biocides Regulations before it may be sold — not an ANDS/NDS eCTD "
+        "review. Contact hc.nnhpd.consultation-dpsnso.sc@canada.ca.",
+}
+
+
+def regulatory_note(drug_type) -> str | None:
+    """An honest regulatory-pathway note for a drug type whose DIN does NOT come
+    from the ANDS/NDS eCTD review (disinfectant/biocide → NNHPD); None otherwise."""
+    return _REGULATORY_NOTES.get(_s(drug_type).lower()) or None
+
 # the MAH's annual post-approval obligations — the server-tracked checklist
 # (each tick records who signed it and when, per workspace and year)
 ANNUAL_CHECKLIST_ITEMS = (
@@ -71,7 +94,9 @@ def new_registration(data: dict) -> dict:
         return {"valid": False, "errors": errors}
     return {"valid": True, "registration": {
         "product": product, "country": country, "dossier_id": dossier_id,
-        "din": din, "drug_type": drug_type or None, "status": STATUS_SUBMITTED}}
+        "din": din, "drug_type": drug_type or None, "status": STATUS_SUBMITTED,
+        # TIER-B: honest NNHPD/Biocides note for disinfectant/biocide DINs
+        "regulatory_note": regulatory_note(drug_type)}}
 
 
 def validate_status_transition(old: str, new: str) -> dict:
