@@ -383,12 +383,40 @@ def _applicability(node: dict, module: str, cs_be_only: bool,
     return node.get("a", _O)
 
 
+# ANDS-specific labels/generators must not persist on a non-ANDS filing. For the
+# submission types listed, a section's ANDS comparative-BE framing (the QOS-CE(BE)
+# variant, the ANDS Sponsor Attestation + its generator) is replaced with a
+# neutral, correct title/purpose/guidance. Keyed by section -> (types to adapt,
+# overrides). ANDS (and, for 2.3, SANDS as a generic) keep the base labels.
+_LABEL_ADAPT = {
+    "2.3": ({"NDS", "SNDS", "DIN"}, {
+        "title": "Quality Overall Summary (QOS)",
+        "purpose": "The quality summary of Module 3.",
+        "guidance": "Summarises drug substance + drug product + stability from "
+                    "Module 3 (~40-100 pages). The portal scaffolds the QOS "
+                    "template; complete or upload it. A .docx is expected "
+                    "alongside the PDF.",
+    }),
+    "1.2.3": ({"NDS", "SNDS", "DIN", "SANDS"}, {
+        "title": "Certification & Attestation",
+        "purpose": "The sponsor's signed certification/attestation for this "
+                   "submission.",
+        "guidance": "Certification & attestation forms live at 1.2.3. The ANDS "
+                    "Sponsor Attestation applies to an ANDS, not to this "
+                    "submission type — provide the certification/attestation "
+                    "your submission type requires.",
+        "generator_key": None,       # do not offer to generate an ANDS attestation
+    }),
+}
+
+
 def _build_node(module: str, node: dict, cs_be_only: bool,
                 submission_type: str = "ANDS",
                 dosage_form_class: str = "ir_solid_oral") -> dict:
     section = node["s"]
     url_key = node.get("u", "ectd")
-    return {
+    gen = node.get("gen")
+    item = {
         "id": _slug(section),
         "module": module,
         "section": section,
@@ -397,8 +425,8 @@ def _build_node(module: str, node: dict, cs_be_only: bool,
         "depth": section.count("."),
         "applicability": _applicability(node, module, cs_be_only, submission_type, dosage_form_class),
         "affordances": list(node.get("aff", [])),
-        "generator_key": node.get("gen"),
-        "ai_draftable": node.get("gen") in LLM_DRAFTABLE,
+        "generator_key": gen,
+        "ai_draftable": gen in LLM_DRAFTABLE,
         "formats": list(node.get("fmt", [])),
         "bilingual": bool(node.get("bi")),
         "purpose": node.get("p", ""),
@@ -407,6 +435,12 @@ def _build_node(module: str, node: dict, cs_be_only: bool,
         "folder": _folder(module, section),
         "leaf_id": _leaf_id(section),
     }
+    adapt = _LABEL_ADAPT.get(section)
+    if adapt and str(submission_type or "ANDS").upper() in adapt[0]:
+        for k, v in adapt[1].items():
+            item[k] = v
+        item["ai_draftable"] = item["generator_key"] in LLM_DRAFTABLE
+    return item
 
 
 def section_tree(*, cs_be_only: bool = True,
