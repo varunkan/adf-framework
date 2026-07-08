@@ -102,15 +102,20 @@ export default function PortfolioPage() {
             const c = await dossierApi.getContent(d.dossier_id);
             if (!alive) return;
             const f = c.fees;
+            const feeAmount = f?.mitigation?.payable ?? f?.review_fee?.amount;
             const state: FeeState = f?.fee_paid
               ? { kind: "paid" }
               : f?.mitigation?.waived
                 ? { kind: "waived" }
-                : {
-                    kind: "due",
-                    amount: f?.mitigation?.payable ?? f?.review_fee?.amount ?? 0,
-                    currency: f?.review_fee?.currency || "CAD",
-                  };
+                // non-ANDS type: fee not auto-computed (amount null) → Schedule 1,
+                // never a misleading "$0 due"
+                : feeAmount == null
+                  ? { kind: "schedule1" }
+                  : {
+                      kind: "due",
+                      amount: feeAmount,
+                      currency: f?.review_fee?.currency || "CAD",
+                    };
             setFees((m) => ({ ...m, [d.dossier_id]: state }));
             // Round-9 (n=1; regops_publisher): technical-validation status on
             // the row — from the same content payload, no extra request.
@@ -274,7 +279,9 @@ export default function PortfolioPage() {
                 d.gate?.complete ? "READY" : "in progress",
                 fee?.kind === "due"
                   ? `due ${(fee as any).amount} ${(fee as any).currency}`
-                  : fee?.kind || ""];
+                  : fee?.kind === "schedule1"
+                    ? "see HC Schedule 1"
+                    : fee?.kind || ""];
       }),
     ];
     // Round-9 (n=5): versioned schema + all-UTC + SHA-256 manifest — the

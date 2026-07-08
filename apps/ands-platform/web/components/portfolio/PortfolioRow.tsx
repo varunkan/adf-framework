@@ -14,6 +14,8 @@ export type FeeState =
   | { kind: "unknown" }
   | { kind: "paid" }
   | { kind: "waived" }
+  // non-ANDS type: the fee grouping is not auto-computed — refer to Schedule 1
+  | { kind: "schedule1" }
   | { kind: "due"; amount: number; currency: string };
 
 // live PM(NOC) clock on a served Form V allegation, from the lifecycle service.
@@ -71,6 +73,8 @@ function FeeChip({ state }: { state: FeeState }) {
       return <span className="chip ready">Fee paid</span>;
     case "waived":
       return <span className="chip ready">Fee waived</span>;
+    case "schedule1":
+      return <span className="chip" title="This submission type's fee grouping is not auto-computed — refer to HC Schedule 1 (Fees Order).">Fee · see Schedule 1</span>;
     case "due":
       return (
         <span className="chip blocked">

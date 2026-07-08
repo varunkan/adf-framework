@@ -1826,14 +1826,19 @@ class DossierService:
             submission_type=submission_type,
             dosage_form_class=dosage_form_class)
         today = date.today().isoformat()
-        review_fee = fees.ands_review_fee(today)
+        # submission-type-aware: the ANDS comparative-studies fee is emitted only
+        # for an ANDS; other types name their HC Schedule 1 grouping (amount None)
+        # instead of stating the wrong ANDS fee.
+        review_fee = fees.review_fee(today, submission_type)
         fee_paid = bool(idx.get("fee_paid"))
         sme_granted = bool(idx.get("sme_granted"))
         fees_block = {
             "review_fee": review_fee,
-            "mitigation": fees.small_business_mitigation(
+            # SME mitigation only applies to a computed fee amount
+            "mitigation": (fees.small_business_mitigation(
                 review_fee["amount"], sme_granted=sme_granted,
-                first_ever_submission=False),
+                first_ever_submission=False)
+                if review_fee.get("amount") is not None else None),
             "right_to_sell": fees.right_to_sell(today, sme_granted=sme_granted),
             "fee_paid": fee_paid, "sme_granted": sme_granted}
         # structural eCTD validation (PDF-byte checks are in validate_submission)

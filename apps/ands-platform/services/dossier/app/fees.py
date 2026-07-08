@@ -78,6 +78,38 @@ def ands_review_fee(as_of) -> dict:
             "basis": ANDS_REVIEW_FEE_BASIS, "amount_fiscal_year": used_fy}
 
 
+# The ANDS 'comparative-studies' grouping fee is correct ONLY for an ANDS. HC
+# Schedule 1 (Fees Order) puts other submission types in DIFFERENT fee groupings.
+# Rather than state a plausible-but-wrong concrete fee (a MATERIAL_ERROR and a
+# trust breach), the tool names the correct grouping and refers to Schedule 1.
+_FEE_GROUPING_NOTE = {
+    "NDS": "New Drug Submission with a new active substance: a distinct, HIGHER "
+           "fee grouping than comparative-studies — refer to HC Schedule 1 (Fees "
+           "Order). Not auto-computed here.",
+    "SNDS": "Supplement to an NDS: the fee depends on the change level — refer to "
+            "HC Schedule 1 (Fees Order). Not auto-computed here.",
+    "SANDS": "Supplement to an ANDS: the fee depends on the change level — refer "
+             "to HC Schedule 1 (Fees Order). Not auto-computed here.",
+    "DIN": "DIN application without supporting clinical/nonclinical/CMC data: a "
+           "distinct, LOWER fee grouping than comparative-studies — refer to HC "
+           "Schedule 1 (Fees Order). Not auto-computed here.",
+}
+
+
+def review_fee(as_of, submission_type: str = "ANDS") -> dict:
+    """Submission-type-aware review fee. The comparative-studies grouping fee is
+    emitted (computed) ONLY for an ANDS; every other type names its correct HC
+    Schedule 1 grouping with amount=None (``computed`` False) — the tool never
+    states a wrong concrete fee for a grouping it does not model."""
+    st = str(submission_type or "ANDS").upper()
+    if st == "ANDS":
+        return {**ands_review_fee(as_of), "computed": True, "submission_type": "ANDS"}
+    return {"fiscal_year": fiscal_year(as_of), "amount": None, "currency": CURRENCY,
+            "basis": _FEE_GROUPING_NOTE.get(st, "Refer to HC Schedule 1 (Fees "
+                     "Order) for this submission type. Not auto-computed here."),
+            "amount_fiscal_year": None, "computed": False, "submission_type": st}
+
+
 def small_business_mitigation(amount, *, sme_granted: bool,
                               first_ever_submission: bool) -> dict:
     """SME pre-market mitigation on a review-fee ``amount``.

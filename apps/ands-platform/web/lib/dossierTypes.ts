@@ -132,8 +132,11 @@ export interface OutlineView {
 }
 
 export interface FeesBlock {
-  review_fee: { fiscal_year: string; amount: number; currency: string; basis: string };
-  mitigation: { reduction: number; waived: boolean; payable: number; note: string };
+  // amount is null for non-ANDS types — the fee grouping is not auto-computed;
+  // basis names the correct HC Schedule 1 grouping. computed=false then.
+  review_fee: { fiscal_year: string; amount: number | null; currency: string;
+    basis: string; computed?: boolean; submission_type?: string };
+  mitigation: { reduction: number; waived: boolean; payable: number; note: string } | null;
   right_to_sell: { amount: number; due_date: string; note: string };
   fee_paid: boolean;
   sme_granted: boolean;

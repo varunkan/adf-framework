@@ -1296,20 +1296,29 @@ function FeesWidget({
   if (!fees) return <div className="mut">Loading fee…</div>;
   const fee = fees.review_fee;
   const m = fees.mitigation;
+  // The comparative-studies fee is only computed for an ANDS. For other
+  // submission types the tool names the correct HC Schedule 1 grouping instead
+  // of stating a wrong concrete number (honest, not $0).
+  const computed = fee.amount != null;
   return (
     <div className="fees-widget">
       <div className="notice">
-        Current ANDS review fee ({fee.fiscal_year}):{" "}
-        <b>${fee.amount.toLocaleString()} {fee.currency}</b>
-        {m.waived ? (
-          <> — <b>waived</b> (first-ever submission).</>
-        ) : m.reduction ? (
-          // m.reduction is a DOLLAR amount (see fees.small_business_mitigation)
-          <> — small-business payable{" "}
-            <b>${m.payable.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>{" "}
-            ({Math.round((m.reduction / fee.amount) * 100)}% reduction).</>
-        ) : null}
-        <div className="mut" style={{ fontSize: 12, marginTop: 4 }}>{m.note}</div>
+        {computed ? (
+          <>Current ANDS review fee ({fee.fiscal_year}):{" "}
+          <b>${fee.amount!.toLocaleString()} {fee.currency}</b>
+          {m?.waived ? (
+            <> — <b>waived</b> (first-ever submission).</>
+          ) : m?.reduction ? (
+            // m.reduction is a DOLLAR amount (see fees.small_business_mitigation)
+            <> — small-business payable{" "}
+              <b>${m.payable.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>{" "}
+              ({Math.round((m.reduction / fee.amount!) * 100)}% reduction).</>
+          ) : null}
+          {m?.note && <div className="mut" style={{ fontSize: 12, marginTop: 4 }}>{m.note}</div>}</>
+        ) : (
+          <><b>Review fee — refer to Health Canada Schedule 1.</b>
+          <div className="mut" style={{ fontSize: 12.5, marginTop: 4 }}>{fee.basis}</div></>
+        )}
       </div>
       <div className="notice">
         Right to Sell (annual): ${fees.right_to_sell.amount.toLocaleString()} —
