@@ -454,7 +454,8 @@ ${outstanding ? `<ul>${outstanding}</ul>` : "<p>Nothing outstanding — every re
                       guard because g.missing can legitimately hold two entries
                       for the same section. */}
                   {g.missing
-                    .filter((m) => m.module && m.section !== "1.2.2")
+                    .filter((m) => m.module && m.section !== "1.2.2"
+                                   && m.section !== "fee_payment")
                     .map((m, i) => (
                     <li key={`${m.module}-${m.section}-${i}`} style={{ fontSize: 12 }}>
                       {blockerLink(

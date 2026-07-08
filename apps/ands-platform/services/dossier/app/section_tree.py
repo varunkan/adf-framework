@@ -468,6 +468,20 @@ def _build_node(module: str, node: dict, cs_be_only: bool,
                      if section == "5.3.1"
                      else "Summarise this evidence in the CS-BE (1.6).")
             item["guidance"] = f"{r['evidence']} ({r['citation']}) {where}"
+    # 5.3.5: for a topical (clinical-endpoint) or orally-inhaled (comparative
+    # clinical/PD) ANDS this is a REACHABLE conditional arm — say so, instead of
+    # the innovator-only "a generic does not repeat clinical trials" text.
+    if section == "5.3.5" and st == "ANDS" and item.get("applicability") == "conditional":
+        r = comparative_evidence.route(dosage_form_class)
+        if r["route"] == "topical_clinical_invitro":
+            item["guidance"] = ("A locally-acting topical generic may demonstrate "
+                                "equivalence by a comparative CLINICAL endpoint "
+                                "study — place that report here (5.3.5).")
+        elif r["route"] == "oip_studies":
+            item["guidance"] = ("An orally-inhaled generic typically provides "
+                                "comparative clinical / pharmacodynamic evidence "
+                                "in addition to comparative PK — place those "
+                                "reports here (5.3.5).")
     # 3.2.P.2: the ICH M9 BCS-based biowaiver applies ONLY to immediate-release
     # solid oral products — do not recommend it for any other dosage form.
     if section == "3.2.P.2" and str(dosage_form_class or "") != "ir_solid_oral":

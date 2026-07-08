@@ -54,3 +54,19 @@ def test_ands_module4_still_na():
                                      submission_type="ANDS")
     m4 = next(x for x in tower if x["module"] == "4")
     assert m4["state"] == "na"
+
+
+# -- gap 3: gate.missing lists eCTD section 1.2.2 at most once ----------------
+def test_fee_reminder_does_not_collide_with_the_122_document(client):
+    client.post("/api/dossier/dossiers", json={"dossier_id": "e930401",
+                "title": "t", "submission_type": "ANDS"})
+    gate = client.get("/api/dossier/dossiers/e930401/content").json()["gate"]
+    secs = [m["section"] for m in gate["missing"]]
+    assert secs.count("1.2.2") <= 1           # the DOCUMENT gap, once
+    assert "fee_payment" in secs              # the fee reminder is distinct
+
+
+# -- gap 4: 5.3.5 guidance reflects the topical comparative-clinical arm ------
+def test_topical_535_guidance_mentions_the_clinical_endpoint():
+    n = _node(_tree(submission_type="ANDS", dosage_form_class="topical_local"), "5.3.5")
+    assert "clinical" in n["guidance"].lower() and "does not repeat" not in n["guidance"].lower()

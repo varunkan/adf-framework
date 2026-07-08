@@ -1872,7 +1872,10 @@ class DossierService:
                          "your review — confirm each as your own content "
                          "before filing"})
         if not fee_paid:
-            missing.append({"section": "1.2.2", "module": "1",
+            # a DISTINCT pseudo-section so the fee-payment reminder never
+            # collides with the 1.2.2 (Fees form) DOCUMENT gap in gate.missing —
+            # eCTD section 1.2.2 must appear at most once in the checklist count.
+            missing.append({"section": "fee_payment", "module": "1",
                             "title": "Fee payment / small-business status "
                                      "(arrange before filing)"})
         for e in validation.get("errors", []):
