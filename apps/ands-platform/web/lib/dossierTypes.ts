@@ -636,6 +636,9 @@ export interface ContentState {
   // Studio's core generic small-molecule authoring (null for the in-core case).
   product_class?: string;
   product_class_note?: string | null;
+  // swarm gap #19: controlled-substance OCS/CDSA obligations advisory
+  controlled_substance?: boolean;
+  controlled_substance_note?: string | null;
   version: string;
   modules: ModuleView[];
   gate: {

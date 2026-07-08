@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS dossier_index (
     submission_type TEXT,
     dosage_form_class TEXT,
     product_class   TEXT,
+    controlled_substance INTEGER NOT NULL DEFAULT 0,
     cs_be_only      INTEGER NOT NULL DEFAULT 1,
     din             TEXT,
     company_id      TEXT,
@@ -206,6 +207,7 @@ class SqliteDossierRepository:
         "ALTER TABLE dossier_index ADD COLUMN labelling_owner TEXT",
         "ALTER TABLE dossier_index ADD COLUMN dosage_form_class TEXT",
         "ALTER TABLE dossier_index ADD COLUMN product_class TEXT",
+        "ALTER TABLE dossier_index ADD COLUMN controlled_substance INTEGER NOT NULL DEFAULT 0",
     )
 
     # DDL that must run on pre-existing DBs too (the durable audit ledger +
@@ -472,11 +474,11 @@ class SqliteDossierRepository:
         uid = new_id()
         self.db.execute(
             "INSERT INTO dossier_index (dossier_id, uid, title, submission_type, "
-            "dosage_form_class, product_class, "
+            "dosage_form_class, product_class, controlled_substance, "
             "cs_be_only, din, company_id, sponsor, drug_product, owner, "
             "title_fr, labelling_owner, "
             "tenant_id, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(dossier_id) DO UPDATE SET title=excluded.title, "
             # a re-create keeps the original uid — never re-key the ledger
             "uid=COALESCE(dossier_index.uid, excluded.uid), "
@@ -485,6 +487,7 @@ class SqliteDossierRepository:
             "dossier_index.dosage_form_class), "
             "product_class=COALESCE(excluded.product_class, "
             "dossier_index.product_class), "
+            "controlled_substance=excluded.controlled_substance, "
             "cs_be_only=excluded.cs_be_only, din=excluded.din, "
             # preserve REP identity across upserts that omit it (COALESCE keeps
             # the stored sponsor/company_id when the new rec leaves them NULL)
@@ -504,6 +507,7 @@ class SqliteDossierRepository:
             (rec["dossier_id"], uid, rec["title"], rec.get("submission_type"),
              rec.get("dosage_form_class") or None,
              rec.get("product_class") or None,
+             1 if rec.get("controlled_substance") else 0,
              1 if rec.get("cs_be_only", True) else 0, rec.get("din"),
              rec.get("company_id") or None, rec.get("sponsor") or None,
              rec.get("drug_product") or None, rec.get("owner") or None,

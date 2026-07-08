@@ -117,6 +117,8 @@ export interface CreateDossierBody {
   dosage_form_class?: string;
   // TIER-B: product class (for the honest out-of-core scope note)
   product_class?: string;
+  // swarm gap #19: scheduled drug → OCS/CDSA advisory
+  controlled_substance?: boolean;
   sponsor?: string;
   owner?: string;
   labelling_owner?: string;

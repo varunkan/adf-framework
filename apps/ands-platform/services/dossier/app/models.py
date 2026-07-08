@@ -15,6 +15,8 @@ class CreateDossierIn(BaseModel):
     # Tier B: the product class — for the honest scope note when it is outside
     # ANDS Studio's core generic small-molecule authoring. See product_scope.py.
     product_class: str = "small_molecule"
+    # a scheduled drug carries OCS/CDSA obligations beyond the submission
+    controlled_substance: bool = False
     cs_be_only: bool = True
     din: str = ""
     drug_product: str = ""   # the real product name (distinct from a nickname title)

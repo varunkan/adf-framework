@@ -25,6 +25,14 @@ _ID_RE = re.compile(r"^[a-z]\d{6,7}$")
 # a lifecycle placement suffixes the working sequence onto the base leaf id
 _SEQ_SUFFIX_RE = re.compile(r"^(?P<base>.+)-\d{4}$")
 
+# Swarm gap #19: a scheduled drug carries obligations BEYOND the drug submission.
+_CONTROLLED_SUBSTANCE_NOTE = (
+    "This product is flagged as a controlled substance. Beyond this drug "
+    "submission, additional Office of Controlled Substances (OCS) obligations "
+    "apply under the Controlled Drugs and Substances Act (CDSA) — e.g. a dealer's "
+    "licence, security requirements and reporting. ANDS Studio does not manage "
+    "those; confirm the applicable OCS requirements for your schedule.")
+
 # regulatory activities a working sequence can belong to
 SEQUENCE_PURPOSES = ("initial", "response", "supplement",
                      "annual-notification")
@@ -1886,6 +1894,10 @@ class DossierService:
             # (None for the in-core generic small-molecule chemical drug)
             "product_class": product_class,
             "product_class_note": product_scope.note(product_class),
+            # a scheduled drug carries OCS/CDSA obligations BEYOND the submission
+            "controlled_substance": bool(idx.get("controlled_substance")),
+            "controlled_substance_note": (_CONTROLLED_SUBSTANCE_NOTE
+                if idx.get("controlled_substance") else None),
             # honest scope note for non-ANDS submission types (None for ANDS)
             "scope_note": tree.get("scope_note"),
             # Tier A: the comparative-evidence route for this dosage form
@@ -1969,6 +1981,7 @@ class DossierService:
                                  or "ir_solid_oral",
             # Tier B: the product class (for the honest out-of-core scope note)
             "product_class": _s(data.get("product_class")) or "small_molecule",
+            "controlled_substance": bool(data.get("controlled_substance")),
             # cs_be_only is an ANDS-only comparative-BE concept. Force it FALSE
             # for every non-ANDS type so a direct API create can never leak
             # 'CS-BE' onto an innovator NDS / DIN (backend enforcement — not

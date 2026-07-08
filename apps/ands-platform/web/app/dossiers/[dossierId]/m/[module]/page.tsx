@@ -320,6 +320,13 @@ ${outstanding ? `<ul>${outstanding}</ul>` : "<p>Nothing outstanding — every re
               {content.product_class_note}
             </div>
           )}
+          {/* swarm gap #19: OCS/CDSA obligations live beyond the drug submission */}
+          {content.controlled_substance_note && (
+            <div className="notice warn" style={{ marginBottom: 14, fontSize: 13 }}>
+              <b>Controlled substance — obligations beyond this submission.</b>{" "}
+              {content.controlled_substance_note}
+            </div>
+          )}
           {/* TIER-A comparative-evidence route: for a generic, the dosage form
               decides whether Health Canada expects an in-vivo BE (PK) study or a
               biowaiver / non-PK route applies. Shown once at the top of the

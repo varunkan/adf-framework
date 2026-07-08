@@ -251,6 +251,8 @@ export default function DossiersHome() {
   const [dosageForm, setDosageForm] = useState<string>("ir_solid_oral");
   // TIER-B: product class → honest out-of-core scope banner
   const [productClass, setProductClass] = useState<string>("small_molecule");
+  // swarm gap #19: a scheduled drug carries OCS/CDSA obligations beyond the filing
+  const [controlledSubstance, setControlledSubstance] = useState(false);
   const [sponsor, setSponsor] = useState("");
   const [owner, setOwner] = useState("");
   const [busy, setBusy] = useState(false);
@@ -449,6 +451,7 @@ export default function DossiersHome() {
         dosage_form_class: GENERIC_FAMILY.has(subType) ? dosageForm : "ir_solid_oral",
         // TIER-B: the product class (for the honest out-of-core scope note)
         product_class: productClass,
+        controlled_substance: controlledSubstance,
         sponsor: sponsor.trim() || undefined,
         owner: owner.trim() || undefined,
       });
@@ -820,6 +823,17 @@ export default function DossiersHome() {
                       </div>
                     );
                   })()}
+                  {/* swarm gap #19: flag a scheduled drug so the builder surfaces
+                      the OCS/CDSA obligations that live BEYOND the submission. */}
+                  <label style={{ display: "flex", alignItems: "flex-start",
+                    gap: 6, fontSize: 12, marginTop: 10, fontWeight: 400 }}>
+                    <input type="checkbox" checked={controlledSubstance}
+                      style={{ width: "auto", marginTop: 2 }}
+                      onChange={(e) => setControlledSubstance(e.target.checked)} />
+                    <span>This is a <b>controlled substance</b> (scheduled under the
+                      CDSA) — surfaces the additional Office of Controlled
+                      Substances obligations.</span>
+                  </label>
                 </div>
               </div>
               <div>
