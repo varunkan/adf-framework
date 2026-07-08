@@ -45,6 +45,27 @@ export const ROADMAP: RoadmapEntry[] = [
       "S3 sink. Today the full audit trail is viewable and exportable in-app " +
       "(CSV / JSON / plain-text) on this page.",
   },
+  {
+    id: "ectd4",
+    title: "eCTD 4.0 (HL7 RPS) submission format",
+    targetQuarter: "When Health Canada sets a mandatory date",
+    status: "planned",
+    detail:
+      "What is in force TODAY — and what ANDS Studio builds: ICH eCTD 3.2.2 + " +
+      "the Canadian Module 1 v2.2 backbone (index.xml / ca-regional.xml, DTD-" +
+      "validated). eCTD 4.0 is NOT mandated: Health Canada has published only a " +
+      "DRAFT Canadian Module 1 Technical Implementation Guide for v4.0 and is in " +
+      "stakeholder consultation — no mandatory date is set, and 3.2.2 remains " +
+      "the accepted format. 4.0 is not a version bump but a different backbone: " +
+      "it is built on the HL7 Regulated Product Submission (RPS) message " +
+      "standard (XML Schemas + controlled vocabularies / contexts-of-use + " +
+      "cross-submission document reuse) rather than the 3.2.2 DTD folder tree. " +
+      "Our upgrade path when HC finalises it: a parallel RPS backbone/validation " +
+      "engine and a controlled-vocabulary layer in the dossier service — the " +
+      "guided journey, authoring, fees, e-sign, validation, portfolio and " +
+      "registry all carry over unchanged. We will not imply 4.0 support before " +
+      "HC accepts it.",
+  },
 ];
 
 export const ssoEntry = (): RoadmapEntry =>

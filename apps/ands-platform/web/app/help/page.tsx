@@ -13,6 +13,61 @@ import { Term } from "@/components/Term";
 type Rule = { rule: string; rule_id: string; family: string;
   severity: string; description: string };
 
+// TIER-C: special submission pathways — HC-verified (canada.ca, Jul 2026),
+// honestly ADVISORY (ANDS Studio explains + cites them; it does not automate
+// them). Mirrors journey.special_pathways (catalog is the authoritative copy).
+const SPECIAL_PATHWAYS = [
+  { id: "priority_review", label: "Priority Review", kind: "expedited",
+    summary: "An accepted Priority Review shortens the review target to 180 "
+      + "calendar days (vs. 300 for a standard submission).",
+    eligibility: "An NDS/SNDS for a serious, life-threatening or severely "
+      + "debilitating disease with substantial evidence of clinical "
+      + "effectiveness; requires a request Health Canada accepts before filing.",
+    citation: "HC Priority Review of Drug Submissions Policy & Guidance." },
+  { id: "noc_c", label: "Notice of Compliance with conditions (NOC/c)",
+    kind: "conditional authorization",
+    summary: "Authorisation on PROMISING clinical evidence (a surrogate/clinical "
+      + "endpoint reasonably likely to predict benefit), with conditions.",
+    eligibility: "A serious condition where the sponsor undertakes CONFIRMATORY "
+      + "trials, plus increased monitoring and labelling/advertising restrictions "
+      + "until the conditions are met.",
+    citation: "HC Guidance Document: Notice of Compliance with Conditions." },
+  { id: "pediatric", label: "Pediatric submission / data", kind: "attribute",
+    summary: "A pediatric indication or pediatric data carries specific data "
+      + "expectations and may qualify for a data-protection extension.",
+    eligibility: "Any submission proposing pediatric use or containing pediatric "
+      + "study results supporting a pediatric indication.",
+    citation: "HC data protection (FDR C.08.004.1) + pediatric guidance." },
+  { id: "controlled_substance", label: "Controlled substance", kind: "attribute",
+    summary: "A scheduled drug triggers additional Office of Controlled "
+      + "Substances (OCS) obligations under the CDSA, on top of the submission.",
+    eligibility: "A medicinal ingredient scheduled under the Controlled Drugs and "
+      + "Substances Act — dealer's licence, security and reporting via the OCS.",
+    citation: "Controlled Drugs and Substances Act; HC OCS requirements." },
+  { id: "cta", label: "Clinical Trial Application (CTA)", kind: "pre-market",
+    summary: "A PRE-market authorisation to run a trial — a different track from "
+      + "a market (NDS/ANDS) submission.",
+    eligibility: "Sponsors running a phase I-III trial of a drug not yet "
+      + "authorised for the studied use; filed under Part C, Division 5.",
+    citation: "Food and Drug Regulations, Part C, Division 5 (CTA)." },
+  { id: "fixed_dose_combination", label: "Fixed-dose combination (FDC)",
+    kind: "attribute",
+    summary: "Two or more medicinal ingredients in one dosage form must justify "
+      + "the combination.",
+    eligibility: "Requires a combination rationale (each component's "
+      + "contribution, dosing) and, for a generic FDC, comparative evidence "
+      + "appropriate to the combination.",
+    citation: "HC guidance on fixed-dose combination drug products." },
+  { id: "complex_generic", label: "Complex generic", kind: "attribute",
+    summary: "A generic of a complex product (long-acting injectable, inhaled, "
+      + "topical, drug-device) often needs product-specific evidence beyond a "
+      + "simple PK study.",
+    eligibility: "A dosage form / route where standard bioequivalence is "
+      + "insufficient — follow the product-specific HC guidance (see the "
+      + "dossier's dosage-form comparative-evidence route).",
+    citation: "HC product-specific comparative bioavailability guidance." },
+] as const;
+
 // R9-OVERALL "No end-to-end journey scope/time preview" (n=1) — every phase
 // of the full ANDS journey at once, with rough planning figures, so a
 // first-time filer can size the effort BEFORE starting. Labels mirror the
@@ -501,6 +556,47 @@ export default function HelpPage() {
               <Link href="/roadmap#lifecycle-changes">roadmap, target
               Q2 2027</Link>.
             </p>
+          </div>
+        </section>
+
+        {/* TIER-C: special submission pathways — recognised + cited, honestly
+            marked advisory (ANDS Studio explains them; it does not automate the
+            Priority Review clock, NOC/c conditions, OCS licences, etc.). */}
+        <section id="special-pathways"
+          style={{ marginTop: 40, scrollMarginTop: 80 }}>
+          <h2>Special submission pathways &amp; considerations</h2>
+          <div className="card glass" style={{ padding: "18px 22px" }}>
+            <p style={{ margin: 0, fontSize: 13.5 }}>
+              These Health Canada pathways and attributes can change how — or how
+              fast — a submission is reviewed. ANDS Studio <b>flags and cites</b>{" "}
+              each so you plan for it; it does <b>not</b> automate the pathway
+              itself (e.g. it does not run the Priority Review clock or track
+              NOC/c conditions). Confirm eligibility with Health Canada.
+            </p>
+            <ul style={{ listStyle: "none", margin: "14px 0 0", padding: 0,
+              display: "grid", gap: 12 }}>
+              {SPECIAL_PATHWAYS.map((p) => (
+                <li key={p.id} style={{ borderTop: "1px solid rgba(255,255,255,.08)",
+                  paddingTop: 10 }}>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 8,
+                    flexWrap: "wrap" }}>
+                    <b style={{ fontSize: 14 }}>{p.label}</b>
+                    <span className="chip" style={{ fontSize: 10.5 }}>{p.kind}</span>
+                    <span className="chip" style={{ fontSize: 10.5 }}>advisory</span>
+                  </div>
+                  <p style={{ margin: "5px 0 0", fontSize: 13.5, lineHeight: 1.5 }}>
+                    {p.summary}
+                  </p>
+                  <p className="mut" style={{ margin: "3px 0 0", fontSize: 12.5,
+                    lineHeight: 1.5 }}>
+                    <b>When:</b> {p.eligibility}
+                  </p>
+                  <p className="mut" style={{ margin: "3px 0 0", fontSize: 12 }}>
+                    {p.citation}
+                  </p>
+                </li>
+              ))}
+            </ul>
           </div>
         </section>
 
