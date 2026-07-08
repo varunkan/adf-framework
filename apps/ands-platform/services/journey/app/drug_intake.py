@@ -216,6 +216,7 @@ CE_OPHTHALMIC_OTIC_SOLUTION = "ophthalmic_otic_solution"
 CE_ORALLY_INHALED = "orally_inhaled"
 CE_TOPICAL_LOCAL = "topical_local"
 CE_MR_SOLID_ORAL = "mr_solid_oral"
+CE_COMPLEX_PARENTERAL = "complex_parenteral"
 
 # route -> (requires_be_study, label, evidence, citation)
 _CE_ROUTES = {
@@ -247,6 +248,13 @@ _CE_ROUTES = {
         "ingredients are qualitatively identical to the reference, the in-vivo "
         "BE study may be WAIVED - provide the biowaiver justification.",
         "HC Comparative Bioavailability Standards (aqueous solutions)."),
+    "complex_generic_pk": (
+        True, "Complex-generic comparative evidence (NOT a biowaiver)",
+        "A complex parenteral (long-acting injectable / microsphere / liposome / "
+        "suspension / depot) is NOT a simple aqueous-solution biowaiver: it needs "
+        "product-specific comparative evidence - comparative PK plus "
+        "physicochemical/in-vitro characterisation, often comparative clinical.",
+        "HC product-specific comparative bioavailability guidance (complex generics)."),
     "topical_clinical_invitro": (
         False, "Topical comparative evidence (not PK BE)",
         "A locally-acting topical generic demonstrates equivalence by "
@@ -261,6 +269,7 @@ _CE_FORM_TO_ROUTE = {
     "non_ir": "pk_be_study",
     CE_ORALLY_INHALED: "oip_studies",
     CE_PARENTERAL_SOLUTION: "parenteral_biowaiver",
+    CE_COMPLEX_PARENTERAL: "complex_generic_pk",
     CE_ORAL_SOLUTION: "aqueous_solution_biowaiver",
     CE_OPHTHALMIC_OTIC_SOLUTION: "aqueous_solution_biowaiver",
     CE_TOPICAL_LOCAL: "topical_clinical_invitro",
@@ -285,6 +294,7 @@ DOSAGE_FORMS = (
     (CE_MR_SOLID_ORAL, "Modified-release solid oral"),
     (CE_ORAL_SOLUTION, "Oral solution / aqueous liquid"),
     (CE_PARENTERAL_SOLUTION, "Parenteral (injectable) aqueous solution"),
+    (CE_COMPLEX_PARENTERAL, "Complex parenteral (long-acting injectable / microsphere / liposome)"),
     (CE_OPHTHALMIC_OTIC_SOLUTION, "Ophthalmic / otic solution"),
     (CE_ORALLY_INHALED, "Orally inhaled product"),
     (CE_TOPICAL_LOCAL, "Topical / locally-acting (dermal)"),

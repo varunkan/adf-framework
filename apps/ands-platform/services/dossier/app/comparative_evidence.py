@@ -25,6 +25,7 @@ PARENTERAL_SOLUTION = "parenteral_solution"
 OPHTHALMIC_OTIC_SOLUTION = "ophthalmic_otic_solution"
 ORALLY_INHALED = "orally_inhaled"
 TOPICAL_LOCAL = "topical_local"
+COMPLEX_PARENTERAL = "complex_parenteral"
 OTHER = "other"
 
 # Ordered for UI selects: (value, label)
@@ -33,6 +34,8 @@ DOSAGE_FORMS = (
     (MR_SOLID_ORAL, "Modified-release solid oral"),
     (ORAL_SOLUTION, "Oral solution / aqueous liquid"),
     (PARENTERAL_SOLUTION, "Parenteral (injectable) aqueous solution"),
+    (COMPLEX_PARENTERAL,
+     "Complex parenteral (long-acting injectable / microsphere / liposome / suspension)"),
     (OPHTHALMIC_OTIC_SOLUTION, "Ophthalmic / otic solution"),
     (ORALLY_INHALED, "Orally inhaled product"),
     (TOPICAL_LOCAL, "Topical / locally-acting (dermal)"),
@@ -79,6 +82,14 @@ _ROUTES = {
         "comparative CLINICAL endpoint or in-vitro release/permeation — not a "
         "systemic PK bioequivalence study.",
         "HC guidance for topical / locally-acting products."),
+    "complex_generic_pk": (
+        True, "Complex-generic comparative evidence (NOT a biowaiver)",
+        "A complex parenteral (long-acting injectable / microsphere / liposome / "
+        "suspension / depot) is NOT a simple aqueous-solution biowaiver: it "
+        "requires product-specific comparative evidence — comparative PK PLUS "
+        "physicochemical / in-vitro characterisation, and often comparative "
+        "clinical data — per the product-specific guidance.",
+        "HC product-specific comparative bioavailability guidance (complex generics)."),
 }
 
 _FORM_TO_ROUTE = {
@@ -86,6 +97,7 @@ _FORM_TO_ROUTE = {
     MR_SOLID_ORAL: "mr_pk_be_study",
     ORALLY_INHALED: "oip_studies",
     PARENTERAL_SOLUTION: "parenteral_biowaiver",
+    COMPLEX_PARENTERAL: "complex_generic_pk",
     ORAL_SOLUTION: "aqueous_solution_biowaiver",
     OPHTHALMIC_OTIC_SOLUTION: "aqueous_solution_biowaiver",
     TOPICAL_LOCAL: "topical_clinical_invitro",
