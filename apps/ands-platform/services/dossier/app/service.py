@@ -27,6 +27,25 @@ _ID_RE = re.compile(r"^[a-z]\d{6,7}$")
 # a lifecycle placement suffixes the working sequence onto the base leaf id
 _SEQ_SUFFIX_RE = re.compile(r"^(?P<base>.+)-\d{4}$")
 
+_GENERIC_FAMILY_TYPES = {"ANDS", "SANDS"}
+
+
+def _reject_contradictory_class(submission_type: str, product_class: str) -> None:
+    """A generic ANDS/SANDS is only for a small-molecule chemical drug. An
+    out-of-core product class (biologic/biosimilar/radiopharm/veterinary/
+    disinfectant/NHP) must file as an NDS/SNDS — reject the wrong-pathway combo."""
+    st = str(submission_type or "ANDS").upper()
+    pc = str(product_class or "small_molecule").strip().lower()
+    if st in _GENERIC_FAMILY_TYPES and pc not in ("small_molecule", ""):
+        raise ProblemError(
+            422, f"a {pc.replace('_', ' ')} cannot be filed as an {st}",
+            detail="This product class is authorized through a full New Drug "
+                   "Submission (NDS/SNDS), not the abbreviated (ANDS) generic "
+                   "pathway. Set the submission type to NDS/SNDS, or the product "
+                   "class to small-molecule.",
+            rule="product_class_pathway_conflict")
+
+
 def _special_pathways_of(idx: dict) -> list:
     """The dossier's flagged special-pathway ids (stored as a JSON list)."""
     raw = idx.get("special_pathways")
@@ -2002,6 +2021,12 @@ class DossierService:
                          "configured ID convention",
                     detail=note or f"configured rule: {convention}",
                     rule="dossier_id_convention")
+        # A biosimilar/biologic/radiopharm/etc CANNOT be a generic ANDS/SANDS —
+        # HC files it as a full NDS/SNDS. Reject the contradictory combination up
+        # front so the tool never scaffolds/fees/exports a wrong-pathway dossier.
+        _reject_contradictory_class(
+            _s(data.get("submission_type")).upper() or "ANDS",
+            _s(data.get("product_class")) or "small_molecule")
         rec = self.repo.create_dossier_index({
             "dossier_id": dossier_id,
             "title": _s(data.get("title")) or dossier_id,
@@ -2229,6 +2254,47 @@ class DossierService:
                                  reason=reason, data=data)
         return {"dossier_id": _s(dossier_id), "owner": new_owner,
                 "reason": reason}
+
+    def reclassify(self, dossier_id: str, data: dict,
+                   tenant_id: str | None = None) -> dict:
+        """Correct a dossier's classification after creation (swarm r3: a
+        restored/mis-set dossier was trapped on the wrong pathway, and the
+        controlled_substance flag was create-time only). Merges the requested
+        product_class / submission_type / dosage_form_class / controlled_substance
+        / special_pathways over the current values, re-validates the pathway
+        combination, and records the change on the durable ledger."""
+        self._tenant_guard(dossier_id, tenant_id)
+        idx = self.repo.get_dossier_index(_s(dossier_id))
+        if not idx:
+            raise ProblemError(404, "no such dossier", detail=_s(dossier_id))
+        data = data or {}
+        submission_type = (_s(data.get("submission_type")).upper()
+                           or _s(idx.get("submission_type")).upper() or "ANDS")
+        product_class = (_s(data.get("product_class"))
+                         or _s(idx.get("product_class")) or "small_molecule")
+        # a biosimilar/biologic cannot be a generic ANDS/SANDS — same guard as create
+        _reject_contradictory_class(submission_type, product_class)
+        dosage_form_class = (_s(data.get("dosage_form_class"))
+                             or _s(idx.get("dosage_form_class")) or "ir_solid_oral")
+        controlled = (bool(data.get("controlled_substance"))
+                      if "controlled_substance" in data
+                      else bool(idx.get("controlled_substance")))
+        special = ([str(x) for x in (data.get("special_pathways") or [])]
+                   if "special_pathways" in data else _special_pathways_of(idx))
+        # cs_be_only is ANDS-only; force false off the ANDS path
+        cs_be = submission_type == "ANDS" and (
+            bool(data.get("cs_be_only")) if "cs_be_only" in data
+            else bool(idx.get("cs_be_only")))
+        self.repo.reclassify_index(
+            _s(dossier_id), submission_type=submission_type,
+            product_class=product_class, dosage_form_class=dosage_form_class,
+            controlled_substance=controlled, special_pathways=special,
+            cs_be_only=cs_be)
+        self._forward_governance("dossier.reclassified", _s(dossier_id),
+                                 reason="classification corrected",
+                                 data={"submission_type": submission_type,
+                                       "product_class": product_class})
+        return self.content_state(dossier_id)
 
     def list_archived(self, tenant_id: str | None = None) -> dict:
         """The recoverable 'trash' view — soft-archived dossiers a user can

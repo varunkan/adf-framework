@@ -559,6 +559,23 @@ class SqliteDossierRepository:
             "SELECT * FROM dossier_index WHERE dossier_id = ?", (dossier_id,))
         return self._index_row(row) if row else None
 
+    def reclassify_index(self, dossier_id: str, *, submission_type: str,
+                         product_class: str, dosage_form_class: str,
+                         controlled_substance: bool, special_pathways: list,
+                         cs_be_only: bool) -> dict | None:
+        """Correct a dossier's classification attributes after creation (swarm
+        r3: no post-create correction path existed)."""
+        self.db.execute(
+            "UPDATE dossier_index SET submission_type = ?, product_class = ?, "
+            "dosage_form_class = ?, controlled_substance = ?, "
+            "special_pathways = ?, cs_be_only = ?, updated_at = ? "
+            "WHERE dossier_id = ?",
+            (submission_type, product_class, dosage_form_class,
+             1 if controlled_substance else 0,
+             json.dumps(special_pathways or []),
+             1 if cs_be_only else 0, utcnow_iso(), dossier_id))
+        return self.get_dossier_index(dossier_id)
+
     def list_dossier_index(self, tenant_id: str | None = None) -> list[dict]:
         # WS3: the working catalog excludes soft-archived dossiers.
         if tenant_id:

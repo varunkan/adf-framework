@@ -233,6 +233,13 @@ def build_app(service: DossierService) -> FastAPI:
             dossier_id, str((body or {}).get("owner", "")),
             str((body or {}).get("reason", "")), x_tenant_id or None)
 
+    @router.post("/dossiers/{dossier_id}/reclassify")
+    def reclassify(dossier_id: str, body: dict | None = None,
+                   x_tenant_id: str = Header(default="", alias="X-Tenant-Id")):
+        # correct product_class / submission_type / dosage_form_class /
+        # controlled_substance / special_pathways on an existing dossier
+        return service.reclassify(dossier_id, body or {}, x_tenant_id or None)
+
     @router.get("/validation/rules")
     def validation_rules():
         # static catalogue — the depth surface regulatory ops evaluate on
