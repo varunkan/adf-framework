@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from ands_shared import EventEnvelope, ProblemError, new_id, utcnow_iso
 
-from . import content_slots, drug_intake, dossier_id, journey, readiness_card, tracking
+from . import (content_slots, drug_intake, dossier_id, journey, product_class,
+               readiness_card, tracking)
 from .ports import SessionRepository
 
 # step key -> the signal a successful CTA writes (validated below against STAGES).
@@ -131,6 +132,7 @@ class JourneyService:
             "submission_types": drug_intake.SUBMISSION_TYPES,
             "be_rulesets": drug_intake.list_be_rulesets(),
             "dosage_forms": drug_intake.list_dosage_forms(),
+            "product_classes": product_class.list_product_classes(),
             "dossier_branches": dossier_id.list_branches(),
         }
 

@@ -8,6 +8,8 @@ the branching guidance the conversational intake renders.
 
 from __future__ import annotations
 
+from . import product_class as _product_class
+
 # -- submission-type router (from content_model) -----------------------------
 SUBMISSION_TYPES = {
     "NDS": {"label": "New Drug Submission", "ands_content_model": False,
@@ -366,6 +368,17 @@ def assess(answers: dict) -> dict:
     if not route.get("valid"):
         result["eligible_ands"] = False
         return result
+
+    # TIER-B: 'is this even the right tool?' — an out-of-core product class
+    # (biologic/biosimilar/radiopharm/veterinary/disinfectant/NHP) is handed off
+    # HONESTLY rather than silently authored as a generic chemical drug.
+    if answers.get("product_class"):
+        pc = _product_class.scope(_s(answers.get("product_class")))
+        result["checks"]["product_class"] = pc
+        if not pc["in_scope"]:
+            result["advisories"].append({
+                "rule": "product_class_out_of_scope",
+                "message": pc["advisory"]})
 
     crp = answers.get("crp")
     if crp:
