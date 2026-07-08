@@ -300,6 +300,16 @@ ${outstanding ? `<ul>${outstanding}</ul>` : "<p>Nothing outstanding — every re
           opByLeaf={opByLeaf}
         />
         <main className="ws-main">
+          {/* Submission-type scope: ANDS Studio is purpose-built for ANDS
+              (generics). For an NDS / SNDS / DIN it shows the CORRECT eCTD
+              structure, validation and fees, but the scientific dossier is
+              authored externally — stated plainly, never hidden. */}
+          {content.scope_note && (
+            <div className="notice warn" style={{ marginBottom: 14, fontSize: 13 }}>
+              <b>{content.submission_type} — outside ANDS Studio&apos;s core scope.</b>{" "}
+              {content.scope_note}
+            </div>
+          )}
           {/* Round-9 builder_forms MAJOR "No guided onboarding" (n=6) — the
               dismissible, replayable first-run walkthrough. */}
           <FirstRunWizard open={tourOpen} onClose={closeTour} />

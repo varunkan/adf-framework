@@ -608,6 +608,10 @@ export type ExportOutcome = ExportOk | ExportBlocked;
 export interface ContentState {
   dossier_id: string;
   cs_be_only: boolean;
+  // the submission type driving the content model; scope_note is a plain-
+  // language caveat for non-ANDS types (null for a fully-supported ANDS).
+  submission_type?: string;
+  scope_note?: string | null;
   version: string;
   modules: ModuleView[];
   gate: {
