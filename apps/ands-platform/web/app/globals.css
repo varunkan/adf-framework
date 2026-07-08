@@ -14,7 +14,14 @@
 }
 
 *{box-sizing:border-box}
-html,body{padding:0;margin:0}
+/* Visual-QA fix (2026-07-07): an absolutely-positioned .term-pop glossary
+   tooltip on a term near the right edge (rails, tables) extends ~160px past
+   the viewport and, being an abs-positioned box, adds to document scrollWidth
+   even while hidden — producing a page-wide horizontal scrollbar on any page
+   with a right-side <Term>. `overflow-x: clip` stops the page from scrolling
+   sideways WITHOUT establishing a scroll container, so position:sticky (the
+   top nav) keeps working. `overflow-y: visible` is preserved. */
+html,body{padding:0;margin:0;overflow-x:clip}
 body{
   font:15.5px/1.62 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
   color:var(--ink); min-height:100vh;
