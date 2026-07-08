@@ -24,7 +24,9 @@ _PATHWAYS: dict[str, tuple[str, str, str]] = {
     "noc_c": (
         "Notice of Compliance with conditions (NOC/c)",
         "Authorisation on PROMISING clinical evidence (a surrogate/clinical "
-        "endpoint reasonably likely to predict benefit), conditional on the "
+        "endpoint reasonably likely to predict benefit) for a serious, "
+        "life-threatening OR severely debilitating disease with an unmet need or "
+        "a significant improvement over existing therapies — conditional on the "
         "sponsor's undertaking to run CONFIRMATORY trials plus increased "
         "monitoring and labelling/advertising restrictions.",
         "HC Guidance Document: Notice of Compliance with Conditions (NOC/c)."),

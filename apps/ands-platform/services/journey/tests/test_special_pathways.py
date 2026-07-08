@@ -46,3 +46,10 @@ def test_every_pathway_is_honest_advisory_with_a_citation():
 
 def test_unknown_pathway_is_none():
     assert sp.pathway("teleport") is None
+
+
+def test_noc_c_eligibility_names_severely_debilitating_and_unmet_need():  # r3 gap 6
+    p = sp.pathway("noc_c")
+    e = p["eligibility"].lower()
+    assert "severely debilitating" in e
+    assert "unmet" in e or "significant improvement" in e

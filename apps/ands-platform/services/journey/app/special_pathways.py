@@ -49,10 +49,14 @@ _PATHWAYS: tuple[dict, ...] = (
         "summary": "Market authorisation granted on PROMISING clinical evidence "
                    "(a surrogate or clinical endpoint reasonably likely to "
                    "predict clinical benefit), with conditions.",
-        "eligibility": "A serious/life-threatening condition where the sponsor "
-                       "undertakes to complete CONFIRMATORY trials to verify "
-                       "benefit, plus increased monitoring, defined labelling and "
-                       "advertising restrictions until the conditions are met.",
+        "eligibility": "A serious, life-threatening OR severely debilitating "
+                       "disease AND either an unmet medical need (no effective "
+                       "therapy marketed in Canada) or a significant improvement "
+                       "in benefit/risk over existing therapies — where the "
+                       "sponsor undertakes to complete CONFIRMATORY trials to "
+                       "verify benefit, plus increased monitoring and defined "
+                       "labelling/advertising restrictions until the conditions "
+                       "are met.",
         "citation": "HC Guidance Document: Notice of Compliance with Conditions "
                     "(NOC/c).",
     },

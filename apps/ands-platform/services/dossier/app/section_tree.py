@@ -389,10 +389,21 @@ def _applicability(node: dict, module: str, cs_be_only: bool,
     # route — keep admin + product info required, downgrade heavy technical.
     if st == "DIN" and module in ("3", "5") and node.get("a") == _R:
         return "optional"
+    # DIN: the QOS (2.3) summarises Module 3 — which is optional on the DIN route.
+    # Keeping 2.3 hard-required while its source data is optional is an internal
+    # contradiction; align it (optional/change-dependent).
+    if st == "DIN" and sec == "2.3":
+        return "optional"
     # SANDS is a post-NOC supplement: it scopes to the CHANGED modules, so the
     # full fresh-ANDS Module 3 CMC set is CHANGE-DEPENDENT (conditional), not all
     # unconditionally required (HC Post-NOC Changes guidance).
     if st == "SANDS" and module == "3" and node.get("a") == _R:
+        return "conditional"
+    # SANDS labelling (1.3.x — Product Monograph / labels) is only triggered by a
+    # LABEL-IMPACTING change; HC scopes it to such changes, so it is conditional
+    # for a supplement, not unconditionally required (e.g. a manufacturing-site
+    # change needs no new PM/labels).
+    if st == "SANDS" and sec.startswith("1.3") and node.get("a") == _R:
         return "conditional"
     return node.get("a", _O)
 
@@ -403,7 +414,7 @@ def _applicability(node: dict, module: str, cs_be_only: bool,
 # neutral, correct title/purpose/guidance. Keyed by section -> (types to adapt,
 # overrides). ANDS (and, for 2.3, SANDS as a generic) keep the base labels.
 _LABEL_ADAPT = {
-    "2.3": ({"NDS", "SNDS", "DIN"}, {
+    "2.3": ({"NDS", "SNDS", "DIN", "SANDS"}, {
         "title": "Quality Overall Summary (QOS)",
         "purpose": "The quality summary of Module 3.",
         "guidance": "Summarises drug substance + drug product + stability from "
@@ -455,6 +466,10 @@ def _build_node(module: str, node: dict, cs_be_only: bool,
         for k, v in adapt[1].items():
             item[k] = v
         item["ai_draftable"] = item["generator_key"] in LLM_DRAFTABLE
+    # 2.3 QOS variant name by submission type: ANDS keeps QOS-CE(BE); a DIN uses
+    # the HC DINA variant name; NDS/SNDS/SANDS the neutral QOS (set above).
+    if section == "2.3" and str(submission_type or "ANDS").upper() == "DIN":
+        item["title"] = "Quality Overall Summary — QOS-CE (DINA)"
     # Route-aware evidence prose: the 5.3.1 / 1.6 nodes hard-code a PK-BE (AUC/Cmax
     # 90% CI) requirement. When the dosage form's route is a biowaiver / topical
     # clinical-in-vitro / OIP / post-NOC supplement, that framing is wrong — state
