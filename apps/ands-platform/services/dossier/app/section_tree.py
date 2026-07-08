@@ -362,6 +362,12 @@ def _applicability(node: dict, module: str, cs_be_only: bool,
             return "required"
         if st == "SNDS":
             return "conditional"              # a brand supplement may add trials
+        # a locally-acting topical generic can demonstrate equivalence by a
+        # comparative CLINICAL endpoint — that report lives in 5.3.5, so it is a
+        # reachable conditional arm for such an ANDS (not hard na).
+        if st == "ANDS" and comparative_evidence.route(
+                dosage_form_class)["route"] == "topical_clinical_invitro":
+            return "conditional"
         return "na"                           # ANDS / SANDS / DIN never file these
     # 2.4–2.7 nonclinical/clinical summaries (base-flagged cs_be_suppressed):
     # an innovator NDS requires the full set; the generic path suppresses them.
@@ -440,6 +446,19 @@ def _build_node(module: str, node: dict, cs_be_only: bool,
         for k, v in adapt[1].items():
             item[k] = v
         item["ai_draftable"] = item["generator_key"] in LLM_DRAFTABLE
+    # Route-aware evidence prose: the 5.3.1 / 1.6 nodes hard-code a PK-BE (AUC/Cmax
+    # 90% CI) requirement. When the dosage form's route is a biowaiver / topical
+    # clinical-in-vitro / OIP / post-NOC supplement, that framing is wrong — state
+    # the correct route's evidence (from comparative_evidence) instead.
+    st = str(submission_type or "ANDS").upper()
+    if section in _BE_EVIDENCE and st in _GENERIC_FAMILY:
+        r = comparative_evidence.route(dosage_form_class, submission_type=st)
+        if r["route"] not in ("pk_be_study", "mr_pk_be_study"):
+            item["purpose"] = r["label"]
+            where = ("The full report/justification goes in Module 5.3.1."
+                     if section == "5.3.1"
+                     else "Summarise this evidence in the CS-BE (1.6).")
+            item["guidance"] = f"{r['evidence']} ({r['citation']}) {where}"
     return item
 
 
