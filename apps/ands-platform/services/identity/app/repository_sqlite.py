@@ -188,6 +188,11 @@ class SqliteIdentityRepository:
             "SELECT * FROM sessions WHERE token = ?", (token,))
         return dict(row) if row else None
 
+    def touch_session(self, token, expires_at) -> None:
+        # sliding renewal — move a live session's expiry forward
+        self.db.execute("UPDATE sessions SET expires_at = ? WHERE token = ?",
+                        (expires_at, token))
+
     def delete_session(self, token) -> None:
         self.db.execute("DELETE FROM sessions WHERE token = ?", (token,))
 

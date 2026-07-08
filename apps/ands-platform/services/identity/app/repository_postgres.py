@@ -180,6 +180,11 @@ class PostgresIdentityRepository:
     def get_session(self, token):
         return self._one("SELECT * FROM sessions WHERE token = %s", (token,))
 
+    def touch_session(self, token, expires_at):
+        # sliding renewal — move a live session's expiry forward
+        self._exec("UPDATE sessions SET expires_at = %s WHERE token = %s",
+                   (expires_at, token))
+
     def delete_session(self, token):
         self._exec("DELETE FROM sessions WHERE token = %s", (token,))
 

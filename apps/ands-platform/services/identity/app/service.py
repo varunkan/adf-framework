@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta, timezone
 
 from ands_shared import EventEnvelope, EventType, ProblemError, new_id
@@ -10,7 +11,23 @@ from . import billing, entitlements, oidc, rbac, security
 from .ports import IdentityRepository
 
 PLATFORM_TENANT = ""          # owner accounts live outside any tenant
-SESSION_TTL = timedelta(hours=12)
+
+
+def _ttl_hours(env: str, default: int) -> int:
+    try:
+        return max(1, int(os.environ.get(env, "").strip() or default))
+    except ValueError:
+        return default
+
+
+# Session lifetime. A 12h hard TTL logged ACTIVE users out mid-work every ~12h
+# ("login is lost when I click Portfolio/Dossiers"). Default to a multi-day
+# ROLLING window (renewed on activity in ``resolve``), env-configurable so
+# compliance can tighten it. An idle session still expires after this window.
+SESSION_TTL = timedelta(hours=_ttl_hours("ANDS_SESSION_TTL_HOURS", 24 * 7))
+# Renew a session only once it is past this fraction of its life, so an active
+# request does not rewrite the row every call (at most one write per half-TTL).
+SESSION_RENEW_AFTER = SESSION_TTL / 2
 # CAMP-SSO-OIDC: an in-flight OIDC login round-trip is short-lived — the browser
 # should complete the /authorize → callback hop promptly.
 SSO_FLOW_TTL = timedelta(minutes=10)
@@ -447,7 +464,8 @@ class IdentityService:
             expires = datetime.fromisoformat(row["expires_at"])
         except ValueError:
             return None
-        if expires < datetime.now(timezone.utc):
+        now = datetime.now(timezone.utc)
+        if expires < now:
             self.repo.delete_session(token)
             return None
         scope = row.get("scope") or "full"
@@ -472,6 +490,16 @@ class IdentityService:
                 403, "your workspace requires multi-factor authentication "
                 "— set it up to continue signing in",
                 rule="workspace_mfa_required")
+        # Sliding renewal: an ACTIVE full-scope session that is past half its
+        # life is extended to a fresh full TTL, so a working user is never logged
+        # out mid-session. mfa_setup tokens keep their short fixed life. The
+        # half-life guard bounds this to one write per SESSION_RENEW_AFTER window.
+        if scope == "full" and (expires - now) < SESSION_RENEW_AFTER:
+            renewed = (now + SESSION_TTL).isoformat()
+            try:
+                self.repo.touch_session(token, renewed)
+            except Exception:
+                pass          # renewal is best-effort; never fail a valid resolve
         return principal
 
     def _session_blocked_by_mandate(self, principal: dict) -> bool:

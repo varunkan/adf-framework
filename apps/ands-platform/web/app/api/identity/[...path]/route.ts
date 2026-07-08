@@ -8,7 +8,14 @@ export const dynamic = "force-dynamic";
 
 const BFF = process.env.IDENTITY_BFF_URL || "http://127.0.0.1:8014";
 const COOKIE = "ands_token";
-const MAX_AGE = 12 * 3600; // matches the identity service SESSION_TTL
+// Cookie lifetime MUST match the identity service SESSION_TTL (default 7 days,
+// env ANDS_SESSION_TTL_HOURS). A 12h cookie/session logged active users out
+// mid-work; the cookie is now re-issued on every successful auth/me (rolling
+// window) so it tracks the server-side sliding session renewal.
+const MAX_AGE = Number(process.env.ANDS_SESSION_TTL_HOURS || "168") * 3600;
+const COOKIE_OPTS = {
+  httpOnly: true, sameSite: "lax" as const, path: "/", maxAge: MAX_AGE,
+};
 
 async function forward(req: NextRequest, path: string[]) {
   const suffix = path.map(encodeURIComponent).join("/");
@@ -54,11 +61,15 @@ async function forward(req: NextRequest, path: string[]) {
     ) {
       try {
         const token = JSON.parse(buf.toString("utf8"))?.token;
-        if (token)
-          res.cookies.set(COOKIE, token, {
-            httpOnly: true, sameSite: "lax", path: "/", maxAge: MAX_AGE,
-          });
+        if (token) res.cookies.set(COOKIE, token, COOKIE_OPTS);
       } catch {}
+    } else if (upstream.ok && route === "auth/me") {
+      // Rolling cookie: a live session (the identity service just slid its
+      // expiry forward) → re-issue the SAME token with a fresh max-age so the
+      // browser cookie never expires out from under an active user and bounces
+      // them to /login.
+      const existing = req.cookies.get(COOKIE)?.value;
+      if (existing) res.cookies.set(COOKIE, existing, COOKIE_OPTS);
     }
     if (route === "auth/logout") res.cookies.delete(COOKIE);
     return res;
