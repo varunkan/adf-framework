@@ -44,6 +44,28 @@ const SUBMISSION_TYPES = [
       "approved product." },
 ] as const;
 
+// TIER-A: the dosage form drives the Health-Canada comparative-evidence route
+// for a generic. requiresBe=false forms open a biowaiver / non-PK route, which
+// makes the 5.3.1 BE study + 1.6 CS-BE summary CONDITIONAL rather than required.
+// Mirrors journey.drug_intake.DOSAGE_FORMS (kept in sync; the catalog is the
+// authoritative source, this is the create-form fallback).
+const DOSAGE_FORMS = [
+  { code: "ir_solid_oral", label: "Immediate-release solid oral (tablet/capsule)",
+    requiresBe: true },
+  { code: "mr_solid_oral", label: "Modified-release solid oral", requiresBe: true },
+  { code: "oral_solution", label: "Oral solution / aqueous liquid",
+    requiresBe: false },
+  { code: "parenteral_solution", label: "Parenteral (injectable) aqueous solution",
+    requiresBe: false },
+  { code: "ophthalmic_otic_solution", label: "Ophthalmic / otic solution",
+    requiresBe: false },
+  { code: "orally_inhaled", label: "Orally inhaled product", requiresBe: true },
+  { code: "topical_local", label: "Topical / locally-acting (dermal)",
+    requiresBe: false },
+  { code: "other", label: "Other / not sure", requiresBe: true },
+] as const;
+const GENERIC_FAMILY = new Set(["ANDS", "SANDS"]);
+
 // R9-CATALOG "Archive/delete reason is pure free text" (n=2): a controlled
 // vocabulary keeps archive reasons auditable and consistent; free-text detail
 // stays available but optional.
@@ -187,6 +209,8 @@ export default function DossiersHome() {
   // portfolio list view (WS6 fields already round-trip to the index).
   const [subType, setSubType] = useState<string>("ANDS");
   const [csBeOnly, setCsBeOnly] = useState(true);
+  // TIER-A: dosage form → comparative-evidence route (generic families only)
+  const [dosageForm, setDosageForm] = useState<string>("ir_solid_oral");
   const [sponsor, setSponsor] = useState("");
   const [owner, setOwner] = useState("");
   const [busy, setBusy] = useState(false);
@@ -380,6 +404,9 @@ export default function DossiersHome() {
         submission_type: subType,
         // cs_be_only only means something on the ANDS path; force false otherwise
         cs_be_only: subType === "ANDS" ? csBeOnly : false,
+        // TIER-A: the dosage form is a generic-family property (drives the
+        // comparative-evidence route); default the innovator paths to solid oral
+        dosage_form_class: GENERIC_FAMILY.has(subType) ? dosageForm : "ir_solid_oral",
         sponsor: sponsor.trim() || undefined,
         owner: owner.trim() || undefined,
       });
@@ -691,6 +718,40 @@ export default function DossiersHome() {
                       study.
                     </span>
                   </label>
+                )}
+                {/* TIER-A: dosage form → comparative-evidence route. Shown for
+                    the generic families (ANDS/SANDS) since it decides whether a
+                    comparative BE (PK) study is required or a biowaiver may
+                    apply — surfaced here, at the point of choice. */}
+                {GENERIC_FAMILY.has(subType) && (
+                  <div style={{ marginTop: 10 }}>
+                    <label>Dosage form <span className="mut"
+                      style={{ fontWeight: 400 }}>(comparative-evidence route)</span></label>
+                    <select value={dosageForm}
+                      onChange={(e) => setDosageForm(e.target.value)}
+                      style={{ width: "100%" }}>
+                      {DOSAGE_FORMS.map((d) => (
+                        <option key={d.code} value={d.code}>{d.label}</option>
+                      ))}
+                    </select>
+                    {(() => {
+                      const d = DOSAGE_FORMS.find((x) => x.code === dosageForm);
+                      if (!d) return null;
+                      return d.requiresBe ? (
+                        <p style={{ fontSize: 12, lineHeight: 1.45, margin: "6px 0 0" }}>
+                          A comparative <b>bioequivalence (PK) study</b> is required
+                          — sections 5.3.1 (study report) and 1.6 (CS-BE summary)
+                          stay required.
+                        </p>
+                      ) : (
+                        <p style={{ fontSize: 12, lineHeight: 1.45, margin: "6px 0 0" }}>
+                          A <b>biowaiver / non-PK route</b> may apply — Health Canada
+                          may waive the in-vivo BE study, so 5.3.1 and 1.6 become{" "}
+                          <b>conditional</b>. You confirm the route for your product.
+                        </p>
+                      );
+                    })()}
+                  </div>
                 )}
               </div>
               <div>

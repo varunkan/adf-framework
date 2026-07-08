@@ -605,6 +605,18 @@ export interface ExportOk {
 
 export type ExportOutcome = ExportOk | ExportBlocked;
 
+// TIER-A: Health Canada comparative-evidence route for a generic's dosage form.
+// requires_be_study=false means a biowaiver / non-PK route may apply (the 5.3.1
+// PK study + 1.6 CS-BE summary drop from 'required' to 'conditional').
+export interface ComparativeEvidence {
+  dosage_form_class: string;
+  route: string;
+  requires_be_study: boolean;
+  label: string;
+  evidence: string;
+  citation: string;
+}
+
 export interface ContentState {
   dossier_id: string;
   cs_be_only: boolean;
@@ -612,6 +624,11 @@ export interface ContentState {
   // language caveat for non-ANDS types (null for a fully-supported ANDS).
   submission_type?: string;
   scope_note?: string | null;
+  // TIER-A: the dosage form + the Health-Canada comparative-evidence route it
+  // implies (present for a generic family — ANDS/SANDS — else null). Drives the
+  // "a biowaiver may apply" builder banner and whether 5.3.1/1.6 is required.
+  dosage_form_class?: string;
+  comparative_evidence?: ComparativeEvidence | null;
   version: string;
   modules: ModuleView[];
   gate: {

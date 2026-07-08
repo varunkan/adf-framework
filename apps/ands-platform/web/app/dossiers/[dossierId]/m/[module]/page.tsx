@@ -310,6 +310,40 @@ ${outstanding ? `<ul>${outstanding}</ul>` : "<p>Nothing outstanding — every re
               {content.scope_note}
             </div>
           )}
+          {/* TIER-A comparative-evidence route: for a generic, the dosage form
+              decides whether Health Canada expects an in-vivo BE (PK) study or a
+              biowaiver / non-PK route applies. Shown once at the top of the
+              builder so a filer of an injectable/solution/topical generic is not
+              led to run a study HC may waive. Only rendered on M5 & M1 (where the
+              5.3.1 study report + 1.6 CS-BE summary live) to stay unobtrusive. */}
+          {content.comparative_evidence &&
+           (moduleId === "5" || moduleId === "1") && (
+            <div
+              className={`notice ${content.comparative_evidence.requires_be_study ? "" : "ok"}`}
+              style={{ marginBottom: 14, fontSize: 13 }}
+            >
+              <b>
+                Comparative evidence — {content.comparative_evidence.label}
+                {content.comparative_evidence.requires_be_study
+                  ? " (BE study required)"
+                  : " (biowaiver may apply)"}
+              </b>
+              <div style={{ marginTop: 4 }}>
+                {content.comparative_evidence.evidence}
+              </div>
+              {!content.comparative_evidence.requires_be_study && (
+                <div style={{ marginTop: 4 }}>
+                  Because of this, sections <b>5.3.1</b> (BE study report) and{" "}
+                  <b>1.6</b> (CS-BE summary) are shown as <b>conditional</b> — file
+                  the biowaiver justification instead of a comparative PK study if
+                  the route applies to your product.
+                </div>
+              )}
+              <div className="mut" style={{ marginTop: 4, fontSize: 12 }}>
+                {content.comparative_evidence.citation}
+              </div>
+            </div>
+          )}
           {/* Round-9 builder_forms MAJOR "No guided onboarding" (n=6) — the
               dismissible, replayable first-run walkthrough. */}
           <FirstRunWizard open={tourOpen} onClose={closeTour} />

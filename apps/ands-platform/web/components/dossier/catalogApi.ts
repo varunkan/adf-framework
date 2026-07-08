@@ -113,6 +113,8 @@ export interface CreateDossierBody {
   title_fr?: string;
   submission_type?: string;
   cs_be_only?: boolean;
+  // TIER-A: dosage form driving the comparative-evidence route (generic family)
+  dosage_form_class?: string;
   sponsor?: string;
   owner?: string;
   labelling_owner?: string;
