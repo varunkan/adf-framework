@@ -12,6 +12,9 @@ class CreateDossierIn(BaseModel):
     # Tier A: the dosage form drives the comparative-evidence route (a biowaiver
     # form makes the in-vivo BE study conditional). See comparative_evidence.py.
     dosage_form_class: str = "ir_solid_oral"
+    # Tier B: the product class — for the honest scope note when it is outside
+    # ANDS Studio's core generic small-molecule authoring. See product_scope.py.
+    product_class: str = "small_molecule"
     cs_be_only: bool = True
     din: str = ""
     drug_product: str = ""   # the real product name (distinct from a nickname title)

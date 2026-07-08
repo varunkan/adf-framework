@@ -13,7 +13,7 @@ from . import (admin_sequence, ai_draft_meta, archive, assembly, content_model,
                content_plan, dossier_state, drafting, ectd_validation,
                export_pkg, fees, form_review, form_samples, form_schemas,
                generators, import_compat, llm_provider, monograph, pm_xml,
-               pm_xref, section_tree, shadow_run)
+               pm_xref, product_scope, section_tree, shadow_run)
 from . import audit_hook
 from .document_store import SqliteBlobStore
 from .ports import DossierRepository
@@ -1808,6 +1808,7 @@ class DossierService:
         # correct, DIFFERENT plan (not the generic-ANDS plan) — see section_tree.
         submission_type = _s(idx.get("submission_type")).upper() or "ANDS"
         dosage_form_class = _s(idx.get("dosage_form_class")) or "ir_solid_oral"
+        product_class = _s(idx.get("product_class")) or "small_molecule"
         states = self.repo.list_section_state(dossier_id)
         tree = section_tree.section_tree(cs_be_only=cs_be_only,
                                          submission_type=submission_type,
@@ -1876,6 +1877,10 @@ class DossierService:
             "dossier_id": dossier_id, "cs_be_only": cs_be_only,
             "submission_type": submission_type,
             "dosage_form_class": dosage_form_class,
+            # Tier B: the product class + its honest out-of-core scope note
+            # (None for the in-core generic small-molecule chemical drug)
+            "product_class": product_class,
+            "product_class_note": product_scope.note(product_class),
             # honest scope note for non-ANDS submission types (None for ANDS)
             "scope_note": tree.get("scope_note"),
             # Tier A: the comparative-evidence route for this dosage form
@@ -1957,6 +1962,8 @@ class DossierService:
             "submission_type": _s(data.get("submission_type")).upper() or "ANDS",
             "dosage_form_class": _s(data.get("dosage_form_class"))
                                  or "ir_solid_oral",
+            # Tier B: the product class (for the honest out-of-core scope note)
+            "product_class": _s(data.get("product_class")) or "small_molecule",
             "cs_be_only": bool(data.get("cs_be_only", True)),
             "din": din or None,
             # the real product name — distinct from a display title
