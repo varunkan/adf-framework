@@ -17,6 +17,8 @@ class CreateDossierIn(BaseModel):
     product_class: str = "small_molecule"
     # a scheduled drug carries OCS/CDSA obligations beyond the submission
     controlled_substance: bool = False
+    # swarm r2 enhancement: flagged special pathways (priority_review, noc_c, …)
+    special_pathways: list[str] = []
     cs_be_only: bool = True
     din: str = ""
     drug_product: str = ""   # the real product name (distinct from a nickname title)

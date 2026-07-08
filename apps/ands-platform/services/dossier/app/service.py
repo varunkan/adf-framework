@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ands_shared import EventEnvelope, EventType, ProblemError, utcnow_iso
 
+import json
 import os
 import re
 import secrets
@@ -13,7 +14,8 @@ from . import (admin_sequence, ai_draft_meta, archive, assembly, content_model,
                content_plan, dossier_state, drafting, ectd_validation,
                export_pkg, fees, form_review, form_samples, form_schemas,
                generators, import_compat, llm_provider, monograph, pm_xml,
-               pm_xref, product_scope, section_tree, shadow_run)
+               pm_xref, product_scope, section_tree, shadow_run,
+               special_pathways as special_pathways_mod)
 from . import audit_hook
 from .document_store import SqliteBlobStore
 from .ports import DossierRepository
@@ -24,6 +26,20 @@ _DIN_RE = re.compile(r"^\d{8}$")
 _ID_RE = re.compile(r"^[a-z]\d{6,7}$")
 # a lifecycle placement suffixes the working sequence onto the base leaf id
 _SEQ_SUFFIX_RE = re.compile(r"^(?P<base>.+)-\d{4}$")
+
+def _special_pathways_of(idx: dict) -> list:
+    """The dossier's flagged special-pathway ids (stored as a JSON list)."""
+    raw = idx.get("special_pathways")
+    if isinstance(raw, list):
+        return raw
+    if not raw:
+        return []
+    try:
+        v = json.loads(raw)
+        return v if isinstance(v, list) else []
+    except (ValueError, TypeError):
+        return []
+
 
 # Swarm gap #19: a scheduled drug carries obligations BEYOND the drug submission.
 _CONTROLLED_SUBSTANCE_NOTE = (
@@ -1906,6 +1922,10 @@ class DossierService:
             "controlled_substance": bool(idx.get("controlled_substance")),
             "controlled_substance_note": (_CONTROLLED_SUBSTANCE_NOTE
                 if idx.get("controlled_substance") else None),
+            # swarm r2 enhancement: honest, cited advisories for the special
+            # pathways the filer flagged (Priority Review, NOC/c, pediatric, …)
+            "special_pathways": special_pathways_mod.advisories(
+                _special_pathways_of(idx)),
             # honest scope note for non-ANDS submission types (None for ANDS)
             "scope_note": tree.get("scope_note"),
             # Tier A: the comparative-evidence route for this dosage form
@@ -1991,6 +2011,7 @@ class DossierService:
             # Tier B: the product class (for the honest out-of-core scope note)
             "product_class": _s(data.get("product_class")) or "small_molecule",
             "controlled_substance": bool(data.get("controlled_substance")),
+            "special_pathways": [str(x) for x in (data.get("special_pathways") or [])],
             # cs_be_only is an ANDS-only comparative-BE concept. Force it FALSE
             # for every non-ANDS type so a direct API create can never leak
             # 'CS-BE' onto an innovator NDS / DIN (backend enforcement — not
