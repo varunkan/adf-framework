@@ -341,6 +341,15 @@ button:disabled{opacity:.45;cursor:not-allowed;transform:none}
 
 /* ── dossier header module tabs (P0-4: per-module completeness) ────── */
 .module-tabs{display:flex;gap:5px;margin-left:18px}
+/* Mobile (2026-07-09): the 5 eCTD module tabs (~512px) exceed a phone viewport.
+   Without this the row was clipped by body's overflow-x:clip and M4/M5 were
+   unreachable. Take the full wrapped-topbar row, allow shrink, and scroll the
+   tabs horizontally so every module is reachable. */
+@media (max-width:720px){
+  .module-tabs{margin-left:0;min-width:0;flex:1 1 100%;max-width:100%;
+    overflow-x:auto;-webkit-overflow-scrolling:touch;
+    scrollbar-width:thin;padding-bottom:3px}
+}
 .mtab{position:relative;display:inline-flex;align-items:center;gap:7px;
   padding:7px 13px 9px;border-radius:9px;font-size:13px;font-weight:600;
   color:var(--mut);border:1px solid transparent;overflow:hidden}
