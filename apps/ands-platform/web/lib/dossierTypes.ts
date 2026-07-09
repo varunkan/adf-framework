@@ -644,7 +644,14 @@ export interface ContentState {
   din_type_note?: string | null;
   // swarm gap #19: controlled-substance OCS/CDSA obligations advisory
   controlled_substance?: boolean;
+  // swarm r7: true when the product NAME matches a scheduled-substance term but
+  // the flag was not explicitly set — a "detected, confirm" suggestion.
+  controlled_substance_inferred?: boolean;
   controlled_substance_note?: string | null;
+  // swarm r7: resolved bioequivalence ruleset (ICH M13A vs legacy) for a
+  // generic-family PK filing prepared today (null off the generic PK path).
+  be_ruleset?: { version: string; label: string; effective?: string;
+                 legacy_excluded?: boolean } | null;
   // swarm r2 enhancement: honest cited advisories for the flagged special pathways
   special_pathways?: { id: string; label: string; summary: string; citation: string; advisory_only: boolean }[];
   version: string;

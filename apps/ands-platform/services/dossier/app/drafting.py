@@ -46,8 +46,9 @@ _HINTS = {
         "Canadian Reference Product (with DIN), dosage form/strength, study "
         "design (e.g. single-dose fasting crossover), AUC and Cmax 90% "
         "confidence intervals against the 80.00–125.00% limits, the ruleset "
-        "applied (ICH M13A or legacy), and a clear bioequivalence "
-        "conclusion."),
+        "applied — ICH M13A for an immediate-release solid oral filed on/after "
+        "its 2025-12-27 cutover (full 90% CI on Cmax), otherwise the legacy "
+        "standard — and a clear bioequivalence conclusion."),
 }
 
 

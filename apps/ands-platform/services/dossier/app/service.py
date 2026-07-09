@@ -10,8 +10,9 @@ import re
 import secrets
 from datetime import date
 
-from . import (admin_sequence, ai_draft_meta, archive, assembly, content_model,
-               content_plan, dossier_state, drafting, ectd_validation,
+from . import (admin_sequence, ai_draft_meta, archive, assembly, be_ruleset,
+               content_model, content_plan, controlled_substances,
+               dossier_state, drafting, ectd_validation,
                export_pkg, fees, form_review, form_samples, form_schemas,
                generators, import_compat, llm_provider, monograph, pm_xml,
                pm_xref, product_scope, section_tree, shadow_run,
@@ -72,7 +73,11 @@ _CONTROLLED_SUBSTANCE_NOTE = (
 # Monograph applies to any DIN. The sub-type drives Module-3 CMC + QOS-CE(DINA):
 #   data_supported      -> chemical entity needing a quality review (M3 + QOS req)
 #   standard_referenced -> Category IV monograph / labelling standard (no CMC)
-_VALID_DIN_TYPES = {"data_supported", "standard_referenced"}
+# swarm r7 (e970008): HC codes DINA-labelling-standard and DINF-Category-IV as
+# DISTINCT application types; the round-6 "standard_referenced" collapsed them.
+# Accept the precise codes plus the round-6 value as a legacy alias.
+_VALID_DIN_TYPES = {"data_supported", "labelling_standard", "category_iv",
+                    "standard_referenced"}
 
 
 def _norm_din_type(submission_type: str, din_type: str) -> str:
@@ -89,22 +94,49 @@ _DIN_TYPE_NOTES = {
         "review: file the Module 3 CMC package (drug substance S + drug product P) "
         "and a Quality Overall Summary QOS-CE (DINA). No Product Monograph and no "
         "clinical data (a DIN is not a safety/efficacy review)."),
-    "standard_referenced": (
-        "Standard-referenced DIN (Category IV monograph / labelling standard, e.g. "
-        "an antacid): an administrative attestation — no Module 3 CMC data is filed "
-        "(GMP is attested; quality information is kept on file) and no Product "
-        "Monograph. Product information is the label: the Canadian Drug Facts Table "
-        "(Plain Language Labelling) conforming to the referenced monograph/standard."),
+    "labelling_standard": (
+        "DINA attesting to a Labelling Standard — a non-prescription product whose "
+        "formulation and labelling conform to a published Health Canada Labelling "
+        "Standard (e.g. the Acetylsalicylic Acid or Antacid Labelling Standard): an "
+        "administrative attestation with NO Module 3 CMC data filed (GMP attested, "
+        "quality kept on file) and no Product Monograph. The label — the Canadian "
+        "Drug Facts Table under Plain Language Labelling — is the product-information "
+        "vehicle."),
+    "category_iv": (
+        "DINF — a Category IV Monograph product (e.g. an antacid, antiseptic skin "
+        "cleanser, sunscreen): the sponsor attests the product conforms to the "
+        "referenced Category IV Monograph. NO Module 3 CMC data is filed and no "
+        "Product Monograph; product information is the label (Canadian Drug Facts "
+        "Table). Note: the Category IV 'monograph' is a labelling standard, NOT the "
+        "new-drug Product Monograph."),
+    "standard_referenced": (   # round-6 legacy value → labelling-standard / Cat IV
+        "Standard-referenced DIN (a Labelling Standard or Category IV monograph "
+        "attestation): no Module 3 CMC data filed and no Product Monograph; the "
+        "label (Canadian Drug Facts Table) is the vehicle. Re-select the precise "
+        "sub-type — DINA (labelling standard) or DINF (Category IV monograph)."),
     "": (
         "DIN sub-type not set. A DIN bears no Notice of Compliance, so no Product "
         "Monograph applies. Declare the sub-type: 'data-supported DINA' (chemistry "
-        "review — Module 3 + QOS required) or 'standard-referenced' (Category IV / "
-        "labelling standard — no CMC filed)."),
+        "review — Module 3 + QOS required), 'DINA — labelling standard' (no CMC), or "
+        "'DINF — Category IV monograph' (no CMC)."),
 }
 
 
 def _din_type_note(din_type: str) -> str:
     return _DIN_TYPE_NOTES.get(str(din_type or ""), _DIN_TYPE_NOTES[""])
+
+
+def _inferred_cs_note(term: str) -> str:
+    """swarm r7 (e970011): honest inferred controlled-substance advisory. The
+    product NAME matched a scheduled-substance term — a suggestion to confirm, not
+    an adjudication of the CDSA schedule."""
+    return (
+        f"This product's name matches a controlled-substance term (\"{term}\"), so "
+        "it appears to be scheduled under the Controlled Drugs and Substances Act "
+        "(CDSA). If so, Office of Controlled Substances (OCS) obligations apply "
+        "BEYOND this drug submission — a dealer's licence, security and reporting. "
+        "Confirm and set the controlled-substance flag; ANDS Studio does not manage "
+        "OCS requirements.")
 
 
 # regulatory activities a working sequence can belong to
@@ -1897,12 +1929,26 @@ class DossierService:
         # swarm r6: DIN sub-type (data_supported DINA vs standard_referenced) —
         # only meaningful for a DIN; drives PM/CMC/QOS applicability.
         din_type = _norm_din_type(submission_type, _s(idx.get("din_type")))
+        today = date.today().isoformat()
+        # swarm r7 (e970001): resolve the BE ruleset (ICH M13A vs legacy) for a
+        # generic-family filing prepared today, so the CS-BE (1.6/5.3.1) guidance
+        # states M13A for a post-cutover IR-solid-oral filing instead of hedging.
+        be_rs = (be_ruleset.resolve(today, dosage_form_class)
+                 if submission_type in ("ANDS", "SANDS") and product_in_scope
+                 else None)
+        # swarm r7 (e970011): infer a controlled-substance advisory from the
+        # product name when it is not explicitly flagged (suggestion, not override).
+        cs_explicit = bool(idx.get("controlled_substance"))
+        cs_term = controlled_substances.detect(_s(idx.get("title")),
+                                               _s(idx.get("drug_product")))
+        cs_inferred = bool(cs_term) and not cs_explicit
         states = self.repo.list_section_state(dossier_id)
         tree = section_tree.section_tree(cs_be_only=cs_be_only,
                                          submission_type=submission_type,
                                          dosage_form_class=dosage_form_class,
                                          product_in_scope=product_in_scope,
-                                         din_type=din_type)
+                                         din_type=din_type,
+                                         be_ruleset=(be_rs["version"] if be_rs else ""))
         modules = []
         for m in tree["modules"]:
             modules.append({
@@ -1916,7 +1962,6 @@ class DossierService:
             submission_type=submission_type,
             dosage_form_class=dosage_form_class,
             product_in_scope=product_in_scope, din_type=din_type)
-        today = date.today().isoformat()
         # submission-type-aware: the ANDS comparative-studies fee is emitted only
         # for an ANDS; other types name their HC Schedule 1 grouping (amount None)
         # instead of stating the wrong ANDS fee.
@@ -1936,6 +1981,21 @@ class DossierService:
         validation = (ectd_validation.validate(model) if model
                       else {"passed": True, "errors": [], "warnings": [],
                             "checked": 0})
+        # [r7-e970006] a legacy/restored dossier can persist a forbidden pathway
+        # combo (a biosimilar/biologic filed as an ANDS/SANDS) that create +
+        # reclassify now reject. Surface it as a validation ERROR so validation
+        # can never report passed=true for a combination intake forbids.
+        if (submission_type in _GENERIC_FAMILY_TYPES
+                and product_class not in ("small_molecule", "")):
+            validation = {**validation,
+                          "errors": list(validation.get("errors", [])) + [{
+                              "rule": "product_class_pathway_conflict",
+                              "severity": "error",
+                              "message": (f"A {product_class.replace('_', ' ')} "
+                                          f"cannot be filed as a {submission_type} "
+                                          "— it requires a full NDS/SNDS. Reclassify "
+                                          "the submission type or product class.")}],
+                          "passed": False}
         # combined "ready to file" gate: content + fee arranged + validation clean
         missing = list(section_gate["missing"])
         # SAFETY: surface the unconfirmed sample/AI drafts as an explicit
@@ -1985,10 +2045,18 @@ class DossierService:
             # (None for the in-core generic small-molecule chemical drug)
             "product_class": product_class,
             "product_class_note": product_scope.note(product_class),
-            # a scheduled drug carries OCS/CDSA obligations BEYOND the submission
-            "controlled_substance": bool(idx.get("controlled_substance")),
-            "controlled_substance_note": (_CONTROLLED_SUBSTANCE_NOTE
-                if idx.get("controlled_substance") else None),
+            # a scheduled drug carries OCS/CDSA obligations BEYOND the submission.
+            # swarm r7 (e970011): if not explicitly flagged, INFER a suggestion
+            # from the product name so an opioid/narcotic never silently omits the
+            # CDSA/OCS advisory (controlled_substance_inferred = detected, confirm).
+            "controlled_substance": cs_explicit,
+            "controlled_substance_inferred": cs_inferred,
+            "controlled_substance_note": (
+                _CONTROLLED_SUBSTANCE_NOTE if cs_explicit
+                else _inferred_cs_note(cs_term) if cs_inferred else None),
+            # swarm r7 (e970001): the resolved BE ruleset (ICH M13A vs legacy) for a
+            # generic-family filing prepared today (None off the generic PK path)
+            "be_ruleset": be_rs,
             # swarm r2 enhancement: honest, cited advisories for the special
             # pathways the filer flagged (Priority Review, NOC/c, pediatric, …)
             "special_pathways": special_pathways_mod.advisories(

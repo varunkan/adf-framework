@@ -320,10 +320,14 @@ ${outstanding ? `<ul>${outstanding}</ul>` : "<p>Nothing outstanding — every re
               {content.product_class_note}
             </div>
           )}
-          {/* swarm gap #19: OCS/CDSA obligations live beyond the drug submission */}
+          {/* swarm gap #19 + r7: OCS/CDSA obligations live beyond the drug
+              submission. An INFERRED advisory (name matched a scheduled term but
+              the flag was not set) reads as "detected — confirm". */}
           {content.controlled_substance_note && (
             <div className="notice warn" style={{ marginBottom: 14, fontSize: 13 }}>
-              <b>Controlled substance — obligations beyond this submission.</b>{" "}
+              <b>{content.controlled_substance_inferred
+                ? "Possible controlled substance — confirm."
+                : "Controlled substance — obligations beyond this submission."}</b>{" "}
               {content.controlled_substance_note}
             </div>
           )}

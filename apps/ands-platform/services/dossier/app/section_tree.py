@@ -372,6 +372,13 @@ _SCOPE_NOTES = {
 # the comparative-evidence artifacts whose applicability depends on dosage form
 # (a biowaiver route makes the in-vivo BE study conditional, not required)
 _BE_EVIDENCE = {"1.6", "5.3.1"}   # CS-BE summary, comparative-BE study report
+
+# swarm r7 (e970008): DIN sub-types that file NO Module-3 CMC data — an
+# attestation route. HC codes them distinctly: DINA attesting to a labelling
+# standard ("labelling_standard") and DINF Category IV Monograph ("category_iv");
+# "standard_referenced" is the round-6 value kept as a legacy alias. A
+# "data_supported" DINA (chemical-entity quality review) is the CMC path.
+_DIN_NO_CMC = {"standard_referenced", "labelling_standard", "category_iv"}
 # generic routes whose equivalence rests (partly) on comparative CLINICAL / PD
 # evidence — those study reports live in 5.3.5 and are summarised/overviewed in
 # 2.7 / 2.5, so those Module-2 clinical sections must be reachable (conditional).
@@ -461,13 +468,13 @@ def _applicability(node: dict, module: str, cs_be_only: bool,
         if sec == "1.3.1":
             return "na"
         if module == "3":
-            if din_type == "standard_referenced":
+            if din_type in _DIN_NO_CMC:
                 return "na"
             if node.get("a") == _R:
                 return "required" if din_type == "data_supported" else "conditional"
             return node.get("a", _O)
         if sec == "2.3":
-            if din_type == "standard_referenced":
+            if din_type in _DIN_NO_CMC:
                 return "na"
             return "required" if din_type == "data_supported" else "conditional"
         return node.get("a", _O)
@@ -540,7 +547,7 @@ def _build_node(module: str, node: dict, cs_be_only: bool,
                 submission_type: str = "ANDS",
                 dosage_form_class: str = "ir_solid_oral",
                 product_in_scope: bool = True,
-                din_type: str = "") -> dict:
+                din_type: str = "", be_ruleset: str = "") -> dict:
     section = node["s"]
     url_key = node.get("u", "ectd")
     gen = node.get("gen")
@@ -637,6 +644,20 @@ def _build_node(module: str, node: dict, cs_be_only: bool,
             # not the general comparative-BA page the node authors point at by default.
             if r["route"] == "oip_studies":
                 item["source_url"] = _URL["oip"]
+        elif be_ruleset == "M13A":
+            # [r7-e970001] IR-solid-oral BE study on the PK route filed post-cutover:
+            # ICH M13A governs (legacy excluded) — replace the static "M13A or
+            # legacy" hedge with the resolved standard.
+            where = ("The full study report goes in Module 5.3.1."
+                     if section == "5.3.1"
+                     else "Summarise it in the CS-BE (1.6).")
+            item["guidance"] = (
+                "The pivotal comparative bioavailability study vs. the Canadian "
+                "Reference Product must comply with ICH M13A (in force 2025-12-27): "
+                "the full 90% confidence interval for AUC AND Cmax within "
+                "80.00-125.00% (log-scale). The legacy point-estimate rule no longer "
+                "applies to an immediate-release solid oral filed on/after the "
+                "cutover. " + where)
     # 5.3.5: for a topical (clinical-endpoint) or orally-inhaled (comparative
     # clinical/PD) ANDS this is a REACHABLE conditional arm — say so, instead of
     # the innovator-only "a generic does not repeat clinical trials" text.
@@ -689,15 +710,15 @@ def section_tree(*, cs_be_only: bool = True,
                  submission_type: str = "ANDS",
                  dosage_form_class: str = "ir_solid_oral",
                  product_in_scope: bool = True,
-                 din_type: str = "") -> dict:
+                 din_type: str = "", be_ruleset: str = "") -> dict:
     """The full versioned M1–M5 tree with per-section applicability resolved for
-    the submission type (NDS / ANDS / SANDS / SNDS / DIN), dosage form, and — for
-    a DIN — the DIN sub-type (data_supported DINA vs standard_referenced)."""
+    the submission type (NDS / ANDS / SANDS / SNDS / DIN), dosage form, DIN
+    sub-type, and — for the PK-BE route — the resolved BE ruleset (M13A/legacy)."""
     st = str(submission_type or "ANDS").upper()
     modules = []
     for mod in _MODULES:
         nodes = [_build_node(mod["module"], n, cs_be_only, st, dosage_form_class,
-                             product_in_scope, din_type)
+                             product_in_scope, din_type, be_ruleset)
                  for n in mod["nodes"]]
         modules.append({"module": mod["module"], "title": mod["title"], "nodes": nodes})
     return {"version": SECTION_TREE_VERSION, "cs_be_only": bool(cs_be_only),
@@ -711,12 +732,13 @@ def section_tree(*, cs_be_only: bool = True,
 def all_nodes(*, cs_be_only: bool = True, submission_type: str = "ANDS",
               product_in_scope: bool = True,
               dosage_form_class: str = "ir_solid_oral",
-              din_type: str = "") -> list[dict]:
+              din_type: str = "", be_ruleset: str = "") -> list[dict]:
     return [n for m in section_tree(cs_be_only=cs_be_only,
                                     submission_type=submission_type,
                                     dosage_form_class=dosage_form_class,
                                     product_in_scope=product_in_scope,
-                                    din_type=din_type)["modules"]
+                                    din_type=din_type,
+                                    be_ruleset=be_ruleset)["modules"]
             for n in m["nodes"]]
 
 

@@ -225,7 +225,7 @@ def cs_be(ctx: dict) -> dict:
         f"  Design:                   {_g(ctx, 'study_design', default='single-dose, fasting, crossover')}\n"
         f"  AUC 90% CI:               {_g(ctx, 'auc_ci', default='[__-__%] (limits 80.00-125.00%)')}\n"
         f"  Cmax 90% CI / PE:         {_g(ctx, 'cmax', default='[__-__%] / [__%]')}\n"
-        f"  Ruleset:                  {_g(ctx, 'ruleset', default='ICH M13A / legacy per dosage-form class + filing date')}\n\n"
+        f"  Ruleset:                  {_g(ctx, 'ruleset', default='ICH M13A for an IR solid oral filed on/after 2025-12-27; otherwise the legacy standard')}\n\n"
         "Conclusion: the test product is / is not bioequivalent to the reference "
         "product on the above parameters.\n")
     return _pdf("Comprehensive Summary — Bioequivalence (CS-BE)", body, "cs-be")

@@ -62,17 +62,23 @@ const DIN_TYPES = [
   { code: "", label: "— select DIN sub-type —",
     note: "A DIN bears no Notice of Compliance, so no Product Monograph applies. "
       + "Pick the sub-type to resolve the Module-3 / QOS requirements." },
-  { code: "standard_referenced",
-    label: "Standard-referenced (Category IV monograph / labelling standard)",
-    note: "An administrative attestation (e.g. an antacid): no Module 3 CMC data "
-      + "is filed (GMP attested, quality kept on file) and no Product Monograph. "
-      + "Product information is the label — the Canadian Drug Facts Table (Plain "
-      + "Language Labelling) conforming to the referenced monograph/standard." },
   { code: "data_supported",
-    label: "Data-supported DINA (chemical entity — quality review)",
+    label: "DINA — data-supported (chemical entity, quality review)",
     note: "A chemical-entity pharmaceutical needing a quality review: file the "
       + "Module 3 CMC package (drug substance S + drug product P) and a QOS-CE "
       + "(DINA). No Product Monograph and no clinical data." },
+  { code: "labelling_standard",
+    label: "DINA — labelling standard (e.g. antacid, ASA)",
+    note: "A non-prescription product conforming to a published HC Labelling "
+      + "Standard: an administrative attestation — no Module 3 CMC data filed "
+      + "(GMP attested, quality kept on file) and no Product Monograph. The label "
+      + "(Canadian Drug Facts Table under Plain Language Labelling) is the vehicle." },
+  { code: "category_iv",
+    label: "DINF — Category IV monograph product",
+    note: "A product conforming to a Category IV Monograph (antacid, antiseptic, "
+      + "sunscreen …): the sponsor attests to the monograph — no Module 3 CMC data "
+      + "and no Product Monograph; product info is the label (Drug Facts Table). "
+      + "(The Category IV 'monograph' is a labelling standard, not the PM.)" },
 ] as const;
 
 // TIER-A: the dosage form drives the Health-Canada comparative-evidence route
