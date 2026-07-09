@@ -90,7 +90,33 @@ _ROUTES = {
         "physicochemical / in-vitro characterisation, and often comparative "
         "clinical data — per the product-specific guidance.",
         "HC product-specific comparative bioavailability guidance (complex generics)."),
+    # swarm r8-e970003: a SECOND-ENTRY short-acting beta2-agonist (SABA) MDI. HC's
+    # 1999 SABA-MDI guidance: systemic absorption does NOT reflect airway effect,
+    # so blood-level bioequivalence is not appropriate — a comparative
+    # PHARMACODYNAMIC clinical study (bronchodilation / bronchoprotection dose-
+    # response) is the required method to establish therapeutic equivalence.
+    "oip_saba_pd": (
+        True, "Second-entry SABA MDI comparative evidence (PD clinical study)",
+        "A second-entry short-acting beta2-agonist (SABA) MDI cannot rely on "
+        "blood-level bioequivalence — systemic absorption does not reflect airway "
+        "effect. A comparative PHARMACODYNAMIC clinical study (bronchodilation / "
+        "bronchoprotection dose-response) vs. the Canadian Reference Product is "
+        "REQUIRED to establish therapeutic equivalence, alongside comparative "
+        "in-vitro characterisation (delivered dose, APSD).",
+        "HC Guidance to Establish Equivalence or Relative Potency of Safety and "
+        "Efficacy of a Second Entry Short-Acting Beta2-Agonist MDI (1999)."),
 }
+
+# SABA active ingredients (INN / USAN) — a second-entry MDI of any of these
+# follows the 1999 SABA-MDI PD-study guidance, not the general OIP PK route.
+_SABA_TERMS = ("salbutamol", "albuterol", "levalbuterol", "levosalbutamol",
+               "terbutaline", "fenoterol", "pirbuterol", "orciprenaline",
+               "metaproterenol")
+
+
+def _is_saba(drug_name: str) -> bool:
+    low = str(drug_name or "").lower()
+    return any(t in low for t in _SABA_TERMS)
 
 _FORM_TO_ROUTE = {
     IR_SOLID_ORAL: "pk_be_study",
@@ -126,10 +152,12 @@ _SUPPLEMENT_ROUTE = (
     "HC Post-NOC Changes: Quality guidance.")
 
 
-def route(dosage_form_class: str, submission_type: str = "ANDS") -> dict:
+def route(dosage_form_class: str, submission_type: str = "ANDS",
+          drug_name: str = "") -> dict:
     """The comparative-evidence route for a dosage form + submission type: a
     plain-language plan + HC citation + whether an in-vivo BE study (5.3.1) is
-    required. A SANDS (post-NOC supplement) is change-dependent, not required."""
+    required. A SANDS (post-NOC supplement) is change-dependent, not required.
+    An orally-inhaled SABA (by drug_name) follows the 1999 SABA-MDI PD route."""
     df = _norm(dosage_form_class)
     if str(submission_type or "").upper() == "SANDS":
         requires, label, evidence, citation = _SUPPLEMENT_ROUTE
@@ -137,6 +165,8 @@ def route(dosage_form_class: str, submission_type: str = "ANDS") -> dict:
                 "requires_be_study": requires, "label": label,
                 "evidence": evidence, "citation": citation}
     key = _FORM_TO_ROUTE[df]
+    if df == ORALLY_INHALED and _is_saba(drug_name):
+        key = "oip_saba_pd"
     requires, label, evidence, citation = _ROUTES[key]
     return {"dosage_form_class": df, "route": key, "requires_be_study": requires,
             "label": label, "evidence": evidence, "citation": citation}

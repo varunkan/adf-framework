@@ -1945,13 +1945,17 @@ class DossierService:
         cs_term = controlled_substances.detect(_s(idx.get("title")),
                                                _s(idx.get("drug_product")))
         cs_inferred = bool(cs_term) and not cs_explicit
+        # swarm r9 (e970003): the product name drives drug-specific routing (e.g. a
+        # second-entry SABA MDI → the 1999 comparative-PD route).
+        drug_name = (_s(idx.get("title")) + " " + _s(idx.get("drug_product"))).strip()
         states = self.repo.list_section_state(dossier_id)
         tree = section_tree.section_tree(cs_be_only=cs_be_only,
                                          submission_type=submission_type,
                                          dosage_form_class=dosage_form_class,
                                          product_in_scope=product_in_scope,
                                          din_type=din_type,
-                                         be_ruleset=(be_rs["version"] if be_rs else ""))
+                                         be_ruleset=(be_rs["version"] if be_rs else ""),
+                                         drug_name=drug_name)
         modules = []
         for m in tree["modules"]:
             modules.append({
@@ -1964,7 +1968,8 @@ class DossierService:
             cs_be_only=cs_be_only, states=states,
             submission_type=submission_type,
             dosage_form_class=dosage_form_class,
-            product_in_scope=product_in_scope, din_type=din_type)
+            product_in_scope=product_in_scope, din_type=din_type,
+            drug_name=drug_name)
         # submission-type-aware: the ANDS comparative-studies fee is emitted only
         # for an ANDS; other types name their HC Schedule 1 grouping (amount None)
         # instead of stating the wrong ANDS fee.
@@ -2080,7 +2085,7 @@ class DossierService:
                                               submission_type=submission_type,
                                               dosage_form_class=dosage_form_class,
                                               product_in_scope=product_in_scope,
-                                              din_type=din_type),
+                                              din_type=din_type, drug_name=drug_name),
             "fees": fees_block, "validation": validation, "din": idx.get("din"),
             "evalidator": evalidator_cleared,
             # POLISH-SIGN-BANNER: ambient signature-readiness signal so the

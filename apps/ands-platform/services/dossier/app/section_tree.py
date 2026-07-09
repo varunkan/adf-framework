@@ -383,14 +383,15 @@ _DIN_NO_CMC = {"standard_referenced", "labelling_standard", "category_iv"}
 # evidence — those study reports live in 5.3.5 and are summarised/overviewed in
 # 2.7 / 2.5, so those Module-2 clinical sections must be reachable (conditional).
 _CLINICAL_EVIDENCE_ROUTES = (
-    "topical_clinical_invitro", "oip_studies", "complex_generic_pk")
+    "topical_clinical_invitro", "oip_studies", "complex_generic_pk",
+    "oip_saba_pd")
 
 
 def _applicability(node: dict, module: str, cs_be_only: bool,
                    submission_type: str = "ANDS",
                    dosage_form_class: str = "ir_solid_oral",
                    product_in_scope: bool = True,
-                   din_type: str = "") -> str:
+                   din_type: str = "", drug_name: str = "") -> str:
     st = str(submission_type or "ANDS").upper()
     sec = node["s"]
     # Module 4 (nonclinical study reports): only the innovator NDS requires it.
@@ -433,11 +434,16 @@ def _applicability(node: dict, module: str, cs_be_only: bool,
         # a locally-acting topical generic can demonstrate equivalence by a
         # comparative CLINICAL endpoint — that report lives in 5.3.5, so it is a
         # reachable conditional arm for such an ANDS (not hard na).
-        if st == "ANDS" and comparative_evidence.route(dosage_form_class)["route"] \
-                in _CLINICAL_EVIDENCE_ROUTES:
+        if st == "ANDS":
+            r = comparative_evidence.route(dosage_form_class, drug_name=drug_name)["route"]
+            # a second-entry SABA MDI: the comparative PD clinical study is
+            # de-facto REQUIRED (1999 SABA-MDI guidance), not merely reachable.
+            if r == "oip_saba_pd":
+                return "required"
             # a topical (clinical endpoint), orally-inhaled (comparative clinical/
             # PD) or complex-generic route places that evidence in 5.3.5 — reachable
-            return "conditional"
+            if r in _CLINICAL_EVIDENCE_ROUTES:
+                return "conditional"
         return "na"                           # ANDS / SANDS / DIN never file these
     # 2.4–2.7 nonclinical/clinical summaries (base-flagged cs_be_suppressed):
     # an innovator NDS requires the full set; the generic path suppresses them.
@@ -547,7 +553,8 @@ def _build_node(module: str, node: dict, cs_be_only: bool,
                 submission_type: str = "ANDS",
                 dosage_form_class: str = "ir_solid_oral",
                 product_in_scope: bool = True,
-                din_type: str = "", be_ruleset: str = "") -> dict:
+                din_type: str = "", be_ruleset: str = "",
+                drug_name: str = "") -> dict:
     section = node["s"]
     url_key = node.get("u", "ectd")
     gen = node.get("gen")
@@ -558,7 +565,7 @@ def _build_node(module: str, node: dict, cs_be_only: bool,
         "title": node["t"],
         "kind": node["k"],
         "depth": section.count("."),
-        "applicability": _applicability(node, module, cs_be_only, submission_type, dosage_form_class, product_in_scope, din_type),
+        "applicability": _applicability(node, module, cs_be_only, submission_type, dosage_form_class, product_in_scope, din_type, drug_name),
         "affordances": list(node.get("aff", [])),
         "generator_key": gen,
         "ai_draftable": gen in LLM_DRAFTABLE,
@@ -632,7 +639,8 @@ def _build_node(module: str, node: dict, cs_be_only: bool,
     # clinical-in-vitro / OIP / post-NOC supplement, that framing is wrong — state
     # the correct route's evidence (from comparative_evidence) instead.
     if section in _BE_EVIDENCE and st in _GENERIC_FAMILY:
-        r = comparative_evidence.route(dosage_form_class, submission_type=st)
+        r = comparative_evidence.route(dosage_form_class, submission_type=st,
+                                       drug_name=drug_name)
         if r["route"] not in ("pk_be_study", "mr_pk_be_study"):
             item["purpose"] = r["label"]
             where = ("The full report/justification goes in Module 5.3.1."
@@ -642,7 +650,7 @@ def _build_node(module: str, node: dict, cs_be_only: bool,
             # [r5-e970003] link the guidance to the route's governing HC document:
             # the OIP route follows the dedicated 2020 OIP comparative-PK guidance,
             # not the general comparative-BA page the node authors point at by default.
-            if r["route"] == "oip_studies":
+            if r["route"] in ("oip_studies", "oip_saba_pd"):
                 item["source_url"] = _URL["oip"]
         elif be_ruleset == "M13A":
             # [r7-e970001] IR-solid-oral BE study on the PK route filed post-cutover:
@@ -661,9 +669,17 @@ def _build_node(module: str, node: dict, cs_be_only: bool,
     # 5.3.5: for a topical (clinical-endpoint) or orally-inhaled (comparative
     # clinical/PD) ANDS this is a REACHABLE conditional arm — say so, instead of
     # the innovator-only "a generic does not repeat clinical trials" text.
-    if section == "5.3.5" and st == "ANDS" and item.get("applicability") == "conditional":
-        r = comparative_evidence.route(dosage_form_class)
-        if r["route"] == "topical_clinical_invitro":
+    if section == "5.3.5" and st == "ANDS" and item.get("applicability") in ("conditional", "required"):
+        r = comparative_evidence.route(dosage_form_class, drug_name=drug_name)
+        if r["route"] == "oip_saba_pd":
+            item["guidance"] = ("A second-entry SABA MDI must demonstrate "
+                                "therapeutic equivalence by a comparative "
+                                "PHARMACODYNAMIC clinical study (bronchodilation / "
+                                "bronchoprotection dose-response) vs. the reference "
+                                "— this is REQUIRED (PK alone is not sufficient); "
+                                "place that report here (5.3.5). (HC 1999 "
+                                "Second-Entry SABA MDI guidance.)")
+        elif r["route"] == "topical_clinical_invitro":
             item["guidance"] = ("A locally-acting topical generic may demonstrate "
                                 "equivalence by a comparative CLINICAL endpoint "
                                 "study — place that report here (5.3.5).")
@@ -724,21 +740,23 @@ def section_tree(*, cs_be_only: bool = True,
                  submission_type: str = "ANDS",
                  dosage_form_class: str = "ir_solid_oral",
                  product_in_scope: bool = True,
-                 din_type: str = "", be_ruleset: str = "") -> dict:
+                 din_type: str = "", be_ruleset: str = "",
+                 drug_name: str = "") -> dict:
     """The full versioned M1–M5 tree with per-section applicability resolved for
     the submission type (NDS / ANDS / SANDS / SNDS / DIN), dosage form, DIN
-    sub-type, and — for the PK-BE route — the resolved BE ruleset (M13A/legacy)."""
+    sub-type, the resolved BE ruleset (M13A/legacy), and — for an orally-inhaled
+    SABA (by drug_name) — the 1999 SABA-MDI comparative-PD route."""
     st = str(submission_type or "ANDS").upper()
     modules = []
     for mod in _MODULES:
         nodes = [_build_node(mod["module"], n, cs_be_only, st, dosage_form_class,
-                             product_in_scope, din_type, be_ruleset)
+                             product_in_scope, din_type, be_ruleset, drug_name)
                  for n in mod["nodes"]]
         modules.append({"module": mod["module"], "title": mod["title"], "nodes": nodes})
     return {"version": SECTION_TREE_VERSION, "cs_be_only": bool(cs_be_only),
             "submission_type": st, "scope_note": _SCOPE_NOTES.get(st),
             "comparative_evidence": comparative_evidence.route(
-                dosage_form_class, submission_type=st)
+                dosage_form_class, submission_type=st, drug_name=drug_name)
             if (st in _GENERIC_FAMILY and product_in_scope) else None,
             "modules": modules}
 
@@ -746,13 +764,15 @@ def section_tree(*, cs_be_only: bool = True,
 def all_nodes(*, cs_be_only: bool = True, submission_type: str = "ANDS",
               product_in_scope: bool = True,
               dosage_form_class: str = "ir_solid_oral",
-              din_type: str = "", be_ruleset: str = "") -> list[dict]:
+              din_type: str = "", be_ruleset: str = "",
+              drug_name: str = "") -> list[dict]:
     return [n for m in section_tree(cs_be_only=cs_be_only,
                                     submission_type=submission_type,
                                     dosage_form_class=dosage_form_class,
                                     product_in_scope=product_in_scope,
                                     din_type=din_type,
-                                    be_ruleset=be_ruleset)["modules"]
+                                    be_ruleset=be_ruleset,
+                                    drug_name=drug_name)["modules"]
             for n in m["nodes"]]
 
 

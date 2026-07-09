@@ -48,7 +48,12 @@ _PATHWAYS: tuple[dict, ...] = (
         "kind": "conditional_authorization",
         "summary": "Market authorisation granted on PROMISING clinical evidence "
                    "(a surrogate or clinical endpoint reasonably likely to "
-                   "predict clinical benefit), with conditions.",
+                   "predict clinical benefit), with conditions. The sponsor "
+                   "declares NOC/c eligibility in the submission cover letter; "
+                   "Health Canada issues a Qualifying Notice (QN) before the NOC/c "
+                   "(sponsor responds within 30 days with a Letter of "
+                   "Undertaking), and the confirmatory results are later filed as "
+                   "an SNDS-C that, once accepted, lifts the conditions.",
         "eligibility": "A serious, life-threatening OR severely debilitating "
                        "disease AND either an unmet medical need (no effective "
                        "therapy marketed in Canada) or a significant improvement "

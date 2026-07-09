@@ -26,9 +26,15 @@ _PATHWAYS: dict[str, tuple[str, str, str]] = {
         "Authorisation on PROMISING clinical evidence (a surrogate/clinical "
         "endpoint reasonably likely to predict benefit) for a serious, "
         "life-threatening OR severely debilitating disease with an unmet need or "
-        "a significant improvement over existing therapies — conditional on the "
-        "sponsor's undertaking to run CONFIRMATORY trials plus increased "
-        "monitoring and labelling/advertising restrictions.",
+        "a significant improvement over existing therapies. The sponsor must "
+        "DECLARE NOC/c eligibility in the submission COVER LETTER (and file within "
+        "60 days of an accepted advance-consideration request); Health Canada "
+        "issues a QUALIFYING NOTICE (QN) before granting the NOC/c, to which the "
+        "sponsor responds within 30 days, signing a Letter of Undertaking. It is "
+        "conditional on the undertaking to run CONFIRMATORY trials plus increased "
+        "monitoring and labelling/advertising restrictions; the final confirmatory "
+        "results are filed as an SNDS-C (Supplement to fulfil the conditions), and "
+        "Health Canada's acceptance of them lifts the conditions to a full NOC.",
         "HC Guidance Document: Notice of Compliance with Conditions (NOC/c)."),
     "pediatric": (
         "Pediatric submission / data",
