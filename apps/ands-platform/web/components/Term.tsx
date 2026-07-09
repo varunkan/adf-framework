@@ -1,4 +1,5 @@
 "use client";
+import { useRef, useState } from "react";
 import { TERMS } from "@/lib/terms";
 
 // R9-OVERALL "Rule-ID and eCTD jargon lacks inline plain-English explainers"
@@ -30,9 +31,29 @@ const EXTRA_TERMS: Record<string, string> = {
 // its plain-language meaning on hover/focus (keyboard-accessible).
 export function Term({ k, children }: { k: string; children?: React.ReactNode }) {
   const def = TERMS[k] ?? EXTRA_TERMS[k];
+  const ref = useRef<HTMLSpanElement>(null);
+  const [flip, setFlip] = useState(false);
   if (!def) return <>{children ?? k}</>;
+  // Keep the 280px popover on-screen: when the term sits near the right edge
+  // (right rail, table cells), flip the popover to open leftward so its content
+  // is never clipped by the viewport. Measured on hover/focus (the only time it
+  // shows), so no layout cost at rest.
+  const place = () => {
+    const el = ref.current;
+    if (!el || typeof window === "undefined") return;
+    const r = el.getBoundingClientRect();
+    const popW = Math.min(280, window.innerWidth - 24);
+    // flip to open leftward ONLY when the popover would overflow the right edge
+    // AND right-aligning keeps its left edge on-screen (otherwise stay put — never
+    // trade a right-clip for a worse left-clip on a narrow viewport).
+    const overflowsRight = r.left + popW > window.innerWidth - 8;
+    const fitsWhenFlipped = r.right - popW >= 8;
+    setFlip(overflowsRight && fitsWhenFlipped);
+  };
   return (
-    <span className="term" tabIndex={0} role="note" aria-label={`${k}: ${def}`}>
+    <span ref={ref} className={"term" + (flip ? " term-flip" : "")} tabIndex={0}
+      role="note" aria-label={`${k}: ${def}`}
+      onMouseEnter={place} onFocus={place}>
       {children ?? k}
       <span className="term-pop" aria-hidden>
         <b>{k}</b> — {def}

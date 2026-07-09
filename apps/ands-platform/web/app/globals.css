@@ -164,10 +164,13 @@ button:disabled{opacity:.45;cursor:not-allowed;transform:none}
 .step:focus-visible,.doc-chip:focus-visible,.slot:focus-visible,
 .tile:focus-visible,li[role="button"]:focus-visible{
   outline:3px solid var(--brand);outline-offset:2px;border-radius:8px}
-.term-pop{position:absolute;left:0;bottom:130%;width:280px;z-index:60;
+.term-pop{position:absolute;left:0;bottom:130%;width:280px;max-width:calc(100vw - 24px);z-index:60;
   background:#141d33;border:1px solid var(--line);border-radius:10px;padding:11px 13px;
   font-size:12.5px;color:#dbe6f7;line-height:1.5;box-shadow:var(--prism-shadow-3);
   opacity:0;visibility:hidden;transform:translateY(6px);transition:all var(--prism-ease)}
+/* Visual-QA (2026-07-09): flip a right-edge term's popover to open leftward so
+   its 280px box is never clipped by the viewport (Term.tsx measures on hover). */
+.term-flip .term-pop{left:auto;right:0}
 
 /* advisories / notices */
 .notice{padding:14px 17px;border-radius:12px;border:1px solid var(--line);
