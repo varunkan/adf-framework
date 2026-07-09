@@ -119,6 +119,8 @@ export interface CreateDossierBody {
   product_class?: string;
   // swarm gap #19: scheduled drug → OCS/CDSA advisory
   controlled_substance?: boolean;
+  // swarm r2: flagged special pathways (priority_review, noc_c, pediatric, …)
+  special_pathways?: string[];
   sponsor?: string;
   owner?: string;
   labelling_owner?: string;
@@ -131,6 +133,14 @@ export const catalogApi = {
   createDossier: (body: CreateDossierBody) =>
     j<CatalogListItem>("/dossiers",
       { method: "POST", body: JSON.stringify(body) }),
+
+  // swarm r3: correct a dossier's classification after create (product_class /
+  // submission_type / dosage_form_class / controlled_substance / special_pathways)
+  reclassify: (id: string, changes: Partial<Pick<CreateDossierBody,
+    "product_class" | "submission_type" | "dosage_form_class" |
+    "controlled_substance" | "special_pathways">>) =>
+    j<unknown>(`/dossiers/${encodeURIComponent(id)}/reclassify`,
+      { method: "POST", body: JSON.stringify(changes) }),
 
   listArchived: () =>
     j<{ dossiers: (CatalogListItem & { archived_at?: string;

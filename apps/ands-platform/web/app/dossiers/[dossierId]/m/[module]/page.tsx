@@ -327,6 +327,21 @@ ${outstanding ? `<ul>${outstanding}</ul>` : "<p>Nothing outstanding — every re
               {content.controlled_substance_note}
             </div>
           )}
+          {/* swarm r2: honest, cited advisories for the flagged special pathways */}
+          {(content.special_pathways?.length ?? 0) > 0 && (
+            <div className="notice" style={{ marginBottom: 14, fontSize: 13 }}>
+              <b>Special pathways flagged for this submission</b>
+              <ul style={{ margin: "6px 0 0", paddingLeft: 18, display: "grid",
+                gap: 5 }}>
+                {content.special_pathways!.map((p) => (
+                  <li key={p.id}>
+                    <b>{p.label}.</b> {p.summary}{" "}
+                    <span className="mut" style={{ fontSize: 12 }}>({p.citation})</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {/* TIER-A comparative-evidence route: for a generic, the dosage form
               decides whether Health Canada expects an in-vivo BE (PK) study or a
               biowaiver / non-PK route applies. Shown once at the top of the

@@ -639,6 +639,8 @@ export interface ContentState {
   // swarm gap #19: controlled-substance OCS/CDSA obligations advisory
   controlled_substance?: boolean;
   controlled_substance_note?: string | null;
+  // swarm r2 enhancement: honest cited advisories for the flagged special pathways
+  special_pathways?: { id: string; label: string; summary: string; citation: string; advisory_only: boolean }[];
   version: string;
   modules: ModuleView[];
   gate: {

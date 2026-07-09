@@ -69,6 +69,18 @@ const DOSAGE_FORMS = [
 ] as const;
 const GENERIC_FAMILY = new Set(["ANDS", "SANDS"]);
 
+// swarm r2/r3: special submission pathways a filer can flag — each surfaces an
+// honest, cited advisory on the dossier (advisory-only; the tool does not
+// automate the pathway). Mirrors journey/dossier special_pathways.
+const SPECIAL_PATHWAYS = [
+  { code: "priority_review", label: "Priority Review (180-day target)" },
+  { code: "noc_c", label: "Notice of Compliance with conditions (NOC/c)" },
+  { code: "pediatric", label: "Pediatric submission / data" },
+  { code: "fixed_dose_combination", label: "Fixed-dose combination" },
+  { code: "complex_generic", label: "Complex generic" },
+  { code: "cta", label: "Clinical Trial Application (pre-market)" },
+] as const;
+
 // TIER-B: the product class. inScope=true is ANDS Studio's core generic small-
 // molecule chemical-drug authoring; the others are real Health Canada regimes
 // with different directorates/instruments — surfaced honestly, never hollow.
@@ -253,6 +265,8 @@ export default function DossiersHome() {
   const [productClass, setProductClass] = useState<string>("small_molecule");
   // swarm gap #19: a scheduled drug carries OCS/CDSA obligations beyond the filing
   const [controlledSubstance, setControlledSubstance] = useState(false);
+  // swarm r2/r3: flagged special pathways (surface honest advisories on the dossier)
+  const [specialPathways, setSpecialPathways] = useState<string[]>([]);
   const [sponsor, setSponsor] = useState("");
   const [owner, setOwner] = useState("");
   const [busy, setBusy] = useState(false);
@@ -452,6 +466,7 @@ export default function DossiersHome() {
         // TIER-B: the product class (for the honest out-of-core scope note)
         product_class: productClass,
         controlled_substance: controlledSubstance,
+        special_pathways: specialPathways,
         sponsor: sponsor.trim() || undefined,
         owner: owner.trim() || undefined,
       });
@@ -834,6 +849,28 @@ export default function DossiersHome() {
                       CDSA) — surfaces the additional Office of Controlled
                       Substances obligations.</span>
                   </label>
+                  {/* swarm r2/r3: flag any special pathways that apply — each
+                      surfaces an honest, cited advisory on the dossier. */}
+                  <div style={{ marginTop: 10 }}>
+                    <label>Special pathways <span className="mut"
+                      style={{ fontWeight: 400 }}>(optional — advisory)</span></label>
+                    <div style={{ display: "grid", gap: 4, marginTop: 4 }}>
+                      {SPECIAL_PATHWAYS.map((sp) => (
+                        <label key={sp.code} style={{ display: "flex",
+                          alignItems: "flex-start", gap: 6, fontSize: 12,
+                          fontWeight: 400 }}>
+                          <input type="checkbox"
+                            checked={specialPathways.includes(sp.code)}
+                            style={{ width: "auto", marginTop: 2 }}
+                            onChange={(e) => setSpecialPathways((prev) =>
+                              e.target.checked
+                                ? [...prev, sp.code]
+                                : prev.filter((c) => c !== sp.code))} />
+                          <span>{sp.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
               <div>
