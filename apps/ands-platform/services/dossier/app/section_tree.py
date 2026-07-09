@@ -320,6 +320,11 @@ _GENERIC_FAMILY = {"ANDS", "SANDS"}
 # CORRECT eCTD structure/applicability + validation + fees for other types, but
 # its in-app authoring generators are ANDS-tuned — stated plainly, never hidden.
 _SCOPE_NOTES = {
+    "SANDS": "This is a Supplement to an ANDS (a post-NOC change). Scope the "
+             "submission to the CHANGED modules — Module 3 CMC and the labelling "
+             "(1.3.x) sections are shown as conditional (change-dependent), not "
+             "the full fresh-ANDS set; include only what your specific change "
+             "requires, with the supporting data for that change.",
     "NDS": "ANDS Studio is purpose-built for Abbreviated New Drug Submissions "
            "(generics). This New Drug Submission (innovator) shows the correct "
            "eCTD module applicability — the full nonclinical (Module 4) and "
@@ -340,6 +345,11 @@ _SCOPE_NOTES = {
 # the comparative-evidence artifacts whose applicability depends on dosage form
 # (a biowaiver route makes the in-vivo BE study conditional, not required)
 _BE_EVIDENCE = {"1.6", "5.3.1"}   # CS-BE summary, comparative-BE study report
+# generic routes whose equivalence rests (partly) on comparative CLINICAL / PD
+# evidence — those study reports live in 5.3.5 and are summarised/overviewed in
+# 2.7 / 2.5, so those Module-2 clinical sections must be reachable (conditional).
+_CLINICAL_EVIDENCE_ROUTES = (
+    "topical_clinical_invitro", "oip_studies", "complex_generic_pk")
 
 
 def _applicability(node: dict, module: str, cs_be_only: bool,
@@ -371,6 +381,12 @@ def _applicability(node: dict, module: str, cs_be_only: bool,
             return node.get("a", _O)          # Form V (1.2.4) always required for ANDS
         if st == "SANDS":
             return "conditional"              # a generic supplement may not touch these
+        # PM(NOC) s.5 captures a submission that COMPARES to a marketed drug —
+        # including a biosimilar NDS/SNDS (compared to its reference biologic). Its
+        # Form V (1.2.4) is CONDITIONAL (applies when the reference has listed
+        # patents/CSPs), not hard na like an independent innovator NDS.
+        if sec == "1.2.4" and st in ("NDS", "SNDS") and not product_in_scope:
+            return "conditional"
         return "na"                           # NDS / SNDS / DIN never file these
     # innovator-only controlled clinical trials (5.3.5): NDS core evidence; a
     # generic files comparative BE (5.3.1) instead, so this is na for generics.
@@ -383,9 +399,9 @@ def _applicability(node: dict, module: str, cs_be_only: bool,
         # comparative CLINICAL endpoint — that report lives in 5.3.5, so it is a
         # reachable conditional arm for such an ANDS (not hard na).
         if st == "ANDS" and comparative_evidence.route(dosage_form_class)["route"] \
-                in ("topical_clinical_invitro", "oip_studies"):
-            # a topical (clinical endpoint) or an orally-inhaled (comparative
-            # clinical/PD) generic places that evidence in 5.3.5 — reachable
+                in _CLINICAL_EVIDENCE_ROUTES:
+            # a topical (clinical endpoint), orally-inhaled (comparative clinical/
+            # PD) or complex-generic route places that evidence in 5.3.5 — reachable
             return "conditional"
         return "na"                           # ANDS / SANDS / DIN never file these
     # 2.4–2.7 nonclinical/clinical summaries (base-flagged cs_be_suppressed):
@@ -393,6 +409,13 @@ def _applicability(node: dict, module: str, cs_be_only: bool,
     if node.get("sup"):
         if st == "NDS":
             return "required"
+        # a generic on a CLINICAL-evidence route (topical/OIP/complex) files a
+        # comparative clinical/PD study report in 5.3.5 — the CTD requires it to be
+        # summarised in 2.7 and overviewed in 2.5, so those stay reachable
+        # (conditional), even though the pure BE path suppresses the 2.x summaries.
+        if st == "ANDS" and sec in ("2.5", "2.7") and comparative_evidence.route(
+                dosage_form_class)["route"] in _CLINICAL_EVIDENCE_ROUTES:
+            return "conditional"
         if st in _GENERIC_FAMILY and cs_be_only:
             return "suppressed"
         return node.get("a", _O)
@@ -515,6 +538,30 @@ def _build_node(module: str, node: dict, cs_be_only: bool,
                             "Note: the ICH M9 BCS-based biowaiver applies only to "
                             "immediate-release solid oral products and does not "
                             "apply to this dosage form.")
+    # [r4-4] the live-computed fee is the ANDS comparative-studies fee — do not
+    # tell a non-ANDS filer the portal shows "the ANDS review fee".
+    if section == "1.2.2" and st != "ANDS":
+        item["guidance"] = ("Fees follow the Fees Order (CPI-indexed each April "
+            "1). The applicable fee grouping depends on your submission type — "
+            "see HC Schedule 1 (Fees Order). Upload the fee / small-business form.")
+    # [r4-5/8] a generic-only artifact (Form V / CS-BE / comparative-BE) that is
+    # N/A for this submission type must not carry generic-pathway 'required'
+    # guidance — say plainly it does not apply.
+    if section in _GENERIC_ONLY and item["applicability"] == "na":
+        item["purpose"] = "Not applicable to this submission type."
+        item["guidance"] = ("This is a generic-ANDS artifact (Form V / "
+            "comparative bioequivalence); it does not apply to a " + st + " and "
+            "is marked N/A.")
+    # [r4-2] OIP comparative in-vitro characterisation: name the quality data HC's
+    # 2020 OIP guidance expects, and where it goes.
+    if section in ("3.2.P.5", "3.2.P.2") and comparative_evidence.route(
+            dosage_form_class)["route"] == "oip_studies":
+        item["guidance"] = (item["guidance"] + " For an orally-inhaled generic, "
+            "provide COMPARATIVE in-vitro characterisation vs. the reference — "
+            "delivered dose and aerodynamic particle size distribution (APSD), "
+            "including fine particle mass — in Module 3.2.P; a lower-strength "
+            "in-vivo waiver may rest on in-vitro proportionality (HC Comparative "
+            "PK Studies for Orally Inhaled Products, 2020).")
     return item
 
 

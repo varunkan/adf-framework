@@ -53,6 +53,12 @@ _PATHWAYS: dict[str, tuple[str, str, str]] = {
         "topical, drug-device) often needs product-specific comparative evidence "
         "beyond a simple PK study.",
         "HC product-specific comparative bioavailability guidance."),
+    "controlled_substance": (
+        "Controlled substance",
+        "A scheduled drug carries additional Office of Controlled Substances "
+        "(OCS) obligations under the Controlled Drugs and Substances Act (CDSA) — "
+        "dealer's licence, security and reporting — beyond the drug submission.",
+        "Controlled Drugs and Substances Act; HC Office of Controlled Substances."),
 }
 
 VALID_PATHWAYS = tuple(_PATHWAYS)
