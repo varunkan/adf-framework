@@ -91,6 +91,17 @@ _MODULES: list[dict] = [
          "p": "Address the patents/CSPs on the Patent Register for the Canadian Reference Product.",
          "g": "Intellectual-property information lives at 1.2.4. The generic FILES Form V (Declaration Re: Patent List) under the Patented Medicines (Notice of Compliance) Regulations — per listed patent/CSP on the Register for the Canadian Reference Product: number, expiry, and ONE s.5 statement (not addressed / accepts expiry / alleges invalidity / alleges non-infringement — or that the Register lists no patents). When alleging invalidity or non-infringement, the generic also SERVES a Notice of Allegation (NOA) on the innovator. The portal scaffolds the declaration from your reference-product + patent inputs, or upload a completed Form V.",
          "u": "forms"},
+        {"s": "1.2.4.2", "t": "Intellectual Property — Data Protection (innovator)",
+         "k": "document", "a": _C, "aff": [_UP, _NA], "gen": None, "fmt": ["pdf"],
+         "bi": False,
+         "p": "An innovator's request/eligibility for data protection on an "
+              "innovative drug (an NDS with a new chemical entity).",
+         "g": "Data protection (Food and Drug Regulations C.08.004.1) gives an "
+              "innovator up to 8 years (8.5 with a pediatric extension) of market "
+              "protection for a drug containing a NEW active substance. Placed "
+              "under 1.2.4 for an innovator NDS/SNDS; it does not apply to a "
+              "generic ANDS. Upload the data-protection information/eligibility.",
+         "u": "forms"},
         {"s": "1.2.5", "t": "Authorization & Regulatory Correspondence", "k": "document",
          "a": _O, "aff": [_GEN, _UP, _NA], "gen": "structured", "fmt": ["pdf"], "bi": False,
          "p": "Contact information and authorization letters (sponsor, regulatory, quality contacts).",
