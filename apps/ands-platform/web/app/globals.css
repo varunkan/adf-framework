@@ -380,8 +380,12 @@ button:disabled{opacity:.45;cursor:not-allowed;transform:none}
 /* ── module workspace (P1-1: the tree is the hero) ────────────────── */
 .workspace{max-width:1360px;margin:0 auto;padding:22px 24px 80px;display:grid;
   grid-template-columns:336px minmax(0,1fr) 312px;gap:20px;align-items:start}
-@media (max-width:1100px){.workspace{grid-template-columns:1fr}
+@media (max-width:1100px){.workspace{grid-template-columns:minmax(0,1fr)}
   .ws-aside{order:2}.ws-main{order:3}.section-tree{order:1;position:static}}
+/* grid items must be allowed to shrink below their content's min-width, else a
+   wide child (long token, table) pushes the mobile column past the viewport
+   (2026-07-09: .ws-main was 368px in a 342px cell, spilling ~2px off-screen). */
+.ws-main,.ws-aside,.section-tree{min-width:0}
 .section-tree{position:sticky;top:80px;max-height:calc(100vh - 100px);overflow:auto;
   padding:14px 12px}
 .section-tree ul{list-style:none;margin:0;padding:0}
