@@ -62,15 +62,18 @@ _CLASSES: dict[str, dict] = {
         "label": "Biosimilar (subsequent-entry biologic, Schedule D)",
         "in_scope": False,
         "directorate": "Biologic and Radiopharmaceutical Drugs Directorate (BRDD)",
-        "filing_instrument": "New Drug Submission (NDS) — not an ANDS",
+        "filing_instrument": "New Drug Submission (NDS) / SNDS (case-by-case) "
+                             "— not an ANDS",
         "evidence": "a similarity / comparability package vs. the reference "
                     "biologic, not a bioequivalence study",
         "advisory": "A biosimilar is NOT a generic: Health Canada authorizes it "
-                    "through a full New Drug Submission (NDS) with a similarity "
-                    "package versus the reference biologic — the ANDS "
-                    "bioequivalence pathway does not apply. ANDS Studio can shape "
-                    "the eCTD, but the biosimilarity evidence is authored to the "
-                    "biosimilars guidance.",
+                    "through a full New Drug Submission (NDS) — or, on a "
+                    "case-by-case basis, an SNDS relying on the previously "
+                    "demonstrated similarity (generally a labelling-only "
+                    "supplement) — with a similarity package versus the reference "
+                    "biologic. The ANDS bioequivalence pathway does not apply. "
+                    "ANDS Studio can shape the eCTD, but the biosimilarity "
+                    "evidence is authored to the biosimilars guidance.",
         "citation": "HC Guidance: Information and Submission Requirements for "
                     "Biosimilar Biologic Drugs.",
         "contact": "",

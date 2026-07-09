@@ -23,9 +23,11 @@ _NOTES: dict[str, str] = {
         "authored to the biologics guidance, not the generic model.",
     "biosimilar":
         "This dossier is marked as a biosimilar. A biosimilar is authorized "
-        "through a full New Drug Submission (NDS) with a similarity package "
-        "versus the reference biologic — NOT the ANDS bioequivalence pathway. "
-        "Use ANDS Studio for the eCTD shell only.",
+        "through a full New Drug Submission (NDS) — or, on a case-by-case basis, "
+        "an SNDS relying on the previously demonstrated similarity (generally a "
+        "labelling-only supplement) — with a similarity package versus the "
+        "reference biologic, NOT the ANDS bioequivalence pathway. Use ANDS Studio "
+        "for the eCTD shell only.",
     "radiopharmaceutical":
         "This dossier is marked as a radiopharmaceutical (Schedule C). It carries "
         "the additional Part C, Division 3 requirements under BRDD review, which "

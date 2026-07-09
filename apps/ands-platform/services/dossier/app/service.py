@@ -78,6 +78,9 @@ _CONTROLLED_SUBSTANCE_NOTE = (
 # Accept the precise codes plus the round-6 value as a legacy alias.
 _VALID_DIN_TYPES = {"data_supported", "labelling_standard", "category_iv",
                     "standard_referenced"}
+# DIN sub-types that denote a NON-PRESCRIPTION (OTC) product — they set the
+# lower Right-to-Sell fee tier (swarm r8 e970008).
+_DIN_OTC_TYPES = {"labelling_standard", "category_iv", "standard_referenced"}
 
 
 def _norm_din_type(submission_type: str, din_type: str) -> str:
@@ -1975,7 +1978,14 @@ class DossierService:
                 review_fee["amount"], sme_granted=sme_granted,
                 first_ever_submission=False)
                 if review_fee.get("amount") is not None else None),
-            "right_to_sell": fees.right_to_sell(today, sme_granted=sme_granted),
+            # swarm r8 (e970008): tier the annual Right-to-Sell fee by drug type —
+            # a non-prescription DIN (Category IV / labelling standard) uses the
+            # lower OTC tier; a disinfectant its own tier; else prescription.
+            "right_to_sell": fees.right_to_sell(
+                today, sme_granted=sme_granted,
+                drug_type=("disinfectant" if product_class == "disinfectant"
+                           else "non_prescription" if din_type in _DIN_OTC_TYPES
+                           else "prescription")),
             "fee_paid": fee_paid, "sme_granted": sme_granted}
         # structural eCTD validation (PDF-byte checks are in validate_submission)
         validation = (ectd_validation.validate(model) if model

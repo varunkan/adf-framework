@@ -689,10 +689,24 @@ def _build_node(module: str, node: dict, cs_be_only: bool,
     # N/A for this submission type must not carry generic-pathway 'required'
     # guidance — say plainly it does not apply.
     if section in _GENERIC_ONLY and item["applicability"] == "na":
-        item["purpose"] = "Not applicable to this submission type."
-        item["guidance"] = ("This is a generic-ANDS artifact (Form V / "
-            "comparative bioequivalence); it does not apply to a " + st + " and "
-            "is marked N/A.")
+        item["purpose"] = "Not applicable to this submission."
+        if section == "1.2.4":
+            # [r8-e970005] Form V is CONTENT-triggered (s.5 PM(NOC)), not
+            # type-triggered — it applies whenever a submission compares to /
+            # references another marketed drug with a listed patent (this can
+            # include an NDS/SNDS, e.g. a biosimilar). Do NOT say it "never applies
+            # to an NDS"; only that THIS submission makes no such comparison.
+            item["guidance"] = (
+                "Form V (Declaration re: Patent List) is triggered by submission "
+                "CONTENT under s.5 of the PM(NOC) Regulations — it applies when a "
+                "submission directly or indirectly compares to, or references, "
+                "another drug marketed under an NOC with a patent on the Register "
+                "(this can include some NDS/SNDS, e.g. a biosimilar). This "
+                "submission makes no such comparison, so Form V does not apply and "
+                "is marked N/A.")
+        else:
+            item["guidance"] = ("This is a generic-ANDS comparative-bioequivalence "
+                "artifact; it does not apply to a " + st + " and is marked N/A.")
     # [r4-2] OIP comparative in-vitro characterisation: name the quality data HC's
     # 2020 OIP guidance expects, and where it goes.
     if section in ("3.2.P.5", "3.2.P.2") and comparative_evidence.route(

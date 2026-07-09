@@ -33,7 +33,20 @@ SME_STATUS_NOTE = ("Small-business status must be granted by Health Canada "
 
 # Per-DIN Right-to-Sell (annual). ANDS pharmaceuticals -> "prescription" drug
 # type; figures ported verbatim from the mesh RIGHT_TO_SELL_FEES table. Due Oct 1.
-RIGHT_TO_SELL_FEES = {"2025-26": 5531.0, "2026-27": 5626.0}
+# swarm r8 (e970008): the annual Right-to-Sell fee is TIERED by drug type
+# (prescription / non-prescription / disinfectant) — HC reduced the OTC and
+# disinfectant tiers to reflect the lower oversight effort. Figures ported verbatim
+# from the mesh fees service RIGHT_TO_SELL_FEES table.
+RIGHT_TO_SELL_FEES_BY_TYPE = {
+    "prescription": {"2025-26": 5531.0, "2026-27": 5626.0},
+    "non_prescription": {"2025-26": 3334.0, "2026-27": 3391.0},
+    "disinfectant": {"2025-26": 1730.0, "2026-27": 1760.0},
+}
+# legacy alias (prescription tier) — kept for existing callers/tests
+RIGHT_TO_SELL_FEES = RIGHT_TO_SELL_FEES_BY_TYPE["prescription"]
+_RTS_TIER_LABEL = {"prescription": "prescription drug",
+                   "non_prescription": "non-prescription (OTC) drug",
+                   "disinfectant": "disinfectant"}
 RIGHT_TO_SELL_DUE_MONTH = 10
 RIGHT_TO_SELL_DUE_DAY = 1
 
@@ -86,10 +99,15 @@ _FEE_GROUPING_NOTE = {
     "NDS": "New Drug Submission with a new active substance: a distinct, HIGHER "
            "fee grouping than comparative-studies — refer to HC Schedule 1 (Fees "
            "Order). Not auto-computed here.",
-    "SNDS": "Supplement to an NDS: the fee depends on the change level — refer to "
-            "HC Schedule 1 (Fees Order). Not auto-computed here.",
-    "SANDS": "Supplement to an ANDS: the fee depends on the change level — refer "
-             "to HC Schedule 1 (Fees Order). Not auto-computed here.",
+    "SNDS": "Supplement to an NDS: the fee grouping depends on the change — a "
+            "change requiring comparative/clinical studies is the HIGHER grouping; "
+            "a CMC-only / labelling change is LOWER. Refer to HC Schedule 1 (Fees "
+            "Order). Not auto-computed here.",
+    "SANDS": "Supplement to an ANDS: the fee grouping depends on the change — a "
+             "change requiring comparative studies (e.g. a new comparative-BE "
+             "study) is the HIGHER grouping; a CMC-only / pharmaceutical-"
+             "equivalence change is LOWER. Refer to HC Schedule 1 (Fees Order). "
+             "Not auto-computed here.",
     "DIN": "DIN application without supporting clinical/nonclinical/CMC data: a "
            "distinct, LOWER fee grouping than comparative-studies — refer to HC "
            "Schedule 1 (Fees Order). Not auto-computed here.",
@@ -139,21 +157,29 @@ def right_to_sell_due_date(as_of) -> str:
     return f"{start}-{RIGHT_TO_SELL_DUE_MONTH:02d}-{RIGHT_TO_SELL_DUE_DAY:02d}"
 
 
-def right_to_sell(as_of, *, sme_granted: bool = False) -> dict:
+def right_to_sell(as_of, *, sme_granted: bool = False,
+                  drug_type: str = "prescription") -> dict:
     """Annual per-DIN Right-to-Sell fee, due October 1 of ``as_of``'s FY.
 
-    SME status carries a 50% reduction on the annual fee; note that status must
-    be granted before it applies.
+    swarm r8 (e970008): TIERED by drug type — prescription / non_prescription /
+    disinfectant. An unknown/empty drug_type falls back to the prescription tier
+    (the common case; also preserves the pre-r8 behaviour for existing callers).
+    SME status carries a 50% reduction on the annual fee; status must be granted
+    before it applies.
     """
+    dt = str(drug_type or "prescription").strip().lower()
+    table = RIGHT_TO_SELL_FEES_BY_TYPE.get(dt, RIGHT_TO_SELL_FEES_BY_TYPE["prescription"])
+    tier = dt if dt in RIGHT_TO_SELL_FEES_BY_TYPE else "prescription"
     fy = fiscal_year(as_of)
-    used_fy, gross = _resolve_amount(RIGHT_TO_SELL_FEES, fy)
+    used_fy, gross = _resolve_amount(table, fy)
+    tier_label = _RTS_TIER_LABEL[tier]
     if sme_granted:
         amount = round(gross * (1.0 - SME_PREMARKET_REDUCTION), 2)
-        note = ("Annual Right-to-Sell fee, due Oct 1; 50% small-business "
-                "reduction applied. " + SME_STATUS_NOTE)
+        note = (f"Annual Right-to-Sell fee ({tier_label} tier), due Oct 1; 50% "
+                "small-business reduction applied. " + SME_STATUS_NOTE)
     else:
         amount = gross
-        note = "Annual Right-to-Sell fee, due Oct 1 (full fee)."
+        note = f"Annual Right-to-Sell fee ({tier_label} tier), due Oct 1 (full fee)."
     return {"amount": amount, "due_date": right_to_sell_due_date(as_of),
             "note": note, "fiscal_year": fy, "amount_fiscal_year": used_fy,
-            "currency": CURRENCY}
+            "currency": CURRENCY, "drug_type": tier}
