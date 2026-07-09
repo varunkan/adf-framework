@@ -21,6 +21,11 @@ class CreateDossierIn(BaseModel):
     special_pathways: list[str] = []
     cs_be_only: bool = True
     din: str = ""
+    # swarm r6: DIN sub-type (DIN submissions only) — "" (unspecified) |
+    # "data_supported" (DINA needing a quality review — Module 3 CMC + QOS-CE
+    # required) | "standard_referenced" (Category IV monograph / labelling
+    # standard, e.g. antacid — no CMC; the label/CDFT is the vehicle, no PM).
+    din_type: str = ""
     drug_product: str = ""   # the real product name (distinct from a nickname title)
     # REP regulatory-transaction identity — the sponsor company (distinct from
     # the product/title). company_id is HC's assigned Company ID.

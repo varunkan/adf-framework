@@ -76,8 +76,11 @@ def test_sands_labelling_13x_is_conditional_not_required():  # gap 4
         assert _node("SANDS", sec)["applicability"] == "conditional", sec
 
 
-def test_din_qos_23_not_required_while_m3_optional():  # gap 5
-    assert _node("DIN", "2.3")["applicability"] == "optional"
+def test_din_qos_23_not_required_while_m3_optional():  # gap 5 (r6: now conditional)
+    # unspecified DIN sub-type -> QOS (2.3) is conditional (declare data_supported
+    # vs standard_referenced); never hard-required while its Module-3 source is
+    # not filed. (Set din_type=data_supported and it becomes required; see r6.)
+    assert _node("DIN", "2.3")["applicability"] == "conditional"
 
 
 def test_sands_23_not_labelled_ce_be():  # gap 8

@@ -90,6 +90,7 @@ CREATE TABLE IF NOT EXISTS dossier_index (
     special_pathways TEXT,
     cs_be_only      INTEGER NOT NULL DEFAULT 1,
     din             TEXT,
+    din_type        TEXT,
     company_id      TEXT,
     sponsor         TEXT,
     drug_product    TEXT,
@@ -210,6 +211,9 @@ class SqliteDossierRepository:
         "ALTER TABLE dossier_index ADD COLUMN product_class TEXT",
         "ALTER TABLE dossier_index ADD COLUMN controlled_substance INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE dossier_index ADD COLUMN special_pathways TEXT",
+        # swarm r6: DIN sub-type (data_supported DINA vs standard_referenced /
+        # Category-IV / labelling-standard) — drives PM/CMC/QOS applicability.
+        "ALTER TABLE dossier_index ADD COLUMN din_type TEXT",
     )
 
     # DDL that must run on pre-existing DBs too (the durable audit ledger +
@@ -477,10 +481,10 @@ class SqliteDossierRepository:
         self.db.execute(
             "INSERT INTO dossier_index (dossier_id, uid, title, submission_type, "
             "dosage_form_class, product_class, controlled_substance, special_pathways, "
-            "cs_be_only, din, company_id, sponsor, drug_product, owner, "
+            "cs_be_only, din, din_type, company_id, sponsor, drug_product, owner, "
             "title_fr, labelling_owner, "
             "tenant_id, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(dossier_id) DO UPDATE SET title=excluded.title, "
             # a re-create keeps the original uid — never re-key the ledger
             "uid=COALESCE(dossier_index.uid, excluded.uid), "
@@ -493,6 +497,7 @@ class SqliteDossierRepository:
             "special_pathways=COALESCE(excluded.special_pathways, "
             "dossier_index.special_pathways), "
             "cs_be_only=excluded.cs_be_only, din=excluded.din, "
+            "din_type=COALESCE(excluded.din_type, dossier_index.din_type), "
             # preserve REP identity across upserts that omit it (COALESCE keeps
             # the stored sponsor/company_id when the new rec leaves them NULL)
             "company_id=COALESCE(excluded.company_id, dossier_index.company_id), "
@@ -514,6 +519,7 @@ class SqliteDossierRepository:
              1 if rec.get("controlled_substance") else 0,
              __import__("json").dumps(rec.get("special_pathways") or []),
              1 if rec.get("cs_be_only", True) else 0, rec.get("din"),
+             rec.get("din_type") or None,
              rec.get("company_id") or None, rec.get("sponsor") or None,
              rec.get("drug_product") or None, rec.get("owner") or None,
              rec.get("title_fr") or None, rec.get("labelling_owner") or None,
@@ -562,18 +568,18 @@ class SqliteDossierRepository:
     def reclassify_index(self, dossier_id: str, *, submission_type: str,
                          product_class: str, dosage_form_class: str,
                          controlled_substance: bool, special_pathways: list,
-                         cs_be_only: bool) -> dict | None:
+                         cs_be_only: bool, din_type: str = "") -> dict | None:
         """Correct a dossier's classification attributes after creation (swarm
-        r3: no post-create correction path existed)."""
+        r3: no post-create correction path existed; r6 added din_type)."""
         self.db.execute(
             "UPDATE dossier_index SET submission_type = ?, product_class = ?, "
             "dosage_form_class = ?, controlled_substance = ?, "
-            "special_pathways = ?, cs_be_only = ?, updated_at = ? "
+            "special_pathways = ?, cs_be_only = ?, din_type = ?, updated_at = ? "
             "WHERE dossier_id = ?",
             (submission_type, product_class, dosage_form_class,
              1 if controlled_substance else 0,
              json.dumps(special_pathways or []),
-             1 if cs_be_only else 0, utcnow_iso(), dossier_id))
+             1 if cs_be_only else 0, din_type or None, utcnow_iso(), dossier_id))
         return self.get_dossier_index(dossier_id)
 
     def list_dossier_index(self, tenant_id: str | None = None) -> list[dict]:

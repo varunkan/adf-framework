@@ -68,6 +68,45 @@ _CONTROLLED_SUBSTANCE_NOTE = (
     "licence, security requirements and reporting. ANDS Studio does not manage "
     "those; confirm the applicable OCS requirements for your schedule.")
 
+# swarm r6: DIN sub-type (DIN submissions only). A DIN bears no NOC — no Product
+# Monograph applies to any DIN. The sub-type drives Module-3 CMC + QOS-CE(DINA):
+#   data_supported      -> chemical entity needing a quality review (M3 + QOS req)
+#   standard_referenced -> Category IV monograph / labelling standard (no CMC)
+_VALID_DIN_TYPES = {"data_supported", "standard_referenced"}
+
+
+def _norm_din_type(submission_type: str, din_type: str) -> str:
+    """DIN sub-type is meaningful only for a DIN; unknown values -> '' (unspecified)."""
+    dt = str(din_type or "").strip().lower()
+    if str(submission_type or "").upper() != "DIN":
+        return ""
+    return dt if dt in _VALID_DIN_TYPES else ""
+
+
+_DIN_TYPE_NOTES = {
+    "data_supported": (
+        "Data-supported DINA — a chemical-entity pharmaceutical needing a quality "
+        "review: file the Module 3 CMC package (drug substance S + drug product P) "
+        "and a Quality Overall Summary QOS-CE (DINA). No Product Monograph and no "
+        "clinical data (a DIN is not a safety/efficacy review)."),
+    "standard_referenced": (
+        "Standard-referenced DIN (Category IV monograph / labelling standard, e.g. "
+        "an antacid): an administrative attestation — no Module 3 CMC data is filed "
+        "(GMP is attested; quality information is kept on file) and no Product "
+        "Monograph. Product information is the label: the Canadian Drug Facts Table "
+        "(Plain Language Labelling) conforming to the referenced monograph/standard."),
+    "": (
+        "DIN sub-type not set. A DIN bears no Notice of Compliance, so no Product "
+        "Monograph applies. Declare the sub-type: 'data-supported DINA' (chemistry "
+        "review — Module 3 + QOS required) or 'standard-referenced' (Category IV / "
+        "labelling standard — no CMC filed)."),
+}
+
+
+def _din_type_note(din_type: str) -> str:
+    return _DIN_TYPE_NOTES.get(str(din_type or ""), _DIN_TYPE_NOTES[""])
+
+
 # regulatory activities a working sequence can belong to
 SEQUENCE_PURPOSES = ("initial", "response", "supplement",
                      "annual-notification")
@@ -1855,11 +1894,15 @@ class DossierService:
         # an out-of-core product class (biologic/biosimilar/…) is not a generic
         # small-molecule: the ANDS comparative-BE artifacts do not apply
         product_in_scope = product_class == "small_molecule"
+        # swarm r6: DIN sub-type (data_supported DINA vs standard_referenced) —
+        # only meaningful for a DIN; drives PM/CMC/QOS applicability.
+        din_type = _norm_din_type(submission_type, _s(idx.get("din_type")))
         states = self.repo.list_section_state(dossier_id)
         tree = section_tree.section_tree(cs_be_only=cs_be_only,
                                          submission_type=submission_type,
                                          dosage_form_class=dosage_form_class,
-                                         product_in_scope=product_in_scope)
+                                         product_in_scope=product_in_scope,
+                                         din_type=din_type)
         modules = []
         for m in tree["modules"]:
             modules.append({
@@ -1872,7 +1915,7 @@ class DossierService:
             cs_be_only=cs_be_only, states=states,
             submission_type=submission_type,
             dosage_form_class=dosage_form_class,
-            product_in_scope=product_in_scope)
+            product_in_scope=product_in_scope, din_type=din_type)
         today = date.today().isoformat()
         # submission-type-aware: the ANDS comparative-studies fee is emitted only
         # for an ANDS; other types name their HC Schedule 1 grouping (amount None)
@@ -1933,6 +1976,11 @@ class DossierService:
             "dossier_id": dossier_id, "cs_be_only": cs_be_only,
             "submission_type": submission_type,
             "dosage_form_class": dosage_form_class,
+            # swarm r6: the DIN sub-type + its honest advisory (None off the DIN
+            # path). Drives PM/CMC/QOS applicability; PM never applies to a DIN.
+            "din_type": din_type or None,
+            "din_type_note": (_din_type_note(din_type)
+                              if submission_type == "DIN" else None),
             # Tier B: the product class + its honest out-of-core scope note
             # (None for the in-core generic small-molecule chemical drug)
             "product_class": product_class,
@@ -1953,7 +2001,8 @@ class DossierService:
             "tower": dossier_state.tower_view(cs_be_only=cs_be_only, states=states,
                                               submission_type=submission_type,
                                               dosage_form_class=dosage_form_class,
-                                              product_in_scope=product_in_scope),
+                                              product_in_scope=product_in_scope,
+                                              din_type=din_type),
             "fees": fees_block, "validation": validation, "din": idx.get("din"),
             "evalidator": evalidator_cleared,
             # POLISH-SIGN-BANNER: ambient signature-readiness signal so the
@@ -2044,6 +2093,10 @@ class DossierService:
             "cs_be_only": (_s(data.get("submission_type")).upper() or "ANDS")
                           == "ANDS" and bool(data.get("cs_be_only", True)),
             "din": din or None,
+            # swarm r6: DIN sub-type (DIN-only; forced "" off the DIN path)
+            "din_type": _norm_din_type(
+                _s(data.get("submission_type")).upper() or "ANDS",
+                _s(data.get("din_type"))),
             # the real product name — distinct from a display title
             "drug_product": (_s(data.get("drug_product"))
                              or _s(data.get("title")) or None),
@@ -2285,11 +2338,17 @@ class DossierService:
         cs_be = submission_type == "ANDS" and (
             bool(data.get("cs_be_only")) if "cs_be_only" in data
             else bool(idx.get("cs_be_only")))
+        # swarm r6: DIN sub-type (DIN-only; re-normalised against the possibly
+        # changed submission_type — leaving DIN forces it back to "")
+        din_type = _norm_din_type(
+            submission_type,
+            _s(data.get("din_type")) if "din_type" in data
+            else _s(idx.get("din_type")))
         self.repo.reclassify_index(
             _s(dossier_id), submission_type=submission_type,
             product_class=product_class, dosage_form_class=dosage_form_class,
             controlled_substance=controlled, special_pathways=special,
-            cs_be_only=cs_be)
+            cs_be_only=cs_be, din_type=din_type)
         self._forward_governance("dossier.reclassified", _s(dossier_id),
                                  reason="classification corrected",
                                  data={"submission_type": submission_type,

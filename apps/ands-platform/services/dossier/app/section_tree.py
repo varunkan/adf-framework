@@ -36,6 +36,9 @@ _URL = {
     # OIP route: the dedicated 2020 comparative-PK guidance for orally-inhaled
     # products — a distinct HC document from the general comparative-BA page above.
     "oip": f"{_APPS}/guidance-documents/comparative-pharmacokinetic-studies-orally-inhaled-products-2020.html",
+    # DIN non-prescription product-information vehicle: the label per the
+    # referenced Category IV monograph / labelling standard (CDFT under PLL).
+    "labels_din": f"{_APPS}/guidance-documents/nonprescription-drugs-labelling-standards.html",
     "fees": "https://www.canada.ca/en/health-canada/services/drugs-health-products/drug-products/fees/fees-review-drug-submissions-applications.html",
     "smallbiz": "https://www.canada.ca/en/health-canada/services/drugs-health-products/funding-fees/small-business-mitigation.html",
 }
@@ -260,13 +263,34 @@ _MODULES: list[dict] = [
          "p": "Animal pharmacology/toxicology study reports.",
          "g": "NOT applicable to a generic ANDS relying on comparative bioequivalence — the generic relies on the reference product's established nonclinical profile. An innovator New Drug Submission (NDS) DOES file the full nonclinical dossier here.",
          "u": "ectd"},
-        # Innovator-only document slot: required for an NDS, na on the generic
-        # ANDS/supplement paths (resolved by _applicability on module "4").
-        {"s": "4.2", "t": "Nonclinical Study Reports (pharmacology, pharmacokinetics, toxicology)",
-         "k": "document", "a": _R, "aff": [_UP, _NA], "gen": None, "fmt": ["pdf"],
-         "bi": False, "na": True,
-         "p": "The pivotal nonclinical (animal) pharmacology, PK and toxicology study reports.",
+        # ICH CTD M4S structure (adopted by HC): 4.2 Study Reports groups
+        # 4.2.1 Pharmacology / 4.2.2 Pharmacokinetics / 4.2.3 Toxicology, plus a
+        # distinct 4.3 Literature References. Innovator-NDS-only: required for an
+        # NDS, na on the generic ANDS/supplement paths (resolved by _applicability
+        # on module "4").
+        {"s": "4.2", "t": "Study Reports", "k": "group", "a": _O, "na": True,
+         "p": "The nonclinical study reports, organised per ICH CTD M4S.",
+         "g": "Study reports grouped as 4.2.1 Pharmacology, 4.2.2 Pharmacokinetics and 4.2.3 Toxicology. Filed by an innovator NDS; not applicable on the generic ANDS/supplement paths.",
+         "u": "ectd"},
+        {"s": "4.2.1", "t": "Pharmacology", "k": "document", "a": _R, "aff": [_UP, _NA],
+         "gen": None, "fmt": ["pdf"], "bi": False, "na": True,
+         "p": "Primary & secondary pharmacodynamics, safety pharmacology, and PD drug-interaction study reports.",
          "g": "Filed by an innovator New Drug Submission; a generic ANDS relies on the reference product's established nonclinical profile and marks Module 4 not applicable.",
+         "u": "ectd"},
+        {"s": "4.2.2", "t": "Pharmacokinetics", "k": "document", "a": _R, "aff": [_UP, _NA],
+         "gen": None, "fmt": ["pdf"], "bi": False, "na": True,
+         "p": "Analytical methods, absorption, distribution, metabolism, excretion, and PK drug-interaction study reports.",
+         "g": "Filed by an innovator New Drug Submission; a generic ANDS relies on the reference product's established nonclinical profile and marks Module 4 not applicable.",
+         "u": "ectd"},
+        {"s": "4.2.3", "t": "Toxicology", "k": "document", "a": _R, "aff": [_UP, _NA],
+         "gen": None, "fmt": ["pdf"], "bi": False, "na": True,
+         "p": "Single- and repeat-dose toxicity, genotoxicity, carcinogenicity, reproductive & developmental toxicity, local tolerance, and other toxicity study reports.",
+         "g": "Filed by an innovator New Drug Submission; a generic ANDS relies on the reference product's established nonclinical profile and marks Module 4 not applicable.",
+         "u": "ectd"},
+        {"s": "4.3", "t": "Literature References", "k": "document", "a": _R, "aff": [_UP, _NA],
+         "gen": None, "fmt": ["pdf"], "bi": False, "na": True,
+         "p": "Published literature references cited in the nonclinical program.",
+         "g": "Published literature supporting the nonclinical section. Filed by an innovator NDS; not applicable on the generic ANDS/supplement paths.",
          "u": "ectd"},
     ]},
     {"module": "5", "title": "Module 5 — Clinical Study Reports", "nodes": [
@@ -358,7 +382,8 @@ _CLINICAL_EVIDENCE_ROUTES = (
 def _applicability(node: dict, module: str, cs_be_only: bool,
                    submission_type: str = "ANDS",
                    dosage_form_class: str = "ir_solid_oral",
-                   product_in_scope: bool = True) -> str:
+                   product_in_scope: bool = True,
+                   din_type: str = "") -> str:
     st = str(submission_type or "ANDS").upper()
     sec = node["s"]
     # Module 4 (nonclinical study reports): only the innovator NDS requires it.
@@ -422,15 +447,30 @@ def _applicability(node: dict, module: str, cs_be_only: bool,
         if st in _GENERIC_FAMILY and cs_be_only:
             return "suppressed"
         return node.get("a", _O)
-    # DIN Application: the heavy CMC (M3) / clinical (M5) dossier is not the DINA
-    # route — keep admin + product info required, downgrade heavy technical.
-    if st == "DIN" and module in ("3", "5") and node.get("a") == _R:
-        return "optional"
-    # DIN: the QOS (2.3) summarises Module 3 — which is optional on the DIN route.
-    # Keeping 2.3 hard-required while its source data is optional is an internal
-    # contradiction; align it (optional/change-dependent).
-    if st == "DIN" and sec == "2.3":
-        return "optional"
+    # DIN Application (submission-type-aware by DIN SUB-TYPE). A DIN bears no NOC:
+    #  * 1.3.1 Product Monograph is NEVER part of a DIN (the PM is the NOC-bearing
+    #    artifact for NDS/SNDS/ANDS/SANDS) -> na. 1.3.3 Labelling stays required —
+    #    the label (Canadian Drug Facts Table / labelling standard / Category IV
+    #    monograph) is the DIN's sole product-information vehicle.
+    #  * Module 3 CMC + 2.3 QOS-CE(DINA) are REQUIRED only for a DATA-SUPPORTED
+    #    DINA (a chemical entity needing a quality review); na for a STANDARD-
+    #    REFERENCED / Category-IV / labelling-standard DIN (no CMC filed — GMP
+    #    attested, quality kept on file); conditional until the sub-type is set.
+    #  (Module 4 nonclinical + Module 5 clinical are already na for a DIN above.)
+    if st == "DIN":
+        if sec == "1.3.1":
+            return "na"
+        if module == "3":
+            if din_type == "standard_referenced":
+                return "na"
+            if node.get("a") == _R:
+                return "required" if din_type == "data_supported" else "conditional"
+            return node.get("a", _O)
+        if sec == "2.3":
+            if din_type == "standard_referenced":
+                return "na"
+            return "required" if din_type == "data_supported" else "conditional"
+        return node.get("a", _O)
     # SANDS is a post-NOC supplement: it scopes to the CHANGED modules, so the
     # full fresh-ANDS Module 3 CMC set is CHANGE-DEPENDENT (conditional), not all
     # unconditionally required (HC Post-NOC Changes guidance).
@@ -499,7 +539,8 @@ _M2_CONDITIONAL_GUIDANCE = (
 def _build_node(module: str, node: dict, cs_be_only: bool,
                 submission_type: str = "ANDS",
                 dosage_form_class: str = "ir_solid_oral",
-                product_in_scope: bool = True) -> dict:
+                product_in_scope: bool = True,
+                din_type: str = "") -> dict:
     section = node["s"]
     url_key = node.get("u", "ectd")
     gen = node.get("gen")
@@ -510,7 +551,7 @@ def _build_node(module: str, node: dict, cs_be_only: bool,
         "title": node["t"],
         "kind": node["k"],
         "depth": section.count("."),
-        "applicability": _applicability(node, module, cs_be_only, submission_type, dosage_form_class, product_in_scope),
+        "applicability": _applicability(node, module, cs_be_only, submission_type, dosage_form_class, product_in_scope, din_type),
         "affordances": list(node.get("aff", [])),
         "generator_key": gen,
         "ai_draftable": gen in LLM_DRAFTABLE,
@@ -532,6 +573,34 @@ def _build_node(module: str, node: dict, cs_be_only: bool,
     # the HC DINA variant name; NDS/SNDS/SANDS the neutral QOS (set above).
     if section == "2.3" and str(submission_type or "ANDS").upper() == "DIN":
         item["title"] = "Quality Overall Summary — QOS-CE (DINA)"
+    # [r6-e970008] DIN sub-type guidance. A DIN bears no NOC, so 1.3.1 Product
+    # Monograph is not part of the filing; 1.3.3 Labelling (CDFT / labelling
+    # standard / Category IV monograph) is the DIN's product-information vehicle.
+    if st == "DIN":
+        if section == "1.3.1":
+            item["purpose"] = "Not part of a DIN application."
+            item["guidance"] = (
+                "A Product Monograph is NOT part of a DIN application — a DIN "
+                "receives no Notice of Compliance (the PM accompanies an "
+                "NDS/SNDS/ANDS/SANDS). Product information for a DIN is conveyed "
+                "by the label: the Canadian Drug Facts Table (Plain Language "
+                "Labelling) for a non-prescription product, per the referenced "
+                "Category IV monograph / labelling standard. See section 1.3.3.")
+        elif section == "1.3.3":
+            item["source_url"] = _URL["labels_din"]
+            item["guidance"] = (
+                "Labelling (1.3.3) is the DIN's product-information vehicle — "
+                "there is no Product Monograph. A non-prescription self-selection "
+                "product must display the Canadian Drug Facts Table (CDFT) on the "
+                "outer label under Plain Language Labelling, conforming to the "
+                "referenced Category IV monograph / labelling standard. Bilingual "
+                "(EN + FR) mock-ups are required. Upload the label set.")
+        elif section == "2.3" and din_type == "data_supported":
+            item["guidance"] = (
+                "A data-supported DINA files a Quality Overall Summary — "
+                "QOS-CE (DINA) (Module 2) covering the drug substance (S) and "
+                "drug product (P), per HC 'Quality Guidance: Applications for "
+                "DINAs for Pharmaceuticals'. Complete or upload it.")
     # [r5-e970005] Module-2 summaries (2.4-2.7) carry a static generic-ANDS "not
     # required — suppressed on the CS-BE path" guidance. Swap it to match the
     # applicability actually resolved: required on the innovator NDS path, or a
@@ -619,14 +688,16 @@ def _build_node(module: str, node: dict, cs_be_only: bool,
 def section_tree(*, cs_be_only: bool = True,
                  submission_type: str = "ANDS",
                  dosage_form_class: str = "ir_solid_oral",
-                 product_in_scope: bool = True) -> dict:
+                 product_in_scope: bool = True,
+                 din_type: str = "") -> dict:
     """The full versioned M1–M5 tree with per-section applicability resolved for
-    the submission type (NDS / ANDS / SANDS / SNDS / DIN) and dosage form."""
+    the submission type (NDS / ANDS / SANDS / SNDS / DIN), dosage form, and — for
+    a DIN — the DIN sub-type (data_supported DINA vs standard_referenced)."""
     st = str(submission_type or "ANDS").upper()
     modules = []
     for mod in _MODULES:
         nodes = [_build_node(mod["module"], n, cs_be_only, st, dosage_form_class,
-                             product_in_scope)
+                             product_in_scope, din_type)
                  for n in mod["nodes"]]
         modules.append({"module": mod["module"], "title": mod["title"], "nodes": nodes})
     return {"version": SECTION_TREE_VERSION, "cs_be_only": bool(cs_be_only),
@@ -639,11 +710,13 @@ def section_tree(*, cs_be_only: bool = True,
 
 def all_nodes(*, cs_be_only: bool = True, submission_type: str = "ANDS",
               product_in_scope: bool = True,
-              dosage_form_class: str = "ir_solid_oral") -> list[dict]:
+              dosage_form_class: str = "ir_solid_oral",
+              din_type: str = "") -> list[dict]:
     return [n for m in section_tree(cs_be_only=cs_be_only,
                                     submission_type=submission_type,
                                     dosage_form_class=dosage_form_class,
-                                    product_in_scope=product_in_scope)["modules"]
+                                    product_in_scope=product_in_scope,
+                                    din_type=din_type)["modules"]
             for n in m["nodes"]]
 
 

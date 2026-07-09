@@ -42,6 +42,37 @@ const SUBMISSION_TYPES = [
     def: "A change to an innovator (brand) product's existing approval.",
     example: "Example: a brand sponsor adding a new indication to an " +
       "approved product." },
+  { code: "NDS", label: "NDS — New Drug Submission (innovator)",
+    def: "An innovator's first filing for a new drug (full nonclinical + " +
+      "clinical dossier). ANDS Studio is generic-focused — see the scope note.",
+    example: "Example: a sponsor seeking market authorization for a new " +
+      "chemical entity with its own clinical trials." },
+  { code: "DIN", label: "DIN — Drug Identification Number application",
+    def: "A DIN application for a product that is not a 'new drug' (no NOC) — " +
+      "e.g. a non-prescription Category IV / labelling-standard product, or a " +
+      "data-supported DINA needing only a quality review.",
+    example: "Example: an antacid oral suspension filed against the Antacid " +
+      "Labelling Standard (no Product Monograph; the label is the vehicle)." },
+] as const;
+
+// swarm r6: DIN sub-type (shown only when submission type = DIN). A DIN bears no
+// NOC, so NO Product Monograph applies to any DIN; the sub-type decides whether a
+// Module-3 CMC package + QOS-CE(DINA) are required.
+const DIN_TYPES = [
+  { code: "", label: "— select DIN sub-type —",
+    note: "A DIN bears no Notice of Compliance, so no Product Monograph applies. "
+      + "Pick the sub-type to resolve the Module-3 / QOS requirements." },
+  { code: "standard_referenced",
+    label: "Standard-referenced (Category IV monograph / labelling standard)",
+    note: "An administrative attestation (e.g. an antacid): no Module 3 CMC data "
+      + "is filed (GMP attested, quality kept on file) and no Product Monograph. "
+      + "Product information is the label — the Canadian Drug Facts Table (Plain "
+      + "Language Labelling) conforming to the referenced monograph/standard." },
+  { code: "data_supported",
+    label: "Data-supported DINA (chemical entity — quality review)",
+    note: "A chemical-entity pharmaceutical needing a quality review: file the "
+      + "Module 3 CMC package (drug substance S + drug product P) and a QOS-CE "
+      + "(DINA). No Product Monograph and no clinical data." },
 ] as const;
 
 // TIER-A: the dosage form drives the Health-Canada comparative-evidence route
@@ -267,6 +298,8 @@ export default function DossiersHome() {
   const [controlledSubstance, setControlledSubstance] = useState(false);
   // swarm r2/r3: flagged special pathways (surface honest advisories on the dossier)
   const [specialPathways, setSpecialPathways] = useState<string[]>([]);
+  // swarm r6: DIN sub-type (DIN only) — data_supported DINA vs standard_referenced
+  const [dinType, setDinType] = useState<string>("");
   const [sponsor, setSponsor] = useState("");
   const [owner, setOwner] = useState("");
   const [busy, setBusy] = useState(false);
@@ -465,6 +498,8 @@ export default function DossiersHome() {
         dosage_form_class: GENERIC_FAMILY.has(subType) ? dosageForm : "ir_solid_oral",
         // TIER-B: the product class (for the honest out-of-core scope note)
         product_class: productClass,
+        // swarm r6: DIN sub-type (only meaningful for a DIN; backend forces "" off DIN)
+        din_type: subType === "DIN" ? (dinType || undefined) : undefined,
         controlled_substance: controlledSubstance,
         special_pathways: specialPathways,
         sponsor: sponsor.trim() || undefined,
@@ -778,6 +813,32 @@ export default function DossiersHome() {
                       study.
                     </span>
                   </label>
+                )}
+                {/* swarm r6: DIN sub-type — decides whether a Module-3 CMC
+                    package + QOS are required (data-supported DINA) or n/a
+                    (Category IV / labelling standard). No DIN needs a Product
+                    Monograph. Surfaced at the point of choice. */}
+                {subType === "DIN" && (
+                  <div style={{ marginTop: 10 }}>
+                    <label>DIN sub-type <span className="mut"
+                      style={{ fontWeight: 400 }}>(quality requirements)</span></label>
+                    <select value={dinType}
+                      onChange={(e) => setDinType(e.target.value)}
+                      style={{ width: "100%" }}>
+                      {DIN_TYPES.map((d) => (
+                        <option key={d.code} value={d.code}>{d.label}</option>
+                      ))}
+                    </select>
+                    {(() => {
+                      const d = DIN_TYPES.find((x) => x.code === dinType);
+                      if (!d) return null;
+                      return (
+                        <p style={{ fontSize: 12, lineHeight: 1.45, margin: "6px 0 0" }}>
+                          {d.note}
+                        </p>
+                      );
+                    })()}
+                  </div>
                 )}
                 {/* TIER-A: dosage form → comparative-evidence route. Shown for
                     the generic families (ANDS/SANDS) since it decides whether a

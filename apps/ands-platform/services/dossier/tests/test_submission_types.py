@@ -81,9 +81,12 @@ def test_din_is_light_no_generic_artifacts_no_clinical():
     assert _ap("DIN", "4", cs_be=False) == "na"
     # a DIN application does not carry the full generic CMC/BE dossier as required
     assert _ap("DIN", "3.2.P.8", cs_be=False) in ("optional", "conditional", "na")
-    # but M1 admin + product info stays required
+    # M1 admin stays required; but the Product Monograph (1.3.1) is NOT part of a
+    # DIN — a DIN bears no NOC (PM is for NDS/SNDS/ANDS/SANDS) -> na. Labelling
+    # (1.3.3) stays required: the label is the DIN's product-info vehicle. [r6]
     assert _ap("DIN", "1.0", cs_be=False) == "required"
-    assert _ap("DIN", "1.3.1", cs_be=False) == "required"
+    assert _ap("DIN", "1.3.1", cs_be=False) == "na"
+    assert _ap("DIN", "1.3.3", cs_be=False) == "required"
 
 
 # -- the tree carries an honest scope note for non-ANDS types ---------------

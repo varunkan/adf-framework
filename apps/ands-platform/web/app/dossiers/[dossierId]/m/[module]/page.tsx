@@ -327,6 +327,19 @@ ${outstanding ? `<ul>${outstanding}</ul>` : "<p>Nothing outstanding — every re
               {content.controlled_substance_note}
             </div>
           )}
+          {/* swarm r6: DIN sub-type advisory — a DIN bears no NOC, so no Product
+              Monograph applies; the sub-type sets the Module-3/QOS requirements. */}
+          {content.din_type_note && (
+            <div className="notice" style={{ marginBottom: 14, fontSize: 13 }}>
+              <b>{content.din_type === "data_supported"
+                ? "Data-supported DINA"
+                : content.din_type === "standard_referenced"
+                  ? "Standard-referenced DIN (Category IV / labelling standard)"
+                  : "DIN application"}
+                {" "}— no Product Monograph applies.</b>{" "}
+              {content.din_type_note}
+            </div>
+          )}
           {/* swarm r2: honest, cited advisories for the flagged special pathways */}
           {(content.special_pathways?.length ?? 0) > 0 && (
             <div className="notice" style={{ marginBottom: 14, fontSize: 13 }}>

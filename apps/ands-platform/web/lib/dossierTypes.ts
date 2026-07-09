@@ -636,6 +636,12 @@ export interface ContentState {
   // Studio's core generic small-molecule authoring (null for the in-core case).
   product_class?: string;
   product_class_note?: string | null;
+  // swarm r6: DIN sub-type (DIN submissions only) + its honest advisory. A DIN
+  // bears no NOC, so no Product Monograph applies; the sub-type drives whether
+  // Module 3 CMC + QOS are required (data_supported DINA) or n/a (Category IV /
+  // labelling standard). Both null off the DIN path.
+  din_type?: string | null;
+  din_type_note?: string | null;
   // swarm gap #19: controlled-substance OCS/CDSA obligations advisory
   controlled_substance?: boolean;
   controlled_substance_note?: string | null;
