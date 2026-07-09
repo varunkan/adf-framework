@@ -112,7 +112,7 @@ def test_structured_generator_carries_draft_watermark():
 # upload-only by design. 1.2.4.2 (innovator data protection) is an eligibility/
 # legal document the sponsor supplies — upload-only by design too.
 _UPLOAD_ONLY_BY_DESIGN = {"1.1", "2.1", "1.2.2", "4.2.1", "4.2.2", "4.2.3",
-                          "4.3", "5.3.5", "1.2.4.2"}
+                          "4.3", "5.2", "5.3.5", "5.3.7", "1.2.4.2"}
 
 
 def test_every_content_section_exposes_generate():

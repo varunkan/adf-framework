@@ -294,6 +294,16 @@ _MODULES: list[dict] = [
          "u": "ectd"},
     ]},
     {"module": "5", "title": "Module 5 — Clinical Study Reports", "nodes": [
+        # [r10-e970005] ICH CTD M5 structure: 5.2 Tabular Listing of All Clinical
+        # Studies (applies wherever clinical/BE studies exist) + 5.3.7 Case Report
+        # Forms (innovator-NDS clinical evidence).
+        {"s": "5.2", "t": "Tabular Listing of All Clinical Studies", "k": "document",
+         "a": _O, "aff": [_UP, _NA], "gen": None, "fmt": ["pdf"], "bi": False,
+         "p": "A tabular index of every clinical/comparative study in Module 5.",
+         "g": "List each study in Module 5 (design, population, endpoints, status). "
+              "For an ANDS this is the comparative BA/BE study; for an NDS the full "
+              "clinical program. Optional index — upload the tabular listing.",
+         "u": "ectd"},
         {"s": "5.3.1", "t": "Comparative Bioavailability / Bioequivalence Study Reports",
          "k": "document", "a": _R, "aff": [_GEN, _UP], "gen": "structured", "fmt": ["pdf"], "bi": False,
          "p": "The pivotal comparative BA/BE study report(s) — the core evidence for an ANDS.",
@@ -307,6 +317,12 @@ _MODULES: list[dict] = [
          "bi": False,
          "p": "The pivotal controlled clinical efficacy/safety trials supporting a New Drug Submission.",
          "g": "Filed by an innovator NDS. A generic ANDS does not repeat clinical trials — it demonstrates comparative bioequivalence (5.3.1) to the reference product instead.",
+         "u": "ectd"},
+        {"s": "5.3.7", "t": "Case Report Forms and Individual Patient Listings",
+         "k": "document", "a": _R, "aff": [_UP, _NA], "gen": None, "fmt": ["pdf"],
+         "bi": False,
+         "p": "Case report forms and individual patient data listings supporting the clinical study reports.",
+         "g": "Filed by an innovator NDS to support its controlled clinical trials (on request / as applicable). A generic ANDS does not file clinical-trial CRFs.",
          "u": "ectd"},
     ]},
 ]
@@ -340,7 +356,7 @@ def _leaf_id(section: str) -> str:
 _GENERIC_ONLY = {"1.2.4", "1.6", "5.3.1"}
 # INNOVATOR-ONLY clinical evidence: the controlled clinical trials (5.3.5) that
 # are the core of an NDS. A generic demonstrates comparative BE (5.3.1) instead.
-_INNOVATOR_ONLY = {"5.3.5"}
+_INNOVATOR_ONLY = {"5.3.5", "5.3.7"}
 _GENERIC_FAMILY = {"ANDS", "SANDS"}
 
 # Honest scope: ANDS Studio is purpose-built for ANDS (generics). It reports the
@@ -355,13 +371,17 @@ _SCOPE_NOTES = {
     "NDS": "ANDS Studio is purpose-built for Abbreviated New Drug Submissions "
            "(generics). This New Drug Submission (innovator) shows the correct "
            "eCTD module applicability — the full nonclinical (Module 4) and "
-           "clinical/nonclinical summaries (2.4–2.7) are required, and no Form V "
-           "or comparative-bioequivalence study applies — but the scientific "
-           "dossier is authored outside ANDS Studio.",
+           "clinical/nonclinical summaries (2.4–2.7) are required, and no "
+           "comparative-bioequivalence study applies. A Form V (Declaration re: "
+           "Patent List) applies only IF this submission compares to or references "
+           "another drug with a patent on the Patent Register (s.5 PM(NOC)) — e.g. "
+           "a biosimilar — so 1.2.4 is shown as conditional, not never. The "
+           "scientific dossier is authored outside ANDS Studio.",
     "SNDS": "ANDS Studio is purpose-built for Abbreviated New Drug Submissions "
             "(generics). This Supplement to a New Drug Submission (brand change) "
-            "carries no Form V or comparative-bioequivalence study; the changed "
-            "scientific modules are authored outside ANDS Studio.",
+            "carries no comparative-bioequivalence study; a Form V applies only IF "
+            "the supplement compares to / references a patented marketed drug (s.5 "
+            "PM(NOC)). The changed scientific modules are authored outside ANDS Studio.",
     "DIN": "ANDS Studio is purpose-built for Abbreviated New Drug Submissions "
            "(generics). A DIN Application is a lighter regulatory route — the "
            "administrative Module 1 and product information apply; the full "
@@ -413,7 +433,7 @@ def _applicability(node: dict, module: str, cs_be_only: bool,
             # solutions, topical) — never force a study HC may waive.
             if sec in _BE_EVIDENCE:
                 return comparative_evidence.be_study_applicability(
-                    dosage_form_class)
+                    dosage_form_class, drug_name=drug_name)
             return node.get("a", _O)          # Form V (1.2.4) always required for ANDS
         if st == "SANDS":
             return "conditional"              # a generic supplement may not touch these

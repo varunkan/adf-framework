@@ -158,14 +158,16 @@ def right_to_sell_due_date(as_of) -> str:
 
 
 def right_to_sell(as_of, *, sme_granted: bool = False,
-                  drug_type: str = "prescription") -> dict:
+                  drug_type: str = "prescription",
+                  estimated: bool = False) -> dict:
     """Annual per-DIN Right-to-Sell fee, due October 1 of ``as_of``'s FY.
 
     swarm r8 (e970008): TIERED by drug type — prescription / non_prescription /
-    disinfectant. An unknown/empty drug_type falls back to the prescription tier
-    (the common case; also preserves the pre-r8 behaviour for existing callers).
-    SME status carries a 50% reduction on the annual fee; status must be granted
-    before it applies.
+    disinfectant. swarm r10 (e970008): when the tier is NOT confidently known
+    (``estimated=True`` — e.g. a DIN whose sub-type is unset), the prescription
+    tier is shown as an ESTIMATE with a caveat, mirroring review_fee's honest
+    deferral, rather than asserting a concrete tier as fact. SME status carries a
+    50% reduction on the annual fee; status must be granted before it applies.
     """
     dt = str(drug_type or "prescription").strip().lower()
     table = RIGHT_TO_SELL_FEES_BY_TYPE.get(dt, RIGHT_TO_SELL_FEES_BY_TYPE["prescription"])
@@ -173,13 +175,19 @@ def right_to_sell(as_of, *, sme_granted: bool = False,
     fy = fiscal_year(as_of)
     used_fy, gross = _resolve_amount(table, fy)
     tier_label = _RTS_TIER_LABEL[tier]
+    label = (f"{tier_label}-tier ESTIMATE" if estimated else f"{tier_label} tier")
     if sme_granted:
         amount = round(gross * (1.0 - SME_PREMARKET_REDUCTION), 2)
-        note = (f"Annual Right-to-Sell fee ({tier_label} tier), due Oct 1; 50% "
+        note = (f"Annual Right-to-Sell fee ({label}), due Oct 1; 50% "
                 "small-business reduction applied. " + SME_STATUS_NOTE)
     else:
         amount = gross
-        note = f"Annual Right-to-Sell fee ({tier_label} tier), due Oct 1 (full fee)."
+        note = f"Annual Right-to-Sell fee ({label}), due Oct 1 (full fee)."
+    if estimated:
+        note += (" The tier (prescription / non-prescription / disinfectant) is "
+                 "set by the drug type you declare on the Annual Drug Notification "
+                 "Form — confirm your product's type; the amount shown is the "
+                 "prescription-tier estimate.")
     return {"amount": amount, "due_date": right_to_sell_due_date(as_of),
             "note": note, "fiscal_year": fy, "amount_fiscal_year": used_fy,
-            "currency": CURRENCY, "drug_type": tier}
+            "currency": CURRENCY, "drug_type": tier, "estimated": bool(estimated)}

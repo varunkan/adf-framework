@@ -118,6 +118,22 @@ def _is_saba(drug_name: str) -> bool:
     low = str(drug_name or "").lower()
     return any(t in low for t in _SABA_TERMS)
 
+
+# swarm r10-e970013: a parenteral declared as an aqueous "solution" but named as a
+# depot / microsphere / liposome / suspension / long-acting injectable is NOT a
+# simple aqueous-solution biowaiver — it is a complex generic (BE study + product-
+# specific characterisation required). Detect it from the name and reroute
+# (confirm-style, erring toward requiring evidence, never wrongly waiving).
+_COMPLEX_PARENTERAL_TERMS = ("microsphere", "liposome", "liposomal", "depot",
+                             "long-acting injectable", "long acting injectable",
+                             "lai", "suspension", "nanoparticle", "in-situ gel",
+                             "implant", "emulsion")
+
+
+def _is_complex_parenteral(drug_name: str) -> bool:
+    low = str(drug_name or "").lower()
+    return any(t in low for t in _COMPLEX_PARENTERAL_TERMS)
+
 _FORM_TO_ROUTE = {
     IR_SOLID_ORAL: "pk_be_study",
     MR_SOLID_ORAL: "mr_pk_be_study",
@@ -167,14 +183,20 @@ def route(dosage_form_class: str, submission_type: str = "ANDS",
     key = _FORM_TO_ROUTE[df]
     if df == ORALLY_INHALED and _is_saba(drug_name):
         key = "oip_saba_pd"
+    # a parenteral "solution" named as a depot/microsphere/etc. is a complex
+    # generic, not the aqueous-solution biowaiver — reroute (never wrongly waive).
+    elif df == PARENTERAL_SOLUTION and _is_complex_parenteral(drug_name):
+        key = "complex_generic_pk"
     requires, label, evidence, citation = _ROUTES[key]
     return {"dosage_form_class": df, "route": key, "requires_be_study": requires,
             "label": label, "evidence": evidence, "citation": citation}
 
 
-def be_study_applicability(dosage_form_class: str) -> str:
+def be_study_applicability(dosage_form_class: str, drug_name: str = "") -> str:
     """Applicability of the comparative-BE study (5.3.1) + CS-BE summary (1.6)
     for a GENERIC of this dosage form: 'required' when a PK study is needed,
-    'conditional' when a biowaiver or non-PK evidence route applies."""
-    return "required" if route(dosage_form_class)["requires_be_study"] \
+    'conditional' when a biowaiver or non-PK evidence route applies. drug_name
+    lets a depot/microsphere parenteral reroute to the complex-generic (required)
+    path even when declared a parenteral 'solution'."""
+    return "required" if route(dosage_form_class, drug_name=drug_name)["requires_be_study"] \
         else "conditional"

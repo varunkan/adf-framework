@@ -1962,6 +1962,18 @@ class DossierService:
                 "module": m["module"], "title": m["title"],
                 "nodes": dossier_state.annotate(m["nodes"], states),
                 "progress": dossier_state.module_progress(m["nodes"], states)})
+        # [r10-e970010] surface a NOC/c cue on the 1.0 Cover Letter node when the
+        # NOC/c pathway is flagged — the eligibility declaration lives in the cover
+        # letter, and HC issues a Qualifying Notice before granting the NOC/c.
+        if "noc_c" in _special_pathways_of(idx):
+            for m in modules:
+                for n in m["nodes"]:
+                    if n["section"] == "1.0":
+                        n["guidance"] = ((n.get("guidance") or "") + " NOC/c: this "
+                            "submission is flagged for a Notice of Compliance with "
+                            "conditions — DECLARE the NOC/c eligibility request in "
+                            "this cover letter; Health Canada issues a Qualifying "
+                            "Notice (QN) before granting the NOC/c.")
         model = self.repo.get_dossier(dossier_id)
 
         section_gate = dossier_state.completeness_gate(
@@ -1976,6 +1988,18 @@ class DossierService:
         review_fee = fees.review_fee(today, submission_type)
         fee_paid = bool(idx.get("fee_paid"))
         sme_granted = bool(idx.get("sme_granted"))
+        # swarm r8/r10 (e970008): tier the annual Right-to-Sell fee by drug type.
+        # Confident tiers come from real signals — a disinfectant product class, or
+        # a non-prescription DIN sub-type (Category IV / labelling standard). When
+        # neither applies the drug type (Rx vs OTC) is NOT known to the tool, so the
+        # prescription tier is shown as an honest ESTIMATE with a caveat rather than
+        # asserted as fact.
+        if product_class == "disinfectant":
+            rts_dt, rts_estimated = "disinfectant", False
+        elif din_type in _DIN_OTC_TYPES:
+            rts_dt, rts_estimated = "non_prescription", False
+        else:
+            rts_dt, rts_estimated = "prescription", True
         fees_block = {
             "review_fee": review_fee,
             # SME mitigation only applies to a computed fee amount
@@ -1983,14 +2007,9 @@ class DossierService:
                 review_fee["amount"], sme_granted=sme_granted,
                 first_ever_submission=False)
                 if review_fee.get("amount") is not None else None),
-            # swarm r8 (e970008): tier the annual Right-to-Sell fee by drug type —
-            # a non-prescription DIN (Category IV / labelling standard) uses the
-            # lower OTC tier; a disinfectant its own tier; else prescription.
             "right_to_sell": fees.right_to_sell(
                 today, sme_granted=sme_granted,
-                drug_type=("disinfectant" if product_class == "disinfectant"
-                           else "non_prescription" if din_type in _DIN_OTC_TYPES
-                           else "prescription")),
+                drug_type=rts_dt, estimated=rts_estimated),
             "fee_paid": fee_paid, "sme_granted": sme_granted}
         # structural eCTD validation (PDF-byte checks are in validate_submission)
         validation = (ectd_validation.validate(model) if model
