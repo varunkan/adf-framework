@@ -33,6 +33,9 @@ _URL = {
     "qos": f"{_APPS}/templates.html",
     "cmc": f"{_APPS}/guidance-documents/chemical-entity-products-quality/guidance-document-quality-chemistry-manufacturing-guidance-new-drug-submissions-ndss-abbreviated-new-drug-submissions.html",
     "babe": f"{_APPS}/guidance-documents/bioavailability-bioequivalence/conduct-analysis-comparative.html",
+    # OIP route: the dedicated 2020 comparative-PK guidance for orally-inhaled
+    # products — a distinct HC document from the general comparative-BA page above.
+    "oip": f"{_APPS}/guidance-documents/comparative-pharmacokinetic-studies-orally-inhaled-products-2020.html",
     "fees": "https://www.canada.ca/en/health-canada/services/drugs-health-products/drug-products/fees/fees-review-drug-submissions-applications.html",
     "smallbiz": "https://www.canada.ca/en/health-canada/services/drugs-health-products/funding-fees/small-business-mitigation.html",
 }
@@ -469,6 +472,30 @@ _LABEL_ADAPT = {
 }
 
 
+# [r5-e970005] The Module-2 summaries (2.4-2.7) are authored with a static
+# generic-ANDS "not required — suppressed on the CS-BE path" guidance. On the
+# innovator NDS path they are REQUIRED (they summarise the full Module 4/5 data
+# packages; FDR C.08.005.1(1)(c) requires a comprehensive summary of every
+# study), so the guidance must be swapped to match the applicability shown.
+_M2_REQUIRED_GUIDANCE = {
+    "2.4": "Required for a New Drug Submission — a concise critical assessment of "
+           "the nonclinical (pharmacology/toxicology) program, integrating the "
+           "Module 4 data.",
+    "2.5": "Required for a New Drug Submission — a critical analysis of the "
+           "clinical efficacy and safety data, integrating the Module 5 studies.",
+    "2.6": "Required for a New Drug Submission — the factual written and tabulated "
+           "nonclinical summaries drawn from Module 4.",
+    "2.7": "Required for a New Drug Submission — the detailed factual summary of "
+           "biopharmaceutics, clinical pharmacology, efficacy and safety, drawn "
+           "from Module 5.",
+}
+_M2_CONDITIONAL_GUIDANCE = (
+    "Reachable on this submission's clinical-evidence route — summarise here the "
+    "comparative clinical / pharmacodynamic (or nonclinical) evidence that "
+    "supports the submission. A pure comparative-bioequivalence ANDS suppresses "
+    "this summary.")
+
+
 def _build_node(module: str, node: dict, cs_be_only: bool,
                 submission_type: str = "ANDS",
                 dosage_form_class: str = "ir_solid_oral",
@@ -495,6 +522,7 @@ def _build_node(module: str, node: dict, cs_be_only: bool,
         "folder": _folder(module, section),
         "leaf_id": _leaf_id(section),
     }
+    st = str(submission_type or "ANDS").upper()
     adapt = _LABEL_ADAPT.get(section)
     if adapt and str(submission_type or "ANDS").upper() in adapt[0]:
         for k, v in adapt[1].items():
@@ -504,11 +532,29 @@ def _build_node(module: str, node: dict, cs_be_only: bool,
     # the HC DINA variant name; NDS/SNDS/SANDS the neutral QOS (set above).
     if section == "2.3" and str(submission_type or "ANDS").upper() == "DIN":
         item["title"] = "Quality Overall Summary — QOS-CE (DINA)"
+    # [r5-e970005] Module-2 summaries (2.4-2.7) carry a static generic-ANDS "not
+    # required — suppressed on the CS-BE path" guidance. Swap it to match the
+    # applicability actually resolved: required on the innovator NDS path, or a
+    # reachable conditional arm for a generic on a clinical-evidence route.
+    # suppressed / na keep the authored 'not required' text.
+    if node.get("sup"):
+        app = item["applicability"]
+        if app == "required":
+            item["guidance"] = (_M2_REQUIRED_GUIDANCE.get(
+                section, "Required for a New Drug Submission.")
+                + " (Food and Drug Regulations C.08.005.1(1)(c).)")
+        elif app == "conditional":
+            item["guidance"] = _M2_CONDITIONAL_GUIDANCE
+        elif app == "optional" and st not in _GENERIC_FAMILY:
+            # e.g. SNDS (brand supplement): change-dependent, not a generic path
+            item["guidance"] = (
+                "Provide/update this summary where the submission's changes affect "
+                "the relevant nonclinical or clinical content; otherwise it is not "
+                "required for this submission type.")
     # Route-aware evidence prose: the 5.3.1 / 1.6 nodes hard-code a PK-BE (AUC/Cmax
     # 90% CI) requirement. When the dosage form's route is a biowaiver / topical
     # clinical-in-vitro / OIP / post-NOC supplement, that framing is wrong — state
     # the correct route's evidence (from comparative_evidence) instead.
-    st = str(submission_type or "ANDS").upper()
     if section in _BE_EVIDENCE and st in _GENERIC_FAMILY:
         r = comparative_evidence.route(dosage_form_class, submission_type=st)
         if r["route"] not in ("pk_be_study", "mr_pk_be_study"):
@@ -517,6 +563,11 @@ def _build_node(module: str, node: dict, cs_be_only: bool,
                      if section == "5.3.1"
                      else "Summarise this evidence in the CS-BE (1.6).")
             item["guidance"] = f"{r['evidence']} ({r['citation']}) {where}"
+            # [r5-e970003] link the guidance to the route's governing HC document:
+            # the OIP route follows the dedicated 2020 OIP comparative-PK guidance,
+            # not the general comparative-BA page the node authors point at by default.
+            if r["route"] == "oip_studies":
+                item["source_url"] = _URL["oip"]
     # 5.3.5: for a topical (clinical-endpoint) or orally-inhaled (comparative
     # clinical/PD) ANDS this is a REACHABLE conditional arm — say so, instead of
     # the innovator-only "a generic does not repeat clinical trials" text.
