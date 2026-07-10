@@ -228,6 +228,66 @@ def _check_backbone_checksums(ctx) -> list:
     return out
 
 
+# Backbone infrastructure files are not content leaves; they are never
+# "orphaned" even though no leaf href points at them.
+_BACKBONE_ARTIFACTS = {
+    "index.xml", "index-md5.txt", "ca-regional.xml",
+}
+
+
+def _check_orphaned_files(ctx) -> list:
+    """REQ-075 / rule R06 — every stored content file must be referenced by a
+    backbone leaf. A file present in the transaction that no leaf href resolves
+    to is an orphan (mapped to its path). Skipped when there is no backbone
+    (no leaves) and for directories / backbone-infrastructure artifacts."""
+    leaves = _leaves(ctx)
+    if not leaves:
+        return []
+    referenced = {_norm(lf.get("href")) for lf in leaves}
+    out = []
+    for f in _files(ctx):
+        if f.get("is_dir"):
+            continue
+        path = _norm(f.get("path"))
+        if not path or path in referenced:
+            continue
+        if path.rsplit("/", 1)[-1] in _BACKBONE_ARTIFACTS:
+            continue
+        out.append({
+            "file": path, "node": path,
+            "message": (f"file '{path}' is stored in the transaction but no "
+                        "backbone leaf references it (orphaned file)"),
+            "remediable": False, "fix_id": "",
+        })
+    return out
+
+
+def _check_checksum_match(ctx) -> list:
+    """REQ-075 / rule B07b — every leaf's recorded MD5 must match the actual
+    MD5 of the bytes it ships. Only verifiable (and only flagged) when the leaf
+    re-ships its content; a reused leaf that ships no bytes is skipped (its
+    bytes are unchanged from the prior, already-verified sequence)."""
+    out = []
+    for lf in _leaves(ctx):
+        if _norm(lf.get("operation")) == "delete":
+            continue
+        content = lf.get("content")
+        recorded = _norm(lf.get("checksum"))
+        if content is None or not recorded:
+            continue
+        actual = ectd.md5_hex(content)
+        if recorded != actual:
+            out.append({
+                "file": _norm(lf.get("href")),
+                "node": _norm(lf.get("leaf_id")),
+                "message": (f"leaf '{_norm(lf.get('leaf_id'))}' records MD5 "
+                            f"{recorded} but its bytes hash to {actual} "
+                            "(checksum mismatch)"),
+                "remediable": False, "fix_id": "",
+            })
+    return out
+
+
 def _check_regional(ctx) -> list:
     """Regional category — ca-regional dossier-id must match the transaction."""
     out = []
@@ -698,6 +758,14 @@ RULE_CATALOG = [
     {"rule_id": "B07", "category": "ICH-Backbone", "severity": SEVERITY_ERROR,
      "description": "Every leaf carries an MD5 checksum in the backbone",
      "min_version": "5.2", "check": _check_backbone_checksums},
+    {"rule_id": "B07b", "category": "ICH-Backbone", "severity": SEVERITY_ERROR,
+     "description": "Every leaf's recorded MD5 matches the actual bytes it "
+                    "ships (REQ-075 checksum integrity)",
+     "min_version": "5.3", "check": _check_checksum_match},
+    {"rule_id": "R06", "category": "Referenced", "severity": SEVERITY_ERROR,
+     "description": "Every stored file is referenced by a backbone leaf — no "
+                    "orphaned files (REQ-075 referential integrity)",
+     "min_version": "5.3", "check": _check_orphaned_files},
     {"rule_id": "G01", "category": "Regional", "severity": SEVERITY_ERROR,
      "description": "ca-regional.xml dossier-id matches the transaction",
      "min_version": "5.2", "check": _check_regional},
