@@ -83,7 +83,7 @@ _MODULES: list[dict] = [
         {"s": "1.2.2", "t": "Fees & Small-business", "k": "document", "a": _R,
          "aff": [_UP], "gen": None, "fmt": ["pdf"], "bi": False,
          "p": "Fee payment information — and, if you qualify, the small-business status confirmation.",
-         "g": "Fees follow the Fees Order (CPI-indexed each April 1) — the portal shows the live current-fiscal-year ANDS review fee. Small-business status (≤300 staff or <$100M revenue incl. affiliates) gives a 50% reduction and a full waiver on your FIRST-ever submission, but status must be GRANTED BEFORE you file. Upload the fee/small-business form.",
+         "g": "Fees follow the Fees Order (CPI-indexed each April 1) — the portal shows the live current-fiscal-year ANDS review fee. Small-business status — fewer than 100 employees, OR $30,000–$5 million in annual gross revenues (including affiliates) — gives a 50% reduction on pre-market evaluation fees (25% on Right-to-Sell / Establishment Licence) and a full waiver on your FIRST-ever pre-market submission; status must be GRANTED BEFORE you file. Upload the fee/small-business form.",
          "u": "fees"},
         {"s": "1.2.3", "t": "Certification & Attestation (ANDS Sponsor Attestation)",
          "k": "document", "a": _R, "aff": [_GEN, _UP], "gen": "ands_attestation",
@@ -375,8 +375,9 @@ _SCOPE_NOTES = {
            "comparative-bioequivalence study applies. A Form V (Declaration re: "
            "Patent List) applies only IF this submission compares to or references "
            "another drug with a patent on the Patent Register (s.5 PM(NOC)) — e.g. "
-           "a biosimilar — so 1.2.4 is shown as conditional, not never. The "
-           "scientific dossier is authored outside ANDS Studio.",
+           "a biosimilar. So 1.2.4 (Form V) is conditional IN GENERAL and resolves "
+           "to N/A for a non-comparison first NCE like this one. The scientific "
+           "dossier is authored outside ANDS Studio.",
     "SNDS": "ANDS Studio is purpose-built for Abbreviated New Drug Submissions "
             "(generics). This Supplement to a New Drug Submission (brand change) "
             "carries no comparative-bioequivalence study; a Form V applies only IF "
@@ -456,7 +457,13 @@ def _applicability(node: dict, module: str, cs_be_only: bool,
         # reachable conditional arm for such an ANDS (not hard na).
         if st == "ANDS":
             r = comparative_evidence.route(dosage_form_class, drug_name=drug_name)["route"]
-            # a second-entry SABA MDI: the comparative PD clinical study is
+            # [r11-e970003] 5.3.7 (Case Report Forms / patient listings) is an
+            # ON-REQUEST artifact even for an NDS — never a hard generic requirement.
+            # Keep it reachable-conditional on a clinical route, never gate-blocking.
+            if sec == "5.3.7":
+                return "conditional" if (r in _CLINICAL_EVIDENCE_ROUTES
+                                         or r == "oip_saba_pd") else "na"
+            # a second-entry SABA MDI: the comparative PD clinical study (5.3.5) is
             # de-facto REQUIRED (1999 SABA-MDI guidance), not merely reachable.
             if r == "oip_saba_pd":
                 return "required"
@@ -611,7 +618,13 @@ def _build_node(module: str, node: dict, cs_be_only: bool,
     # Monograph is not part of the filing; 1.3.3 Labelling (CDFT / labelling
     # standard / Category IV monograph) is the DIN's product-information vehicle.
     if st == "DIN":
-        if section == "1.3.1":
+        if section == "1.3":
+            # [r11-e970008] the 1.3 group purpose names a "bilingual Product
+            # Monograph" — a DIN has none; its product info is the label.
+            item["purpose"] = ("The DIN's product information — the bilingual "
+                "label(s) / Canadian Drug Facts Table (Plain Language Labelling); "
+                "a DIN has no Product Monograph.")
+        elif section == "1.3.1":
             item["purpose"] = "Not part of a DIN application."
             item["guidance"] = (
                 "A Product Monograph is NOT part of a DIN application — a DIN "

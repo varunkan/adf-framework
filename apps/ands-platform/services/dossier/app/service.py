@@ -29,12 +29,18 @@ _ID_RE = re.compile(r"^[a-z]\d{6,7}$")
 _SEQ_SUFFIX_RE = re.compile(r"^(?P<base>.+)-\d{4}$")
 
 _GENERIC_FAMILY_TYPES = {"ANDS", "SANDS"}
+# swarm r11 (e970012): new-drug product classes that a DIN application cannot carry —
+# they are authorized through a full NDS (radiopharm Schedule C / biologic Schedule D
+# file to the BRDD, which issues an NOC + DIN). A DIN itself is a lower-tier route for
+# a small-molecule (or disinfectant) NON-new-drug.
+_DIN_NEW_DRUG_CLASSES = ("biologic", "biosimilar", "radiopharmaceutical", "veterinary")
 
 
 def _reject_contradictory_class(submission_type: str, product_class: str) -> None:
-    """A generic ANDS/SANDS is only for a small-molecule chemical drug. An
-    out-of-core product class (biologic/biosimilar/radiopharm/veterinary/
-    disinfectant/NHP) must file as an NDS/SNDS — reject the wrong-pathway combo."""
+    """A generic ANDS/SANDS is only for a small-molecule chemical drug, and a DIN is
+    only for a small-molecule/disinfectant NON-new-drug. An out-of-core new-drug
+    product class (biologic/biosimilar/radiopharm/veterinary) must file as an
+    NDS/SNDS — reject the wrong-pathway combo."""
     st = str(submission_type or "ANDS").upper()
     pc = str(product_class or "small_molecule").strip().lower()
     if st in _GENERIC_FAMILY_TYPES and pc not in ("small_molecule", ""):
@@ -44,6 +50,16 @@ def _reject_contradictory_class(submission_type: str, product_class: str) -> Non
                    "Submission (NDS/SNDS), not the abbreviated (ANDS) generic "
                    "pathway. Set the submission type to NDS/SNDS, or the product "
                    "class to small-molecule.",
+            rule="product_class_pathway_conflict")
+    if st == "DIN" and pc in _DIN_NEW_DRUG_CLASSES:
+        nice = pc.replace("_", " ")
+        raise ProblemError(
+            422, f"a {nice} cannot be filed as a DIN application",
+            detail=f"A {nice} is a NEW DRUG authorized through a full New Drug "
+                   "Submission (NDS) — a radiopharmaceutical (Schedule C) or "
+                   "biologic/biosimilar (Schedule D) files an NDS to the Biologic "
+                   "and Radiopharmaceutical Drugs Directorate (BRDD), which issues "
+                   "the NOC and DIN. Set the submission type to NDS.",
             rule="product_class_pathway_conflict")
 
 
@@ -106,8 +122,10 @@ _DIN_TYPE_NOTES = {
         "Drug Facts Table under Plain Language Labelling — is the product-information "
         "vehicle."),
     "category_iv": (
-        "DINF — a Category IV Monograph product (e.g. an antacid, antiseptic skin "
-        "cleanser, sunscreen): the sponsor attests the product conforms to the "
+        "DINF — a Category IV Monograph product (e.g. an antiseptic skin cleanser, "
+        "sunscreen, anti-dandruff or medicated-skin-care product; an antacid instead "
+        "follows the Antacid Labelling Standard — use the labelling-standard "
+        "sub-type): the sponsor attests the product conforms to the "
         "referenced Category IV Monograph. NO Module 3 CMC data is filed and no "
         "Product Monograph; product information is the label (Canadian Drug Facts "
         "Table). Note: the Category IV 'monograph' is a labelling standard, NOT the "
@@ -1965,15 +1983,27 @@ class DossierService:
         # [r10-e970010] surface a NOC/c cue on the 1.0 Cover Letter node when the
         # NOC/c pathway is flagged — the eligibility declaration lives in the cover
         # letter, and HC issues a Qualifying Notice before granting the NOC/c.
-        if "noc_c" in _special_pathways_of(idx):
+        _flagged = _special_pathways_of(idx)
+        if "noc_c" in _flagged or "priority_review" in _flagged:
             for m in modules:
                 for n in m["nodes"]:
-                    if n["section"] == "1.0":
-                        n["guidance"] = ((n.get("guidance") or "") + " NOC/c: this "
-                            "submission is flagged for a Notice of Compliance with "
-                            "conditions — DECLARE the NOC/c eligibility request in "
-                            "this cover letter; Health Canada issues a Qualifying "
-                            "Notice (QN) before granting the NOC/c.")
+                    if n["section"] != "1.0":
+                        continue
+                    g = n.get("guidance") or ""
+                    if "noc_c" in _flagged:
+                        g += (" NOC/c: this submission is flagged for a Notice of "
+                              "Compliance with conditions — DECLARE the NOC/c "
+                              "eligibility request in this cover letter; Health "
+                              "Canada issues a Qualifying Notice (QN) before granting "
+                              "the NOC/c.")
+                    # [r11-e970010] parallel Priority Review cue
+                    if "priority_review" in _flagged:
+                        g += (" Priority Review: if Health Canada has ACCEPTED your "
+                              "priority-review request, clearly state the accepted "
+                              "priority status in this cover letter and file within "
+                              "60 calendar days of acceptance (review target 180 vs "
+                              "300 calendar days).")
+                    n["guidance"] = g
         model = self.repo.get_dossier(dossier_id)
 
         section_gate = dossier_state.completeness_gate(
@@ -1985,7 +2015,7 @@ class DossierService:
         # submission-type-aware: the ANDS comparative-studies fee is emitted only
         # for an ANDS; other types name their HC Schedule 1 grouping (amount None)
         # instead of stating the wrong ANDS fee.
-        review_fee = fees.review_fee(today, submission_type)
+        review_fee = fees.review_fee(today, submission_type, product_class)
         fee_paid = bool(idx.get("fee_paid"))
         sme_granted = bool(idx.get("sme_granted"))
         # swarm r8/r10 (e970008): tier the annual Right-to-Sell fee by drug type.
@@ -2019,16 +2049,21 @@ class DossierService:
         # combo (a biosimilar/biologic filed as an ANDS/SANDS) that create +
         # reclassify now reject. Surface it as a validation ERROR so validation
         # can never report passed=true for a combination intake forbids.
-        if (submission_type in _GENERIC_FAMILY_TYPES
-                and product_class not in ("small_molecule", "")):
+        _conflict = (
+            (submission_type in _GENERIC_FAMILY_TYPES
+             and product_class not in ("small_molecule", ""))
+            or (submission_type == "DIN" and product_class in _DIN_NEW_DRUG_CLASSES))
+        if _conflict:
+            _need = ("NDS (to the BRDD)" if submission_type == "DIN"
+                     else "full NDS/SNDS")
             validation = {**validation,
                           "errors": list(validation.get("errors", [])) + [{
                               "rule": "product_class_pathway_conflict",
                               "severity": "error",
                               "message": (f"A {product_class.replace('_', ' ')} "
                                           f"cannot be filed as a {submission_type} "
-                                          "— it requires a full NDS/SNDS. Reclassify "
-                                          "the submission type or product class.")}],
+                                          f"— it requires a {_need}. Reclassify the "
+                                          "submission type or product class.")}],
                           "passed": False}
         # combined "ready to file" gate: content + fee arranged + validation clean
         missing = list(section_gate["missing"])

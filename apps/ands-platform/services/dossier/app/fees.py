@@ -95,10 +95,25 @@ def ands_review_fee(as_of) -> dict:
 # Schedule 1 (Fees Order) puts other submission types in DIFFERENT fee groupings.
 # Rather than state a plausible-but-wrong concrete fee (a MATERIAL_ERROR and a
 # trust breach), the tool names the correct grouping and refers to Schedule 1.
+# swarm r11 (e970006/11): NOT every NDS is a "new active substance" (NAS). A
+# biosimilar/biologic NDS is a comparability filing, and an NDS for an existing
+# medicinal ingredient (new dosage form / combination / long-marketed molecule) is
+# a NON-NAS grouping. Present NAS vs non-NAS as distinct Schedule-1 groupings and
+# key the biologic case off product_class — never assert the highest tier by default.
+_NDS_BIOLOGIC_FEE_NOTE = (
+    "New Drug Submission for a biosimilar / biologic: the fee grouping is the "
+    "comparability / 'clinical or non-clinical data and chemistry & manufacturing "
+    "data' grouping — NOT the higher new-active-substance grouping. Refer to HC "
+    "Schedule 1 (Fees Order). Not auto-computed here.")
+_NDS_FEE_NOTE = (
+    "New Drug Submission: name the grouping by CONTENT — an NDS WITH a new active "
+    "substance (NAS) is the HIGHEST Schedule-1 grouping; an NDS WITHOUT a new active "
+    "substance (e.g. a new dosage form, combination, or indication of an already-"
+    "marketed medicinal ingredient) is a LOWER grouping. Refer to HC Schedule 1 "
+    "(Fees Order). Not auto-computed here.")
+
 _FEE_GROUPING_NOTE = {
-    "NDS": "New Drug Submission with a new active substance: a distinct, HIGHER "
-           "fee grouping than comparative-studies — refer to HC Schedule 1 (Fees "
-           "Order). Not auto-computed here.",
+    "NDS": _NDS_FEE_NOTE,
     "SNDS": "Supplement to an NDS: the fee grouping depends on the change — a "
             "change requiring comparative/clinical studies is the HIGHER grouping; "
             "a CMC-only / labelling change is LOWER. Refer to HC Schedule 1 (Fees "
@@ -114,18 +129,26 @@ _FEE_GROUPING_NOTE = {
 }
 
 
-def review_fee(as_of, submission_type: str = "ANDS") -> dict:
+def review_fee(as_of, submission_type: str = "ANDS",
+               product_class: str = "small_molecule") -> dict:
     """Submission-type-aware review fee. The comparative-studies grouping fee is
     emitted (computed) ONLY for an ANDS; every other type names its correct HC
     Schedule 1 grouping with amount=None (``computed`` False) — the tool never
-    states a wrong concrete fee for a grouping it does not model."""
+    states a wrong concrete fee for a grouping it does not model. swarm r11: an
+    NDS is not assumed to be a new-active-substance filing (biosimilar/biologic and
+    non-NAS NDS are lower groupings)."""
     st = str(submission_type or "ANDS").upper()
     if st == "ANDS":
         return {**ands_review_fee(as_of), "computed": True, "submission_type": "ANDS"}
+    pc = str(product_class or "small_molecule").strip().lower()
+    if st == "NDS" and pc in ("biosimilar", "biologic"):
+        basis = _NDS_BIOLOGIC_FEE_NOTE
+    else:
+        basis = _FEE_GROUPING_NOTE.get(st, "Refer to HC Schedule 1 (Fees Order) "
+                                        "for this submission type. Not auto-computed here.")
     return {"fiscal_year": fiscal_year(as_of), "amount": None, "currency": CURRENCY,
-            "basis": _FEE_GROUPING_NOTE.get(st, "Refer to HC Schedule 1 (Fees "
-                     "Order) for this submission type. Not auto-computed here."),
-            "amount_fiscal_year": None, "computed": False, "submission_type": st}
+            "basis": basis, "amount_fiscal_year": None, "computed": False,
+            "submission_type": st}
 
 
 def small_business_mitigation(amount, *, sme_granted: bool,
@@ -176,18 +199,28 @@ def right_to_sell(as_of, *, sme_granted: bool = False,
     used_fy, gross = _resolve_amount(table, fy)
     tier_label = _RTS_TIER_LABEL[tier]
     label = (f"{tier_label}-tier ESTIMATE" if estimated else f"{tier_label} tier")
+    # swarm r11 (e970002/05/07/09/13): Oct 1 is the Annual-Drug-Notification / invoice
+    # ISSUANCE milestone, NOT the fee-payment deadline. HC invoices on Oct 1 (from the
+    # ADNF, which the manufacturer files BEFORE Oct 1) and PAYMENT is due within 30
+    # days of issuance (~Oct 31). Do not label Oct 1 as the payment "due" date.
+    invoice_date = right_to_sell_due_date(as_of)
+    start = int(fiscal_year(as_of).split("-")[0])
+    payment_due_date = f"{start}-10-31"
+    base = (f"Annual Right-to-Sell fee ({label}). Health Canada invoices on Oct 1 "
+            "(from your Annual Drug Notification Form, filed before Oct 1); payment "
+            "is due within 30 days of issuance (~Oct 31).")
     if sme_granted:
         amount = round(gross * (1.0 - SME_PREMARKET_REDUCTION), 2)
-        note = (f"Annual Right-to-Sell fee ({label}), due Oct 1; 50% "
-                "small-business reduction applied. " + SME_STATUS_NOTE)
+        note = base + " 50% small-business reduction applied. " + SME_STATUS_NOTE
     else:
         amount = gross
-        note = f"Annual Right-to-Sell fee ({label}), due Oct 1 (full fee)."
+        note = base
     if estimated:
         note += (" The tier (prescription / non-prescription / disinfectant) is "
                  "set by the drug type you declare on the Annual Drug Notification "
                  "Form — confirm your product's type; the amount shown is the "
                  "prescription-tier estimate.")
-    return {"amount": amount, "due_date": right_to_sell_due_date(as_of),
+    return {"amount": amount, "due_date": invoice_date,
+            "invoice_date": invoice_date, "payment_due_date": payment_due_date,
             "note": note, "fiscal_year": fy, "amount_fiscal_year": used_fy,
             "currency": CURRENCY, "drug_type": tier, "estimated": bool(estimated)}

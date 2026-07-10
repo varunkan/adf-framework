@@ -147,9 +147,27 @@ _FORM_TO_ROUTE = {
 }
 
 
+# swarm r11 (e970004): an unrecognized dosage-form value must NOT silently fall to
+# the systemic PK-BE default (OTHER) — a locally-acting topical routed as a systemic
+# bioequivalence product is a MATERIAL mischaracterization. Map common synonyms to
+# their canonical route so a "topical_semisolid"/cream/ointment lands on the
+# local-acting topical (clinical / in-vitro) route.
+_SYNONYMS = {
+    "topical_semisolid": TOPICAL_LOCAL, "topical": TOPICAL_LOCAL, "cream": TOPICAL_LOCAL,
+    "ointment": TOPICAL_LOCAL, "gel": TOPICAL_LOCAL, "lotion": TOPICAL_LOCAL,
+    "dermal": TOPICAL_LOCAL, "semisolid": TOPICAL_LOCAL,
+    "mr_solid_oral": MR_SOLID_ORAL, "er_solid_oral": MR_SOLID_ORAL,
+    "oral_solution": ORAL_SOLUTION, "solution": ORAL_SOLUTION,
+    "microsphere": COMPLEX_PARENTERAL, "depot": COMPLEX_PARENTERAL,
+    "long_acting_injectable": COMPLEX_PARENTERAL,
+}
+
+
 def _norm(dosage_form_class: str) -> str:
     df = str(dosage_form_class or "").strip()
-    return df if df in _VALID else OTHER
+    if df in _VALID:
+        return df
+    return _SYNONYMS.get(df.lower(), OTHER)
 
 
 # A SANDS is a POST-NOC supplement, not a fresh generic filing. Health Canada's
