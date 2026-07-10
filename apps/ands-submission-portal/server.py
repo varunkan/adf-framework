@@ -5589,6 +5589,8 @@ def run(host: str = "127.0.0.1", port: int = 8000, db_path: str = DB_PATH):
 
 
 if __name__ == "__main__":
-    # Port is taken from the environment so a verifier can run an isolated
-    # instance; behaviour is unchanged (default 8000) when the env is unset.
-    run(port=int(os.environ.get("ADF_SMOKE_PORT") or os.environ.get("PORT") or 8000))
+    # Port/host from the environment so Railway/cloud can bind 0.0.0.0:PORT.
+    run(
+        host=os.environ.get("HOST", "127.0.0.1"),
+        port=int(os.environ.get("ADF_SMOKE_PORT") or os.environ.get("PORT") or 8000),
+    )

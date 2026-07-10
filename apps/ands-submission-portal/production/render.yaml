@@ -1,0 +1,47 @@
+# Render Blueprint — alternative to Railway for backend + Postgres.
+# Dashboard: New > Blueprint > connect repo, set root to this folder's parent
+# (adf-framework/apps/ands-submission-portal) or adjust paths below.
+
+services:
+  - type: web
+    name: ands-portal-api
+    runtime: docker
+    plan: free
+    rootDir: adf-framework/apps/ands-submission-portal
+    dockerfilePath: production/backend/Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ands-portal-db
+          property: connectionString
+      - key: CORS_ORIGINS
+        sync: false
+      - key: CORS_ALLOW_VERCEL_PREVIEWS
+        value: "true"
+      - key: S3_ENABLED
+        value: "false"
+      - key: ESG_MODE
+        value: mock
+
+  - type: worker
+    name: ands-portal-worker
+    runtime: docker
+    plan: free
+    rootDir: adf-framework/apps/ands-submission-portal
+    dockerfilePath: production/backend/Dockerfile.worker
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ands-portal-db
+          property: connectionString
+      - key: S3_ENABLED
+        value: "false"
+      - key: ESG_MODE
+        value: mock
+
+databases:
+  - name: ands-portal-db
+    plan: free
+    databaseName: ands
+    user: ands
