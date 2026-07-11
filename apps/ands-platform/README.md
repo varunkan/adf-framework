@@ -5,9 +5,9 @@ bounded context**, **Postgres-per-service**, a **Redis event bus**, and an **API
 gateway / BFF** — hexagonal (ports & adapters) + DDD. See
 [`docs/ADR-0001-microservices-architecture.md`](docs/ADR-0001-microservices-architecture.md).
 
-> Replaces the stdlib monolith at [`apps/ands-submission-portal`](../ands-submission-portal),
-> which is retained as the 675-test **oracle** to port domain logic from, and
-> decommissioned per context as each service drains it.
+> Replaces the former stdlib monolith (`apps/ands-submission-portal`), which
+> served as the reference **oracle** during the rewrite and has now been fully
+> decommissioned and removed — the domain logic lives in these services.
 
 ## Layout
 

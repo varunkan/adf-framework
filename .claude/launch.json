@@ -2,14 +2,6 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "ands-app",
-      "runtimeExecutable": "python3",
-      "runtimeArgs": [
-        "/tmp/ands-view/server.py"
-      ],
-      "port": 8099
-    },
-    {
       "name": "adf-dashboard",
       "runtimeExecutable": "python3",
       "runtimeArgs": [

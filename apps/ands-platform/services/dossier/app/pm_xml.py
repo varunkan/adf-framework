@@ -3,10 +3,9 @@
 Generates a structured XML Product Monograph (ElementTree auto-escapes content)
 and validates it: well-formedness + required elements + section codes against a
 controlled vocabulary. A transmit gate blocks a PDF-only PM where XML is required.
-No lxml — mirrors how the monolith embeds XSD/CV as data.
+No lxml — XSD/CV are embedded as data.
 
-Hardened with the monolith's stylesheet-package machinery
-(apps/ands-submission-portal/rep_stylesheet.py, REQ-065/REQ-040) applied to
+Hardened with a stylesheet-package machinery (REQ-065/REQ-040) applied to
 the XML PM view:
 
   * HC's XML PM stylesheet package (SPL Canada stylesheet,
