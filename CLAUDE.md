@@ -105,6 +105,29 @@ invariants. This cheap pass repeatedly catches real defects pre-ship.
 Recalled facts and this file may be stale — verify a symbol/flag/behavior still
 exists in the code before relying on it.
 
+**Maintain an activity log — one entry per activity, updated after EVERY commit.**
+Keep a running log document at `docs/activity-log/ACTIVITY_LOG.md` (newest entry
+first) that records EVERY activity: the date, what was analyzed, what changed and
+why, the requirement/persona/gap it traces to, the commit hash(es), and the
+verification result (tests run + outcome). Append an entry immediately after each
+commit — and for any substantive analysis, decision, or test round even when no
+commit results. Before starting new work, READ the latest log entries to
+understand what was done last and continue from there: the log is the durable,
+human-readable memory of the build (complementary to the knowledge graph and
+auto-memory). No activity is complete until it is logged. For a long
+multi-round campaign, also keep a per-campaign log (e.g.
+`docs/activity-log/<campaign>-log.md`) and link it from the main log.
+
+**Check ALL current code and state BEFORE every commit — a prior step may have
+half-landed.** A network error, interrupted tool call, timeout, or crash can
+leave the working tree partially changed or a commit partially made. So before
+every `git add`/`git commit`: re-run `git status` + `git diff --stat` +
+`git log --oneline -3`, re-read (or diff) the exact files you intend to commit,
+and re-run the relevant tests — confirm the ACTUAL current state matches what you
+intend, that no earlier change was lost or double-applied, and that nothing
+unrelated is being swept in. Never commit blind on the assumption a previous step
+completed; verify it did, then commit.
+
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph
 
