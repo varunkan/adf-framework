@@ -213,3 +213,51 @@ POST routes:
   approximation + a Halley refinement against `math.erfc`) — standard library
   only. Requires at least two values (the standard error is undefined for one
   observation). The inferential companion to `/api/describe`.
+- `/api/cohens-d` — `{a:[{value,unit},...], b:[...], to?}` → the standardized
+  **effect size** (Cohen's d) for the difference between two **independent**
+  samples' means, the magnitude companion to the significance tests `/api/t-test`
+  and `/api/mann-whitney`. Where a p-value shrinks toward zero as the samples
+  grow, the effect size does not: it reports the difference of means in
+  **pooled-standard-deviation** units, `d = (x̄ₐ − x̄_b)/s_p` with
+  `s_p = √(((nₐ−1)·s²ₐ + (n_b−1)·s²_b)/(nₐ+n_b−2))`. Also reports the
+  small-sample bias-corrected **Hedges' g** `= d·(1 − 3/(4(nₐ+n_b)−9))` (with its
+  `correction_factor`), **Glass's delta** `= (x̄ₐ − x̄_b)/s_b` (standardised by
+  sample B's stdev alone, `null` when B is constant) and a plain-language
+  `magnitude` label by Cohen's cutoffs (negligible < 0.2 ≤ small < 0.5 ≤ medium <
+  0.8 ≤ large). The two samples are independent, may differ in length, and must
+  share one linear category; `d`/`g` are **dimensionless** (invariant under `to`)
+  while the means/stdevs carry the unit. Requires at least two values per sample
+  and rejects two all-constant samples (zero pooled variance leaves `d`
+  undefined).
+- `/api/variance-ratio-test` — `{a:[{value,unit},...], b:[...], alpha?, to?}` →
+  an **F-test for the equality of two variances**, the spread-comparison
+  companion to `/api/t-test` (which compares the two *means*). It tests whether
+  two independent samples are equally **dispersed** — the classic pre-check that
+  decides between a pooled (`equal_var=true`) and a Welch t-test. The statistic
+  is the unbiased **variance ratio** `F = s²ₐ/s²_b` with numerator/denominator
+  degrees of freedom `df_a = nₐ−1`, `df_b = n_b−1`, and the two-sided p-value is
+  `2·min(P(F ≥ f), P(F ≤ f))` (capped at 1) under the `F(df_a, df_b)`
+  distribution. Swapping the two samples reciprocates the statistic (`F → 1/F`)
+  but leaves the p-value unchanged. Reports both samples' means/variances/stdevs,
+  the `variance_ratio`, `larger_variance` (`"a"`/`"b"`/`"equal"`), the p-value and
+  a verdict at the `alpha` level (default 0.05). The two samples are independent,
+  may differ in length, and must share one linear category; requires at least two
+  values per sample and rejects EITHER sample being constant (a zero variance
+  makes the ratio undefined).
+- `/api/one-sample-t-test` — `{items:[{value,unit},...], mu?, alpha?, to?}` → a
+  **one-sample t-test** of the sample mean against a hypothesized value `mu` (in
+  the common target unit, default 0). The one-group inferential companion to the
+  two-sample `/api/t-test` and the paired `/api/paired-t-test`, and the
+  hypothesis-test sibling of the interval estimators `/api/t-interval` and
+  `/api/confidence-interval` (which bound the same mean instead of testing it).
+  With the sample mean `x̄`, the unbiased sample stdev `s` (`/(n−1)`) and `n`
+  observations, the standard error is `SE = s/√n`, the statistic is
+  `t = (x̄ − mu)/SE` on `df = n − 1`, and the two-sided p-value is `P(|T| ≥ |t|)`
+  under Student's t (reusing the same incomplete-beta tail as `/api/t-test`).
+  Reports `mean`, `difference` (`mean − mu`), `sample_stdev`, `standard_error`,
+  the `statistic`, `df`, the `p_value`, the `significant` verdict at `alpha`
+  (default 0.05) and the matching `confidence_level = 1 − alpha` interval
+  (`critical_value`/`margin_of_error`/`lower`/`upper`) for the mean — the test
+  rejects exactly when `mu` falls outside it. `mu` must be a finite number and
+  `alpha` strictly in `(0, 1)`; requires at least two values and rejects an
+  all-identical (zero-variance) sample.

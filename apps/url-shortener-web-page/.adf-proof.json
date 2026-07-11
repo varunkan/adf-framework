@@ -1,0 +1,92 @@
+{
+  "build": {
+    "backend": "auto",
+    "model": null,
+    "prompt": "@orch-orchestrator resume url-shortener-web-page",
+    "verified": true,
+    "verify_summary": ".......\n----------------------------------------------------------------------\nRan 7 tests in 3.532s\n\nOK\n\nboot check: server.py serves on :59065"
+  },
+  "created_at": "2026-06-20T02:39:44+00:00",
+  "feature_id": "url-shortener-web-page",
+  "files": [
+    {
+      "bytes": 2380,
+      "path": "README.md",
+      "sha256": "c1ff51f8d22baf529219ecb9f64b03ebd2640cb6d0fdf57a08f66bcd33ac53d3"
+    },
+    {
+      "bytes": 5989,
+      "path": "index.html",
+      "sha256": "c0b51f805ad72da18e3c3b5de7d9f40cd125bb6417062e7989ef3957e3c8ab4d"
+    },
+    {
+      "bytes": 5629,
+      "path": "server.py",
+      "sha256": "b2b091500d4fdae9c23c095f3e36bb5312d14c5d67089723a266f791b07af834"
+    },
+    {
+      "bytes": 4436,
+      "path": "test_app.py",
+      "sha256": "2ddd8a28da72353fffd412fcfa1fb64a130174c6144efc931397d039e69f5dc4"
+    },
+    {
+      "bytes": 49,
+      "path": "urls.json",
+      "sha256": "7d54fd2a8f9aeef98a4d9e28a10b9e740f30ef88c05a69549a2ffb47d02432a1"
+    }
+  ],
+  "merkle_root": "a07731838a7be35afbe4da62c8e18d22607b927745de85e25fccbeffcea0c4b3",
+  "schema": "adf-proof/1",
+  "seal": "adf1:a07731838a7b",
+  "spec_sha256": "55d91228262f1840290d084b19a717358328f65be2866ebb1f744ea52a902e49",
+  "stack": "stdlib",
+  "verdict": {
+    "policy": {
+      "blocked": [],
+      "checked": true,
+      "enforced": [
+        "no_network_egress",
+        "no_plaintext_pii",
+        "no_secrets",
+        "no_weak_crypto"
+      ],
+      "n_violations": 0,
+      "ok": true,
+      "policy_id": "adf-default-secure",
+      "rules": [
+        "dependency_allowlist:pass",
+        "no_network_egress:pass",
+        "no_plaintext_pii:pass",
+        "no_secrets:pass",
+        "no_weak_crypto:pass",
+        "offline_capable:pass"
+      ]
+    },
+    "process": {
+      "blocked": [],
+      "enforced": [
+        "verification_evidence"
+      ],
+      "facts": {
+        "review_passed": {
+          "stages": [
+            "spec_compliance",
+            "code_quality"
+          ],
+          "status": "proven"
+        },
+        "verification_evidence": {
+          "gates": [
+            "test",
+            "boot"
+          ],
+          "status": "proven"
+        }
+      },
+      "schema": "adf-process/1"
+    },
+    "stack": "stdlib",
+    "verified": true,
+    "verify_summary": ".......\n----------------------------------------------------------------------\nRan 7 tests in 3.532s\n\nOK\n\nboot check: server.py serves on :59065"
+  }
+}

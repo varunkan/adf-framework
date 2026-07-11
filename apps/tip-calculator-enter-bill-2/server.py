@@ -712,6 +712,91 @@ def calculate_with_discount(bill, tip_percent, discount, discount_kind="percent"
     return result
 
 
+def _coerce_happy_hour_items(items):
+    """Validate a list of line items, each carrying its OWN optional discount.
+
+    The mirror of the whole-bill coupon: where `/api/discount` knocks a single
+    percentage or flat amount off the entire check, this lets every line carry
+    its own markdown — the classic "happy hour" bill where the drinks are half
+    price while the food stays full price, which one whole-bill discount can
+    never express. Each entry is an object with a non-negative `price`, an
+    optional `name` label (filled in as "Item N" when missing), an optional
+    `discount` (default 0), and an optional `discount_kind` ("percent" off this
+    item's price, the default, or "amount" for a flat dollar amount). The
+    per-item discount is interpreted by the SAME `_coerce_discount` the
+    whole-bill coupon uses, so a flat amount is capped at the item's own price
+    and a line can never go negative, and the bounds/messages can never drift.
+
+    Returns a list of (name, price_cents, discount_cents) tuples. Raises
+    ValueError on anything invalid so the API surfaces a clean 400.
+    """
+    if isinstance(items, (str, bytes)) or not isinstance(items, (list, tuple)):
+        raise ValueError("items must be a list of line items")
+    if not items:
+        raise ValueError("items must not be empty")
+    cleaned = []
+    for i, entry in enumerate(items):
+        if not isinstance(entry, dict):
+            raise ValueError("each item must be an object with a price")
+        price = entry.get("price")
+        if isinstance(price, bool) or price is None:
+            raise ValueError("each item needs a price")
+        try:
+            price = float(price)
+        except (TypeError, ValueError):
+            raise ValueError("item price must be a number")
+        if price != price or price < 0:  # NaN or negative
+            raise ValueError("item price must be non-negative")
+        price_cents = _to_cents(price)
+        # Reuse the whole-bill coupon validator: it enforces the kind, rejects a
+        # NaN/negative discount, and caps a flat amount at this item's price.
+        discount = entry.get("discount", 0)
+        kind = entry.get("discount_kind", "percent")
+        discount_cents = _coerce_discount(discount, kind, price_cents)
+        name = entry.get("name")
+        if name is None:
+            name = "Item %d" % (i + 1)
+        else:
+            name = str(name).strip() or ("Item %d" % (i + 1))
+        cleaned.append((name, price_cents, discount_cents))
+    return cleaned
+
+
+def happy_hour_bill(items, tip_percent, people=1, tax_percent=0,
+                    round_total=False, tip_on="pretax"):
+    """A bill with per-item ("happy hour") discounts, then tax + tip + fair split.
+
+    Unlike the whole-bill `/api/discount` and `/api/coupons`, every line item
+    can carry its OWN discount (see `_coerce_happy_hour_items`) — the classic
+    happy-hour check where the drinks are half price while the food stays full
+    price. Each item's discounted price is summed into the subtotal, and tax,
+    tip and the fair per-person split are then figured on that DISCOUNTED
+    subtotal via `calculate_bill`, so the savings correctly reduce both the tax
+    and the tip exactly as a whole-bill coupon does.
+
+    Raises ValueError on any invalid input. Returns the `calculate_bill` dict
+    (whose `subtotal` is the discounted subtotal) plus: original_subtotal (the
+    bill before any item discounts), total_savings (the dollars knocked off
+    across all items), and items (a per-line breakdown of
+    {name, price, discount, final}).
+    """
+    rows = _coerce_happy_hour_items(items)
+    original_cents = sum(price for _, price, _ in rows)
+    discount_cents = sum(disc for _, _, disc in rows)
+    discounted_cents = original_cents - discount_cents
+
+    result = calculate_bill(_from_cents(discounted_cents), tip_percent, people,
+                            tax_percent, round_total, tip_on)
+    result["original_subtotal"] = _from_cents(original_cents)
+    result["total_savings"] = _from_cents(discount_cents)
+    result["items"] = [
+        {"name": name, "price": _from_cents(price),
+         "discount": _from_cents(disc), "final": _from_cents(price - disc)}
+        for name, price, disc in rows
+    ]
+    return result
+
+
 def _coerce_coupons(coupons, bill_cents):
     """Validate a STACK of coupons and apply them in order to a running subtotal.
 
@@ -855,6 +940,108 @@ def service_charge_bill(bill, service_percent, tip_percent=0, people=1,
         "people": people,
         "per_person": _from_cents(total_shares[0]),
         "per_person_service": _from_cents(service_shares[0]),
+        "per_person_tip": _from_cents(tip_shares[0]),
+        "per_person_tax": _from_cents(tax_shares[0]),
+        "shares": [_from_cents(c) for c in total_shares],
+        "tip_on": tip_on,
+        "rounded": rounded,
+    }
+
+
+def _coerce_threshold(value):
+    """Validate a party-size threshold as a whole number >= 1; return it as int.
+
+    The auto-gratuity rule turns on when the party reaches this size, so the
+    threshold must be a positive whole number. Bounded by MAX_PEOPLE for the same
+    reason `_coerce_people` is — a hostile value can never drive an unbounded
+    allocation downstream. Raises ValueError on anything invalid so the API
+    surfaces a clean 400 rather than a 500.
+    """
+    try:
+        value_f = float(value)
+    except (TypeError, ValueError):
+        raise ValueError("party_threshold must be a whole number")
+    if value_f != value_f or value_f != int(value_f):  # NaN or non-integer
+        raise ValueError("party_threshold must be a whole number")
+    threshold = int(value_f)
+    if threshold < 1:
+        raise ValueError("party_threshold must be at least 1")
+    if threshold > MAX_PEOPLE:
+        raise ValueError("party_threshold must be at most %d" % MAX_PEOPLE)
+    return threshold
+
+
+def auto_gratuity_bill(bill, people, party_threshold=6, auto_percent=18,
+                       extra_tip_percent=0, tax_percent=0, round_total=False,
+                       tip_on="pretax"):
+    """Full breakdown for the large-party automatic-gratuity rule.
+
+    Many restaurants add a *mandatory* gratuity (commonly 18%) automatically once
+    a party reaches a size threshold (commonly 6 or more), and the guests may
+    still leave an *additional* voluntary tip on top. This models exactly that
+    rule, which is what makes it distinct from `service_charge_bill`: the auto
+    gratuity is applied ONLY when `people >= party_threshold`. Below the
+    threshold no auto gratuity is charged and the guests simply leave
+    `extra_tip_percent` as their ordinary tip.
+
+    Both the auto gratuity and the extra tip are figured on the base selected by
+    `tip_on` (the pre-tax subtotal by default, the post-tax amount when
+    "posttax"); `tax` is always figured on the pre-tax subtotal. When
+    `round_total` is truthy the grand total is rounded UP to the next whole
+    dollar and the extra cents are absorbed into the extra tip, exactly as in
+    `service_charge_bill`. Every per-person breakdown is produced with
+    `split_amount`, so each sums back exactly to its whole.
+
+    Raises ValueError on any invalid input. Returns a dict with: subtotal, tax,
+    tax_percent, auto_gratuity, auto_percent, auto_gratuity_applied,
+    party_threshold, tip (the extra voluntary tip), tip_percent, total, people,
+    per_person, per_person_gratuity, per_person_tip, per_person_tax, shares,
+    tip_on, and rounded.
+    """
+    # Reuse the shared validator for bill/people; the voluntary extra tip rides
+    # the same 0..100 bound as every other tip percent.
+    bill_cents, extra_tip_percent, people = _validate_common(
+        bill, extra_tip_percent, people)
+    auto_percent = _coerce_percent(auto_percent, "auto_percent")
+    party_threshold = _coerce_threshold(party_threshold)
+    tax_percent = _coerce_tax(tax_percent)
+
+    if tip_on not in TIP_BASES:
+        raise ValueError("tip_on must be 'pretax' or 'posttax'")
+
+    tax_cents = int(round(bill_cents * tax_percent / 100.0))
+    base_cents = bill_cents if tip_on == "pretax" else bill_cents + tax_cents
+
+    applied = people >= party_threshold
+    gratuity_cents = int(round(base_cents * auto_percent / 100.0)) if applied else 0
+    tip_cents = int(round(base_cents * extra_tip_percent / 100.0))
+    total_cents = bill_cents + tax_cents + gratuity_cents + tip_cents
+
+    rounded = bool(round_total)
+    if rounded:
+        bumped = int(math.ceil(total_cents / 100.0)) * 100
+        tip_cents += bumped - total_cents
+        total_cents = bumped
+
+    total_shares = split_amount(total_cents, people)
+    gratuity_shares = split_amount(gratuity_cents, people)
+    tip_shares = split_amount(tip_cents, people)
+    tax_shares = split_amount(tax_cents, people)
+
+    return {
+        "subtotal": _from_cents(bill_cents),
+        "tax": _from_cents(tax_cents),
+        "tax_percent": round(tax_percent, 4),
+        "auto_gratuity": _from_cents(gratuity_cents),
+        "auto_percent": round(auto_percent, 4),
+        "auto_gratuity_applied": applied,
+        "party_threshold": party_threshold,
+        "tip": _from_cents(tip_cents),
+        "tip_percent": round(extra_tip_percent, 4),
+        "total": _from_cents(total_cents),
+        "people": people,
+        "per_person": _from_cents(total_shares[0]),
+        "per_person_gratuity": _from_cents(gratuity_shares[0]),
         "per_person_tip": _from_cents(tip_shares[0]),
         "per_person_tax": _from_cents(tax_shares[0]),
         "shares": [_from_cents(c) for c in total_shares],
@@ -1803,6 +1990,120 @@ def settle_up(bill, tip_percent, people, paid, tax_percent=0,
     return base
 
 
+def _coerce_caps(caps, people):
+    """Validate the per-diner contribution caps for `cap_split`.
+
+    `caps` is a list with exactly one entry per diner: the maximum that diner is
+    willing/able to put toward the grand total. Each entry is a non-negative
+    amount, or null/None to mean that diner has NO cap (they absorb whatever is
+    left over). Returns a list of length `people` of integer-cent caps, with None
+    preserved for the uncapped diners. Raises ValueError on anything invalid so
+    the API surfaces a clean 400 rather than a 500.
+    """
+    if caps is None:
+        raise ValueError("caps are required")
+    if isinstance(caps, (str, bytes)) or not isinstance(caps, (list, tuple)):
+        raise ValueError("caps must be a list of amounts")
+    if len(caps) != people:
+        raise ValueError("caps must have exactly one amount per person")
+    out = []
+    for c in caps:
+        if c is None:
+            out.append(None)
+            continue
+        if isinstance(c, bool):
+            raise ValueError("caps must be non-negative numbers or null")
+        try:
+            cv = float(c)
+        except (TypeError, ValueError):
+            raise ValueError("caps must be non-negative numbers or null")
+        if cv != cv or cv < 0:  # NaN or negative
+            raise ValueError("caps must be non-negative numbers or null")
+        out.append(_to_cents(cv))
+    return out
+
+
+def _cap_fill(total_cents, caps_cents):
+    """Water-fill `total_cents` across diners without exceeding any diner's cap.
+
+    Splits the total as evenly as possible with `split_amount`; whenever a
+    diner's even share would exceed their (finite) cap, that diner is pinned at
+    their cap and the remaining cents are re-split across the diners who still
+    have room, repeated until every free diner fits under their cap. `caps_cents`
+    is a list of integer-cent caps with None for uncapped diners (who never pin
+    and so always absorb whatever is left).
+
+    Assumes the split is feasible (the caller has already rejected the case where
+    every diner is capped and the caps fall short of the total). Returns a list
+    of integer-cent shares of the same length that sums back exactly to
+    `total_cents`.
+    """
+    n = len(caps_cents)
+    shares = [None] * n
+    remaining = total_cents
+    while True:
+        free = [i for i in range(n) if shares[i] is None]
+        if not free:
+            break
+        portions = split_amount(remaining, len(free))
+        newly_capped = [
+            i for k, i in enumerate(free)
+            if caps_cents[i] is not None and portions[k] > caps_cents[i]
+        ]
+        if not newly_capped:
+            for k, i in enumerate(free):
+                shares[i] = portions[k]
+            break
+        for i in newly_capped:
+            shares[i] = caps_cents[i]
+            remaining -= caps_cents[i]
+    return shares
+
+
+def cap_split(bill, tip_percent, people, caps, tax_percent=0,
+              round_total=False, tip_on="pretax"):
+    """Split a bill where each diner has a maximum they can contribute.
+
+    Computes the full grand total via `calculate_bill`, then splits it as evenly
+    as possible across the `people` diners WITHOUT anyone paying more than their
+    own cap. `caps` is a list with exactly one entry per diner: the most that
+    diner will put in (a non-negative amount), or null for a diner with no cap
+    who simply absorbs whatever is left. Whenever an even share would push a
+    diner past their cap they pay only their cap and the shortfall is spread
+    across the diners who still have room (a "water-filling" split), repeated
+    until everyone fits. The resulting shares always sum back exactly to the
+    grand total and differ by at most a cent among the un-capped diners.
+
+    Raises ValueError on any invalid input, or when every diner is capped and the
+    caps together fall short of the grand total (nobody can cover the rest).
+
+    Returns the `calculate_bill` dict plus: caps (the normalised caps, null for
+    uncapped), shares (each diner's contribution, summing to the total), capped
+    (the 1-based positions that were pinned at their cap), and per_person (the
+    largest share).
+    """
+    base = calculate_bill(bill, tip_percent, people, tax_percent, round_total,
+                          tip_on)
+    people = base["people"]
+    caps_cents = _coerce_caps(caps, people)
+    total_cents = _to_cents(base["total"])
+
+    finite = [c for c in caps_cents if c is not None]
+    if len(finite) == people and sum(finite) < total_cents:
+        raise ValueError(
+            "the caps total less than the bill; the diners cannot cover it")
+
+    shares = _cap_fill(total_cents, caps_cents)
+    capped = [i + 1 for i in range(people)
+              if caps_cents[i] is not None and shares[i] >= caps_cents[i]]
+
+    base["caps"] = [None if c is None else _from_cents(c) for c in caps_cents]
+    base["shares"] = [_from_cents(c) for c in shares]
+    base["capped"] = capped
+    base["per_person"] = _from_cents(max(shares)) if shares else 0.0
+    return base
+
+
 def _coerce_percent_range(start, end, step):
     """Validate a start/end/step tip-percent range for `tip_guide`.
 
@@ -1833,6 +2134,14 @@ def _coerce_percent_range(start, end, step):
     cur = int(round(start * 100))
     stop = int(round(end * 100))
     inc = int(round(step * 100))
+    # A step below ~0.005 rounds to 0 hundredths-of-a-percent; without this guard
+    # the loop below never advances and spins forever, hanging the whole server.
+    if inc <= 0:
+        raise ValueError("step is too small; use at least 0.01")
+    # Cap the number of generated rows so a tiny step over a wide range can't
+    # amplify into an unbounded number of scenario computations.
+    if (stop - cur) // inc > 1000:
+        raise ValueError("step is too small for this range; use a larger step")
     while cur < stop:
         percents.append(round(cur / 100.0, 4))
         cur += inc
@@ -2816,6 +3125,96 @@ def summarize_bills(bills):
     }
 
 
+def _coerce_checks(checks):
+    """Validate a list of separate-check entries for `separate_checks`.
+
+    Each entry is an object describing one party at the table that wants its own
+    check: a required `bill` (that party's pre-tax subtotal) and `tip_percent`,
+    plus optional `tax_percent`, `people`, `tip_on`, `round_total`, and a
+    free-text `label` for the row. As with `_coerce_bill_entries`, the field
+    values themselves are NOT bounds-checked here — they are validated by
+    `calculate_bill` when each check is computed, so the rules can never drift
+    between the two code paths. This validator only enforces the shape: a
+    non-empty list of objects. Returns a list of normalised dicts (a label of
+    "Check N" is filled in when none is given). Raises ValueError on anything
+    invalid so the API surfaces a clean 400.
+    """
+    if isinstance(checks, (str, bytes)) or not isinstance(checks, (list, tuple)):
+        raise ValueError("checks must be a list of check objects")
+    if not checks:
+        raise ValueError("checks must not be empty")
+    cleaned = []
+    for i, c in enumerate(checks):
+        if not isinstance(c, dict):
+            raise ValueError(
+                "each check must be an object with bill and tip_percent")
+        label = c.get("label")
+        label = str(label) if label is not None else "Check %d" % (i + 1)
+        cleaned.append({
+            "label": label,
+            "bill": c.get("bill"),
+            "tip_percent": c.get("tip_percent"),
+            "tax_percent": c.get("tax_percent", 0),
+            "people": c.get("people", 1),
+            "tip_on": c.get("tip_on", "pretax"),
+            "round_total": c.get("round_total", False),
+        })
+    return cleaned
+
+
+def separate_checks(checks):
+    """Split one table into several SEPARATE checks ("can we get separate checks?").
+
+    Where every other endpoint computes ONE shared check, here each entry in
+    `checks` is its own independent bill: each party gets its own pre-tax
+    subtotal, sales tax, tip and fair split among that party's own people,
+    computed by `calculate_bill` so the tax, tip and rounding semantics are
+    identical to the single-check endpoint and can never drift. The per-check
+    results are then summed in integer cents (so no floating-point drift creeps
+    into the totals) into one table-level aggregate — the whole party's subtotal,
+    tax, tip and grand total, the combined head count, and the blended effective
+    tip rate (total tip / total pre-tax subtotal) — so the restaurant still sees
+    one table total while each party pays its own check.
+
+    Raises ValueError on any invalid input (the shape here, the field values
+    delegated to `calculate_bill`). Returns a dict with: count (number of
+    checks), people (combined head count across every check), total_subtotal,
+    total_tax, total_tip, total (the grand total across every check),
+    average_tip_percent (the blended effective rate), and checks (the per-check
+    list, each a full `calculate_bill` breakdown — including its own per-person
+    shares — with its `label` prepended).
+    """
+    entries = _coerce_checks(checks)
+    total_subtotal = total_tax = total_tip = total_total = 0
+    total_people = 0
+    per_check = []
+    for e in entries:
+        r = calculate_bill(e["bill"], e["tip_percent"], e["people"],
+                           e["tax_percent"], e["round_total"], e["tip_on"])
+        total_subtotal += _to_cents(r["subtotal"])
+        total_tax += _to_cents(r["tax"])
+        total_tip += _to_cents(r["tip"])
+        total_total += _to_cents(r["total"])
+        total_people += r["people"]
+        check = {"label": e["label"]}
+        check.update(r)
+        per_check.append(check)
+
+    # The blended rate is the only honest table-wide tip %: a simple mean of the
+    # per-check rates would over-weight a tiny check.
+    blended = (total_tip / total_subtotal * 100.0) if total_subtotal else 0.0
+    return {
+        "count": len(entries),
+        "people": total_people,
+        "total_subtotal": _from_cents(total_subtotal),
+        "total_tax": _from_cents(total_tax),
+        "total_tip": _from_cents(total_tip),
+        "total": _from_cents(total_total),
+        "average_tip_percent": round(blended, 4),
+        "checks": per_check,
+    }
+
+
 # A server's tip-out can be figured on their net sales (the common practice —
 # "tip out 3% of sales to the busser") or on the tips they actually collected.
 TIPOUT_BASES = ("sales", "tips")
@@ -3028,6 +3427,647 @@ def multi_rate_tax_bill(categories, tip_percent, people=1, round_total=False,
                       extra={"categories": breakdown, "rounded": rounded})
 
 
+def _coerce_rate(value, name):
+    """Validate a non-negative finite rate and return it as a float.
+
+    Shared by the loyalty endpoint for the two conversion rates it carries: the
+    points-earned-per-dollar `earn_rate` and the dollars-per-point `point_value`.
+    Unlike `_coerce_percent`/`_coerce_tax` a rate is not a percentage, so it
+    carries no 0–100 ceiling; it must simply be a non-negative finite number
+    (0 is allowed so a program can disable earning or redemption). Raises
+    ValueError on anything invalid so the API surfaces a clean 400.
+    """
+    if isinstance(value, bool):
+        raise ValueError("%s must be a number" % name)
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        raise ValueError("%s must be a number" % name)
+    if num != num or num in (float("inf"), float("-inf")):  # NaN / inf
+        raise ValueError("%s must be a finite number" % name)
+    if num < 0:
+        raise ValueError("%s must not be negative" % name)
+    return num
+
+
+def _coerce_points(value, name):
+    """Validate a whole, non-negative points quantity and return an int.
+
+    Loyalty points are counted in whole units — you cannot earn, hold, or redeem
+    a fraction of a point — so the value must be a non-negative finite WHOLE
+    number (0 is allowed so the UI can leave the field blank). Distinct from
+    `_coerce_rate` (a continuous rate) and `_coerce_people` (which has a sane
+    upper cap): a points balance has no natural ceiling. Raises ValueError on
+    anything invalid so the API surfaces a clean 400.
+    """
+    if isinstance(value, bool):
+        raise ValueError("%s must be a number" % name)
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        raise ValueError("%s must be a number" % name)
+    if num != num or num in (float("inf"), float("-inf")):  # NaN / inf
+        raise ValueError("%s must be a finite number" % name)
+    if num < 0:
+        raise ValueError("%s must not be negative" % name)
+    if num != int(num):
+        raise ValueError("%s must be a whole number of points" % name)
+    return int(num)
+
+
+def loyalty_rewards(bill, tip_percent, people=1, earn_rate=1.0, point_value=0.01,
+                    redeem_points=0, balance=0, tax_percent=0, round_total=False,
+                    tip_on="pretax"):
+    """Full bill plus a loyalty-points accrual and redemption.
+
+    Models a restaurant rewards program layered on the standard bill. Two things
+    happen at the register:
+
+    * EARN — the diner earns `earn_rate` points per pre-tax dollar of subtotal
+      (net food sales, the common practice; tax and tip never earn points),
+      truncated to a whole number of points.
+    * REDEEM — up to `redeem_points` already-banked points (never more than the
+      starting `balance`) are spent at `point_value` dollars each against the
+      grand total, exactly like store credit. The cash value applied is capped at
+      the grand total so the bill never goes negative, and only whole points whose
+      value actually fits are spent; any points left unspent are reported as
+      `unused_points` and stay in the balance.
+
+    The grand total, tax and tip come straight from `calculate_bill` — redemption
+    does NOT shrink the taxable base, so points behave like a gift card (see
+    `gift_card_split`), not a discount. Only the balance remaining after
+    redemption is owed and split fairly across `people` with `split_amount`. The
+    new points balance is the starting balance minus the points actually redeemed
+    plus the points just earned.
+
+    Returns the `calculate_bill` dict (whose `per_person`/`shares` are REPLACED by
+    the split of the remaining balance) plus: earn_rate, point_value,
+    points_earned, points_redeemed, redemption_value, unused_points, balance (the
+    starting balance), new_balance, full_total, remaining, and
+    per_person_remaining. Raises ValueError on any invalid input.
+    """
+    base = calculate_bill(bill, tip_percent, people, tax_percent, round_total,
+                          tip_on)
+    earn_rate = _coerce_rate(earn_rate, "earn_rate")
+    point_value = _coerce_rate(point_value, "point_value")
+    redeem_points = _coerce_points(redeem_points, "redeem_points")
+    balance = _coerce_points(balance, "balance")
+
+    if redeem_points > balance:
+        raise ValueError("cannot redeem more points than the balance")
+
+    people = base["people"]
+    subtotal_cents = _to_cents(base["subtotal"])
+    total_cents = _to_cents(base["total"])
+
+    # EARN on the pre-tax subtotal only; whole points, truncated down.
+    points_earned = int(subtotal_cents / 100.0 * earn_rate)
+
+    # REDEEM: each point is worth `point_value` dollars. The cash applied is
+    # capped at the grand total, and only whole points whose value fits are spent.
+    point_value_cents = point_value * 100.0
+    if point_value_cents <= 0 or redeem_points == 0:
+        points_redeemed = 0
+        applied_cents = 0
+    else:
+        desired_cents = int(round(redeem_points * point_value_cents))
+        if desired_cents <= total_cents:
+            points_redeemed = redeem_points
+            applied_cents = desired_cents
+        else:
+            # The total can't absorb the full redemption; spend only the whole
+            # points that fit, leaving the rest banked.
+            points_redeemed = int(total_cents // point_value_cents)
+            applied_cents = int(round(points_redeemed * point_value_cents))
+            if applied_cents > total_cents:  # float-rounding guard
+                applied_cents = total_cents
+
+    unused_points = redeem_points - points_redeemed
+    remaining_cents = total_cents - applied_cents
+    new_balance = balance - points_redeemed + points_earned
+
+    shares = split_amount(remaining_cents, people)
+
+    base["earn_rate"] = round(earn_rate, 4)
+    base["point_value"] = round(point_value, 4)
+    base["points_earned"] = points_earned
+    base["points_redeemed"] = points_redeemed
+    base["redemption_value"] = _from_cents(applied_cents)
+    base["unused_points"] = unused_points
+    base["balance"] = balance
+    base["new_balance"] = new_balance
+    base["full_total"] = _from_cents(total_cents)
+    base["remaining"] = _from_cents(remaining_cents)
+    base["per_person"] = _from_cents(shares[0])
+    base["per_person_remaining"] = _from_cents(shares[0])
+    base["shares"] = [_from_cents(c) for c in shares]
+    return base
+
+
+# Conventional restaurant-tipping norms by country/region. Tipping etiquette
+# varies enormously around the world — what is generous in one place can be
+# unheard of (or even mildly insulting) in another — so a tool used by
+# travellers should map a destination to its LOCAL custom rather than blindly
+# applying a US-style 18-20% everywhere. Each entry records the conventional tip
+# PERCENTAGE for decent sit-down service, a `custom` level describing the social
+# expectation, and a short human-readable note. Distinct from SERVICE_RATINGS /
+# recommend_tip, which varies the tip by how GOOD the service was; this varies
+# it by WHERE you are dining.
+COUNTRY_TIP_NORMS = {
+    "united states": {"percent": 18, "custom": "customary",
+                      "note": "15-20% expected; servers rely on tips."},
+    "canada": {"percent": 15, "custom": "customary",
+               "note": "15-20% expected for table service."},
+    "united kingdom": {"percent": 12.5, "custom": "optional",
+                       "note": "10-15% when service isn't already included."},
+    "france": {"percent": 5, "custom": "optional",
+               "note": "Service compris by law; round up or leave a little."},
+    "germany": {"percent": 10, "custom": "customary",
+                "note": "Round up or add ~5-10%, handed to the server directly."},
+    "italy": {"percent": 10, "custom": "optional",
+              "note": "Coperto often covers service; a small extra is welcome."},
+    "spain": {"percent": 7, "custom": "optional",
+              "note": "Not expected; rounding up or 5-10% is generous."},
+    "japan": {"percent": 0, "custom": "not expected",
+              "note": "Tipping is not customary and can cause confusion."},
+    "china": {"percent": 0, "custom": "not expected",
+              "note": "Tipping is not traditional in most restaurants."},
+    "australia": {"percent": 10, "custom": "optional",
+                  "note": "Not expected; 10% for good service is appreciated."},
+    "mexico": {"percent": 12, "custom": "customary",
+               "note": "10-15% expected for table service."},
+    "india": {"percent": 10, "custom": "customary",
+              "note": "10% is standard if no service charge is added."},
+    "brazil": {"percent": 10, "custom": "customary",
+               "note": "A 10% service charge is usually added to the bill."},
+}
+
+# Common short names / abbreviations mapped to their canonical COUNTRY_TIP_NORMS
+# key, so a caller can pass "usa", "uk", "us", "britain", … and still resolve to
+# the right norm. Keys here are matched case- and whitespace-insensitively.
+COUNTRY_ALIASES = {
+    "usa": "united states",
+    "us": "united states",
+    "u.s.": "united states",
+    "u.s.a.": "united states",
+    "america": "united states",
+    "uk": "united kingdom",
+    "u.k.": "united kingdom",
+    "britain": "united kingdom",
+    "great britain": "united kingdom",
+    "england": "united kingdom",
+}
+
+
+def _resolve_country(country):
+    """Normalise a caller-supplied country name to a canonical COUNTRY_TIP_NORMS key.
+
+    Matches case- and whitespace-insensitively and accepts the common
+    abbreviations in COUNTRY_ALIASES ("usa", "uk", …). Raises ValueError on a
+    missing or unknown country so the API surfaces a clean 400.
+    """
+    if country is None:
+        raise ValueError("country is required")
+    try:
+        key = str(country).strip().lower()
+    except (TypeError, ValueError):
+        raise ValueError("country must be a string")
+    key = COUNTRY_ALIASES.get(key, key)
+    if key not in COUNTRY_TIP_NORMS:
+        raise ValueError(
+            "country must be one of: " + ", ".join(sorted(COUNTRY_TIP_NORMS)))
+    return key
+
+
+def tip_by_country(bill, country, people=1, tax_percent=0, round_total=False,
+                   tip_on="pretax"):
+    """Recommend a full bill breakdown using a country's local tipping custom.
+
+    Maps a `country` name (see COUNTRY_TIP_NORMS, plus the abbreviations in
+    COUNTRY_ALIASES) to the tip percentage conventional there for decent
+    sit-down service, then defers entirely to `calculate_bill`, so the result
+    carries the same tax handling and fair-split guarantees. Built for travellers
+    who want to tip like a local rather than apply one rate everywhere.
+
+    `country` is matched case- and whitespace-insensitively. Raises ValueError on
+    an unknown country or any invalid bill / people / tax input.
+
+    Returns the `calculate_bill` dict plus `country` (the normalised key),
+    `recommended_percent` (the percentage applied), `custom` (the social
+    expectation: "customary", "optional", or "not expected"), and `note` (a short
+    human-readable etiquette tip).
+    """
+    key = _resolve_country(country)
+    norm = COUNTRY_TIP_NORMS[key]
+    percent = norm["percent"]
+    result = calculate_bill(bill, percent, people, tax_percent, round_total,
+                            tip_on)
+    result["country"] = key
+    result["recommended_percent"] = percent
+    result["custom"] = norm["custom"]
+    result["note"] = norm["note"]
+    return result
+
+
+def _coerce_round_index(value, name):
+    """Validate a 0-based diner index (a whole number >= 0) used by a round.
+
+    Shared by the participant and buyer fields of `_coerce_rounds` so the two
+    can never disagree about what a valid seat reference is. Rejects booleans
+    (so True/False can't masquerade as 1/0), NaN, and non-integers. Raises
+    ValueError on anything invalid so the API surfaces a clean 400.
+    """
+    if isinstance(value, bool):
+        raise ValueError("%s must be a whole number" % name)
+    try:
+        idx_f = float(value)
+    except (TypeError, ValueError):
+        raise ValueError("%s must be a whole number" % name)
+    if idx_f != idx_f or idx_f != int(idx_f):  # NaN or non-integer
+        raise ValueError("%s must be a whole number" % name)
+    idx = int(idx_f)
+    if idx < 0:
+        raise ValueError("%s must be 0 or greater" % name)
+    return idx
+
+
+def _coerce_rounds(rounds):
+    """Validate a list of drink "rounds" for `buy_rounds`.
+
+    `rounds` is a non-empty list of round objects. Each round has:
+      - `amount`       (required) the round's pre-tax cost, a non-negative number;
+      - `participants` (optional) a list of 0-based diner indices who shared that
+        round — omitted/empty means the whole table split it;
+      - `buyer`        (optional) the 0-based index of the diner who fronted the
+        round at the bar — omitted means no one has paid it yet;
+      - `label`        (optional) a name for the round, defaulting to "Round N".
+
+    A round may not list the same diner twice. Returns (rows, max_index) where
+    `rows` is a list of normalised dicts {label, amount_cents, participants (a
+    list of indices or None for "everyone"), buyer (an index or None)} and
+    `max_index` is the largest diner index any round references (or -1 if none),
+    which is used to size the table. Raises ValueError on anything invalid so the
+    API surfaces a clean 400.
+    """
+    if isinstance(rounds, (str, bytes)) or not isinstance(rounds, (list, tuple)):
+        raise ValueError("rounds must be a list of round objects")
+    if not rounds:
+        raise ValueError("rounds must not be empty")
+    rows = []
+    max_index = -1
+    for i, entry in enumerate(rounds):
+        if not isinstance(entry, dict):
+            raise ValueError("each round must be an object with an amount")
+        amount = entry.get("amount")
+        if isinstance(amount, bool) or amount is None:
+            raise ValueError("each round needs an amount")
+        try:
+            amount = float(amount)
+        except (TypeError, ValueError):
+            raise ValueError("round amount must be a number")
+        if amount != amount or amount < 0:  # NaN or negative
+            raise ValueError("round amount must be non-negative")
+        amount_cents = _to_cents(amount)
+
+        participants = entry.get("participants")
+        if participants is None or (
+                isinstance(participants, (list, tuple)) and not participants):
+            participants = None  # "everyone" — resolved against the table later
+        elif isinstance(participants, (list, tuple)):
+            seen = set()
+            cleaned = []
+            for p in participants:
+                idx = _coerce_round_index(p, "participant")
+                if idx in seen:
+                    raise ValueError("a round must not list a diner twice")
+                seen.add(idx)
+                cleaned.append(idx)
+                max_index = max(max_index, idx)
+            participants = cleaned
+        else:
+            raise ValueError("participants must be a list of diner indices")
+
+        buyer = entry.get("buyer")
+        if buyer is not None:
+            buyer = _coerce_round_index(buyer, "buyer")
+            max_index = max(max_index, buyer)
+
+        label = entry.get("label")
+        if label is None:
+            label = "Round %d" % (i + 1)
+        else:
+            label = str(label).strip() or ("Round %d" % (i + 1))
+
+        rows.append({
+            "label": label,
+            "amount_cents": amount_cents,
+            "participants": participants,
+            "buyer": buyer,
+        })
+    return rows, max_index
+
+
+def buy_rounds(rounds, tip_percent, people=None, tax_percent=0,
+               round_total=False, tip_on="pretax"):
+    """Split a night of drinks bought in ROUNDS, then settle who owes whom.
+
+    Models a bar tab built up over a sequence of rounds where both who is
+    drinking and who is paying change from round to round — the classic "we took
+    turns buying rounds, now sort out the damage" night that none of the other
+    splitters capture. `rounds` is a list of round objects (see `_coerce_rounds`):
+    each carries an `amount`, the subset of diners who shared it (`participants`,
+    defaulting to the whole table) and, optionally, the diner who fronted it at
+    the bar (`buyer`).
+
+    Each round's cost is divided evenly and fairly among only its participants
+    (via `split_amount`), building every diner's pre-tax CONSUMPTION. Tax and tip
+    are then figured on the whole tab via `calculate_bill` and apportioned to each
+    diner in proportion to their consumption with `split_weighted`, so everyone
+    pays tax and tip on exactly what they drank — the same apportionment as
+    `split_by_items`. What each diner OWES is their consumption plus their tax and
+    tip share; what they have already PAID is the sum of the rounds they bought.
+
+    The balances (owed - paid) are then squared up into the fewest diner-to-diner
+    transfers using the same greedy largest-first matching as `settle_payments`.
+    Buyers front the pre-tax round amounts, so the table still owes the house the
+    tax and tip; that residual cannot be settled internally and is surfaced as
+    `outstanding` (positive: still owed to the venue), exactly as in
+    `settle_payments`.
+
+    `people` is the table size; when omitted it is inferred from the largest diner
+    index any round references (at least one person). When nobody drank anything
+    (a fully comped tab) the tax/tip fall back to an even split. Raises ValueError
+    on any invalid input or when a round references a diner beyond the table size.
+
+    Returns the `calculate_bill` dict (whose `subtotal` is the whole tab) plus:
+    rounds (a per-round breakdown of {label, amount, participants, buyer,
+    per_participant}), breakdown (a per-diner list of {consumption, tax, tip,
+    owed, paid, balance}), consumption / owed / paid / balances (per-diner lists),
+    transfers ({from, to, amount} using 1-based diner numbers, largest first),
+    transfer_count, total_paid, and outstanding.
+    """
+    rows, max_index = _coerce_rounds(rounds)
+
+    if people is None:
+        people = max_index + 1 if max_index >= 0 else 1
+    people = _coerce_people(people)
+    if max_index >= people:
+        raise ValueError("a round refers to a diner beyond the table size")
+
+    everyone = list(range(people))
+    consumption_cents = [0] * people
+    paid_cents = [0] * people
+    rounds_out = []
+    for row in rows:
+        participants = row["participants"] if row["participants"] else everyone
+        shares = split_amount(row["amount_cents"], len(participants))
+        for share, who in zip(shares, participants):
+            consumption_cents[who] += share
+        if row["buyer"] is not None:
+            paid_cents[row["buyer"]] += row["amount_cents"]
+        rounds_out.append({
+            "label": row["label"],
+            "amount": _from_cents(row["amount_cents"]),
+            "participants": list(participants),
+            "buyer": (row["buyer"] + 1) if row["buyer"] is not None else None,
+            "per_participant": _from_cents(shares[0]),
+        })
+
+    bill_cents = sum(consumption_cents)
+    result = calculate_bill(_from_cents(bill_cents), tip_percent, people,
+                            tax_percent, round_total, tip_on)
+    tax_cents = _to_cents(result["tax"])
+    tip_cents = _to_cents(result["tip"])
+
+    # Apportion tax and tip by each diner's share of the pre-tax consumption.
+    weights = consumption_cents if bill_cents > 0 else [1] * people
+    tax_shares = split_weighted(tax_cents, weights)
+    tip_shares = split_weighted(tip_cents, weights)
+
+    owed_cents = [consumption_cents[i] + tax_shares[i] + tip_shares[i]
+                  for i in range(people)]
+    balances = [owed_cents[i] - paid_cents[i] for i in range(people)]
+
+    breakdown = []
+    for i in range(people):
+        breakdown.append({
+            "consumption": _from_cents(consumption_cents[i]),
+            "tax": _from_cents(tax_shares[i]),
+            "tip": _from_cents(tip_shares[i]),
+            "owed": _from_cents(owed_cents[i]),
+            "paid": _from_cents(paid_cents[i]),
+            "balance": _from_cents(balances[i]),
+        })
+
+    # Square the diners up with the fewest transfers — identical greedy
+    # largest-first matching as settle_payments: match the biggest debtor against
+    # the biggest creditor, transfer the smaller of the two, and advance whichever
+    # side is now clear. Yields at most people-1 transfers.
+    debtors = sorted(((i, b) for i, b in enumerate(balances) if b > 0),
+                     key=lambda x: x[1], reverse=True)
+    creditors = sorted(((i, -b) for i, b in enumerate(balances) if b < 0),
+                       key=lambda x: x[1], reverse=True)
+    transfers = []
+    di = ci = 0
+    while di < len(debtors) and ci < len(creditors):
+        debtor, debt = debtors[di]
+        creditor, credit = creditors[ci]
+        pay = min(debt, credit)
+        if pay > 0:
+            transfers.append({
+                "from": debtor + 1,
+                "to": creditor + 1,
+                "amount": _from_cents(pay),
+            })
+        debt -= pay
+        credit -= pay
+        debtors[di] = (debtor, debt)
+        creditors[ci] = (creditor, credit)
+        if debt == 0:
+            di += 1
+        if credit == 0:
+            ci += 1
+
+    total_paid_cents = sum(paid_cents)
+    result["rounds"] = rounds_out
+    result["breakdown"] = breakdown
+    result["consumption"] = [_from_cents(c) for c in consumption_cents]
+    result["owed"] = [_from_cents(c) for c in owed_cents]
+    result["paid"] = [_from_cents(c) for c in paid_cents]
+    result["balances"] = [_from_cents(b) for b in balances]
+    result["transfers"] = transfers
+    result["transfer_count"] = len(transfers)
+    result["total_paid"] = _from_cents(total_paid_cents)
+    result["outstanding"] = _from_cents(sum(balances))
+    result["round_count"] = len(rows)
+    return result
+
+
+def _coerce_intervals(intervals):
+    """Validate per-person presence intervals for `split_by_time`.
+
+    `intervals` has one entry per person describing when they were present for a
+    rolling tab (a bar session, a shared cab meter, …). Each entry is either:
+      - a single ``[start, end]`` pair (two numbers), or
+      - a list of ``[start, end]`` pairs, for someone who came and went more than
+        once.
+
+    Starts/ends are plain numbers in whatever unit the caller uses (minutes,
+    hours, clock offsets); each pair must have ``end`` strictly after ``start``.
+    The shape is disambiguated by the first element of an entry: a number means
+    the whole entry is one ``[start, end]`` pair, a list/tuple means the entry is
+    a list of such pairs.
+
+    Returns a list (one per person) of lists of ``(start, end)`` float tuples.
+    Raises ValueError on anything invalid so the API returns a clean 400.
+    """
+    if isinstance(intervals, (str, bytes)) or not isinstance(
+            intervals, (list, tuple)):
+        raise ValueError("intervals must be a list, one entry per person")
+    if not intervals:
+        raise ValueError("intervals must not be empty")
+
+    def _point(value, name):
+        if isinstance(value, bool):
+            raise ValueError(name + " must be a number")
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(name + " must be a number")
+        if not math.isfinite(v):
+            raise ValueError(name + " must be a finite number")
+        return v
+
+    def _pair(pair):
+        if isinstance(pair, (str, bytes)) or not isinstance(pair, (list, tuple)):
+            raise ValueError("each interval must be a [start, end] pair")
+        if len(pair) != 2:
+            raise ValueError("each interval must be a [start, end] pair")
+        start = _point(pair[0], "interval start")
+        end = _point(pair[1], "interval end")
+        if end <= start:
+            raise ValueError("interval end must be after its start")
+        return (start, end)
+
+    people_intervals = []
+    for entry in intervals:
+        if isinstance(entry, (str, bytes)) or not isinstance(
+                entry, (list, tuple)):
+            raise ValueError(
+                "each person's intervals must be a [start, end] pair "
+                "or a list of pairs")
+        if not entry:
+            raise ValueError("each person needs at least one interval")
+        # A flat [start, end] (first element is a number) is a single interval;
+        # a list/tuple first element means the entry is already a list of pairs.
+        if isinstance(entry[0], (list, tuple)):
+            pairs = [_pair(p) for p in entry]
+        else:
+            pairs = [_pair(entry)]
+        people_intervals.append(pairs)
+    return people_intervals
+
+
+def split_by_time(bill, tip_percent, intervals, tax_percent=0,
+                  round_total=False, tip_on="pretax"):
+    """Split a rolling tab by HOW LONG each person was actually there.
+
+    Models the "we kept a shared tab open and people drifted in and out" night
+    that none of the other splitters capture: a bar tab, a karaoke room booked by
+    the hour, a metered cab. The bill is assumed to accrue uniformly over the
+    session, and at any instant its running cost is shared equally among only the
+    people present right then — so someone who showed up for the last half hour
+    pays for that half hour, split with whoever else was around, and nothing else.
+
+    `intervals` gives each person's presence (see `_coerce_intervals`) and fixes
+    the number of people. Every interval endpoint becomes a boundary; between two
+    adjacent boundaries the present set is constant, so that slice's cost is split
+    evenly among them. Summing each person's slice shares gives their pre-tax
+    consumption, which is apportioned exactly with `split_weighted` so the
+    per-person subtotals sum back to the bill. Tax and tip are then figured on the
+    whole bill via `calculate_bill` and apportioned by that same consumption,
+    exactly as in `split_by_items`, so everyone pays tax and tip on just their
+    time. Stretches when nobody was present accrue nothing and are skipped.
+
+    When the bill is zero (a fully comped tab) the tax/tip fall back to an even
+    split. Raises ValueError on any invalid input.
+
+    Returns the `calculate_bill` dict (whose `subtotal` is the whole tab) plus:
+    intervals (the normalised per-person pairs), minutes (each person's raw time
+    present), billed_minutes (their time weighted by how many shared each slice —
+    the basis for their share), covered_duration (total time anyone was present),
+    breakdown (a per-person list of {minutes, billed_minutes, subtotal, tax, tip,
+    total}), tip_shares, and shares (per-person grand total).
+    """
+    people_intervals = _coerce_intervals(intervals)
+    people = len(people_intervals)
+
+    # Every endpoint is a boundary; between two adjacent boundaries the set of
+    # people present is constant, so each such slice accrues cost at a constant
+    # per-head rate.
+    boundaries = sorted({pt for pairs in people_intervals
+                         for (s, e) in pairs for pt in (s, e)})
+
+    # `billed` is each person's time weighted by how many people shared each
+    # slice (their dollar basis); `present` is their raw time on the clock.
+    billed = [0.0] * people
+    present = [0.0] * people
+    covered = 0.0
+    for a, b in zip(boundaries, boundaries[1:]):
+        d = b - a
+        if d <= 0:
+            continue
+        here = [i for i in range(people)
+                if any(s <= a and e >= b for (s, e) in people_intervals[i])]
+        if not here:
+            continue
+        covered += d
+        share = d / len(here)
+        for i in here:
+            billed[i] += share
+            present[i] += d
+
+    result = calculate_bill(bill, tip_percent, people, tax_percent,
+                            round_total, tip_on)
+    bill_cents = _to_cents(result["subtotal"])
+    tax_cents = _to_cents(result["tax"])
+    tip_cents = _to_cents(result["tip"])
+
+    # The billed weights sum to `covered`, so split_weighted apportions the bill
+    # exactly in proportion to each person's shared time on the tab.
+    subtotals_cents = split_weighted(bill_cents, billed)
+
+    # Apportion tax and tip by each person's consumption, falling back to an even
+    # split only for a wholly comped (zero) bill.
+    apportion = subtotals_cents if bill_cents > 0 else [1] * people
+    tax_shares = split_weighted(tax_cents, apportion)
+    tip_shares = split_weighted(tip_cents, apportion)
+
+    breakdown = []
+    totals = []
+    for i in range(people):
+        person_total = subtotals_cents[i] + tax_shares[i] + tip_shares[i]
+        totals.append(person_total)
+        breakdown.append({
+            "minutes": round(present[i], 4),
+            "billed_minutes": round(billed[i], 4),
+            "subtotal": _from_cents(subtotals_cents[i]),
+            "tax": _from_cents(tax_shares[i]),
+            "tip": _from_cents(tip_shares[i]),
+            "total": _from_cents(person_total),
+        })
+
+    result["intervals"] = [[[s, e] for (s, e) in pairs]
+                           for pairs in people_intervals]
+    result["minutes"] = [round(m, 4) for m in present]
+    result["billed_minutes"] = [round(w, 4) for w in billed]
+    result["covered_duration"] = round(covered, 4)
+    result["breakdown"] = breakdown
+    result["tip_shares"] = [_from_cents(c) for c in tip_shares]
+    result["shares"] = [_from_cents(c) for c in totals]
+    return result
+
+
 class RequestHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
@@ -3181,6 +4221,10 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
             d.get("bill"), d.get("tip_percent"), d.get("people", 1),
             d.get("paid"), d.get("tax_percent", 0),
             d.get("round_total", False), d.get("tip_on", "pretax")),
+        "/api/caps": lambda d: cap_split(
+            d.get("bill"), d.get("tip_percent"), d.get("people", 1),
+            d.get("caps"), d.get("tax_percent", 0),
+            d.get("round_total", False), d.get("tip_on", "pretax")),
         "/api/guide": lambda d: tip_guide(
             d.get("bill"), d.get("start", 10), d.get("end", 25),
             d.get("step", 5), d.get("people", 1), d.get("tax_percent", 0),
@@ -3227,6 +4271,7 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
             d.get("people"), d.get("tax_percent", 0),
             d.get("round_total", False), d.get("tip_on", "pretax")),
         "/api/summary": lambda d: summarize_bills(d.get("bills")),
+        "/api/separate": lambda d: separate_checks(d.get("checks")),
         "/api/tipout": lambda d: distribute_tipout(
             d.get("sales"), d.get("tip_total"), d.get("tipouts"),
             d.get("basis", "sales")),
@@ -3239,6 +4284,33 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
             d.get("round_total", False), d.get("tip_on", "pretax")),
         "/api/itemtips": lambda d: split_items_custom_tips(
             d.get("items"), d.get("tip_percents"), d.get("tax_percent", 0),
+            d.get("tip_on", "pretax")),
+        "/api/loyalty": lambda d: loyalty_rewards(
+            d.get("bill"), d.get("tip_percent"), d.get("people", 1),
+            d.get("earn_rate", 1.0), d.get("point_value", 0.01),
+            d.get("redeem_points", 0), d.get("balance", 0),
+            d.get("tax_percent", 0), d.get("round_total", False),
+            d.get("tip_on", "pretax")),
+        "/api/country": lambda d: tip_by_country(
+            d.get("bill"), d.get("country"), d.get("people", 1),
+            d.get("tax_percent", 0), d.get("round_total", False),
+            d.get("tip_on", "pretax")),
+        "/api/autograt": lambda d: auto_gratuity_bill(
+            d.get("bill"), d.get("people", 1), d.get("party_threshold", 6),
+            d.get("auto_percent", 18), d.get("extra_tip_percent", 0),
+            d.get("tax_percent", 0), d.get("round_total", False),
+            d.get("tip_on", "pretax")),
+        "/api/happyhour": lambda d: happy_hour_bill(
+            d.get("items"), d.get("tip_percent"), d.get("people", 1),
+            d.get("tax_percent", 0), d.get("round_total", False),
+            d.get("tip_on", "pretax")),
+        "/api/rounds": lambda d: buy_rounds(
+            d.get("rounds"), d.get("tip_percent"), d.get("people"),
+            d.get("tax_percent", 0), d.get("round_total", False),
+            d.get("tip_on", "pretax")),
+        "/api/timeshare": lambda d: split_by_time(
+            d.get("bill"), d.get("tip_percent"), d.get("intervals"),
+            d.get("tax_percent", 0), d.get("round_total", False),
             d.get("tip_on", "pretax")),
     }
 
@@ -3268,8 +4340,9 @@ def make_server(port=0):
 
 
 if __name__ == "__main__":
-    server = make_server(8000)
-    print("Tip calculator (split) server ready on http://127.0.0.1:8000")
+    port = int(os.environ.get("ADF_SMOKE_PORT") or os.environ.get("PORT") or 8000)
+    server = make_server(port)
+    print("Tip calculator (split) server ready on http://127.0.0.1:%d" % port)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

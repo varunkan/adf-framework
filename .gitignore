@@ -64,3 +64,16 @@ apps/*/.adf-visual/
 # ADF runner per-app working context (compaction snapshots, not source)
 apps/*/.adf-context/
 /apps/ands-platform/
+.tokensave
+
+# runtime state that generated apps write while running (never source)
+/control_plane.db
+/submissions.db
+apps/*/err.log
+apps/*/srv.log
+apps/*/.coverage
+apps/*/history.json
+apps/*/memory.json
+apps/*/data.json
+apps/*/urls.json
+apps/expense-tracker-expense-amount/expenses_corrupt_test.json

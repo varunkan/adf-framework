@@ -1,0 +1,234 @@
+{
+  "format": "adf-components/1",
+  "count": 12,
+  "components": [
+    {
+      "name": "HabitForm",
+      "path": "src/components/HabitForm.tsx",
+      "role": "component",
+      "props": [
+        {
+          "name": "onSubmit",
+          "optional": false,
+          "type": "(name: string) => void | Promise<void>"
+        }
+      ]
+    },
+    {
+      "name": "HabitList",
+      "path": "src/components/HabitList.tsx",
+      "role": "component",
+      "props": [
+        {
+          "name": "habits",
+          "optional": false,
+          "type": "Habit[]"
+        },
+        {
+          "name": "onOpen",
+          "optional": false,
+          "type": "(habit: Habit) => void"
+        },
+        {
+          "name": "onDelete",
+          "optional": false,
+          "type": "(id: number) => void"
+        }
+      ]
+    },
+    {
+      "name": "Badge",
+      "path": "src/components/ui/Badge.tsx",
+      "role": "component",
+      "props": [
+        {
+          "name": "label",
+          "optional": false,
+          "type": "string | number"
+        },
+        {
+          "name": "tone",
+          "optional": true,
+          "type": "'primary' | 'success' | 'danger' | 'warning'"
+        }
+      ]
+    },
+    {
+      "name": "Button",
+      "path": "src/components/ui/Button.tsx",
+      "role": "component",
+      "props": [
+        {
+          "name": "title",
+          "optional": false,
+          "type": "string"
+        },
+        {
+          "name": "variant",
+          "optional": true,
+          "type": "'primary' | 'secondary' | 'danger'"
+        }
+      ]
+    },
+    {
+      "name": "Card",
+      "path": "src/components/ui/Card.tsx",
+      "role": "component",
+      "props": [
+        {
+          "name": "title",
+          "optional": true,
+          "type": "string"
+        },
+        {
+          "name": "children",
+          "optional": true,
+          "type": "React.ReactNode"
+        }
+      ]
+    },
+    {
+      "name": "EmptyState",
+      "path": "src/components/ui/EmptyState.tsx",
+      "role": "component",
+      "props": [
+        {
+          "name": "icon",
+          "optional": true,
+          "type": "IconName"
+        },
+        {
+          "name": "title",
+          "optional": false,
+          "type": "string"
+        },
+        {
+          "name": "message",
+          "optional": true,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "Header",
+      "path": "src/components/ui/Header.tsx",
+      "role": "component",
+      "props": [
+        {
+          "name": "title",
+          "optional": false,
+          "type": "string"
+        },
+        {
+          "name": "onBack",
+          "optional": true,
+          "type": "() => void"
+        },
+        {
+          "name": "action",
+          "optional": true,
+          "type": "{ icon: IconName"
+        },
+        {
+          "name": "onPress",
+          "optional": false,
+          "type": "() => void"
+        },
+        {
+          "name": "label",
+          "optional": true,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "Icon",
+      "path": "src/components/ui/Icon.tsx",
+      "role": "component",
+      "props": [
+        {
+          "name": "name",
+          "optional": false,
+          "type": "IconName"
+        },
+        {
+          "name": "size",
+          "optional": true,
+          "type": "'sm' | 'md' | 'lg' | number"
+        },
+        {
+          "name": "color",
+          "optional": true,
+          "type": "string"
+        },
+        {
+          "name": "accessibilityLabel",
+          "optional": true,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "Input",
+      "path": "src/components/ui/Input.tsx",
+      "role": "component",
+      "props": [
+        {
+          "name": "label",
+          "optional": true,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "ListItem",
+      "path": "src/components/ui/ListItem.tsx",
+      "role": "component",
+      "props": [
+        {
+          "name": "title",
+          "optional": false,
+          "type": "string"
+        },
+        {
+          "name": "subtitle",
+          "optional": true,
+          "type": "string"
+        },
+        {
+          "name": "onPress",
+          "optional": true,
+          "type": "() => void"
+        },
+        {
+          "name": "trailing",
+          "optional": true,
+          "type": "React.ReactNode"
+        },
+        {
+          "name": "showChevron",
+          "optional": true,
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "Screen",
+      "path": "src/components/ui/Screen.tsx",
+      "role": "component",
+      "props": [
+        {
+          "name": "children",
+          "optional": true,
+          "type": "React.ReactNode"
+        }
+      ]
+    },
+    {
+      "name": "Text",
+      "path": "src/components/ui/Text.tsx",
+      "role": "component",
+      "props": []
+    }
+  ]
+}

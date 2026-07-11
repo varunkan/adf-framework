@@ -235,6 +235,65 @@
       </div>
 
       <div class="compare">
+        <h2>Loyalty rewards</h2>
+        <p class="muted">Earn points on the pre-tax subtotal and optionally redeem
+          banked points against the total (like store credit). Tax and tip still
+          apply to the full bill above; only the leftover balance is split.</p>
+        <div class="row">
+          <input id="loyalty-earn" type="number" min="0" step="0.1"
+            aria-label="Points earned per dollar"
+            placeholder="earn rate, e.g. 1 pt/$" />
+          <input id="loyalty-value" type="number" min="0" step="0.001"
+            aria-label="Dollar value per point"
+            placeholder="$ per point, e.g. 0.01" />
+        </div>
+        <div class="row">
+          <input id="loyalty-balance" type="number" min="0" step="1"
+            aria-label="Starting points balance"
+            placeholder="points balance, e.g. 8000" />
+          <input id="loyalty-redeem" type="number" min="0" step="1"
+            aria-label="Points to redeem"
+            placeholder="points to redeem, e.g. 5000" />
+          <button id="loyalty-btn" type="button">Apply rewards</button>
+        </div>
+        <div id="loyalty-out"></div>
+      </div>
+
+      <div class="compare">
+        <h2>Tipping by country</h2>
+        <p class="muted">Travelling? Pick a destination to apply the tip
+          percentage that's customary there for sit-down service. Reuses the
+          bill / tax / people inputs above and splits the same way.</p>
+        <div class="row">
+          <select id="country-select" aria-label="Country">
+          </select>
+          <button id="country-btn" type="button">Tip like a local</button>
+        </div>
+        <div id="country-out"></div>
+      </div>
+
+      <div class="compare">
+        <h2>Large-party gratuity</h2>
+        <p class="muted">Many restaurants add an automatic gratuity once a party
+          reaches a set size. The auto rate only applies when the people count
+          above hits the threshold; you can still add an extra voluntary tip on
+          top. Reuses the bill / tax / people inputs above.</p>
+        <div class="row">
+          <input id="autograt-threshold" type="number" min="1" step="1"
+            aria-label="Party-size threshold"
+            placeholder="party size threshold, e.g. 6" />
+          <input id="autograt-percent" type="number" min="0" max="100"
+            step="0.1" aria-label="Auto gratuity percent"
+            placeholder="auto %, e.g. 18" />
+          <input id="autograt-extra" type="number" min="0" max="100"
+            step="0.1" aria-label="Extra tip percent"
+            placeholder="extra tip %, e.g. 0" />
+          <button id="autograt-btn" type="button">Apply gratuity</button>
+        </div>
+        <div id="autograt-out"></div>
+      </div>
+
+      <div class="compare">
         <h2>Comp a diner</h2>
         <p class="muted">Covering someone's meal? List the comped diner numbers
           (1-based, comma-separated); the rest split the whole bill above.</p>
@@ -331,6 +390,22 @@
       </div>
 
       <div class="compare">
+        <h2>Split a tab by time present</h2>
+        <p class="muted">A rolling tab (a bar, an hourly room, a metered cab) split
+          by <em>how long</em> each person was there. The cost is shared, moment by
+          moment, only among whoever was present. One diner per line as
+          <em>start-end</em>; add more stretches with commas
+          (e.g. <em>0-120, 150-180</em>). Bill, tip %, tax % above apply.</p>
+        <div class="row">
+          <textarea id="timeshare" rows="3"
+            aria-label="One diner per line: their start-end times present"
+            placeholder="0-180&#10;60-180&#10;120-180"></textarea>
+          <button id="timeshare-btn" type="button">Split by time</button>
+        </div>
+        <div id="timeshare-out"></div>
+      </div>
+
+      <div class="compare">
         <h2>Tax food &amp; drinks separately</h2>
         <p class="muted">Tax each part of the check at its own rate — e.g. the bar
           tab taxed higher than the food. One line per category as
@@ -390,6 +465,21 @@
       </div>
 
       <div class="compare">
+        <h2>Separate checks</h2>
+        <p class="muted">Each party at the table wants its own check? Enter one
+          check per line as <code>bill tip% [tax%] [people]</code> (e.g.
+          <code>60 20 8 2</code>) and each gets its own tax, tip and fair split,
+          plus the one table total the restaurant sees.</p>
+        <div class="row">
+          <textarea id="separate" rows="4"
+            aria-label="One check per line: bill tip percent optional tax percent optional people"
+            placeholder="60 20 8 2&#10;45 18 8&#10;30 15 8"></textarea>
+          <button id="separate-btn" type="button">Split into checks</button>
+        </div>
+        <div id="separate-out"></div>
+      </div>
+
+      <div class="compare">
         <h2>Server tip-out</h2>
         <p class="muted">Working a shift? Enter your net <em>sales</em> and the
           <em>tips</em> you collected, then list the support roles you tip out —
@@ -413,6 +503,24 @@
           <button id="tipout-btn" type="button">Split the tip-out</button>
         </div>
         <div id="tipout-out"></div>
+      </div>
+
+      <div class="compare">
+        <h2>Happy hour</h2>
+        <p class="muted">Some items marked down while the rest stay full price?
+          Enter one item per line as <code>name, price, [discount], [percent|amount]</code>
+          (e.g. <code>Margarita, 12, 50</code> for half price, or
+          <code>Nachos, 9</code> for no discount). Each line's discount comes off
+          that item alone, then tax and tip are figured on the discounted
+          subtotal and split fairly. Uses the bill's tip %, tax % and people
+          above.</p>
+        <div class="row">
+          <textarea id="happyhour" rows="4"
+            aria-label="One item per line: name, price, optional discount, optional percent or amount"
+            placeholder="Margarita, 12, 50&#10;Beer, 6, 2, amount&#10;Nachos, 9"></textarea>
+          <button id="happyhour-btn" type="button">Apply happy hour</button>
+        </div>
+        <div id="happyhour-out"></div>
       </div>
 
       <div class="error" id="error"></div>
@@ -500,13 +608,8 @@
         err.textContent = "";
         const inp = inputs();
         try {
-          const res = await fetch("/api/roundsplit", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(inp),
-          });
-          const data = await res.json();
-          if (!res.ok) {
+          const { ok, data } = await postJSON("/api/roundsplit", inp);
+          if (!ok) {
             err.textContent = data.error || "Could not split.";
             return;
           }
@@ -539,19 +642,14 @@
         const bill = parseFloat($("bill").value);
         if (!(bill >= 0)) return;
         try {
-          const res = await fetch("/api/recommend", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
+          const { ok, data } = await postJSON("/api/recommend", {
               bill,
               rating,
               tax_percent: parseFloat($("tax").value) || 0,
               people: parseInt($("people").value, 10),
               round_total: $("round").checked,
-            }),
-          });
-          const data = await res.json();
-          if (!res.ok) {
+            });
+          if (!ok) {
             err.textContent = data.error || "Could not recommend.";
             return;
           }
@@ -569,13 +667,8 @@
         const people = parseInt($("people").value, 10);
         if (!(bill >= 0)) return;
         try {
-          const res = await fetch("/api/presets", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ bill, people }),
-          });
-          const data = await res.json();
-          if (!res.ok) return;
+          const { ok, data } = await postJSON("/api/presets", { bill, people });
+          if (!ok) return;
           for (const s of data.suggestions) {
             const b = document.createElement("button");
             b.innerHTML =
@@ -601,13 +694,8 @@
         err.textContent = "";
         const inp = inputs();
         try {
-          const res = await fetch("/api/receipt", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(inp),
-          });
-          const data = await res.json();
-          if (!res.ok) {
+          const { ok, data } = await postJSON("/api/receipt", inp);
+          if (!ok) {
             err.textContent = data.error || "Could not build receipt.";
             return;
           }
@@ -626,17 +714,12 @@
         err.textContent = "";
         const inp = inputs();
         try {
-          const res = await fetch("/api/compare", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              bill: inp.bill,
-              tax_percent: inp.tax_percent,
-              people: inp.people,
-            }),
+          const { ok, data } = await postJSON("/api/compare", {
+            bill: inp.bill,
+            tax_percent: inp.tax_percent,
+            people: inp.people,
           });
-          const data = await res.json();
-          if (!res.ok) {
+          if (!ok) {
             err.textContent = data.error || "Could not compare.";
             return;
           }
@@ -663,20 +746,15 @@
         err.textContent = "";
         const inp = inputs();
         try {
-          const res = await fetch("/api/cardfee", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
+          const { ok, data } = await postJSON("/api/cardfee", {
               bill: inp.bill,
               tip_percent: inp.tip_percent,
               tax_percent: inp.tax_percent,
               people: inp.people,
               round_total: inp.round_total,
               surcharge_percent: parseFloat($("cardfee").value) || 0,
-            }),
-          });
-          const data = await res.json();
-          if (!res.ok) {
+            });
+          if (!ok) {
             $("cardfee-out").textContent = data.error || "Could not calculate.";
             return;
           }
@@ -703,20 +781,15 @@
         err.textContent = "";
         const inp = inputs();
         try {
-          const res = await fetch("/api/giftcard", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
+          const { ok, data } = await postJSON("/api/giftcard", {
               bill: inp.bill,
               tip_percent: inp.tip_percent,
               tax_percent: inp.tax_percent,
               people: inp.people,
               round_total: inp.round_total,
               gift_card: parseFloat($("giftcard").value) || 0,
-            }),
-          });
-          const data = await res.json();
-          if (!res.ok) {
+            });
+          if (!ok) {
             $("giftcard-out").textContent = data.error || "Could not calculate.";
             return;
           }
@@ -740,6 +813,173 @@
         }
       }
 
+      // Earn loyalty points on the subtotal and optionally redeem banked points
+      // against the total (see /api/loyalty). Reuses the bill/tip/tax/people
+      // inputs above. Empty earn-rate / point-value fields fall back to the
+      // server defaults (1 pt/$, $0.01 per point).
+      async function applyLoyalty() {
+        const err = $("error");
+        err.textContent = "";
+        const inp = inputs();
+        const body = {
+          bill: inp.bill,
+          tip_percent: inp.tip_percent,
+          tax_percent: inp.tax_percent,
+          people: inp.people,
+          round_total: inp.round_total,
+          redeem_points: parseInt($("loyalty-redeem").value, 10) || 0,
+          balance: parseInt($("loyalty-balance").value, 10) || 0,
+        };
+        const earn = $("loyalty-earn").value;
+        if (earn !== "") body.earn_rate = parseFloat(earn);
+        const pv = $("loyalty-value").value;
+        if (pv !== "") body.point_value = parseFloat(pv);
+        try {
+          const { ok, data } = await postJSON("/api/loyalty", body);
+          if (!ok) {
+            $("loyalty-out").textContent = data.error || "Could not calculate.";
+            return;
+          }
+          let html = "<div class='line muted'><span>Full total</span><span>" +
+            fmt(data.full_total) + "</span></div>";
+          if (data.redemption_value > 0) {
+            html += "<div class='line'><span>Points redeemed</span><span>-" +
+              fmt(data.redemption_value) + " (" + data.points_redeemed +
+              " pts)</span></div>";
+          }
+          html += "<div class='line grand'><span>Balance due</span><span>" +
+            fmt(data.remaining) + "</span></div>" +
+            "<div class='line'><span>Points earned</span><span>+" +
+            data.points_earned + " pts</span></div>" +
+            "<div class='line muted'><span>New points balance</span><span>" +
+            data.new_balance + " pts</span></div>";
+          if (data.unused_points > 0) {
+            html += "<div class='line muted'><span>Points not spent</span><span>" +
+              data.unused_points + " pts</span></div>";
+          }
+          if (data.people > 1) {
+            html += "<div class='line per'><span>Per person</span><span>" +
+              fmt(data.per_person) + "</span></div>";
+          }
+          $("loyalty-out").innerHTML = html;
+        } catch (e) {
+          err.textContent = "Network error.";
+        }
+      }
+
+      // Apply a destination's customary tip percentage (see /api/country).
+      // Reuses the bill/tax/people inputs above. The list of countries mirrors
+      // COUNTRY_TIP_NORMS on the server; tapping one drops its conventional rate
+      // into the Tip field, recalculates, and shows a short etiquette note.
+      const COUNTRIES = [
+        ["united states", "United States"],
+        ["canada", "Canada"],
+        ["united kingdom", "United Kingdom"],
+        ["france", "France"],
+        ["germany", "Germany"],
+        ["italy", "Italy"],
+        ["spain", "Spain"],
+        ["japan", "Japan"],
+        ["china", "China"],
+        ["australia", "Australia"],
+        ["mexico", "Mexico"],
+        ["india", "India"],
+        ["brazil", "Brazil"],
+      ];
+
+      function loadCountries() {
+        const sel = $("country-select");
+        sel.innerHTML = "";
+        for (const [value, label] of COUNTRIES) {
+          const opt = document.createElement("option");
+          opt.value = value;
+          opt.textContent = label;
+          sel.appendChild(opt);
+        }
+      }
+
+      async function tipByCountry() {
+        const err = $("error");
+        err.textContent = "";
+        const inp = inputs();
+        if (!(inp.bill >= 0)) return;
+        try {
+          const { ok, data } = await postJSON("/api/country", {
+            bill: inp.bill,
+            country: $("country-select").value,
+            tax_percent: inp.tax_percent,
+            people: inp.people,
+            round_total: inp.round_total,
+          });
+          if (!ok) {
+            $("country-out").textContent = data.error || "Could not calculate.";
+            return;
+          }
+          // Drop the local rate into the Tip field and recalculate the main
+          // breakdown, then summarise the custom alongside it.
+          $("tip").value = data.recommended_percent;
+          calculate();
+          let html = "<div class='line'><span>Customary tip</span><span>" +
+            data.recommended_percent + "% (" + data.custom + ")</span></div>" +
+            "<div class='line grand'><span>Total</span><span>" +
+            fmt(data.total) + "</span></div>";
+          if (data.people > 1) {
+            html += "<div class='line per'><span>Per person</span><span>" +
+              fmt(data.per_person) + "</span></div>";
+          }
+          html += "<p class='muted'>" + data.note + "</p>";
+          $("country-out").innerHTML = html;
+        } catch (e) {
+          err.textContent = "Network error.";
+        }
+      }
+
+      // Apply the large-party automatic gratuity (see /api/autograt). The auto
+      // rate is charged only when the people count reaches the threshold; any
+      // extra tip rides on top. Reuses the bill/tax/people inputs above.
+      async function autoGratuity() {
+        const err = $("error");
+        err.textContent = "";
+        const inp = inputs();
+        if (!(inp.bill >= 0)) return;
+        const threshold = parseInt($("autograt-threshold").value, 10);
+        const autoPercent = parseFloat($("autograt-percent").value);
+        const extra = parseFloat($("autograt-extra").value);
+        try {
+          const { ok, data } = await postJSON("/api/autograt", {
+            bill: inp.bill,
+            people: inp.people,
+            party_threshold: Number.isFinite(threshold) ? threshold : 6,
+            auto_percent: Number.isFinite(autoPercent) ? autoPercent : 18,
+            extra_tip_percent: Number.isFinite(extra) ? extra : 0,
+            tax_percent: inp.tax_percent,
+            round_total: inp.round_total,
+          });
+          if (!ok) {
+            $("autograt-out").textContent = data.error || "Could not calculate.";
+            return;
+          }
+          let html = "<div class='line'><span>Auto gratuity " +
+            (data.auto_gratuity_applied
+              ? "(" + data.auto_percent + "%)"
+              : "(not applied — party under " + data.party_threshold + ")") +
+            "</span><span>" + fmt(data.auto_gratuity) + "</span></div>";
+          if (data.tip > 0) {
+            html += "<div class='line'><span>Extra tip (" + data.tip_percent +
+              "%)</span><span>" + fmt(data.tip) + "</span></div>";
+          }
+          html += "<div class='line grand'><span>Total</span><span>" +
+            fmt(data.total) + "</span></div>";
+          if (data.people > 1) {
+            html += "<div class='line per'><span>Per person</span><span>" +
+              fmt(data.per_person) + "</span></div>";
+          }
+          $("autograt-out").innerHTML = html;
+        } catch (e) {
+          err.textContent = "Network error.";
+        }
+      }
+
       // Split a bill where some diners are comped (see /api/comp): the listed
       // seats pay nothing and everyone else covers the whole total.
       async function compSplit() {
@@ -751,20 +991,15 @@
           .map((s) => parseInt(s.trim(), 10))
           .filter((n) => !Number.isNaN(n));
         try {
-          const res = await fetch("/api/comp", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
+          const { ok, data } = await postJSON("/api/comp", {
               bill: inp.bill,
               tip_percent: inp.tip_percent,
               tax_percent: inp.tax_percent,
               people: inp.people,
               round_total: inp.round_total,
               comped: comped,
-            }),
-          });
-          const data = await res.json();
-          if (!res.ok) {
+            });
+          if (!ok) {
             $("comp-out").textContent = data.error || "Could not calculate.";
             return;
           }
@@ -810,19 +1045,14 @@
           .map((s) => parseFloat(s.trim()))
           .filter((n) => !Number.isNaN(n));
         try {
-          const res = await fetch("/api/shareditems", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
+          const { ok, data } = await postJSON("/api/shareditems", {
               items: items,
               shared: shared,
               tip_percent: inp.tip_percent,
               tax_percent: inp.tax_percent,
               round_total: inp.round_total,
-            }),
-          });
-          const data = await res.json();
-          if (!res.ok) {
+            });
+          if (!ok) {
             $("shareditems-out").textContent =
               data.error || "Could not calculate.";
             return;
@@ -882,13 +1112,8 @@
         };
         if (!Number.isNaN(inp.people)) body.people = inp.people;
         try {
-          const res = await fetch("/api/assign", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          });
-          const data = await res.json();
-          if (!res.ok) {
+          const { ok, data } = await postJSON("/api/assign", body);
+          if (!ok) {
             $("assign-out").textContent = data.error || "Could not calculate.";
             return;
           }
@@ -937,13 +1162,8 @@
           round_total: inp.round_total,
         };
         try {
-          const res = await fetch("/api/coupons", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          });
-          const data = await res.json();
-          if (!res.ok) {
+          const { ok, data } = await postJSON("/api/coupons", body);
+          if (!ok) {
             $("coupons-out").textContent = data.error || "Could not calculate.";
             return;
           }
@@ -1005,18 +1225,13 @@
             return cat;
           });
         try {
-          const res = await fetch("/api/category", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
+          const { ok, data } = await postJSON("/api/category", {
               categories: categories,
               tax_percent: inp.tax_percent,
               people: inp.people,
               round_total: inp.round_total,
-            }),
-          });
-          const data = await res.json();
-          if (!res.ok) {
+            });
+          if (!ok) {
             $("category-out").textContent = data.error || "Could not calculate.";
             return;
           }
@@ -1070,18 +1285,13 @@
             return cat;
           });
         try {
-          const res = await fetch("/api/multitax", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
+          const { ok, data } = await postJSON("/api/multitax", {
               categories: categories,
               tip_percent: inp.tip_percent,
               people: inp.people,
               round_total: inp.round_total,
-            }),
-          });
-          const data = await res.json();
-          if (!res.ok) {
+            });
+          if (!ok) {
             $("multitax-out").textContent = data.error || "Could not calculate.";
             return;
           }
@@ -1128,19 +1338,14 @@
             ? { up_to: nums[0], tip_percent: nums[1] }
             : { tip_percent: nums[0] });
         try {
-          const res = await fetch("/api/tiered", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
+          const { ok, data } = await postJSON("/api/tiered", {
               bill: inp.bill,
               brackets: brackets,
               tax_percent: inp.tax_percent,
               people: inp.people,
               round_total: inp.round_total,
-            }),
-          });
-          const data = await res.json();
-          if (!res.ok) {
+            });
+          if (!ok) {
             $("tiered-out").textContent = data.error || "Could not calculate.";
             return;
           }
@@ -1175,20 +1380,15 @@
           .filter((s) => s.length)
           .map(Number);
         try {
-          const res = await fetch("/api/reconcile", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
+          const { ok, data } = await postJSON("/api/reconcile", {
               bill: inp.bill,
               tip_percent: inp.tip_percent,
               tax_percent: inp.tax_percent,
               people: inp.people,
               round_total: inp.round_total,
               paid: paid,
-            }),
-          });
-          const data = await res.json();
-          if (!res.ok) {
+            });
+          if (!ok) {
             $("reconcile-out").textContent = data.error || "Could not settle.";
             return;
           }
@@ -1266,6 +1466,51 @@
         }
         html += "</tbody></table>";
         $("summary-out").innerHTML = html;
+      }
+
+      // Split one table into separate checks (see /api/separate). Each non-empty
+      // line is "bill tip% [tax%] [people]"; labels are auto-numbered server-side.
+      async function separateChecks() {
+        const err = $("error");
+        err.textContent = "";
+        const checks = $("separate").value
+          .split(/\n/)
+          .map((line) => line.trim())
+          .filter((line) => line.length)
+          .map((line) => {
+            const t = line.split(/[\s,]+/).map(Number);
+            const entry = { bill: t[0], tip_percent: t[1] };
+            if (t.length > 2) entry.tax_percent = t[2];
+            if (t.length > 3) entry.people = t[3];
+            return entry;
+          });
+        const { ok, data } = await postJSON("/api/separate", { checks });
+        if (!ok) {
+          $("separate-out").textContent = data.error || "Could not split.";
+          return;
+        }
+        let html = "<table><thead><tr><th>Check</th><th>People</th>" +
+          "<th>Tip</th><th>Per&nbsp;person</th><th>Total</th></tr></thead><tbody>";
+        for (const c of data.checks) {
+          html += "<tr><td>" + c.label + "</td><td>" + c.people + "</td><td>" +
+            fmt(c.tip) + " (" + c.tip_percent + "%)</td><td>" +
+            fmt(c.per_person) + "</td><td>" + fmt(c.total) + "</td></tr>";
+        }
+        html += "</tbody></table>" +
+          "<div class='line'><span>Checks</span><span>" + data.count +
+          " (" + data.people + " people)</span></div>" +
+          "<div class='line muted'><span>Table subtotal</span><span>" +
+          fmt(data.total_subtotal) + "</span></div>";
+        if (data.total_tax > 0) {
+          html += "<div class='line muted'><span>Table tax</span><span>" +
+            fmt(data.total_tax) + "</span></div>";
+        }
+        html += "<div class='line muted'><span>Table tip</span><span>" +
+          fmt(data.total_tip) + " (" + data.average_tip_percent +
+          "%)</span></div>" +
+          "<div class='line grand'><span>Table total</span><span>" +
+          fmt(data.total) + "</span></div>";
+        $("separate-out").innerHTML = html;
       }
 
       // Distribute a server's collected tips to support staff (see /api/tipout).
@@ -1369,13 +1614,271 @@
         $("itemtips-out").innerHTML = html;
       }
 
+      // Split a rolling tab by how long each diner was present (see
+      // /api/timeshare). One diner per line; each line is one or more "start-end"
+      // stretches separated by commas. Bill/tip/tax above apply to the whole tab.
+      async function timeShare() {
+        const err = $("error");
+        err.textContent = "";
+        const inp = inputs();
+        const lines = $("timeshare").value
+          .split(/\n/)
+          .map((s) => s.trim())
+          .filter((s) => s.length);
+        const intervals = lines.map((line) =>
+          line
+            .split(",")
+            .map((s) => s.trim())
+            .filter((s) => s.length)
+            .map((part) => part.split("-").map((n) => parseFloat(n.trim()))));
+        const { ok, data } = await postJSON("/api/timeshare", {
+          bill: inp.bill,
+          tip_percent: inp.tip_percent,
+          tax_percent: inp.tax_percent,
+          round_total: inp.round_total,
+          intervals,
+        });
+        if (!ok) {
+          $("timeshare-out").textContent = data.error || "Could not calculate.";
+          return;
+        }
+        let html = "<table><thead><tr><th>Diner</th><th>Time</th>" +
+          "<th>Subtotal</th><th>Tax</th><th>Tip</th><th>Total</th></tr></thead>" +
+          "<tbody>";
+        data.breakdown.forEach((p, i) => {
+          html += "<tr><td>Person " + (i + 1) + "</td><td>" + p.minutes +
+            "</td><td>" + fmt(p.subtotal) + "</td><td>" + fmt(p.tax) +
+            "</td><td>" + fmt(p.tip) + "</td><td>" + fmt(p.total) +
+            "</td></tr>";
+        });
+        html += "</tbody></table>" +
+          "<div class='line muted'><span>Subtotal</span><span>" +
+          fmt(data.subtotal) + "</span></div>";
+        if (data.tax > 0) {
+          html += "<div class='line muted'><span>Tax</span><span>" +
+            fmt(data.tax) + "</span></div>";
+        }
+        html += "<div class='line'><span>Tip</span><span>" + fmt(data.tip) +
+          "</span></div>" +
+          "<div class='line grand'><span>Total</span><span>" +
+          fmt(data.total) + "</span></div>";
+        $("timeshare-out").innerHTML = html;
+      }
+
+      // Settle several separate receipts together (see /api/multibill). Reuses
+      // the tip/tax/people/round inputs above.
+      async function combineBills() {
+        const err = $("error");
+        err.textContent = "";
+        const inp = inputs();
+        const bills = $("multibill").value
+          .split(",")
+          .map((s) => parseFloat(s.trim()))
+          .filter((n) => !Number.isNaN(n));
+        const { ok, data } = await postJSON("/api/multibill", {
+          bills,
+          tip_percent: inp.tip_percent,
+          tax_percent: inp.tax_percent,
+          people: inp.people,
+          round_total: inp.round_total,
+        });
+        if (!ok) {
+          $("multibill-out").textContent = data.error || "Could not calculate.";
+          return;
+        }
+        let html = "<div class='line muted'><span>" + data.bill_count +
+          " checks combined</span><span>" + fmt(data.subtotal) + "</span></div>";
+        if (data.tax > 0) {
+          html += "<div class='line muted'><span>Tax</span><span>" +
+            fmt(data.tax) + "</span></div>";
+        }
+        html += "<div class='line'><span>Tip</span><span>" + fmt(data.tip) +
+          "</span></div>" +
+          "<div class='line grand'><span>Total</span><span>" +
+          fmt(data.total) + "</span></div>";
+        if (data.people > 1) {
+          html += "<div class='line per'><span>Per person</span><span>" +
+            fmt(data.per_person) + "</span></div>";
+        }
+        $("multibill-out").innerHTML = html;
+      }
+
+      // Show the bill converted to another currency at an exchange rate (see
+      // /api/convert). Reuses the bill/tip/tax/people inputs above.
+      async function convertCurrency() {
+        const err = $("error");
+        err.textContent = "";
+        const inp = inputs();
+        const { ok, data } = await postJSON("/api/convert", {
+          bill: inp.bill,
+          tip_percent: inp.tip_percent,
+          tax_percent: inp.tax_percent,
+          people: inp.people,
+          round_total: inp.round_total,
+          rate: parseFloat($("convert-rate").value),
+          symbol: $("convert-symbol").value || "$",
+        });
+        if (!ok) {
+          $("convert-out").textContent = data.error || "Could not convert.";
+          return;
+        }
+        const sym = data.symbol;
+        const c = data.converted;
+        const conv = (n) => sym + Number(n).toFixed(2);
+        let html = "<div class='line muted'><span>Total ($)</span><span>" +
+          fmt(data.base.total) + "</span></div>" +
+          "<div class='line muted'><span>Rate</span><span>1 = " + sym +
+          data.rate + "</span></div>" +
+          "<div class='line grand'><span>Total (" + sym + ")</span><span>" +
+          conv(c.total) + "</span></div>";
+        if (c.people > 1) {
+          html += "<div class='line per'><span>Per person</span><span>" +
+            conv(c.per_person) + "</span></div>";
+        }
+        $("convert-out").innerHTML = html;
+      }
+
+      // Size the tip so the grand total stays within a budget (see /api/budget).
+      // Reuses the bill/tax/people inputs above.
+      async function fitBudget() {
+        const err = $("error");
+        err.textContent = "";
+        const inp = inputs();
+        const { ok, data } = await postJSON("/api/budget", {
+          bill: inp.bill,
+          tax_percent: inp.tax_percent,
+          people: inp.people,
+          budget: parseFloat($("budget").value),
+        });
+        if (!ok) {
+          $("budget-out").textContent = data.error || "Could not calculate.";
+          return;
+        }
+        let html = "<div class='line muted'><span>Budget</span><span>" +
+          fmt(data.budget) + "</span></div>";
+        if (data.within_budget) {
+          html += "<div class='line'><span>Tip (" +
+            data.effective_tip_percent + "%)</span><span>" + fmt(data.tip) +
+            "</span></div>";
+        } else {
+          html += "<div class='line warn'><span>Over budget — no tip fits" +
+            "</span><span>" + fmt(data.tip) + "</span></div>";
+        }
+        html += "<div class='line grand'><span>Total</span><span>" +
+          fmt(data.total) + "</span></div>";
+        if (data.people > 1) {
+          html += "<div class='line per'><span>Per person</span><span>" +
+            fmt(data.per_person) + "</span></div>";
+        }
+        $("budget-out").innerHTML = html;
+      }
+
+      // Split the bill evenly but let each person pick their own tip % (see
+      // /api/custom). Reuses the tax input above; people = count of percents.
+      async function customSplit() {
+        const err = $("error");
+        err.textContent = "";
+        const inp = inputs();
+        const tip_percents = $("custom").value
+          .split(",")
+          .map((s) => parseFloat(s.trim()))
+          .filter((n) => !Number.isNaN(n));
+        const { ok, data } = await postJSON("/api/custom", {
+          bill: inp.bill,
+          tax_percent: inp.tax_percent,
+          tip_percents,
+        });
+        if (!ok) {
+          $("custom-out").textContent = data.error || "Could not calculate.";
+          return;
+        }
+        let html = "<table><thead><tr><th>Diner</th><th>Share</th><th>Tip</th>" +
+          "<th>Total</th></tr></thead><tbody>";
+        data.per_person.forEach((p, i) => {
+          html += "<tr><td>Person " + (i + 1) + "</td><td>" + fmt(p.share) +
+            "</td><td>" + fmt(p.tip) + " (" + p.tip_percent + "%)</td><td>" +
+            fmt(p.total) + "</td></tr>";
+        });
+        html += "</tbody></table>" +
+          "<div class='line'><span>Tip total</span><span>" + fmt(data.tip) +
+          "</span></div>" +
+          "<div class='line grand'><span>Total</span><span>" +
+          fmt(data.total) + "</span></div>";
+        $("custom-out").innerHTML = html;
+      }
+
+      // Per-item "happy hour" discounts (see /api/happyhour). One item per line
+      // as "name, price, [discount], [percent|amount]"; reuses the bill's tip %,
+      // tax % and people inputs above. Discount defaults to 0, kind to percent.
+      async function happyHour() {
+        const err = $("error");
+        err.textContent = "";
+        const inp = inputs();
+        const items = $("happyhour").value
+          .split("\n")
+          .map((line) => line.trim())
+          .filter((line) => line.length)
+          .map((line) => {
+            const parts = line.split(",").map((s) => s.trim());
+            const discount = parts.length > 2 ? parseFloat(parts[2]) : 0;
+            return {
+              name: parts[0] || "",
+              price: parseFloat(parts[1]),
+              discount: Number.isNaN(discount) ? 0 : discount,
+              discount_kind: (parts[3] || "percent").toLowerCase(),
+            };
+          });
+        const { ok, data } = await postJSON("/api/happyhour", {
+          items,
+          tip_percent: inp.tip_percent,
+          tax_percent: inp.tax_percent,
+          people: inp.people,
+        });
+        if (!ok) {
+          $("happyhour-out").textContent = data.error || "Could not calculate.";
+          return;
+        }
+        let html = "<table><thead><tr><th>Item</th><th>Price</th>" +
+          "<th>Discount</th><th>You pay</th></tr></thead><tbody>";
+        data.items.forEach((it) => {
+          html += "<tr><td>" + it.name + "</td><td>" + fmt(it.price) +
+            "</td><td>-" + fmt(it.discount) + "</td><td>" + fmt(it.final) +
+            "</td></tr>";
+        });
+        html += "</tbody></table>" +
+          "<div class='line'><span>Subtotal (was " +
+          fmt(data.original_subtotal) + ")</span><span>" + fmt(data.subtotal) +
+          "</span></div>" +
+          "<div class='line'><span>You saved</span><span>" +
+          fmt(data.total_savings) + "</span></div>" +
+          "<div class='line'><span>Tax</span><span>" + fmt(data.tax) +
+          "</span></div>" +
+          "<div class='line'><span>Tip</span><span>" + fmt(data.tip) +
+          "</span></div>" +
+          "<div class='line grand'><span>Total</span><span>" + fmt(data.total) +
+          "</span></div>" +
+          "<div class='line'><span>Per person (" + data.people +
+          ")</span><span>" + fmt(data.per_person) + "</span></div>";
+        $("happyhour-out").innerHTML = html;
+      }
+
+      $("happyhour-btn").addEventListener("click", happyHour);
       $("itemtips-btn").addEventListener("click", itemTips);
+      $("timeshare-btn").addEventListener("click", timeShare);
+      $("multibill-btn").addEventListener("click", combineBills);
+      $("convert-btn").addEventListener("click", convertCurrency);
+      $("budget-btn").addEventListener("click", fitBudget);
+      $("custom-btn").addEventListener("click", customSplit);
       $("tipout-btn").addEventListener("click", tipOut);
       $("summary-btn").addEventListener("click", summarize);
+      $("separate-btn").addEventListener("click", separateChecks);
       $("tiered-btn").addEventListener("click", tieredTip);
       $("reconcile-btn").addEventListener("click", reconcile);
       $("cardfee-btn").addEventListener("click", addCardFee);
       $("giftcard-btn").addEventListener("click", applyGiftCard);
+      $("loyalty-btn").addEventListener("click", applyLoyalty);
+      $("country-btn").addEventListener("click", tipByCountry);
+      $("autograt-btn").addEventListener("click", autoGratuity);
       $("category-btn").addEventListener("click", tipByCategory);
       $("multitax-btn").addEventListener("click", taxByCategory);
       $("comp-btn").addEventListener("click", compSplit);
@@ -1391,6 +1894,7 @@
       }
 
       loadRatings();
+      loadCountries();
       calculate();
       loadPresets();
     </script>

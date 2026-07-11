@@ -8009,5 +8009,1768 @@ class TestHttpTwoSampleTTest(unittest.TestCase):
         self.assertIn("error", data)
 
 
+class TestDomainCohensD(unittest.TestCase):
+    """Cohen's d / Hedges' g / Glass's delta effect size for two samples."""
+
+    def test_basic_effect_size(self):
+        a = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+        b = [{"value": v, "unit": "m"} for v in (6, 7, 8, 9, 10)]
+        r = domain.cohens_d(a, b)
+        self.assertEqual(r["category"], "length")
+        self.assertEqual(r["unit"], "m")
+        self.assertEqual(r["n_a"], 5)
+        self.assertEqual(r["n_b"], 5)
+        self.assertAlmostEqual(r["mean_a"], 3.0)
+        self.assertAlmostEqual(r["mean_b"], 8.0)
+        self.assertAlmostEqual(r["difference"], -5.0)
+        # Both samples have sample variance 2.5, so pooled stdev = sqrt(2.5).
+        self.assertAlmostEqual(r["pooled_stdev"], math.sqrt(2.5))
+        self.assertAlmostEqual(r["cohens_d"], -5.0 / math.sqrt(2.5))
+        self.assertEqual(r["magnitude"], "large")
+
+    def test_hedges_g_corrects_toward_zero(self):
+        a = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+        b = [{"value": v, "unit": "m"} for v in (6, 7, 8, 9, 10)]
+        r = domain.cohens_d(a, b)
+        # J = 1 - 3/(4*10 - 9) = 1 - 3/31.
+        self.assertAlmostEqual(r["correction_factor"], 1.0 - 3.0 / 31.0)
+        self.assertAlmostEqual(r["hedges_g"], r["cohens_d"] * (1.0 - 3.0 / 31.0))
+        # The correction shrinks the magnitude.
+        self.assertLess(abs(r["hedges_g"]), abs(r["cohens_d"]))
+
+    def test_glass_delta_uses_sample_b_stdev(self):
+        a = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+        b = [{"value": v, "unit": "m"} for v in (6, 7, 8, 9, 10)]
+        r = domain.cohens_d(a, b)
+        self.assertAlmostEqual(r["glass_delta"], r["difference"] / r["stdev_b"])
+
+    def test_glass_delta_none_when_b_constant(self):
+        a = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)]
+        b = [{"value": 5, "unit": "m"} for _ in range(4)]
+        r = domain.cohens_d(a, b)
+        self.assertEqual(r["var_b"], 0.0)
+        self.assertIsNone(r["glass_delta"])
+        # One constant sample still leaves a defined pooled stdev.
+        self.assertGreater(r["pooled_stdev"], 0.0)
+
+    def test_swapping_samples_flips_sign_only(self):
+        a = [{"value": v, "unit": "m"} for v in (2, 4, 6, 8)]
+        b = [{"value": v, "unit": "m"} for v in (3, 5, 7)]
+        ab = domain.cohens_d(a, b)
+        ba = domain.cohens_d(b, a)
+        self.assertAlmostEqual(ab["cohens_d"], -ba["cohens_d"])
+        self.assertAlmostEqual(ab["hedges_g"], -ba["hedges_g"])
+        self.assertEqual(ab["magnitude"], ba["magnitude"])
+
+    def test_magnitude_labels(self):
+        # Tiny difference relative to spread -> negligible.
+        a = [{"value": v, "unit": "m"} for v in (10, 11, 12, 13, 14)]
+        b = [{"value": v + 0.05, "unit": "m"} for v in (10, 11, 12, 13, 14)]
+        self.assertEqual(domain.cohens_d(a, b)["magnitude"], "negligible")
+
+    def test_unit_conversion_is_consistent(self):
+        a = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)]
+        b_cm = [{"value": v, "unit": "cm"} for v in (600, 700, 800, 900)]
+        b_m = [{"value": v, "unit": "m"} for v in (6, 7, 8, 9)]
+        r_cm = domain.cohens_d(a, b_cm)
+        r_m = domain.cohens_d(a, b_m)
+        self.assertEqual(r_cm["unit"], "m")
+        self.assertAlmostEqual(r_cm["cohens_d"], r_m["cohens_d"], places=9)
+
+    def test_d_is_dimensionless_under_target_unit(self):
+        # Restating everything into a different unit rescales the means/stdevs
+        # but leaves the unit-free effect size unchanged.
+        a = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        b = [{"value": v, "unit": "m"} for v in (4, 5, 6)]
+        r_m = domain.cohens_d(a, b)
+        r_cm = domain.cohens_d(a, b, to_unit="cm")
+        self.assertEqual(r_cm["unit"], "cm")
+        self.assertAlmostEqual(r_cm["mean_a"], 200.0)
+        self.assertAlmostEqual(r_cm["cohens_d"], r_m["cohens_d"], places=9)
+
+    def test_tuple_items_accepted(self):
+        r = domain.cohens_d(
+            [(1, "m"), (2, "m"), (3, "m")], [(4, "m"), (5, "m"), (6, "m")])
+        self.assertAlmostEqual(r["difference"], -3.0)
+
+    def test_both_constant_samples_raise(self):
+        a = [{"value": 5, "unit": "m"} for _ in range(3)]
+        b = [{"value": 9, "unit": "m"} for _ in range(3)]
+        with self.assertRaises(ValueError):
+            domain.cohens_d(a, b)
+
+    def test_single_value_sample_raises(self):
+        with self.assertRaises(ValueError):
+            domain.cohens_d(
+                [{"value": 1, "unit": "m"}],
+                [{"value": 2, "unit": "m"}, {"value": 3, "unit": "m"}])
+
+    def test_empty_sample_raises(self):
+        with self.assertRaises(ValueError):
+            domain.cohens_d([], [{"value": 2, "unit": "m"}])
+
+    def test_cross_category_between_samples_raises(self):
+        with self.assertRaises(ValueError):
+            domain.cohens_d(
+                [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}],
+                [{"value": 1, "unit": "kg"}, {"value": 2, "unit": "kg"}])
+
+    def test_temperature_category_raises(self):
+        with self.assertRaises(ValueError):
+            domain.cohens_d(
+                [{"value": 1, "unit": "c"}, {"value": 2, "unit": "c"}],
+                [{"value": 3, "unit": "c"}, {"value": 4, "unit": "c"}])
+
+
+class TestHttpCohensD(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = server.make_server(0)
+        cls.host, cls.port = cls.server.server_address
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def _post(self, path, payload, raw=None):
+        body = raw if raw is not None else json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            "http://127.0.0.1:%d%s" % (self.port, path), data=body,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            data = json.loads(exc.read().decode("utf-8"))
+            exc.close()
+            return exc.code, data
+
+    def test_endpoint_ok(self):
+        status, data = self._post("/api/cohens-d", {
+            "a": [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)],
+            "b": [{"value": v, "unit": "m"} for v in (6, 7, 8, 9, 10)]})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["n_a"], 5)
+        self.assertEqual(data["n_b"], 5)
+        self.assertAlmostEqual(data["cohens_d"], -5.0 / math.sqrt(2.5), places=6)
+        self.assertEqual(data["magnitude"], "large")
+        self.assertLess(abs(data["hedges_g"]), abs(data["cohens_d"]))
+        self.assertIsNotNone(data["glass_delta"])
+
+    def test_endpoint_glass_delta_null_when_b_constant(self):
+        status, data = self._post("/api/cohens-d", {
+            "a": [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)],
+            "b": [{"value": 5, "unit": "m"} for _ in range(4)]})
+        self.assertEqual(status, 200)
+        self.assertIsNone(data["glass_delta"])
+
+    def test_endpoint_precision_and_unit(self):
+        status, data = self._post("/api/cohens-d", {
+            "a": [{"value": v, "unit": "cm"} for v in (100, 200, 300)],
+            "b": [{"value": v, "unit": "cm"} for v in (400, 500, 600)],
+            "to": "m", "precision": 3})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["mean_a"], round(data["mean_a"], 3))
+        self.assertEqual(data["cohens_d"], round(data["cohens_d"], 3))
+
+    def test_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/cohens-d", {
+            "a": "nope", "b": [{"value": 1, "unit": "m"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_single_value_400(self):
+        status, data = self._post("/api/cohens-d", {
+            "a": [{"value": 1, "unit": "m"}],
+            "b": [{"value": 2, "unit": "m"}, {"value": 3, "unit": "m"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_both_constant_400(self):
+        status, data = self._post("/api/cohens-d", {
+            "a": [{"value": 5, "unit": "m"} for _ in range(3)],
+            "b": [{"value": 9, "unit": "m"} for _ in range(3)]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_cross_category_400(self):
+        status, data = self._post("/api/cohens-d", {
+            "a": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}],
+            "b": [{"value": 1, "unit": "kg"}, {"value": 2, "unit": "kg"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_temperature_400(self):
+        status, data = self._post("/api/cohens-d", {
+            "a": [{"value": 1, "unit": "c"}, {"value": 2, "unit": "c"}],
+            "b": [{"value": 3, "unit": "c"}, {"value": 4, "unit": "c"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_invalid_json_400(self):
+        status, data = self._post("/api/cohens-d", None, raw=b"{bad")
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
+class TestDomainFDistributionSf(unittest.TestCase):
+    """The F-distribution survival function underpinning the ANOVA p-value."""
+
+    def test_zero_and_negative_is_one(self):
+        # All the mass is at or beyond the origin.
+        self.assertEqual(domain._f_distribution_sf(0.0, 2, 12), 1.0)
+        self.assertEqual(domain._f_distribution_sf(-3.0, 2, 12), 1.0)
+
+    def test_decreasing_in_f(self):
+        a = domain._f_distribution_sf(1.0, 3, 20)
+        b = domain._f_distribution_sf(5.0, 3, 20)
+        c = domain._f_distribution_sf(20.0, 3, 20)
+        self.assertGreater(a, b)
+        self.assertGreater(b, c)
+
+    def test_in_unit_interval(self):
+        for f in (0.5, 1.0, 2.0, 10.0, 100.0):
+            p = domain._f_distribution_sf(f, 4, 30)
+            self.assertGreater(p, 0.0)
+            self.assertLessEqual(p, 1.0)
+
+    def test_f_at_median_is_about_half(self):
+        # F(d1, d2) has a median near 1 for large equal d.o.f.; the survival at a
+        # large F is tiny.
+        self.assertLess(domain._f_distribution_sf(50.0, 5, 50), 1e-6)
+
+    def test_matches_two_sided_t_for_one_numerator_df(self):
+        # For d1 == 1 the F statistic equals t**2 and the survival function
+        # equals the two-sided Student-t p-value.
+        for (t, df) in ((2.0, 10), (1.3, 7), (3.5, 25)):
+            self.assertAlmostEqual(
+                domain._f_distribution_sf(t * t, 1, df),
+                domain._student_t_two_sided_p(t, df),
+                places=12,
+            )
+
+
+class TestDomainOneWayAnova(unittest.TestCase):
+    """One-way ANOVA (F-test) for a difference among three-or-more means."""
+
+    def test_basic_balanced(self):
+        # Three groups, equal within-group spread, means 3 / 4 / 5.
+        g1 = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+        g2 = [{"value": v, "unit": "m"} for v in (2, 3, 4, 5, 6)]
+        g3 = [{"value": v, "unit": "m"} for v in (3, 4, 5, 6, 7)]
+        r = domain.one_way_anova([g1, g2, g3])
+        self.assertEqual(r["category"], "length")
+        self.assertEqual(r["unit"], "m")
+        self.assertEqual(r["k"], 3)
+        self.assertEqual(r["n_total"], 15)
+        self.assertAlmostEqual(r["grand_mean"], 4.0)
+        self.assertEqual(r["df_between"], 2)
+        self.assertEqual(r["df_within"], 12)
+        self.assertAlmostEqual(r["ss_between"], 10.0)
+        self.assertAlmostEqual(r["ss_within"], 30.0)
+        self.assertAlmostEqual(r["ms_between"], 5.0)
+        self.assertAlmostEqual(r["ms_within"], 2.5)
+        self.assertAlmostEqual(r["statistic"], 2.0)
+        self.assertGreater(r["p_value"], 0.05)
+        self.assertFalse(r["significant"])
+        self.assertEqual(len(r["groups"]), 3)
+        self.assertAlmostEqual(r["groups"][0]["mean"], 3.0)
+        self.assertAlmostEqual(r["groups"][2]["mean"], 5.0)
+
+    def test_well_separated_groups_are_significant(self):
+        g1 = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        g2 = [{"value": v, "unit": "m"} for v in (11, 12, 13)]
+        g3 = [{"value": v, "unit": "m"} for v in (21, 22, 23)]
+        r = domain.one_way_anova([g1, g2, g3])
+        self.assertAlmostEqual(r["ss_between"], 600.0)
+        self.assertAlmostEqual(r["ms_within"], 1.0)
+        self.assertAlmostEqual(r["statistic"], 300.0)
+        self.assertLess(r["p_value"], 0.001)
+        self.assertTrue(r["significant"])
+
+    def test_identical_groups_give_zero_f(self):
+        g = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)]
+        r = domain.one_way_anova([g, list(g), list(g)])
+        self.assertAlmostEqual(r["ss_between"], 0.0)
+        self.assertAlmostEqual(r["statistic"], 0.0)
+        self.assertAlmostEqual(r["p_value"], 1.0)
+        self.assertFalse(r["significant"])
+
+    def test_reduces_to_pooled_t_test_for_two_groups(self):
+        # ANOVA of two groups equals the pooled t-test: F == t**2, same p-value.
+        a = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+        b = [{"value": v, "unit": "m"} for v in (4, 5, 6, 7, 9)]
+        r = domain.one_way_anova([a, b])
+        t = domain.two_sample_t_test(a, b, equal_var=True)
+        self.assertEqual(r["df_within"], int(t["df"]))
+        self.assertAlmostEqual(r["statistic"], t["statistic"] ** 2, places=9)
+        self.assertAlmostEqual(r["p_value"], t["p_value"], places=9)
+
+    def test_unequal_group_sizes(self):
+        g1 = [{"value": v, "unit": "kg"} for v in (1, 2)]
+        g2 = [{"value": v, "unit": "kg"} for v in (3, 4, 5, 6)]
+        g3 = [{"value": v, "unit": "kg"} for v in (7, 8, 9)]
+        r = domain.one_way_anova([g1, g2, g3])
+        self.assertEqual(r["n_total"], 9)
+        self.assertEqual(r["df_between"], 2)
+        self.assertEqual(r["df_within"], 6)
+        self.assertEqual([g["n"] for g in r["groups"]], [2, 4, 3])
+
+    def test_unit_conversion_is_consistent(self):
+        # Same physical data, one group in cm: identical F once restated to m.
+        g1 = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        g2_cm = [{"value": v, "unit": "cm"} for v in (400, 500, 600)]
+        g2_m = [{"value": v, "unit": "m"} for v in (4, 5, 6)]
+        g3 = [{"value": v, "unit": "m"} for v in (7, 8, 9)]
+        r_cm = domain.one_way_anova([g1, g2_cm, g3])
+        r_m = domain.one_way_anova([g1, g2_m, g3])
+        self.assertEqual(r_cm["unit"], "m")
+        self.assertAlmostEqual(r_cm["statistic"], r_m["statistic"], places=9)
+        self.assertAlmostEqual(r_cm["p_value"], r_m["p_value"], places=9)
+
+    def test_target_unit_override(self):
+        g1 = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        g2 = [{"value": v, "unit": "m"} for v in (4, 5, 6)]
+        r = domain.one_way_anova([g1, g2], to_unit="cm")
+        self.assertEqual(r["unit"], "cm")
+        self.assertAlmostEqual(r["grand_mean"], 350.0)
+        self.assertAlmostEqual(r["groups"][0]["mean"], 200.0)
+
+    def test_tuple_items_accepted(self):
+        r = domain.one_way_anova([
+            [(1, "m"), (2, "m"), (3, "m")],
+            [(4, "m"), (5, "m"), (6, "m")],
+        ])
+        self.assertEqual(r["k"], 2)
+        self.assertAlmostEqual(r["grand_mean"], 3.5)
+
+    def test_custom_alpha_changes_verdict(self):
+        g1 = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)]
+        g2 = [{"value": v, "unit": "m"} for v in (3, 4, 5, 6)]
+        g3 = [{"value": v, "unit": "m"} for v in (5, 6, 7, 8)]
+        loose = domain.one_way_anova([g1, g2, g3], alpha=0.2)
+        strict = domain.one_way_anova([g1, g2, g3], alpha=0.001)
+        self.assertEqual(loose["significant"], loose["p_value"] < 0.2)
+        self.assertEqual(strict["significant"], strict["p_value"] < 0.001)
+
+    def test_single_observation_group_is_allowed(self):
+        # A lone-point group has zero variance but still contributes to SSB; the
+        # test only needs the within-group d.o.f. to be positive.
+        g1 = [{"value": 5, "unit": "m"}]
+        g2 = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        r = domain.one_way_anova([g1, g2])
+        self.assertEqual(r["groups"][0]["n"], 1)
+        self.assertEqual(r["groups"][0]["var"], 0.0)
+        self.assertEqual(r["df_within"], 2)  # 4 - 2
+
+    def test_one_group_raises(self):
+        with self.assertRaises(ValueError):
+            domain.one_way_anova([[{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}]])
+
+    def test_not_a_list_raises(self):
+        with self.assertRaises(ValueError):
+            domain.one_way_anova("nope")
+
+    def test_empty_groups_raises(self):
+        with self.assertRaises(ValueError):
+            domain.one_way_anova([])
+
+    def test_too_few_observations_raises(self):
+        # Two single-point groups: df_within == 0, undefined.
+        with self.assertRaises(ValueError):
+            domain.one_way_anova([
+                [{"value": 1, "unit": "m"}],
+                [{"value": 2, "unit": "m"}],
+            ])
+
+    def test_all_constant_groups_raise(self):
+        with self.assertRaises(ValueError):
+            domain.one_way_anova([
+                [{"value": 5, "unit": "m"}, {"value": 5, "unit": "m"}],
+                [{"value": 9, "unit": "m"}, {"value": 9, "unit": "m"}],
+            ])
+
+    def test_empty_group_raises(self):
+        with self.assertRaises(ValueError):
+            domain.one_way_anova([
+                [],
+                [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}],
+            ])
+
+    def test_cross_category_between_groups_raises(self):
+        with self.assertRaises(ValueError):
+            domain.one_way_anova([
+                [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}],
+                [{"value": 1, "unit": "kg"}, {"value": 2, "unit": "kg"}],
+            ])
+
+    def test_temperature_category_raises(self):
+        with self.assertRaises(ValueError):
+            domain.one_way_anova([
+                [{"value": 1, "unit": "c"}, {"value": 2, "unit": "c"}],
+                [{"value": 3, "unit": "c"}, {"value": 4, "unit": "c"}],
+            ])
+
+    def test_bad_alpha_raises(self):
+        g1 = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        g2 = [{"value": v, "unit": "m"} for v in (4, 5, 6)]
+        for bad in (0.0, 1.0, -0.1, 1.5, float("nan")):
+            with self.assertRaises(ValueError):
+                domain.one_way_anova([g1, g2], alpha=bad)
+        with self.assertRaises(ValueError):
+            domain.one_way_anova([g1, g2], alpha="lots")
+        with self.assertRaises(ValueError):
+            domain.one_way_anova([g1, g2], alpha=True)
+
+
+class TestHttpOneWayAnova(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = server.make_server(0)
+        cls.host, cls.port = cls.server.server_address
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def _post(self, path, payload, raw=None):
+        body = raw if raw is not None else json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            "http://127.0.0.1:%d%s" % (self.port, path), data=body,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            data = json.loads(exc.read().decode("utf-8"))
+            exc.close()
+            return exc.code, data
+
+    def test_endpoint_ok(self):
+        status, data = self._post("/api/anova", {"groups": [
+            [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)],
+            [{"value": v, "unit": "m"} for v in (2, 3, 4, 5, 6)],
+            [{"value": v, "unit": "m"} for v in (3, 4, 5, 6, 7)],
+        ]})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["k"], 3)
+        self.assertEqual(data["n_total"], 15)
+        self.assertEqual(data["df_between"], 2)
+        self.assertEqual(data["df_within"], 12)
+        self.assertAlmostEqual(data["statistic"], 2.0)
+        self.assertEqual(data["alpha"], 0.05)
+        self.assertFalse(data["significant"])
+        self.assertGreater(data["p_value"], 0.0)
+        self.assertLessEqual(data["p_value"], 1.0)
+        self.assertEqual(len(data["groups"]), 3)
+
+    def test_endpoint_significant(self):
+        status, data = self._post("/api/anova", {"groups": [
+            [{"value": v, "unit": "m"} for v in (1, 2, 3)],
+            [{"value": v, "unit": "m"} for v in (11, 12, 13)],
+            [{"value": v, "unit": "m"} for v in (21, 22, 23)],
+        ]})
+        self.assertEqual(status, 200)
+        self.assertTrue(data["significant"])
+        self.assertLess(data["p_value"], 0.001)
+
+    def test_endpoint_custom_alpha(self):
+        status, data = self._post("/api/anova", {
+            "groups": [
+                [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)],
+                [{"value": v, "unit": "m"} for v in (3, 4, 5, 6)],
+                [{"value": v, "unit": "m"} for v in (5, 6, 7, 8)],
+            ],
+            "alpha": 0.10})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["alpha"], 0.10)
+        self.assertEqual(data["significant"], data["p_value"] < 0.10)
+
+    def test_endpoint_precision_and_unit(self):
+        status, data = self._post("/api/anova", {
+            "groups": [
+                [{"value": v, "unit": "cm"} for v in (100, 200, 300)],
+                [{"value": v, "unit": "cm"} for v in (400, 500, 600)],
+            ],
+            "to": "m", "precision": 3})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["statistic"], round(data["statistic"], 3))
+        self.assertEqual(data["grand_mean"], round(data["grand_mean"], 3))
+
+    def test_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/anova", {"groups": "nope"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_group_not_a_list_400(self):
+        status, data = self._post("/api/anova", {"groups": [
+            [{"value": 1, "unit": "m"}], "nope"]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_one_group_400(self):
+        status, data = self._post("/api/anova", {"groups": [
+            [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}]]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_all_constant_400(self):
+        status, data = self._post("/api/anova", {"groups": [
+            [{"value": 5, "unit": "m"}, {"value": 5, "unit": "m"}],
+            [{"value": 9, "unit": "m"}, {"value": 9, "unit": "m"}]]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_cross_category_400(self):
+        status, data = self._post("/api/anova", {"groups": [
+            [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}],
+            [{"value": 1, "unit": "kg"}, {"value": 2, "unit": "kg"}]]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_temperature_400(self):
+        status, data = self._post("/api/anova", {"groups": [
+            [{"value": 1, "unit": "c"}, {"value": 2, "unit": "c"}],
+            [{"value": 3, "unit": "c"}, {"value": 4, "unit": "c"}]]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_bad_alpha_400(self):
+        status, data = self._post("/api/anova", {
+            "groups": [
+                [{"value": v, "unit": "m"} for v in (1, 2, 3)],
+                [{"value": v, "unit": "m"} for v in (4, 5, 6)]],
+            "alpha": 1.5})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_invalid_json_400(self):
+        status, data = self._post("/api/anova", None, raw=b"{bad")
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
+class TestDomainBartlett(unittest.TestCase):
+    """Bartlett's test for homogeneity of variances across k>=2 groups."""
+
+    def test_basic_unequal_variances(self):
+        # Variances 2.5 / 10 / 0.2 — clearly heterogeneous. Hand-computed against
+        # the standard formula: corrected statistic 9.7903, df 2, p 0.00748.
+        g1 = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+        g2 = [{"value": v, "unit": "m"} for v in (2, 4, 6, 8, 10)]
+        g3 = [{"value": v, "unit": "m"} for v in (1, 1, 1, 1, 2)]
+        r = domain.bartlett_test([g1, g2, g3])
+        self.assertEqual(r["category"], "length")
+        self.assertEqual(r["unit"], "m")
+        self.assertEqual(r["k"], 3)
+        self.assertEqual(r["n_total"], 15)
+        self.assertEqual(r["df"], 2)
+        self.assertAlmostEqual(r["pooled_variance"], 50.8 / 12.0)
+        self.assertAlmostEqual(r["correction"], 1.0 + (3 * 0.25 - 1.0 / 12.0) / 6.0)
+        self.assertAlmostEqual(r["statistic"], 9.790312327, places=6)
+        # df=2 chi-square survival is exactly exp(-x/2).
+        self.assertAlmostEqual(r["p_value"], math.exp(-r["statistic"] / 2.0), places=9)
+        self.assertLess(r["p_value"], 0.05)
+        self.assertTrue(r["significant"])
+        self.assertEqual(len(r["groups"]), 3)
+        self.assertAlmostEqual(r["groups"][0]["var"], 2.5)
+        self.assertAlmostEqual(r["groups"][1]["var"], 10.0)
+        self.assertAlmostEqual(r["groups"][2]["var"], 0.2)
+
+    def test_equal_variances_not_significant(self):
+        # Three groups that share the same spread (each is a shift of the others):
+        # near-zero statistic, p ~ 1, not significant.
+        g1 = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+        g2 = [{"value": v, "unit": "m"} for v in (11, 12, 13, 14, 15)]
+        g3 = [{"value": v, "unit": "m"} for v in (21, 22, 23, 24, 25)]
+        r = domain.bartlett_test([g1, g2, g3])
+        self.assertAlmostEqual(r["statistic"], 0.0, places=9)
+        self.assertAlmostEqual(r["p_value"], 1.0, places=9)
+        self.assertFalse(r["significant"])
+
+    def test_correction_is_at_least_one(self):
+        g1 = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)]
+        g2 = [{"value": v, "unit": "m"} for v in (1, 3, 5, 7, 9, 11)]
+        r = domain.bartlett_test([g1, g2])
+        self.assertGreaterEqual(r["correction"], 1.0)
+        self.assertEqual(r["df"], 1)
+
+    def test_pooled_variance_matches_anova_ms_within(self):
+        # The pooled variance is exactly ANOVA's mean-square-within.
+        g1 = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+        g2 = [{"value": v, "unit": "m"} for v in (2, 5, 6, 7, 11)]
+        g3 = [{"value": v, "unit": "m"} for v in (3, 4, 8, 9, 10)]
+        b = domain.bartlett_test([g1, g2, g3])
+        a = domain.one_way_anova([g1, g2, g3])
+        self.assertAlmostEqual(b["pooled_variance"], a["ms_within"], places=9)
+
+    def test_unequal_group_sizes(self):
+        g1 = [{"value": v, "unit": "kg"} for v in (1, 2)]
+        g2 = [{"value": v, "unit": "kg"} for v in (3, 4, 5, 6)]
+        g3 = [{"value": v, "unit": "kg"} for v in (7, 9, 11)]
+        r = domain.bartlett_test([g1, g2, g3])
+        self.assertEqual(r["n_total"], 9)
+        self.assertEqual(r["df"], 2)
+        self.assertEqual([g["n"] for g in r["groups"]], [2, 4, 3])
+
+    def test_unit_conversion_is_consistent(self):
+        # Same physical data, one group in cm: identical statistic once restated.
+        g1 = [{"value": v, "unit": "m"} for v in (1, 2, 3, 5)]
+        g2_cm = [{"value": v, "unit": "cm"} for v in (200, 400, 600, 1000)]
+        g2_m = [{"value": v, "unit": "m"} for v in (2, 4, 6, 10)]
+        g3 = [{"value": v, "unit": "m"} for v in (1, 1, 2, 2)]
+        r_cm = domain.bartlett_test([g1, g2_cm, g3])
+        r_m = domain.bartlett_test([g1, g2_m, g3])
+        self.assertEqual(r_cm["unit"], "m")
+        self.assertAlmostEqual(r_cm["statistic"], r_m["statistic"], places=9)
+        self.assertAlmostEqual(r_cm["p_value"], r_m["p_value"], places=9)
+
+    def test_target_unit_override(self):
+        g1 = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)]
+        g2 = [{"value": v, "unit": "m"} for v in (4, 5, 6, 7)]
+        r = domain.bartlett_test([g1, g2], to_unit="cm")
+        self.assertEqual(r["unit"], "cm")
+        self.assertAlmostEqual(r["groups"][0]["mean"], 250.0)
+
+    def test_tuple_items_accepted(self):
+        r = domain.bartlett_test([
+            [(1, "m"), (2, "m"), (4, "m")],
+            [(4, "m"), (5, "m"), (9, "m")],
+        ])
+        self.assertEqual(r["k"], 2)
+
+    def test_custom_alpha_changes_verdict(self):
+        g1 = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+        g2 = [{"value": v, "unit": "m"} for v in (2, 4, 6, 8, 12)]
+        loose = domain.bartlett_test([g1, g2], alpha=0.5)
+        strict = domain.bartlett_test([g1, g2], alpha=0.001)
+        self.assertEqual(loose["significant"], loose["p_value"] < 0.5)
+        self.assertEqual(strict["significant"], strict["p_value"] < 0.001)
+
+    def test_one_group_raises(self):
+        with self.assertRaises(ValueError):
+            domain.bartlett_test([[{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}]])
+
+    def test_not_a_list_raises(self):
+        with self.assertRaises(ValueError):
+            domain.bartlett_test("nope")
+
+    def test_empty_groups_raises(self):
+        with self.assertRaises(ValueError):
+            domain.bartlett_test([])
+
+    def test_single_observation_group_raises(self):
+        # Unlike ANOVA, Bartlett needs a variance for every group, so a lone
+        # point is rejected (the sample variance is undefined for one value).
+        with self.assertRaises(ValueError):
+            domain.bartlett_test([
+                [{"value": 5, "unit": "m"}],
+                [{"value": v, "unit": "m"} for v in (1, 2, 3)],
+            ])
+
+    def test_constant_group_raises(self):
+        # A zero-variance group makes ln(variance) undefined.
+        with self.assertRaises(ValueError):
+            domain.bartlett_test([
+                [{"value": 5, "unit": "m"}, {"value": 5, "unit": "m"}],
+                [{"value": v, "unit": "m"} for v in (1, 2, 3)],
+            ])
+
+    def test_cross_category_raises(self):
+        with self.assertRaises(ValueError):
+            domain.bartlett_test([
+                [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}],
+                [{"value": 1, "unit": "kg"}, {"value": 2, "unit": "kg"}],
+            ])
+
+    def test_temperature_raises(self):
+        with self.assertRaises(ValueError):
+            domain.bartlett_test([
+                [{"value": 1, "unit": "c"}, {"value": 2, "unit": "c"}],
+                [{"value": 3, "unit": "c"}, {"value": 4, "unit": "c"}],
+            ])
+
+    def test_bad_alpha_raises(self):
+        g1 = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        g2 = [{"value": v, "unit": "m"} for v in (4, 6, 8)]
+        for bad in (0.0, 1.0, -0.1, 1.5):
+            with self.assertRaises(ValueError):
+                domain.bartlett_test([g1, g2], alpha=bad)
+        with self.assertRaises(ValueError):
+            domain.bartlett_test([g1, g2], alpha="lots")
+        with self.assertRaises(ValueError):
+            domain.bartlett_test([g1, g2], alpha=True)
+
+
+class TestHttpBartlett(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = server.make_server(0)
+        cls.host, cls.port = cls.server.server_address
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def _post(self, path, payload, raw=None):
+        body = raw if raw is not None else json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            "http://127.0.0.1:%d%s" % (self.port, path), data=body,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            data = json.loads(exc.read().decode("utf-8"))
+            exc.close()
+            return exc.code, data
+
+    def test_endpoint_ok_significant(self):
+        status, data = self._post("/api/bartlett", {"groups": [
+            [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)],
+            [{"value": v, "unit": "m"} for v in (2, 4, 6, 8, 10)],
+            [{"value": v, "unit": "m"} for v in (1, 1, 1, 1, 2)],
+        ]})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["k"], 3)
+        self.assertEqual(data["n_total"], 15)
+        self.assertEqual(data["df"], 2)
+        self.assertAlmostEqual(data["statistic"], 9.790312327, places=4)
+        self.assertEqual(data["alpha"], 0.05)
+        self.assertTrue(data["significant"])
+        self.assertGreater(data["p_value"], 0.0)
+        self.assertLessEqual(data["p_value"], 1.0)
+        self.assertEqual(len(data["groups"]), 3)
+        self.assertGreaterEqual(data["correction"], 1.0)
+
+    def test_endpoint_equal_variances(self):
+        status, data = self._post("/api/bartlett", {"groups": [
+            [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)],
+            [{"value": v, "unit": "m"} for v in (11, 12, 13, 14, 15)],
+        ]})
+        self.assertEqual(status, 200)
+        self.assertFalse(data["significant"])
+        self.assertAlmostEqual(data["p_value"], 1.0, places=6)
+
+    def test_endpoint_custom_alpha(self):
+        status, data = self._post("/api/bartlett", {
+            "groups": [
+                [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)],
+                [{"value": v, "unit": "m"} for v in (2, 4, 6, 8, 12)]],
+            "alpha": 0.10})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["alpha"], 0.10)
+        self.assertEqual(data["significant"], data["p_value"] < 0.10)
+
+    def test_endpoint_precision_and_unit(self):
+        status, data = self._post("/api/bartlett", {
+            "groups": [
+                [{"value": v, "unit": "cm"} for v in (100, 200, 300, 500)],
+                [{"value": v, "unit": "cm"} for v in (400, 500, 600, 700)]],
+            "to": "m", "precision": 3})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["statistic"], round(data["statistic"], 3))
+        self.assertEqual(data["pooled_variance"], round(data["pooled_variance"], 3))
+
+    def test_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/bartlett", {"groups": "nope"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_one_group_400(self):
+        status, data = self._post("/api/bartlett", {"groups": [
+            [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}]]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_constant_group_400(self):
+        status, data = self._post("/api/bartlett", {"groups": [
+            [{"value": 5, "unit": "m"}, {"value": 5, "unit": "m"}],
+            [{"value": 1, "unit": "m"}, {"value": 3, "unit": "m"}]]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_single_observation_400(self):
+        status, data = self._post("/api/bartlett", {"groups": [
+            [{"value": 5, "unit": "m"}],
+            [{"value": 1, "unit": "m"}, {"value": 3, "unit": "m"}]]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_cross_category_400(self):
+        status, data = self._post("/api/bartlett", {"groups": [
+            [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}],
+            [{"value": 1, "unit": "kg"}, {"value": 2, "unit": "kg"}]]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_temperature_400(self):
+        status, data = self._post("/api/bartlett", {"groups": [
+            [{"value": 1, "unit": "c"}, {"value": 2, "unit": "c"}],
+            [{"value": 3, "unit": "c"}, {"value": 4, "unit": "c"}]]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_bad_alpha_400(self):
+        status, data = self._post("/api/bartlett", {
+            "groups": [
+                [{"value": v, "unit": "m"} for v in (1, 2, 3)],
+                [{"value": v, "unit": "m"} for v in (4, 6, 8)]],
+            "alpha": 1.5})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_invalid_json_400(self):
+        status, data = self._post("/api/bartlett", None, raw=b"{bad")
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
+class TestDomainLevene(unittest.TestCase):
+    """Levene's test for homogeneity of variances across k>=2 groups."""
+
+    def test_basic_unequal_variances_mean_center(self):
+        # Absolute deviations from each group mean, then an ANOVA on them.
+        # g1 dev mean 1.2, g2 dev mean 2.4, g3 dev mean 0.32; hand-computed
+        # W = (12/2)*(10.901333.../14.288) = 4.5778276, df (2, 12).
+        g1 = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+        g2 = [{"value": v, "unit": "m"} for v in (2, 4, 6, 8, 10)]
+        g3 = [{"value": v, "unit": "m"} for v in (1, 1, 1, 1, 2)]
+        r = domain.levene_test([g1, g2, g3])
+        self.assertEqual(r["category"], "length")
+        self.assertEqual(r["unit"], "m")
+        self.assertEqual(r["center"], "mean")
+        self.assertEqual(r["k"], 3)
+        self.assertEqual(r["n_total"], 15)
+        self.assertEqual(r["df_between"], 2)
+        self.assertEqual(r["df_within"], 12)
+        self.assertAlmostEqual(r["statistic"], 4.5778276, places=5)
+        self.assertAlmostEqual(
+            r["p_value"], domain._f_distribution_sf(r["statistic"], 2, 12),
+            places=9)
+        self.assertLess(r["p_value"], 0.05)
+        self.assertTrue(r["significant"])
+        self.assertEqual(len(r["groups"]), 3)
+        self.assertAlmostEqual(r["groups"][0]["center"], 3.0)
+        self.assertAlmostEqual(r["groups"][0]["mean_deviation"], 1.2)
+        self.assertAlmostEqual(r["groups"][1]["mean_deviation"], 2.4)
+        self.assertAlmostEqual(r["groups"][2]["mean_deviation"], 0.32)
+
+    def test_matches_anova_on_abs_deviations(self):
+        # Levene IS a one-way ANOVA on the absolute deviations from the group
+        # means, so building those deviation items by hand and feeding them to
+        # one_way_anova must reproduce the same F-statistic.
+        groups = [(1, 2, 3, 4, 5), (2, 5, 6, 7, 11), (3, 4, 8, 9, 10)]
+        items = [[{"value": v, "unit": "m"} for v in g] for g in groups]
+        r = domain.levene_test(items)
+        dev_items = []
+        for g in groups:
+            mean = sum(g) / len(g)
+            dev_items.append(
+                [{"value": abs(v - mean), "unit": "m"} for v in g])
+        a = domain.one_way_anova(dev_items)
+        self.assertAlmostEqual(r["statistic"], a["statistic"], places=9)
+        self.assertAlmostEqual(r["p_value"], a["p_value"], places=9)
+
+    def test_median_center_brown_forsythe(self):
+        # The Brown--Forsythe variant centres on the median, not the mean.
+        g1 = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 100)]
+        g2 = [{"value": v, "unit": "m"} for v in (5, 6, 7, 8, 9)]
+        r = domain.levene_test([g1, g2], center="median")
+        self.assertEqual(r["center"], "median")
+        self.assertAlmostEqual(r["groups"][0]["center"], 3.0)
+        self.assertAlmostEqual(r["groups"][1]["center"], 7.0)
+        # Median centring is robust to the 100 outlier, so it disagrees with
+        # the mean-centred statistic on the same data.
+        r_mean = domain.levene_test([g1, g2], center="mean")
+        self.assertNotAlmostEqual(r["statistic"], r_mean["statistic"], places=3)
+
+    def test_equal_variances_not_significant(self):
+        # Three groups that are pure shifts of one another: identical absolute
+        # deviations, so W ~ 0, p ~ 1, not significant.
+        g1 = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+        g2 = [{"value": v, "unit": "m"} for v in (11, 12, 13, 14, 15)]
+        g3 = [{"value": v, "unit": "m"} for v in (21, 22, 23, 24, 25)]
+        r = domain.levene_test([g1, g2, g3])
+        self.assertAlmostEqual(r["statistic"], 0.0, places=9)
+        self.assertAlmostEqual(r["p_value"], 1.0, places=9)
+        self.assertFalse(r["significant"])
+
+    def test_unit_conversion_is_consistent(self):
+        # Same physical data, one group in cm: identical statistic once restated.
+        g1 = [{"value": v, "unit": "m"} for v in (1, 2, 3, 5)]
+        g2_cm = [{"value": v, "unit": "cm"} for v in (200, 400, 600, 1000)]
+        g2_m = [{"value": v, "unit": "m"} for v in (2, 4, 6, 10)]
+        g3 = [{"value": v, "unit": "m"} for v in (1, 1, 2, 2)]
+        r_cm = domain.levene_test([g1, g2_cm, g3])
+        r_m = domain.levene_test([g1, g2_m, g3])
+        self.assertEqual(r_cm["unit"], "m")
+        self.assertAlmostEqual(r_cm["statistic"], r_m["statistic"], places=9)
+        self.assertAlmostEqual(r_cm["p_value"], r_m["p_value"], places=9)
+
+    def test_target_unit_override(self):
+        g1 = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)]
+        g2 = [{"value": v, "unit": "m"} for v in (4, 5, 6, 8)]
+        r = domain.levene_test([g1, g2], to_unit="cm")
+        self.assertEqual(r["unit"], "cm")
+        self.assertAlmostEqual(r["groups"][0]["center"], 250.0)
+
+    def test_tuple_items_accepted(self):
+        r = domain.levene_test([
+            [(1, "m"), (2, "m"), (4, "m")],
+            [(4, "m"), (5, "m"), (9, "m")],
+        ])
+        self.assertEqual(r["k"], 2)
+
+    def test_single_observation_group_allowed(self):
+        # Unlike Bartlett, Levene tolerates a lone-point group (its absolute
+        # deviation is simply zero) as long as some within-group spread remains.
+        r = domain.levene_test([
+            [{"value": 5, "unit": "m"}],
+            [{"value": v, "unit": "m"} for v in (1, 2, 3)],
+        ])
+        self.assertEqual(r["k"], 2)
+        self.assertEqual(r["n_total"], 4)
+        self.assertEqual(r["df_within"], 2)
+        self.assertEqual(r["groups"][0]["mean_deviation"], 0.0)
+
+    def test_custom_alpha_changes_verdict(self):
+        g1 = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+        g2 = [{"value": v, "unit": "m"} for v in (2, 4, 6, 8, 12)]
+        loose = domain.levene_test([g1, g2], alpha=0.5)
+        strict = domain.levene_test([g1, g2], alpha=0.001)
+        self.assertEqual(loose["significant"], loose["p_value"] < 0.5)
+        self.assertEqual(strict["significant"], strict["p_value"] < 0.001)
+
+    def test_constant_groups_raise(self):
+        # Every absolute deviation is zero, so there is no within-group spread.
+        with self.assertRaises(ValueError):
+            domain.levene_test([
+                [{"value": 5, "unit": "m"}, {"value": 5, "unit": "m"}],
+                [{"value": 7, "unit": "m"}, {"value": 7, "unit": "m"}],
+            ])
+
+    def test_df_within_must_be_positive(self):
+        # Two lone-point groups give N == k, so df_within would be zero.
+        with self.assertRaises(ValueError):
+            domain.levene_test([
+                [{"value": 5, "unit": "m"}],
+                [{"value": 3, "unit": "m"}],
+            ])
+
+    def test_one_group_raises(self):
+        with self.assertRaises(ValueError):
+            domain.levene_test([[{"value": 1, "unit": "m"},
+                                 {"value": 2, "unit": "m"}]])
+
+    def test_not_a_list_raises(self):
+        with self.assertRaises(ValueError):
+            domain.levene_test("nope")
+
+    def test_empty_groups_raises(self):
+        with self.assertRaises(ValueError):
+            domain.levene_test([])
+
+    def test_cross_category_raises(self):
+        with self.assertRaises(ValueError):
+            domain.levene_test([
+                [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}],
+                [{"value": 1, "unit": "kg"}, {"value": 2, "unit": "kg"}],
+            ])
+
+    def test_temperature_raises(self):
+        with self.assertRaises(ValueError):
+            domain.levene_test([
+                [{"value": 1, "unit": "c"}, {"value": 2, "unit": "c"}],
+                [{"value": 3, "unit": "c"}, {"value": 4, "unit": "c"}],
+            ])
+
+    def test_bad_center_raises(self):
+        g1 = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        g2 = [{"value": v, "unit": "m"} for v in (4, 6, 8)]
+        with self.assertRaises(ValueError):
+            domain.levene_test([g1, g2], center="mode")
+
+    def test_bad_alpha_raises(self):
+        g1 = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        g2 = [{"value": v, "unit": "m"} for v in (4, 6, 8)]
+        for bad in (0.0, 1.0, -0.1, 1.5):
+            with self.assertRaises(ValueError):
+                domain.levene_test([g1, g2], alpha=bad)
+        with self.assertRaises(ValueError):
+            domain.levene_test([g1, g2], alpha="lots")
+        with self.assertRaises(ValueError):
+            domain.levene_test([g1, g2], alpha=True)
+
+
+class TestHttpLevene(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = server.make_server(0)
+        cls.host, cls.port = cls.server.server_address
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def _post(self, path, payload, raw=None):
+        body = raw if raw is not None else json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            "http://127.0.0.1:%d%s" % (self.port, path), data=body,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            data = json.loads(exc.read().decode("utf-8"))
+            exc.close()
+            return exc.code, data
+
+    def test_endpoint_ok_significant(self):
+        status, data = self._post("/api/levene", {"groups": [
+            [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)],
+            [{"value": v, "unit": "m"} for v in (2, 4, 6, 8, 10)],
+            [{"value": v, "unit": "m"} for v in (1, 1, 1, 1, 2)],
+        ]})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["center"], "mean")
+        self.assertEqual(data["k"], 3)
+        self.assertEqual(data["n_total"], 15)
+        self.assertEqual(data["df_between"], 2)
+        self.assertEqual(data["df_within"], 12)
+        self.assertAlmostEqual(data["statistic"], 4.5778276, places=4)
+        self.assertEqual(data["alpha"], 0.05)
+        self.assertTrue(data["significant"])
+        self.assertGreater(data["p_value"], 0.0)
+        self.assertLessEqual(data["p_value"], 1.0)
+        self.assertEqual(len(data["groups"]), 3)
+
+    def test_endpoint_equal_variances(self):
+        status, data = self._post("/api/levene", {"groups": [
+            [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)],
+            [{"value": v, "unit": "m"} for v in (11, 12, 13, 14, 15)],
+        ]})
+        self.assertEqual(status, 200)
+        self.assertFalse(data["significant"])
+        self.assertAlmostEqual(data["p_value"], 1.0, places=6)
+
+    def test_endpoint_median_center(self):
+        status, data = self._post("/api/levene", {
+            "groups": [
+                [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 100)],
+                [{"value": v, "unit": "m"} for v in (5, 6, 7, 8, 9)]],
+            "center": "median"})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["center"], "median")
+        self.assertAlmostEqual(data["groups"][0]["center"], 3.0)
+
+    def test_endpoint_custom_alpha(self):
+        status, data = self._post("/api/levene", {
+            "groups": [
+                [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)],
+                [{"value": v, "unit": "m"} for v in (2, 4, 6, 8, 12)]],
+            "alpha": 0.10})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["alpha"], 0.10)
+        self.assertEqual(data["significant"], data["p_value"] < 0.10)
+
+    def test_endpoint_precision_and_unit(self):
+        status, data = self._post("/api/levene", {
+            "groups": [
+                [{"value": v, "unit": "cm"} for v in (100, 200, 300, 500)],
+                [{"value": v, "unit": "cm"} for v in (400, 500, 600, 700)]],
+            "to": "m", "precision": 3})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["statistic"], round(data["statistic"], 3))
+        self.assertEqual(
+            data["grand_mean_deviation"],
+            round(data["grand_mean_deviation"], 3))
+
+    def test_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/levene", {"groups": "nope"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_one_group_400(self):
+        status, data = self._post("/api/levene", {"groups": [
+            [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}]]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_constant_groups_400(self):
+        status, data = self._post("/api/levene", {"groups": [
+            [{"value": 5, "unit": "m"}, {"value": 5, "unit": "m"}],
+            [{"value": 7, "unit": "m"}, {"value": 7, "unit": "m"}]]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_cross_category_400(self):
+        status, data = self._post("/api/levene", {"groups": [
+            [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}],
+            [{"value": 1, "unit": "kg"}, {"value": 2, "unit": "kg"}]]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_temperature_400(self):
+        status, data = self._post("/api/levene", {"groups": [
+            [{"value": 1, "unit": "c"}, {"value": 2, "unit": "c"}],
+            [{"value": 3, "unit": "c"}, {"value": 4, "unit": "c"}]]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_bad_center_400(self):
+        status, data = self._post("/api/levene", {
+            "groups": [
+                [{"value": v, "unit": "m"} for v in (1, 2, 3)],
+                [{"value": v, "unit": "m"} for v in (4, 6, 8)]],
+            "center": "mode"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_bad_alpha_400(self):
+        status, data = self._post("/api/levene", {
+            "groups": [
+                [{"value": v, "unit": "m"} for v in (1, 2, 3)],
+                [{"value": v, "unit": "m"} for v in (4, 6, 8)]],
+            "alpha": 1.5})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_invalid_json_400(self):
+        status, data = self._post("/api/levene", None, raw=b"{bad")
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
+class TestDomainMannWhitneyU(unittest.TestCase):
+    """Mann-Whitney U (Wilcoxon rank-sum) test for two independent samples."""
+
+    def test_basic_separated_samples(self):
+        a = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+        b = [{"value": v, "unit": "m"} for v in (6, 7, 8, 9, 10)]
+        r = domain.mann_whitney_u(a, b)
+        self.assertEqual(r["category"], "length")
+        self.assertEqual(r["unit"], "m")
+        self.assertEqual(r["n_a"], 5)
+        self.assertEqual(r["n_b"], 5)
+        # a holds the five smallest ranks => U_a == 0, U_b == n_a*n_b == 25.
+        self.assertAlmostEqual(r["u_a"], 0.0)
+        self.assertAlmostEqual(r["u_b"], 25.0)
+        self.assertAlmostEqual(r["u"], 0.0)
+        self.assertAlmostEqual(r["mu_u"], 12.5)
+        self.assertAlmostEqual(r["rank_sum_a"], 15.0)
+        self.assertAlmostEqual(r["rank_sum_b"], 40.0)
+        self.assertAlmostEqual(r["mean_rank_a"], 3.0)
+        self.assertAlmostEqual(r["mean_rank_b"], 8.0)
+        self.assertFalse(r["has_ties"])
+        self.assertLess(r["p_value"], 0.05)
+        self.assertTrue(r["significant"])
+
+    def test_u_identity_and_rank_sum_total(self):
+        # U_a + U_b == n_a*n_b, and the pooled ranks always sum to n(n+1)/2.
+        a = [{"value": v, "unit": "kg"} for v in (3, 1, 4, 1, 5)]
+        b = [{"value": v, "unit": "kg"} for v in (9, 2, 6, 5)]
+        r = domain.mann_whitney_u(a, b)
+        self.assertAlmostEqual(r["u_a"] + r["u_b"], r["n_a"] * r["n_b"])
+        self.assertAlmostEqual(r["u"], min(r["u_a"], r["u_b"]))
+        n = r["n_a"] + r["n_b"]
+        self.assertAlmostEqual(
+            r["rank_sum_a"] + r["rank_sum_b"], n * (n + 1) / 2.0)
+
+    def test_swapping_samples_flips_z_sign_only(self):
+        a = [{"value": v, "unit": "m"} for v in (2, 4, 6, 8)]
+        b = [{"value": v, "unit": "m"} for v in (1, 3, 5, 7, 9)]
+        ab = domain.mann_whitney_u(a, b)
+        ba = domain.mann_whitney_u(b, a)
+        self.assertAlmostEqual(ab["z"], -ba["z"])
+        self.assertAlmostEqual(ab["p_value"], ba["p_value"])
+        self.assertAlmostEqual(ab["u"], ba["u"])
+
+    def test_not_significant_when_interleaved(self):
+        a = [{"value": v, "unit": "m"} for v in (1, 3, 5, 7, 9)]
+        b = [{"value": v, "unit": "m"} for v in (2, 4, 6, 8, 10)]
+        r = domain.mann_whitney_u(a, b)
+        self.assertGreater(r["p_value"], 0.05)
+        self.assertFalse(r["significant"])
+
+    def test_identical_samples_have_zero_z(self):
+        # Two copies of the same data: U sits exactly on its null mean.
+        x = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)]
+        r = domain.mann_whitney_u(x, list(x))
+        self.assertAlmostEqual(r["z"], 0.0)
+        self.assertAlmostEqual(r["p_value"], 1.0)
+        self.assertFalse(r["significant"])
+        self.assertTrue(r["has_ties"])
+
+    def test_tie_correction_flag(self):
+        # A shared value across the two samples sets has_ties.
+        a = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        b = [{"value": v, "unit": "m"} for v in (3, 4, 5)]
+        r = domain.mann_whitney_u(a, b)
+        self.assertTrue(r["has_ties"])
+
+    def test_unit_conversion_is_consistent(self):
+        # Same physical data, b in cm: the rank test must agree once restated.
+        a = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)]
+        b_cm = [{"value": v, "unit": "cm"} for v in (600, 700, 800, 900, 1000)]
+        b_m = [{"value": v, "unit": "m"} for v in (6, 7, 8, 9, 10)]
+        r_cm = domain.mann_whitney_u(a, b_cm)
+        r_m = domain.mann_whitney_u(a, b_m)
+        self.assertEqual(r_cm["unit"], "m")
+        self.assertAlmostEqual(r_cm["p_value"], r_m["p_value"], places=12)
+        self.assertAlmostEqual(r_cm["u"], r_m["u"])
+
+    def test_rank_test_is_scale_invariant(self):
+        # Multiplying every value by a positive constant keeps the ranks, so the
+        # whole result is unchanged (the test sees only the ordering).
+        a = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)]
+        b = [{"value": v, "unit": "m"} for v in (5, 6, 7, 8)]
+        a2 = [{"value": v * 1000, "unit": "m"} for v in (1, 2, 3, 4)]
+        b2 = [{"value": v * 1000, "unit": "m"} for v in (5, 6, 7, 8)]
+        r = domain.mann_whitney_u(a, b)
+        r2 = domain.mann_whitney_u(a2, b2)
+        self.assertAlmostEqual(r["p_value"], r2["p_value"], places=12)
+        self.assertAlmostEqual(r["u"], r2["u"])
+
+    def test_target_unit_override(self):
+        a = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        b = [{"value": v, "unit": "m"} for v in (4, 5, 6)]
+        r = domain.mann_whitney_u(a, b, to_unit="cm")
+        self.assertEqual(r["unit"], "cm")
+        self.assertAlmostEqual(r["mean_rank_a"], 2.0)
+
+    def test_tuple_items_accepted(self):
+        r = domain.mann_whitney_u(
+            [(1, "m"), (2, "m"), (3, "m")], [(4, "m"), (5, "m"), (6, "m")])
+        self.assertAlmostEqual(r["u"], 0.0)
+
+    def test_unequal_lengths_allowed(self):
+        a = [{"value": v, "unit": "m"} for v in (1, 2)]
+        b = [{"value": v, "unit": "m"} for v in (3, 4, 5, 6, 7)]
+        r = domain.mann_whitney_u(a, b)
+        self.assertEqual(r["n_a"], 2)
+        self.assertEqual(r["n_b"], 5)
+        self.assertAlmostEqual(r["u_a"] + r["u_b"], 10.0)
+
+    def test_custom_alpha_changes_verdict(self):
+        a = [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)]
+        b = [{"value": v, "unit": "m"} for v in (3, 4, 5, 6, 7)]
+        loose = domain.mann_whitney_u(a, b, alpha=0.5)
+        strict = domain.mann_whitney_u(a, b, alpha=0.001)
+        self.assertEqual(loose["significant"], loose["p_value"] < 0.5)
+        self.assertEqual(strict["significant"], strict["p_value"] < 0.001)
+
+    def test_all_tied_raises(self):
+        with self.assertRaises(ValueError):
+            domain.mann_whitney_u(
+                [{"value": 5, "unit": "m"} for _ in range(3)],
+                [{"value": 5, "unit": "m"} for _ in range(3)])
+
+    def test_empty_sample_raises(self):
+        with self.assertRaises(ValueError):
+            domain.mann_whitney_u([], [{"value": 2, "unit": "m"}])
+
+    def test_cross_category_between_samples_raises(self):
+        with self.assertRaises(ValueError):
+            domain.mann_whitney_u(
+                [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}],
+                [{"value": 1, "unit": "kg"}, {"value": 2, "unit": "kg"}])
+
+    def test_temperature_category_raises(self):
+        with self.assertRaises(ValueError):
+            domain.mann_whitney_u(
+                [{"value": 1, "unit": "c"}, {"value": 2, "unit": "c"}],
+                [{"value": 3, "unit": "c"}, {"value": 4, "unit": "c"}])
+
+    def test_bad_alpha_raises(self):
+        a = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        b = [{"value": v, "unit": "m"} for v in (4, 5, 6)]
+        for bad in (0.0, 1.0, 1.5, -0.1):
+            with self.assertRaises(ValueError):
+                domain.mann_whitney_u(a, b, alpha=bad)
+        with self.assertRaises(ValueError):
+            domain.mann_whitney_u(a, b, alpha="lots")
+        with self.assertRaises(ValueError):
+            domain.mann_whitney_u(a, b, alpha=True)
+
+
+class TestHttpMannWhitneyU(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = server.make_server(0)
+        cls.host, cls.port = cls.server.server_address
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def _post(self, path, payload, raw=None):
+        body = raw if raw is not None else json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            "http://127.0.0.1:%d%s" % (self.port, path), data=body,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            data = json.loads(exc.read().decode("utf-8"))
+            exc.close()
+            return exc.code, data
+
+    def test_endpoint_ok(self):
+        status, data = self._post("/api/mann-whitney", {
+            "a": [{"value": v, "unit": "m"} for v in (1, 2, 3, 4, 5)],
+            "b": [{"value": v, "unit": "m"} for v in (6, 7, 8, 9, 10)]})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["n_a"], 5)
+        self.assertEqual(data["n_b"], 5)
+        self.assertAlmostEqual(data["u"], 0.0)
+        self.assertAlmostEqual(data["mu_u"], 12.5)
+        self.assertFalse(data["has_ties"])
+        self.assertEqual(data["alpha"], 0.05)
+        self.assertTrue(data["significant"])
+        self.assertGreater(data["p_value"], 0.0)
+        self.assertLessEqual(data["p_value"], 1.0)
+
+    def test_endpoint_custom_alpha(self):
+        status, data = self._post("/api/mann-whitney", {
+            "a": [{"value": v, "unit": "m"} for v in (1, 3, 5, 7, 9)],
+            "b": [{"value": v, "unit": "m"} for v in (2, 4, 6, 8, 10)],
+            "alpha": 0.10})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["alpha"], 0.10)
+        self.assertEqual(data["significant"], data["p_value"] < 0.10)
+
+    def test_endpoint_precision_and_unit(self):
+        status, data = self._post("/api/mann-whitney", {
+            "a": [{"value": v, "unit": "cm"} for v in (100, 200, 300)],
+            "b": [{"value": v, "unit": "cm"} for v in (400, 500, 600)],
+            "to": "m", "precision": 3})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["sigma_u"], round(data["sigma_u"], 3))
+        self.assertEqual(data["z"], round(data["z"], 3))
+
+    def test_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/mann-whitney", {
+            "a": "nope", "b": [{"value": 1, "unit": "m"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_all_tied_400(self):
+        status, data = self._post("/api/mann-whitney", {
+            "a": [{"value": 5, "unit": "m"} for _ in range(3)],
+            "b": [{"value": 5, "unit": "m"} for _ in range(3)]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_cross_category_400(self):
+        status, data = self._post("/api/mann-whitney", {
+            "a": [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}],
+            "b": [{"value": 1, "unit": "kg"}, {"value": 2, "unit": "kg"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_temperature_400(self):
+        status, data = self._post("/api/mann-whitney", {
+            "a": [{"value": 1, "unit": "c"}, {"value": 2, "unit": "c"}],
+            "b": [{"value": 3, "unit": "c"}, {"value": 4, "unit": "c"}]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_bad_alpha_400(self):
+        status, data = self._post("/api/mann-whitney", {
+            "a": [{"value": v, "unit": "m"} for v in (1, 2, 3)],
+            "b": [{"value": v, "unit": "m"} for v in (4, 5, 6)],
+            "alpha": 1.5})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_invalid_json_400(self):
+        status, data = self._post("/api/mann-whitney", None, raw=b"{bad")
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
+class TestDomainChiSquareSf(unittest.TestCase):
+    """The chi-square upper-tail (survival) special function."""
+
+    def test_known_critical_values(self):
+        # Standard 0.05 critical values: P(X >= crit) == 0.05 for each df.
+        for df, crit in ((1, 3.841459), (2, 5.991465), (3, 7.814728),
+                         (5, 11.070498), (10, 18.307038)):
+            self.assertAlmostEqual(domain._chi_square_sf(crit, df), 0.05, places=5)
+
+    def test_zero_and_negative_is_one(self):
+        # All the mass lies at or beyond the origin.
+        self.assertEqual(domain._chi_square_sf(0.0, 3), 1.0)
+        self.assertEqual(domain._chi_square_sf(-5.0, 3), 1.0)
+
+    def test_monotonic_decreasing(self):
+        prev = 1.0
+        for x in (0.5, 1.0, 2.0, 5.0, 10.0, 20.0):
+            cur = domain._chi_square_sf(x, 4)
+            self.assertLess(cur, prev)
+            prev = cur
+
+    def test_decays_toward_zero(self):
+        self.assertLess(domain._chi_square_sf(100.0, 2), 1e-9)
+
+    def test_df1_matches_normal_two_tail(self):
+        # A chi-square with 1 d.o.f. is Z**2, so P(X >= z**2) == P(|Z| >= |z|).
+        for z in (0.5, 1.0, 1.96, 2.5):
+            self.assertAlmostEqual(
+                domain._chi_square_sf(z * z, 1),
+                domain._standard_normal_two_sided_p(z),
+                places=9,
+            )
+
+
+class TestDomainKruskalWallis(unittest.TestCase):
+    """Kruskal-Wallis H test for a difference in location among k samples."""
+
+    def test_known_scipy_example(self):
+        # scipy.stats.kruskal([1,2,3],[4,5,6],[7,8,9]) -> H=7.2, p=0.0273.
+        g = [[{"value": v, "unit": "m"} for v in grp]
+             for grp in ([1, 2, 3], [4, 5, 6], [7, 8, 9])]
+        r = domain.kruskal_wallis_h(g)
+        self.assertEqual(r["category"], "length")
+        self.assertEqual(r["unit"], "m")
+        self.assertEqual(r["k"], 3)
+        self.assertEqual(r["n_total"], 9)
+        self.assertEqual(r["df"], 2)
+        self.assertAlmostEqual(r["statistic"], 7.2, places=6)
+        self.assertAlmostEqual(r["p_value"], 0.0273, places=4)
+        self.assertFalse(r["has_ties"])
+        self.assertAlmostEqual(r["correction"], 1.0)
+        self.assertTrue(r["significant"])
+
+    def test_rank_sums_total_is_triangular(self):
+        # All pooled ranks sum to N*(N+1)/2 regardless of grouping.
+        g = [[{"value": v, "unit": "m"} for v in grp]
+             for grp in ([1, 5, 9], [2, 6, 10], [3, 4, 8])]
+        r = domain.kruskal_wallis_h(g)
+        n = r["n_total"]
+        total = sum(grp["rank_sum"] for grp in r["groups"])
+        self.assertAlmostEqual(total, n * (n + 1) / 2.0)
+        for grp in r["groups"]:
+            self.assertAlmostEqual(grp["mean_rank"], grp["rank_sum"] / grp["n"])
+
+    def test_well_separated_groups_are_significant(self):
+        g = [[{"value": v, "unit": "m"} for v in grp]
+             for grp in ([1, 2, 3, 4], [11, 12, 13, 14], [21, 22, 23, 24])]
+        r = domain.kruskal_wallis_h(g)
+        self.assertLess(r["p_value"], 0.01)
+        self.assertTrue(r["significant"])
+
+    def test_interleaved_groups_not_significant(self):
+        g = [[{"value": v, "unit": "m"} for v in grp]
+             for grp in ([1, 4, 7], [2, 5, 8], [3, 6, 9])]
+        r = domain.kruskal_wallis_h(g)
+        self.assertGreater(r["p_value"], 0.05)
+        self.assertFalse(r["significant"])
+
+    def test_two_groups_match_mann_whitney_no_ties(self):
+        # With two groups and no ties the corrected H equals the squared
+        # Mann-Whitney z computed WITHOUT the continuity correction.
+        a = [{"value": v, "unit": "m"} for v in (3, 1, 4, 1.5, 5, 9, 2, 6)]
+        b = [{"value": v, "unit": "m"} for v in (7, 8, 10, 11, 12, 13, 14)]
+        kw = domain.kruskal_wallis_h([a, b])
+        mwu = domain.mann_whitney_u(a, b)
+        z_nc = (mwu["u_a"] - mwu["mu_u"]) / mwu["sigma_u"]
+        self.assertEqual(kw["df"], 1)
+        self.assertAlmostEqual(kw["statistic"], z_nc ** 2, places=9)
+
+    def test_tie_correction_inflates_statistic(self):
+        # Ties shrink the correction divisor (< 1), so the corrected statistic is
+        # strictly larger than the raw H.
+        g = [[{"value": v, "unit": "m"} for v in grp]
+             for grp in ([1, 2, 2], [2, 3, 3], [3, 4, 4])]
+        r = domain.kruskal_wallis_h(g)
+        self.assertTrue(r["has_ties"])
+        self.assertLess(r["correction"], 1.0)
+        self.assertGreater(r["statistic"], r["h"])
+
+    def test_unequal_group_sizes(self):
+        g1 = [{"value": v, "unit": "kg"} for v in (1, 2)]
+        g2 = [{"value": v, "unit": "kg"} for v in (3, 4, 5, 6)]
+        g3 = [{"value": v, "unit": "kg"} for v in (7, 8, 9)]
+        r = domain.kruskal_wallis_h([g1, g2, g3])
+        self.assertEqual(r["n_total"], 9)
+        self.assertEqual(r["df"], 2)
+        self.assertEqual([g["n"] for g in r["groups"]], [2, 4, 3])
+
+    def test_unit_conversion_is_consistent(self):
+        # The test is rank-based, so restating one group in cm leaves it identical.
+        g1 = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        g2_cm = [{"value": v, "unit": "cm"} for v in (400, 500, 600)]
+        g2_m = [{"value": v, "unit": "m"} for v in (4, 5, 6)]
+        g3 = [{"value": v, "unit": "m"} for v in (7, 8, 9)]
+        r_cm = domain.kruskal_wallis_h([g1, g2_cm, g3])
+        r_m = domain.kruskal_wallis_h([g1, g2_m, g3])
+        self.assertEqual(r_cm["unit"], "m")
+        self.assertAlmostEqual(r_cm["statistic"], r_m["statistic"], places=9)
+        self.assertAlmostEqual(r_cm["p_value"], r_m["p_value"], places=9)
+
+    def test_target_unit_override(self):
+        g1 = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        g2 = [{"value": v, "unit": "m"} for v in (4, 5, 6)]
+        r = domain.kruskal_wallis_h([g1, g2], to_unit="cm")
+        self.assertEqual(r["unit"], "cm")
+
+    def test_tuple_items_accepted(self):
+        r = domain.kruskal_wallis_h([
+            [(1, "m"), (2, "m"), (3, "m")],
+            [(4, "m"), (5, "m"), (6, "m")],
+        ])
+        self.assertEqual(r["k"], 2)
+        self.assertEqual(r["n_total"], 6)
+
+    def test_custom_alpha_changes_verdict(self):
+        g = [[{"value": v, "unit": "m"} for v in grp]
+             for grp in ([1, 2, 3, 4], [3, 4, 5, 6], [5, 6, 7, 8])]
+        loose = domain.kruskal_wallis_h(g, alpha=0.3)
+        strict = domain.kruskal_wallis_h(g, alpha=0.001)
+        self.assertEqual(loose["significant"], loose["p_value"] < 0.3)
+        self.assertEqual(strict["significant"], strict["p_value"] < 0.001)
+
+    def test_single_observation_group_is_allowed(self):
+        g1 = [{"value": 5, "unit": "m"}]
+        g2 = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        r = domain.kruskal_wallis_h([g1, g2])
+        self.assertEqual(r["groups"][0]["n"], 1)
+        self.assertEqual(r["n_total"], 4)
+
+    def test_one_group_raises(self):
+        with self.assertRaises(ValueError):
+            domain.kruskal_wallis_h([[{"value": 1, "unit": "m"},
+                                      {"value": 2, "unit": "m"}]])
+
+    def test_not_a_list_raises(self):
+        with self.assertRaises(ValueError):
+            domain.kruskal_wallis_h("nope")
+
+    def test_empty_groups_raises(self):
+        with self.assertRaises(ValueError):
+            domain.kruskal_wallis_h([])
+
+    def test_empty_group_raises(self):
+        with self.assertRaises(ValueError):
+            domain.kruskal_wallis_h([
+                [],
+                [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}],
+            ])
+
+    def test_all_tied_raises(self):
+        with self.assertRaises(ValueError):
+            domain.kruskal_wallis_h([
+                [{"value": 5, "unit": "m"}, {"value": 5, "unit": "m"}],
+                [{"value": 5, "unit": "m"}, {"value": 5, "unit": "m"}],
+            ])
+
+    def test_cross_category_between_groups_raises(self):
+        with self.assertRaises(ValueError):
+            domain.kruskal_wallis_h([
+                [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}],
+                [{"value": 1, "unit": "kg"}, {"value": 2, "unit": "kg"}],
+            ])
+
+    def test_temperature_category_raises(self):
+        with self.assertRaises(ValueError):
+            domain.kruskal_wallis_h([
+                [{"value": 1, "unit": "c"}, {"value": 2, "unit": "c"}],
+                [{"value": 3, "unit": "c"}, {"value": 4, "unit": "c"}],
+            ])
+
+    def test_bad_alpha_raises(self):
+        g1 = [{"value": v, "unit": "m"} for v in (1, 2, 3)]
+        g2 = [{"value": v, "unit": "m"} for v in (4, 5, 6)]
+        for bad in (0.0, 1.0, -0.1, 1.5, float("nan")):
+            with self.assertRaises(ValueError):
+                domain.kruskal_wallis_h([g1, g2], alpha=bad)
+        with self.assertRaises(ValueError):
+            domain.kruskal_wallis_h([g1, g2], alpha="lots")
+        with self.assertRaises(ValueError):
+            domain.kruskal_wallis_h([g1, g2], alpha=True)
+
+
+class TestHttpKruskalWallis(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = server.make_server(0)
+        cls.host, cls.port = cls.server.server_address
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def _post(self, path, payload, raw=None):
+        body = raw if raw is not None else json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            "http://127.0.0.1:%d%s" % (self.port, path), data=body,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            data = json.loads(exc.read().decode("utf-8"))
+            exc.close()
+            return exc.code, data
+
+    def test_endpoint_ok(self):
+        status, data = self._post("/api/kruskal-wallis", {"groups": [
+            [{"value": v, "unit": "m"} for v in (1, 2, 3)],
+            [{"value": v, "unit": "m"} for v in (4, 5, 6)],
+            [{"value": v, "unit": "m"} for v in (7, 8, 9)],
+        ]})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["category"], "length")
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["k"], 3)
+        self.assertEqual(data["n_total"], 9)
+        self.assertEqual(data["df"], 2)
+        self.assertAlmostEqual(data["statistic"], 7.2, places=5)
+        self.assertAlmostEqual(data["p_value"], 0.0273, places=4)
+        self.assertEqual(data["alpha"], 0.05)
+        self.assertTrue(data["significant"])
+        self.assertFalse(data["has_ties"])
+        self.assertEqual(len(data["groups"]), 3)
+        self.assertIn("rank_sum", data["groups"][0])
+        self.assertIn("mean_rank", data["groups"][0])
+
+    def test_endpoint_not_significant(self):
+        status, data = self._post("/api/kruskal-wallis", {"groups": [
+            [{"value": v, "unit": "m"} for v in (1, 4, 7)],
+            [{"value": v, "unit": "m"} for v in (2, 5, 8)],
+            [{"value": v, "unit": "m"} for v in (3, 6, 9)],
+        ]})
+        self.assertEqual(status, 200)
+        self.assertFalse(data["significant"])
+        self.assertGreater(data["p_value"], 0.05)
+
+    def test_endpoint_custom_alpha(self):
+        status, data = self._post("/api/kruskal-wallis", {
+            "groups": [
+                [{"value": v, "unit": "m"} for v in (1, 2, 3, 4)],
+                [{"value": v, "unit": "m"} for v in (3, 4, 5, 6)],
+                [{"value": v, "unit": "m"} for v in (5, 6, 7, 8)],
+            ],
+            "alpha": 0.30})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["alpha"], 0.30)
+        self.assertEqual(data["significant"], data["p_value"] < 0.30)
+
+    def test_endpoint_precision_and_unit(self):
+        status, data = self._post("/api/kruskal-wallis", {
+            "groups": [
+                [{"value": v, "unit": "cm"} for v in (100, 200, 300)],
+                [{"value": v, "unit": "cm"} for v in (400, 500, 600)],
+            ],
+            "to": "m", "precision": 3})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["unit"], "m")
+        self.assertEqual(data["statistic"], round(data["statistic"], 3))
+
+    def test_endpoint_ties_flag(self):
+        status, data = self._post("/api/kruskal-wallis", {"groups": [
+            [{"value": v, "unit": "m"} for v in (1, 2, 2)],
+            [{"value": v, "unit": "m"} for v in (2, 3, 3)],
+            [{"value": v, "unit": "m"} for v in (3, 4, 4)],
+        ]})
+        self.assertEqual(status, 200)
+        self.assertTrue(data["has_ties"])
+        self.assertLess(data["correction"], 1.0)
+
+    def test_endpoint_not_a_list_400(self):
+        status, data = self._post("/api/kruskal-wallis", {"groups": "nope"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_group_not_a_list_400(self):
+        status, data = self._post("/api/kruskal-wallis", {"groups": [
+            [{"value": 1, "unit": "m"}], "nope"]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_one_group_400(self):
+        status, data = self._post("/api/kruskal-wallis", {"groups": [
+            [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}]]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_all_tied_400(self):
+        status, data = self._post("/api/kruskal-wallis", {"groups": [
+            [{"value": 5, "unit": "m"}, {"value": 5, "unit": "m"}],
+            [{"value": 5, "unit": "m"}, {"value": 5, "unit": "m"}]]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_cross_category_400(self):
+        status, data = self._post("/api/kruskal-wallis", {"groups": [
+            [{"value": 1, "unit": "m"}, {"value": 2, "unit": "m"}],
+            [{"value": 1, "unit": "kg"}, {"value": 2, "unit": "kg"}]]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_temperature_400(self):
+        status, data = self._post("/api/kruskal-wallis", {"groups": [
+            [{"value": 1, "unit": "c"}, {"value": 2, "unit": "c"}],
+            [{"value": 3, "unit": "c"}, {"value": 4, "unit": "c"}]]})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_bad_alpha_400(self):
+        status, data = self._post("/api/kruskal-wallis", {
+            "groups": [
+                [{"value": v, "unit": "m"} for v in (1, 2, 3)],
+                [{"value": v, "unit": "m"} for v in (4, 5, 6)]],
+            "alpha": 1.5})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_endpoint_invalid_json_400(self):
+        status, data = self._post("/api/kruskal-wallis", None, raw=b"{bad")
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
 if __name__ == "__main__":
     unittest.main()

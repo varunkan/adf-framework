@@ -40,6 +40,10 @@ All tests must pass with zero failures.
 | POST   | `/api/timer/pause`  | —                            | Pause countdown                      |
 | POST   | `/api/timer/reset`  | —                            | Reset to the last set value          |
 | POST   | `/api/timer/tick`   | —                            | Decrement remaining by 1s if running |
+| POST   | `/api/timer/finish` | —                            | Skip to end: complete the current cycle now (400 if already at zero) |
+| PUT    | `/api/timer/presets/<name>` | `{"label":"…","seconds":120}` | Edit a custom preset's label and/or seconds (404 if unknown) |
+| GET    | `/api/timer/stats/labels` | —                       | Completed-session stats grouped by label |
+| GET    | `/api/timer/history.csv`  | —                       | Download completed-session history as CSV |
 
 ### State shape
 

@@ -1,0 +1,61 @@
+{
+  "build": {
+    "backend": "auto",
+    "model": null,
+    "prompt": "@orch-orchestrator resume loyalty-points-badge-checkout\n\n## Orchestrator \u2014 client message (phase 7)\n\nExecute per user chat request and ADF routing.\n\n### Client input\nroute not found error, dont you verify the output visibly\n\n### Required\n1. Update `.cursor/orchestration/features/loyalty-points-badge-checkout/requirement.md` with clarifications.\n2. Follow framework-routing.yaml for phase 7.\n3. Stop when awaiting user approval if gate requires it.",
+    "verified": true,
+    "verify_summary": "test_badge_requires_customer_id_400 (__main__.LoyaltyAppTest.test_badge_requires_customer_id_400) ... ok\ntest_badge_view (__main__.LoyaltyAppTest.test_badge_view) ... ok\ntest_checkout_awards_points (__main__.LoyaltyAppTest.test_checkout_awards_points) ... ok\ntest_checkout_redeem (__main__.LoyaltyAppTest.test_checkout_redeem) ... ok\ntest_create_customer_and_read_back (__main__.LoyaltyAppTest.test_create_customer_and_read_back) ... ok\ntest_missing_customer_404 (__main__.LoyaltyAppTest.test_missing_customer_404) ... ok\ntest_redeem_too_many_points_400 (__main__.LoyaltyAppTest.test_redeem_too_many_points_400) ... ok\ntest_root_serves_html (__main__.LoyaltyAppTest.test_root_serves_html) ... ok\ntest_unknown_route_404 (__main__.LoyaltyAppTest.test_unknown_route_404) ... ok\n\n----------------------------------------------------------------------\nRan 9 tests in 4.581s\n\nOK\n\nboot check: server.py serves on :65138"
+  },
+  "created_at": "2026-06-19T11:00:01+00:00",
+  "feature_id": "loyalty-points-badge-checkout",
+  "files": [
+    {
+      "bytes": 1430,
+      "path": "README.md",
+      "sha256": "50987a7691102660c24974865f91569d8f3069f68f82814e17df264cdeeb4bc4"
+    },
+    {
+      "bytes": 212,
+      "path": "data.json",
+      "sha256": "c86384ec1100789ce6b885672148cd697543fe0bf695c697cef77ce7a3ea775f"
+    },
+    {
+      "bytes": 6091,
+      "path": "index.html",
+      "sha256": "2f5ca918b6b6fa4842a6a83da29b8a27b7ff637b69ad8dc3a1a80ac8b7bf5fcd"
+    },
+    {
+      "bytes": 8084,
+      "path": "server.py",
+      "sha256": "6a9aed48b13dd3dbfd62b2abb55e706054bb72a9e2751ed32e255aae574e8c58"
+    },
+    {
+      "bytes": 4694,
+      "path": "test_app.py",
+      "sha256": "d47aafe35517828b8f8335aae5f87524382671d53c27df71ba5d4e2968e640f6"
+    }
+  ],
+  "merkle_root": "bc19d18c77ea17c705c4312b8ba9d2e1e674e8a963a6b38bfb57f68ba8d99282",
+  "schema": "adf-proof/1",
+  "seal": "adf1:bc19d18c77ea",
+  "spec_sha256": "9d21eae5f0cb704add990440a982f76d4c58fa1e48a812fee6171bf8f824cd1b",
+  "stack": "stdlib",
+  "verdict": {
+    "policy": {
+      "checked": true,
+      "n_violations": 0,
+      "ok": true,
+      "policy_id": "adf-default-secure",
+      "rules": [
+        "dependency_allowlist:pass",
+        "no_network_egress:pass",
+        "no_plaintext_pii:pass",
+        "no_secrets:pass",
+        "offline_capable:pass"
+      ]
+    },
+    "stack": "stdlib",
+    "verified": true,
+    "verify_summary": "test_badge_requires_customer_id_400 (__main__.LoyaltyAppTest.test_badge_requires_customer_id_400) ... ok\ntest_badge_view (__main__.LoyaltyAppTest.test_badge_view) ... ok\ntest_checkout_awards_points (__main__.LoyaltyAppTest.test_checkout_awards_points) ... ok\ntest_checkout_redeem (__main__.LoyaltyAppTest.test_checkout_redeem) ... ok\ntest_create_customer_and_read_back (__main__.LoyaltyAppTest.test_create_customer_and_read_back) ... ok\ntest_missing_customer_404 (__main__.LoyaltyAppTest.test_missing_customer_404) ... ok\ntest_redeem_too_many_points_400 (__main__.LoyaltyAppTest.test_redeem_too_many_points_400) ... ok\ntest_root_serves_html (__main__.LoyaltyAppTest.test_root_serves_html) ... ok\ntest_unknown_route_404 (__main__.LoyaltyAppTest.test_unknown_route_404) ... ok\n\n----------------------------------------------------------------------\nRan 9 tests in 4.581s\n\nOK\n\nboot check: server.py serves on :65138"
+  }
+}

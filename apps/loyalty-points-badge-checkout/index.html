@@ -7,164 +7,458 @@
 <style>
   * { box-sizing: border-box; }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-    background: #f4f6fb;
-    margin: 0;
-    color: #1a1a2e;
+    margin: 0; font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    background: linear-gradient(135deg, #eef2ff, #f8fafc); color: #1e293b; min-height: 100vh;
   }
-  .wrap { max-width: 480px; margin: 40px auto; padding: 0 16px; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 32px 20px 60px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  .sub { color: #64748b; margin: 0 0 24px; }
   .card {
-    background: #fff;
-    border-radius: 14px;
-    box-shadow: 0 6px 24px rgba(0,0,0,0.08);
-    padding: 24px;
-    margin-bottom: 20px;
+    background: #fff; border-radius: 16px; padding: 24px;
+    box-shadow: 0 10px 30px rgba(2,6,23,.08); margin-bottom: 20px;
   }
-  h1 { font-size: 22px; margin: 0 0 4px; }
-  .sub { color: #777; font-size: 14px; margin-bottom: 20px; }
-  label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: #444; }
-  select, input {
-    width: 100%; padding: 11px 12px; font-size: 15px;
-    border: 1px solid #d4d9e6; border-radius: 9px; margin-bottom: 16px;
-    background: #fff;
+  label { display: block; font-size: .82rem; font-weight: 600; color: #475569; margin-bottom: 6px; }
+  input {
+    width: 100%; padding: 11px 12px; border: 1px solid #cbd5e1; border-radius: 10px;
+    font-size: 1rem; margin-bottom: 14px; background: #f8fafc;
   }
+  input:focus { outline: none; border-color: #6366f1; background:#fff; }
+  .row { display: flex; gap: 14px; }
+  .row > div { flex: 1; }
   button {
-    width: 100%; padding: 13px; font-size: 16px; font-weight: 600;
-    color: #fff; background: #2d6cdf; border: none; border-radius: 9px;
-    cursor: pointer; transition: background .15s;
+    border: none; border-radius: 10px; padding: 12px 18px; font-size: 1rem; font-weight: 600;
+    cursor: pointer; transition: transform .05s ease;
   }
-  button:hover { background: #2459bd; }
+  button:active { transform: translateY(1px); }
+  .primary { background: #6366f1; color: #fff; width: 100%; }
+  .ghost { background: #e2e8f0; color: #334155; }
+
+  /* Loyalty badge */
   .badge {
-    display: inline-flex; align-items: center; gap: 8px;
-    padding: 8px 14px; border-radius: 999px; color: #fff;
-    font-weight: 700; font-size: 14px; margin-top: 4px;
+    display: flex; align-items: center; gap: 14px; padding: 16px 18px; border-radius: 14px;
+    background: linear-gradient(135deg,#312e81,#6d28d9); color: #fff; margin-bottom: 18px;
   }
-  .badge .dot { width: 9px; height: 9px; border-radius: 50%; background: rgba(255,255,255,.85); }
-  .loyalty-row {
-    display: flex; align-items: center; justify-content: space-between;
-    margin-bottom: 12px;
+  .badge .star { font-size: 2rem; }
+  .badge .b-points { font-size: 1.7rem; font-weight: 800; line-height: 1; }
+  .badge .b-label { font-size: .78rem; opacity: .85; text-transform: uppercase; letter-spacing: .06em; }
+  .tier-pill {
+    margin-left: auto; background: rgba(255,255,255,.18); padding: 6px 14px; border-radius: 999px;
+    font-weight: 700; font-size: .9rem;
   }
-  .loyalty-meta { font-size: 13px; color: #666; }
-  .result {
-    margin-top: 16px; padding: 14px; border-radius: 10px;
-    background: #eef5ee; border: 1px solid #cde6cd; font-size: 14px;
-    display: none;
-  }
-  .result.show { display: block; }
-  .result.error { background: #fdeeee; border-color: #f0c9c9; color: #a33; }
-  .big { font-size: 26px; font-weight: 800; }
+  .meta { display:flex; gap:18px; flex-wrap:wrap; font-size:.85rem; color:#475569; margin-top:4px; }
+  .meta b { color:#1e293b; }
+  .result { background:#ecfdf5; border:1px solid #a7f3d0; color:#065f46;
+    padding:14px 16px; border-radius:12px; margin-top:14px; font-size:.92rem; white-space:pre-line; }
+  .err { background:#fef2f2; border:1px solid #fecaca; color:#991b1b; }
+  .hint { font-size:.8rem; color:#94a3b8; margin-top:-6px; margin-bottom:14px; }
 </style>
 </head>
 <body>
 <div class="wrap">
+  <h1>Checkout</h1>
+  <p class="sub">Loyalty points badge demo — earn 10 points per $1, redeem 100 points for $1.</p>
+
   <div class="card">
-    <h1>Checkout</h1>
-    <div class="sub">Review your order and earn loyalty points.</div>
+    <label for="cust">Customer ID</label>
+    <input id="cust" placeholder="e.g. alice" value="alice">
+    <button class="ghost" onclick="loadBadge()">Load my loyalty badge</button>
 
-    <label for="customer">Customer</label>
-    <select id="customer"></select>
+    <div id="badgeArea" style="margin-top:18px;"></div>
+  </div>
 
-    <div class="loyalty-row">
-      <div id="badgeBox"><span class="loyalty-meta">Loading loyalty…</span></div>
-      <div class="loyalty-meta" id="redeemInfo"></div>
+  <div class="card">
+    <div class="row">
+      <div>
+        <label for="subtotal">Subtotal ($)</label>
+        <input id="subtotal" type="number" min="0" step="0.01" value="42.00" oninput="previewBadge()">
+      </div>
+      <div>
+        <label for="redeem">Redeem points</label>
+        <input id="redeem" type="number" min="0" step="1" value="0">
+      </div>
     </div>
+    <p class="hint">Redeeming points lowers the total; remaining total earns new points.</p>
+    <button class="primary" onclick="doCheckout()">Complete checkout</button>
+    <div id="checkoutResult"></div>
+  </div>
 
-    <label for="amount">Order total (USD)</label>
-    <input id="amount" type="number" min="0" step="0.01" value="49.99">
+  <div class="card">
+    <h2 style="font-size:1.1rem;margin:0 0 12px;">Promo codes</h2>
+    <label for="promo">Enter a promo code</label>
+    <input id="promo" placeholder="e.g. WELCOME50">
+    <button class="ghost" onclick="redeemPromo()">Redeem promo</button>
+    <div id="promoResult"></div>
+    <div id="promoList" class="meta" style="margin-top:12px;"></div>
+  </div>
 
-    <button id="payBtn">Pay &amp; Earn Points</button>
+  <div class="card">
+    <h2 style="font-size:1.1rem;margin:0 0 12px;">Gift points</h2>
+    <div class="row">
+      <div>
+        <label for="giftTo">Recipient customer ID</label>
+        <input id="giftTo" placeholder="e.g. bob">
+      </div>
+      <div>
+        <label for="giftPts">Points</label>
+        <input id="giftPts" type="number" min="1" step="1" value="100">
+      </div>
+    </div>
+    <button class="ghost" onclick="transferPoints()">Send gift</button>
+    <div id="giftResult"></div>
+  </div>
 
-    <div class="result" id="result"></div>
+  <div class="card">
+    <h2 style="font-size:1.1rem;margin:0 0 12px;">Gift a reward</h2>
+    <p class="hint">Spend your points to send a catalog reward to another member — they get the voucher, you pay.</p>
+    <div class="row">
+      <div>
+        <label for="giftRewardTo">Recipient customer ID</label>
+        <input id="giftRewardTo" placeholder="e.g. bob">
+      </div>
+      <div>
+        <label for="giftRewardId">Reward</label>
+        <input id="giftRewardId" placeholder="e.g. coffee">
+      </div>
+    </div>
+    <button class="ghost" onclick="giftReward()">Send reward</button>
+    <div id="giftRewardResult"></div>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:1.1rem;margin:0 0 12px;">Points goal</h2>
+    <label for="goalPts">Set a savings goal (0 to clear)</label>
+    <input id="goalPts" type="number" min="0" step="1" value="1000">
+    <button class="ghost" onclick="setGoal()">Save goal</button>
+    <div id="goalResult"></div>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:1.1rem;margin:0 0 12px;">Refer a friend</h2>
+    <label for="referId">New customer ID — you both get a bonus</label>
+    <input id="referId" placeholder="e.g. dave">
+    <button class="ghost" onclick="referFriend()">Send referral</button>
+    <div id="referResult"></div>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:1.1rem;margin:0 0 12px;">Reward wishlist</h2>
+    <p class="hint">Save rewards you're working toward and see how many points you still need.</p>
+    <div class="row">
+      <div>
+        <label for="wishReward">Reward</label>
+        <input id="wishReward" placeholder="e.g. voucher-5">
+      </div>
+      <div style="flex:0 0 auto;display:flex;align-items:flex-end;gap:8px;">
+        <button class="ghost" onclick="addWish()">Save</button>
+      </div>
+    </div>
+    <div id="wishResult"></div>
+    <div id="wishList" style="margin-top:8px;"></div>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:1.1rem;margin:0 0 12px;">Points estimator</h2>
+    <p class="hint">No sign-in needed — see what an order would earn.</p>
+    <div class="row">
+      <div>
+        <label for="estSub">Subtotal ($)</label>
+        <input id="estSub" type="number" min="0" step="0.01" value="25.00" oninput="estimate()">
+      </div>
+      <div>
+        <label for="estRedeem">Redeem points</label>
+        <input id="estRedeem" type="number" min="0" step="1" value="0" oninput="estimate()">
+      </div>
+    </div>
+    <div id="estResult"></div>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:1.1rem;margin:0 0 12px;">Reward bundles</h2>
+    <p class="hint">Buy a curated set of rewards together and save points versus à la carte.</p>
+    <div id="bundleList"></div>
+    <div id="bundleResult"></div>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:1.1rem;margin:0 0 12px;">Verify a code</h2>
+    <label for="verifyCode">Reward or referral code</label>
+    <input id="verifyCode" placeholder="e.g. RWD-00001">
+    <button class="ghost" onclick="verifyCode()">Verify</button>
+    <div id="verifyResult"></div>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:1.1rem;margin:0 0 12px;">Badge tiers</h2>
+    <div id="tierList"></div>
   </div>
 </div>
 
 <script>
-const $ = (id) => document.getElementById(id);
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  let data = null;
+  try { data = await res.json(); } catch (e) { data = {}; }
+  return { ok: res.ok, status: res.status, data };
+}
 
-async function loadCustomers() {
-  const res = await fetch('/api/customers');
-  const data = await res.json();
-  const sel = $('customer');
-  sel.innerHTML = '';
-  data.customers.forEach(c => {
-    const opt = document.createElement('option');
-    opt.value = c;
-    opt.textContent = c;
-    sel.appendChild(opt);
+function renderBadge(v) {
+  const el = document.getElementById('badgeArea');
+  el.innerHTML = `
+    <div class="badge">
+      <div class="star">⭐</div>
+      <div>
+        <div class="b-points">${v.points}</div>
+        <div class="b-label">Loyalty Points</div>
+      </div>
+      <div class="tier-pill">${v.tier}</div>
+    </div>
+    <div class="meta">
+      <span>Earn on this order: <b>+${v.pointsToEarn ?? 0}</b></span>
+      <span>Redeemable value: <b>$${(v.redeemableValue ?? 0).toFixed(2)}</b></span>
+    </div>`;
+}
+
+async function loadBadge() {
+  const cid = document.getElementById('cust').value.trim();
+  const sub = document.getElementById('subtotal').value || '0';
+  if (!cid) return setError('badgeArea', 'Enter a customer ID');
+  const { ok, data } = await api(`/api/checkout/badge?customerId=${encodeURIComponent(cid)}&subtotal=${encodeURIComponent(sub)}`);
+  if (!ok) return setError('badgeArea', data.error || 'Failed to load');
+  renderBadge(data);
+}
+
+async function previewBadge() {
+  const cid = document.getElementById('cust').value.trim();
+  if (!cid) return;
+  loadBadge();
+}
+
+function setError(id, msg) {
+  document.getElementById(id).innerHTML = `<div class="result err">${msg}</div>`;
+}
+
+async function doCheckout() {
+  const cid = document.getElementById('cust').value.trim();
+  const subtotal = parseFloat(document.getElementById('subtotal').value || '0');
+  const redeemPoints = parseInt(document.getElementById('redeem').value || '0', 10);
+  const out = document.getElementById('checkoutResult');
+  if (!cid) { out.innerHTML = `<div class="result err">Enter a customer ID</div>`; return; }
+  const { ok, data } = await api('/api/checkout', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ customerId: cid, subtotal, redeemPoints })
   });
-  if (data.customers.includes('alice')) sel.value = 'alice';
-  await loadLoyalty();
-}
-
-function renderBadge(d) {
-  $('badgeBox').innerHTML =
-    '<span class="badge" style="background:' + d.color + '">' +
-    '<span class="dot"></span>' + d.badge_label + '</span>';
-  const dollars = (d.redeem_value_cents / 100).toFixed(2);
-  $('redeemInfo').textContent = 'Redeemable: $' + dollars;
-}
-
-async function loadLoyalty() {
-  const cid = $('customer').value;
-  try {
-    const res = await fetch('/api/loyalty/' + encodeURIComponent(cid));
-    if (!res.ok) {
-      $('badgeBox').innerHTML = '<span class="loyalty-meta">No loyalty data</span>';
-      $('redeemInfo').textContent = '';
-      return;
-    }
-    const d = await res.json();
-    renderBadge(d);
-  } catch (e) {
-    $('badgeBox').innerHTML = '<span class="loyalty-meta">Error</span>';
-  }
-}
-
-async function pay() {
-  const cid = $('customer').value;
-  const amountDollars = parseFloat($('amount').value);
-  const result = $('result');
-  result.className = 'result';
-
-  if (isNaN(amountDollars) || amountDollars < 0) {
-    result.classList.add('show', 'error');
-    result.textContent = 'Please enter a valid order total.';
+  if (!ok) {
+    out.innerHTML = `<div class="result err">${data.error || 'Checkout failed'}</div>`;
     return;
   }
-  const amount_cents = Math.round(amountDollars * 100);
-
-  try {
-    const res = await fetch('/api/checkout', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ customer_id: cid, amount_cents })
-    });
-    const d = await res.json();
-    if (!res.ok) {
-      result.classList.add('show', 'error');
-      result.textContent = d.error || 'Checkout failed.';
-      return;
-    }
-    result.classList.add('show');
-    result.innerHTML =
-      'Payment successful! <br>' +
-      'You earned <span class="big">' + d.points_earned + '</span> points.<br>' +
-      'New balance: <strong>' + d.points_total + '</strong> (' + d.tier + ')';
-    // Refresh badge with new total
-    renderBadge({
-      color: d.color,
-      badge_label: d.badge_label,
-      redeem_value_cents: d.points_total
-    });
-  } catch (e) {
-    result.classList.add('show', 'error');
-    result.textContent = 'Network error.';
-  }
+  out.innerHTML = `<div class="result">Order complete!
+Subtotal: $${data.subtotal.toFixed(2)}
+Discount: -$${data.discount.toFixed(2)}
+Total paid: $${data.total.toFixed(2)}
+Points redeemed: ${data.pointsRedeemed}
+Points earned: +${data.pointsEarned}
+New balance: ${data.pointsBalance} (${data.tier})</div>`;
+  document.getElementById('redeem').value = '0';
+  loadBadge();
 }
 
-$('customer').addEventListener('change', loadLoyalty);
-$('payBtn').addEventListener('click', pay);
-loadCustomers();
+async function redeemPromo() {
+  const cid = document.getElementById('cust').value.trim();
+  const code = document.getElementById('promo').value.trim();
+  const out = document.getElementById('promoResult');
+  if (!cid) { out.innerHTML = `<div class="result err">Enter a customer ID above</div>`; return; }
+  if (!code) { out.innerHTML = `<div class="result err">Enter a promo code</div>`; return; }
+  const { ok, data } = await api(`/api/customers/${encodeURIComponent(cid)}/promo`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code })
+  });
+  if (!ok) { out.innerHTML = `<div class="result err">${data.error || 'Promo failed'}</div>`; return; }
+  out.innerHTML = `<div class="result">Promo ${data.code} applied: +${data.bonus} points. New balance: ${data.pointsBalance} (${data.tier})</div>`;
+  loadBadge();
+  loadPromos();
+}
+
+async function loadPromos() {
+  const cid = document.getElementById('cust').value.trim();
+  const path = cid ? `/api/promos?customerId=${encodeURIComponent(cid)}` : '/api/promos';
+  const { ok, data } = await api(path);
+  if (!ok) return;
+  document.getElementById('promoList').innerHTML = data.promos.map(p =>
+    `<span><b>${p.code}</b> +${p.bonus}${p.redeemed ? ' ✓' : ''}</span>`).join('');
+}
+
+async function transferPoints() {
+  const cid = document.getElementById('cust').value.trim();
+  const toCustomerId = document.getElementById('giftTo').value.trim();
+  const points = parseInt(document.getElementById('giftPts').value || '0', 10);
+  const out = document.getElementById('giftResult');
+  if (!cid) { out.innerHTML = `<div class="result err">Enter a customer ID above</div>`; return; }
+  if (!toCustomerId) { out.innerHTML = `<div class="result err">Enter a recipient</div>`; return; }
+  const { ok, data } = await api(`/api/customers/${encodeURIComponent(cid)}/transfer`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ toCustomerId, points })
+  });
+  if (!ok) { out.innerHTML = `<div class="result err">${data.error || 'Transfer failed'}</div>`; return; }
+  out.innerHTML = `<div class="result">Sent ${data.points} points to ${data.toCustomerId}.
+Your balance: ${data.pointsBalance} (${data.tier})</div>`;
+  loadBadge();
+}
+
+async function giftReward() {
+  const cid = document.getElementById('cust').value.trim();
+  const toCustomerId = document.getElementById('giftRewardTo').value.trim();
+  const rewardId = document.getElementById('giftRewardId').value.trim();
+  const out = document.getElementById('giftRewardResult');
+  if (!cid) { out.innerHTML = `<div class="result err">Enter a customer ID above</div>`; return; }
+  if (!toCustomerId) { out.innerHTML = `<div class="result err">Enter a recipient</div>`; return; }
+  if (!rewardId) { out.innerHTML = `<div class="result err">Enter a reward id</div>`; return; }
+  const { ok, data } = await api(`/api/customers/${encodeURIComponent(cid)}/gift-reward`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ toCustomerId, rewardId })
+  });
+  if (!ok) { out.innerHTML = `<div class="result err">${data.error || 'Gift failed'}</div>`; return; }
+  out.innerHTML = `<div class="result">Gifted ${data.rewardName} to ${data.toCustomerId} — voucher ${data.code}.
+Your balance: ${data.pointsBalance} (${data.tier})</div>`;
+  loadBadge();
+}
+
+async function setGoal() {
+  const cid = document.getElementById('cust').value.trim();
+  const goal = parseInt(document.getElementById('goalPts').value || '0', 10);
+  const out = document.getElementById('goalResult');
+  if (!cid) { out.innerHTML = `<div class="result err">Enter a customer ID above</div>`; return; }
+  const { ok, data } = await api(`/api/customers/${encodeURIComponent(cid)}/goal`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ goal })
+  });
+  if (!ok) { out.innerHTML = `<div class="result err">${data.error || 'Goal failed'}</div>`; return; }
+  if (!data.goal) { out.innerHTML = `<div class="result">Goal cleared.</div>`; return; }
+  out.innerHTML = `<div class="result">Goal: ${data.goal} pts — ${data.reached
+    ? 'reached! 🎉' : `${data.remaining} to go`}</div>`;
+}
+
+async function referFriend() {
+  const cid = document.getElementById('cust').value.trim();
+  const newCustomerId = document.getElementById('referId').value.trim();
+  const out = document.getElementById('referResult');
+  if (!cid) { out.innerHTML = `<div class="result err">Enter a customer ID above</div>`; return; }
+  if (!newCustomerId) { out.innerHTML = `<div class="result err">Enter the new customer ID</div>`; return; }
+  const { ok, data } = await api(`/api/customers/${encodeURIComponent(cid)}/refer`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ newCustomerId })
+  });
+  if (!ok) { out.innerHTML = `<div class="result err">${data.error || 'Referral failed'}</div>`; return; }
+  out.innerHTML = `<div class="result">Referral ${data.code} done! +${data.bonus} to you both.
+Your balance: ${data.pointsBalance} (${data.tier}). ${data.newCustomerId} starts with ${data.newCustomerBalance}.</div>`;
+  loadBadge();
+}
+
+async function loadTiers() {
+  const { ok, data } = await api('/api/tiers');
+  if (!ok) return;
+  document.getElementById('tierList').innerHTML = data.tiers.map(t =>
+    `<div class="meta" style="margin-bottom:8px;">
+       <span><b>${t.name}</b> (${t.minPoints}+ pts) — ${t.benefit} <i>${t.customerCount} members</i></span>
+     </div>`).join('');
+}
+
+async function addWish() {
+  const cid = document.getElementById('cust').value.trim();
+  const rewardId = document.getElementById('wishReward').value.trim();
+  const out = document.getElementById('wishResult');
+  if (!cid) { out.innerHTML = `<div class="result err">Enter a customer ID above</div>`; return; }
+  if (!rewardId) { out.innerHTML = `<div class="result err">Enter a reward id</div>`; return; }
+  const { ok, data } = await api(`/api/customers/${encodeURIComponent(cid)}/wishlist`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rewardId })
+  });
+  if (!ok) { out.innerHTML = `<div class="result err">${data.error || 'Could not save'}</div>`; return; }
+  out.innerHTML = '';
+  renderWishlist(data);
+}
+
+async function removeWish(rewardId) {
+  const cid = document.getElementById('cust').value.trim();
+  if (!cid) return;
+  const { ok, data } = await api(`/api/customers/${encodeURIComponent(cid)}/wishlist/remove`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rewardId })
+  });
+  if (ok) renderWishlist(data);
+}
+
+function renderWishlist(data) {
+  const el = document.getElementById('wishList');
+  if (!data.wishlist || !data.wishlist.length) { el.innerHTML = `<p class="hint">Nothing saved yet.</p>`; return; }
+  el.innerHTML = data.wishlist.map(i =>
+    `<div class="meta" style="margin-bottom:6px;">
+       <span><b>${i.name}</b> (${i.cost} pts) — ${i.affordable
+         ? 'ready to redeem ✓' : `need ${i.pointsNeeded} more`}</span>
+       <span style="margin-left:auto;cursor:pointer;color:#6366f1;" onclick="removeWish('${i.id}')">remove</span>
+     </div>`).join('');
+}
+
+async function loadWishlist() {
+  const cid = document.getElementById('cust').value.trim();
+  if (!cid) return;
+  const { ok, data } = await api(`/api/customers/${encodeURIComponent(cid)}/wishlist`);
+  if (ok) renderWishlist(data);
+}
+
+async function estimate() {
+  const sub = document.getElementById('estSub').value || '0';
+  const redeem = document.getElementById('estRedeem').value || '0';
+  const { ok, data } = await api(`/api/estimate?subtotal=${encodeURIComponent(sub)}&redeemPoints=${encodeURIComponent(redeem)}`);
+  const out = document.getElementById('estResult');
+  if (!ok) { out.innerHTML = `<div class="result err">${data.error || 'Could not estimate'}</div>`; return; }
+  out.innerHTML = `<div class="result">Pay $${data.total.toFixed(2)} (−$${data.discount.toFixed(2)}) and earn +${data.pointsToEarn} points.</div>`;
+}
+
+async function verifyCode() {
+  const code = document.getElementById('verifyCode').value.trim();
+  const out = document.getElementById('verifyResult');
+  if (!code) { out.innerHTML = `<div class="result err">Enter a code</div>`; return; }
+  const { ok, data } = await api(`/api/codes/${encodeURIComponent(code)}`);
+  if (!ok) { out.innerHTML = `<div class="result err">${data.error || 'Invalid code'}</div>`; return; }
+  const t = data.transaction;
+  out.innerHTML = `<div class="result">Valid ${t.type} code for ${t.customerId}.</div>`;
+}
+
+async function loadBundles() {
+  const cid = document.getElementById('cust').value.trim();
+  const path = cid ? `/api/bundles?customerId=${encodeURIComponent(cid)}` : '/api/bundles';
+  const { ok, data } = await api(path);
+  if (!ok) return;
+  document.getElementById('bundleList').innerHTML = data.bundles.map(b =>
+    `<div class="meta" style="margin-bottom:8px;">
+       <span><b>${b.name}</b> — ${b.cost} pts <i>(save ${b.savings})</i>
+         ${b.affordable === false ? `· need ${b.pointsNeeded} more` : ''}</span>
+       <span style="margin-left:auto;cursor:pointer;color:#6366f1;" onclick="redeemBundle('${b.id}')">redeem</span>
+     </div>`).join('');
+}
+
+async function redeemBundle(bundleId) {
+  const cid = document.getElementById('cust').value.trim();
+  const out = document.getElementById('bundleResult');
+  if (!cid) { out.innerHTML = `<div class="result err">Enter a customer ID above</div>`; return; }
+  const { ok, data } = await api(`/api/customers/${encodeURIComponent(cid)}/redeem-bundle`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bundleId })
+  });
+  if (!ok) { out.innerHTML = `<div class="result err">${data.error || 'Could not redeem bundle'}</div>`; return; }
+  out.innerHTML = `<div class="result">Redeemed ${data.bundleName} for ${data.cost} pts. Code ${data.code}.
+New balance: ${data.pointsBalance} (${data.tier})</div>`;
+  loadBadge();
+  loadBundles();
+}
+
+loadBadge();
+loadPromos();
+loadTiers();
+loadWishlist();
+loadBundles();
+estimate();
 </script>
 </body>
 </html>

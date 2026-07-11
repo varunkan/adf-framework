@@ -44,6 +44,11 @@ only — no dependencies, no build step.
   unused rather than silently lost.
 - **Comp a diner** — cover one or more diners' meals; the comped seats pay
   nothing and the remaining diners split the whole bill fairly.
+- **Contribution caps** — each diner sets the most they can chip in; the grand
+  total is split as evenly as possible without anyone exceeding their cap, and
+  whatever a capped diner can't cover is "water-filled" onto the diners who
+  still have room (someone with no cap simply absorbs the rest). Rejected when
+  every diner is capped and the caps together fall short of the bill.
 - **Tiered tip** — pick the tip percentage from a bill-size bracket table (e.g.
   ≤$50 → 18%, ≤$100 → 20%, above → 22%), then the usual tax + tip + fair split.
 - **Who pays whom** — turn what each diner has already paid into the *fewest*
@@ -53,6 +58,16 @@ only — no dependencies, no build step.
   staff (busser, bartender, runner, …) as a percent of either net sales (the
   common practice) or of the tips themselves; the server keeps the remainder,
   and tip-outs that exceed the tips collected are rejected.
+- **Separate checks** — the "can we get separate checks?" case: split one
+  table into several independent checks, each with its own bill, tax, tip and
+  fair split among that party's own people, plus the single table total the
+  restaurant still sees and the blended tip rate across them all.
+- **Loyalty rewards** — earn points on the pre-tax subtotal (tax and tip never
+  earn) at a configurable points-per-dollar rate, and optionally redeem banked
+  points against the final total at a set dollar-per-point value, like store
+  credit: the redemption is capped at the total so the bill never goes negative,
+  only whole points that fit are spent, and the running balance is updated with
+  what was redeemed and freshly earned.
 
 ## HTTP API
 
@@ -77,6 +92,7 @@ All endpoints accept and return JSON. Validation failures return `400` with an
 | POST   | `/api/cardfee`   | add a credit-card surcharge on top of the total    |
 | POST   | `/api/giftcard`  | redeem a gift card against the total, split the rest |
 | POST   | `/api/comp`      | split a bill with some diners comped (covered)     |
+| POST   | `/api/caps`      | split a bill with a per-diner contribution `caps` cap |
 | POST   | `/api/shareditems`| own items + evenly-split shared dishes, then tip   |
 | POST   | `/api/assign`    | assign each item to the diners who shared it, then tip |
 | POST   | `/api/category`  | tip each category (e.g. food vs bar) at its own rate |
@@ -84,7 +100,11 @@ All endpoints accept and return JSON. Validation failures return `400` with an
 | POST   | `/api/reconcile` | fewest transfers to settle who `paid` what          |
 | POST   | `/api/coupons`   | stack a list of `coupons` (in order), then tax + tip, split |
 | POST   | `/api/summary`   | aggregate several `bills` into a spend & tip report |
+| POST   | `/api/separate`  | split one table into several independent `checks`   |
 | POST   | `/api/tipout`    | distribute a server's tips to support staff, keep the rest |
+| POST   | `/api/loyalty`   | earn points on the subtotal, redeem banked points off the total |
+| POST   | `/api/country`   | apply a destination's customary tip % to the bill, split it |
+| POST   | `/api/autograt`  | large-party auto-gratuity (applies only at/above a party-size threshold) + optional extra tip, split |
 
 Everything lives in `server.py` (domain logic + HTTP handler) and `index.html`
 (UI); `test_app.py` covers the domain and the API surface.

@@ -1,0 +1,9 @@
+{
+  "_nonce": "",
+  "gates": [
+    "test",
+    "boot"
+  ],
+  "proven": true,
+  "summary": ".......\n----------------------------------------------------------------------\nRan 7 tests in 3.538s\n\nOK\n\nboot check: server.py serves on :58373"
+}

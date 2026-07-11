@@ -4864,3 +4864,2058 @@ def two_sample_t_test(a_items, b_items, equal_var=False, alpha=None, to_unit=Non
         "p_value": p_value,
         "significant": p_value < alpha,
     }
+
+
+# Cohen's conventional cutoffs for the MAGNITUDE of a standardized mean
+# difference, keyed on ``|d|``: below 0.2 is negligible, below 0.5 small, below
+# 0.8 medium, and 0.8 or above large. Stored smallest-first so the first cutoff
+# that ``|d|`` falls under wins.
+COHEN_D_THRESHOLDS = ((0.2, "negligible"), (0.5, "small"), (0.8, "medium"))
+
+
+def _cohen_magnitude(d):
+    """Label the magnitude of a standardized effect size ``d`` by Cohen's
+    conventional cutoffs, applied to its absolute value (so a -0.9 effect is as
+    "large" as a +0.9 one)."""
+    ad = abs(d)
+    for cutoff, label in COHEN_D_THRESHOLDS:
+        if ad < cutoff:
+            return label
+    return "large"
+
+
+def cohens_d(a_items, b_items, to_unit=None):
+    """Standardized effect size (Cohen's d) for two INDEPENDENT samples.
+
+    The effect-SIZE companion to :func:`two_sample_t_test` and
+    :func:`mann_whitney_u`, which report statistical *significance*. Where the
+    t-test asks "is the difference between the two means real?", Cohen's d asks
+    "how big is it?" on a unit-free, sample-size-independent scale: the
+    difference in means expressed in pooled-standard-deviation units. A large
+    enough sample makes even a trivial difference significant, so the effect
+    size is what tells you whether the difference *matters*.
+
+    Both samples are independent and may have *different* lengths. As with the
+    rest of the aggregate family they must share one linear category; sample
+    ``a`` fixes the common ``to_unit`` (or, when omitted, ``a``'s first item's
+    unit) and sample ``b`` is restated into that same unit, so the means and
+    spreads are apples-to-apples. With the sample means ``xbar_a`` / ``xbar_b``
+    and the unbiased sample variances ``s_a**2`` / ``s_b**2`` (the ``/(n-1)``
+    estimator):
+
+    * the **pooled standard deviation** weights the two variances by their
+      degrees of freedom, ``s_p = sqrt(((n_a-1)*s_a**2 + (n_b-1)*s_b**2) /
+      (n_a + n_b - 2))``;
+    * **Cohen's d** is ``(xbar_a - xbar_b) / s_p``;
+    * **Hedges' g** multiplies ``d`` by the small-sample bias-correction factor
+      ``J = 1 - 3 / (4*(n_a + n_b) - 9)``, which nudges the slightly inflated
+      ``d`` toward zero for small samples (``J -> 1`` as the samples grow);
+    * **Glass's delta** standardises by the *second* sample's stdev alone,
+      ``(xbar_a - xbar_b) / s_b`` (the classic "control group" denominator),
+      and is ``None`` when sample ``b`` is constant (its stdev is zero).
+
+    ``magnitude`` labels ``|d|`` by Cohen's conventional cutoffs (negligible <
+    0.2 <= small < 0.5 <= medium < 0.8 <= large). The sign of ``d``/``g`` follows
+    ``xbar_a - xbar_b``, so swapping the two samples flips every effect size's
+    sign but not its magnitude.
+
+    Each of ``a_items`` / ``b_items`` is a list of {"value": <number>,
+    "unit": <token>} dicts (a ``(value, unit)`` tuple is also accepted).
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised common unit>,
+            "n_a": <int>, "n_b": <int>,
+            "mean_a": <float>, "mean_b": <float>,   # in the common unit
+            "var_a": <float>, "var_b": <float>,     # unbiased (/(n-1)) variances
+            "stdev_a": <float>, "stdev_b": <float>, # unbiased sample stdevs
+            "difference": <float>,                  # mean_a - mean_b
+            "pooled_stdev": <float>,                # the d denominator
+            "cohens_d": <float>,
+            "hedges_g": <float>,                    # bias-corrected d
+            "correction_factor": <float>,           # Hedges' J, in (0, 1]
+            "glass_delta": <float or None>,         # standardised by stdev_b
+            "magnitude": "negligible"|"small"|"medium"|"large",
+        }
+
+    Raises ValueError for an empty/non-list sample, a malformed item, an unknown
+    or cross-category unit (either within a sample or between the two samples), a
+    non-finite value, a non-linear category (temperature is affine and fuel
+    economy is reciprocal — neither has a meaningful mean to standardise), either
+    sample having fewer than two values (the sample variance is undefined for one
+    observation), or two samples that are BOTH constant (zero pooled variance
+    leaves ``d`` undefined). Item validation is delegated through
+    ``_series_values`` to ``sum_quantities`` so the accepted inputs stay
+    identical to the rest of the aggregate family.
+    """
+    # Sample a fixes the common unit; sample b is forced into that same unit,
+    # which also rejects a cross-category second sample (mirrors the t-test).
+    a_vals, unit, category = _series_values(a_items, to_unit)
+    b_vals, _, _ = _series_values(b_items, unit)
+
+    n_a = len(a_vals)
+    n_b = len(b_vals)
+    if n_a < 2 or n_b < 2:
+        raise ValueError(
+            "each sample needs at least two values "
+            "(the sample variance is undefined for one observation)"
+        )
+
+    mean_a = sum(a_vals) / n_a
+    mean_b = sum(b_vals) / n_b
+    var_a = sum((x - mean_a) ** 2 for x in a_vals) / (n_a - 1)
+    var_b = sum((x - mean_b) ** 2 for x in b_vals) / (n_b - 1)
+
+    df = n_a + n_b - 2
+    pooled_var = ((n_a - 1) * var_a + (n_b - 1) * var_b) / df
+    if pooled_var == 0.0:
+        # Both samples are constant, so there is no spread to standardise by and
+        # the effect size would divide by zero.
+        raise ValueError(
+            "both samples are constant (zero variance); Cohen's d is undefined"
+        )
+    pooled_stdev = math.sqrt(pooled_var)
+
+    difference = mean_a - mean_b
+    d = difference / pooled_stdev
+    # Hedges' small-sample bias correction; J -> 1 as the samples grow.
+    correction = 1.0 - 3.0 / (4.0 * (n_a + n_b) - 9.0)
+    g = d * correction
+
+    stdev_b = math.sqrt(var_b)
+    glass_delta = (difference / stdev_b) if stdev_b != 0.0 else None
+
+    return {
+        "category": category,
+        "unit": unit,
+        "n_a": n_a,
+        "n_b": n_b,
+        "mean_a": mean_a,
+        "mean_b": mean_b,
+        "var_a": var_a,
+        "var_b": var_b,
+        "stdev_a": math.sqrt(var_a),
+        "stdev_b": stdev_b,
+        "difference": difference,
+        "pooled_stdev": pooled_stdev,
+        "cohens_d": d,
+        "hedges_g": g,
+        "correction_factor": correction,
+        "glass_delta": glass_delta,
+        "magnitude": _cohen_magnitude(d),
+    }
+
+
+def _f_distribution_sf(f, d1, d2):
+    """Upper-tail (survival) probability ``P(F >= f)`` for the F distribution.
+
+    The F-test companion to :func:`_student_t_two_sided_p`: built on the same
+    regularized incomplete beta special function (see
+    :func:`_regularized_incomplete_beta`). With numerator/denominator degrees of
+    freedom ``d1`` / ``d2`` and ``x = d1*f / (d1*f + d2)`` the lower-tail CDF is
+    exactly ``I_x(d1/2, d2/2)``, so the survival function is ``1 - I_x``. Returns
+    ``1.0`` for ``f <= 0`` (all the mass is at or beyond the origin) and decays
+    monotonically to ``0`` as ``f -> inf``.
+
+    This is consistent with the t-test by construction: for ``d1 == 1`` the F
+    statistic equals ``t**2`` and this survival function equals the two-sided t
+    p-value ``_student_t_two_sided_p(t, d2)``. Standard-library only.
+    """
+    if f <= 0.0:
+        return 1.0
+    x = d1 * f / (d1 * f + d2)
+    return 1.0 - _regularized_incomplete_beta(d1 / 2.0, d2 / 2.0, x)
+
+
+# Default significance level for the variance-ratio (F) test verdict, mirroring
+# ``T_TEST_DEFAULT_ALPHA``: ``significant`` is true when the two-sided p-value
+# falls below it (i.e. the two samples' variances differ by more than sampling
+# noise can comfortably explain).
+VARIANCE_RATIO_DEFAULT_ALPHA = 0.05
+
+
+def variance_ratio_test(a_items, b_items, alpha=None, to_unit=None):
+    """F-test for the equality of two INDEPENDENT samples' VARIANCES.
+
+    The spread-comparison companion to :func:`two_sample_t_test` (which compares
+    the two *means*): where the t-test asks "are the two samples centred in the
+    same place?", this asks "are they equally *dispersed*?". That question is the
+    classic pre-check for the t-test itself — a non-significant variance ratio
+    supports the pooled (``equal_var=True``) Student's t-test, while a significant
+    one argues for the default Welch correction.
+
+    Both samples must belong to the SAME linear category; sample ``a`` is first
+    restated in a single common ``to_unit`` (or, when omitted, ``a``'s first
+    item's unit) and sample ``b`` is restated into that very same unit, so the two
+    variances are apples-to-apples — exactly like :func:`two_sample_t_test` and
+    the rest of the aggregate family. With the unbiased sample variances
+    ``s_a**2`` / ``s_b**2`` (the ``/(n-1)`` estimator) the test statistic is the
+    **variance ratio** ``F = s_a**2 / s_b**2`` with numerator/denominator degrees
+    of freedom ``df_a = n_a - 1`` and ``df_b = n_b - 1``.
+
+    The two-sided **p-value** is ``2 * min(P(F >= f), P(F <= f))`` under the
+    ``F(df_a, df_b)`` distribution (see :func:`_f_distribution_sf`), capped at 1.
+    Because ``1/F ~ F(df_b, df_a)``, swapping the two samples reciprocates the
+    statistic (``F -> 1/F``) but leaves the p-value unchanged. ``significant``
+    reports the verdict at the ``alpha`` level (default 0.05): true when the
+    p-value is strictly below ``alpha``. ``larger_variance`` names whichever
+    sample is more dispersed (``"a"``, ``"b"`` or ``"equal"``) — a purely numeric
+    ordering of the two variances, carrying no "better/worse" judgement.
+
+    Each of ``a_items`` / ``b_items`` is a list of {"value": <number>,
+    "unit": <token>} dicts (a ``(value, unit)`` tuple is also accepted).
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised common unit>,
+            "n_a": <int>, "n_b": <int>,
+            "mean_a": <float>, "mean_b": <float>,   # in the common unit
+            "var_a": <float>, "var_b": <float>,     # unbiased (/(n-1)) variances
+            "stdev_a": <float>, "stdev_b": <float>, # unbiased sample stdevs
+            "df_a": <int>, "df_b": <int>,           # numerator / denominator d.o.f.
+            "variance_ratio": <float>,              # s_a**2 / s_b**2
+            "statistic": <float>,                   # the F-statistic (== ratio)
+            "larger_variance": "a" | "b" | "equal",
+            "alpha": <float>,                       # the requested level
+            "p_value": <float>,                     # two-sided, in (0, 1]
+            "significant": <bool>,                  # p_value < alpha
+        }
+
+    Raises ValueError for an empty/non-list sample, a malformed item, an unknown
+    or cross-category unit (either within a sample or between the two samples), a
+    non-finite value, a non-linear category (temperature is affine and fuel
+    economy is reciprocal — neither has a meaningful variance to compare), an
+    ``alpha`` that is not a number strictly in ``(0, 1)``, either sample having
+    fewer than two values (the sample variance is undefined for one observation),
+    or EITHER sample being constant (a zero variance makes the ratio undefined or
+    a division by zero). Item validation is delegated through ``_series_values``
+    to ``sum_quantities`` so the accepted inputs stay identical to the rest of the
+    aggregate family.
+    """
+    alpha = _validate_alpha(alpha, VARIANCE_RATIO_DEFAULT_ALPHA)
+
+    # Sample a fixes the common unit; sample b is forced into that same unit,
+    # which also rejects a cross-category second sample (mirrors the t-test).
+    a_vals, unit, category = _series_values(a_items, to_unit)
+    b_vals, _, _ = _series_values(b_items, unit)
+
+    n_a = len(a_vals)
+    n_b = len(b_vals)
+    if n_a < 2 or n_b < 2:
+        raise ValueError(
+            "each sample needs at least two values "
+            "(the sample variance is undefined for one observation)"
+        )
+
+    mean_a = sum(a_vals) / n_a
+    mean_b = sum(b_vals) / n_b
+    var_a = sum((x - mean_a) ** 2 for x in a_vals) / (n_a - 1)
+    var_b = sum((x - mean_b) ** 2 for x in b_vals) / (n_b - 1)
+
+    if var_a == 0.0 or var_b == 0.0:
+        # A constant sample has no spread to compare; the ratio is 0/x, x/0 or
+        # 0/0 — undefined either way, so the test cannot run.
+        raise ValueError(
+            "each sample must vary (a constant sample has zero variance; "
+            "the variance ratio is undefined)"
+        )
+
+    df_a = n_a - 1
+    df_b = n_b - 1
+    statistic = var_a / var_b  # F with (df_a, df_b) degrees of freedom
+
+    # Two-sided p-value: twice the smaller tail. ``_f_distribution_sf`` is the
+    # upper tail P(F >= f); the lower tail P(F <= f) is its complement.
+    upper = _f_distribution_sf(statistic, df_a, df_b)
+    lower = 1.0 - upper
+    p_value = 2.0 * min(upper, lower)
+    if p_value > 1.0:
+        p_value = 1.0
+
+    if var_a > var_b:
+        larger = "a"
+    elif var_a < var_b:
+        larger = "b"
+    else:
+        larger = "equal"
+
+    return {
+        "category": category,
+        "unit": unit,
+        "n_a": n_a,
+        "n_b": n_b,
+        "mean_a": mean_a,
+        "mean_b": mean_b,
+        "var_a": var_a,
+        "var_b": var_b,
+        "stdev_a": math.sqrt(var_a),
+        "stdev_b": math.sqrt(var_b),
+        "df_a": df_a,
+        "df_b": df_b,
+        "variance_ratio": statistic,
+        "statistic": statistic,
+        "larger_variance": larger,
+        "alpha": alpha,
+        "p_value": p_value,
+        "significant": p_value < alpha,
+    }
+
+
+# Default significance level for the one-way ANOVA verdict, mirroring
+# ``T_TEST_DEFAULT_ALPHA``: ``significant`` is true when the F-test p-value falls
+# below it (i.e. at least one group mean differs by more than sampling noise).
+ANOVA_DEFAULT_ALPHA = 0.05
+
+
+def one_way_anova(groups, alpha=None, to_unit=None):
+    """One-way ANOVA (F-test) for a difference among three-or-more group MEANS.
+
+    The k-group generalisation of :func:`two_sample_t_test` (which compares
+    exactly two means): it takes a list of two or more **independent** samples —
+    which may each have a *different* length — and tests the null hypothesis that
+    they were all drawn from populations with the same mean. Reducing to two
+    groups reproduces the pooled (``equal_var=True``) t-test exactly, with
+    ``F == t**2`` and an identical p-value.
+
+    Every group must belong to the SAME linear category; the first group fixes a
+    single common ``to_unit`` (or, when omitted, its own first item's unit) and
+    every later group is restated into that very same unit, so all the means are
+    apples-to-apples — exactly like :func:`sum_quantities` and the rest of the
+    aggregate family. With ``k`` groups, total count ``N``, group means
+    ``xbar_i`` and grand mean ``xbar``:
+
+    * **Between-group sum of squares** ``SSB = sum_i n_i * (xbar_i - xbar)**2``
+      with ``df_between = k - 1`` and ``MSB = SSB / df_between``.
+    * **Within-group sum of squares** ``SSW = sum_i sum_j (x_ij - xbar_i)**2``
+      with ``df_within = N - k`` and ``MSW = SSW / df_within``.
+
+    The statistic is ``F = MSB / MSW`` and the **p-value** is the upper-tail
+    ``P(F >= statistic)`` under the F distribution with ``(df_between,
+    df_within)`` degrees of freedom (see :func:`_f_distribution_sf`).
+    ``significant`` reports the verdict at the ``alpha`` level (default 0.05):
+    true when the p-value is strictly below ``alpha``, i.e. the group means
+    differ by more than the within-group spread can comfortably explain.
+
+    ``groups`` is a list of groups; each group is a list of {"value": <number>,
+    "unit": <token>} dicts (a ``(value, unit)`` tuple is also accepted), exactly
+    like the samples of :func:`two_sample_t_test`.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised common unit>,
+            "k": <int>,                       # number of groups
+            "n_total": <int>,                 # total observations across groups
+            "grand_mean": <float>,            # in the common unit
+            "groups": [                       # one entry per input group, in order
+                {"n": <int>, "mean": <float>, "var": <float>, "stdev": <float>},
+                ...
+            ],
+            "ss_between": <float>, "ss_within": <float>,
+            "df_between": <int>,  "df_within": <int>,
+            "ms_between": <float>, "ms_within": <float>,
+            "statistic": <float>,             # the F-statistic
+            "alpha": <float>,                 # the requested level
+            "p_value": <float>,               # upper-tail, in (0, 1]
+            "significant": <bool>,            # p_value < alpha
+        }
+
+    Raises ValueError for a non-list / empty ``groups`` argument, fewer than two
+    groups, an empty or malformed group, an unknown or cross-category unit
+    (within a group or between groups), a non-finite value, a non-linear category
+    (temperature is affine and fuel economy is reciprocal — neither has a
+    meaningful mean to compare), an ``alpha`` that is not a number strictly in
+    ``(0, 1)``, a total count not exceeding the group count (``df_within`` would
+    be zero), or every group being internally constant (zero within-group
+    variance leaves the F-statistic undefined). Per-group validation is delegated
+    through :func:`_series_values` to :func:`sum_quantities`, so the accepted
+    inputs stay identical to the rest of the aggregate family.
+    """
+    if alpha is None:
+        alpha = ANOVA_DEFAULT_ALPHA
+    if isinstance(alpha, bool) or not isinstance(alpha, (int, float)):
+        raise ValueError("'alpha' must be a number")
+    alpha = float(alpha)
+    if alpha != alpha or alpha in (float("inf"), float("-inf")):
+        raise ValueError("'alpha' must be finite")
+    if not (0.0 < alpha < 1.0):
+        raise ValueError("'alpha' must be strictly between 0 and 1")
+
+    if not isinstance(groups, (list, tuple)):
+        raise ValueError("'groups' must be a list of groups")
+    if len(groups) < 2:
+        raise ValueError("ANOVA requires at least two groups")
+
+    # The first group fixes the common unit (and category); every later group is
+    # forced into that same unit, which also rejects a cross-category group (the
+    # target belongs to the first group's category, so a mismatch raises in
+    # sum_quantities). _series_values runs the full per-group validation.
+    first_vals, unit, category = _series_values(groups[0], to_unit)
+    group_values = [first_vals]
+    for grp in groups[1:]:
+        vals, _, _ = _series_values(grp, unit)
+        group_values.append(vals)
+
+    k = len(group_values)
+    n_total = sum(len(v) for v in group_values)
+    df_within = n_total - k
+    if df_within < 1:
+        raise ValueError(
+            "ANOVA needs more observations than groups "
+            "(the within-group degrees of freedom must be positive)"
+        )
+
+    grand_mean = sum(sum(v) for v in group_values) / n_total
+
+    group_stats = []
+    ss_between = 0.0
+    ss_within = 0.0
+    for vals in group_values:
+        n = len(vals)
+        mean = sum(vals) / n
+        # Sum of squared deviations from this group's own mean.
+        sq = sum((x - mean) ** 2 for x in vals)
+        ss_within += sq
+        ss_between += n * (mean - grand_mean) ** 2
+        # Unbiased (/(n-1)) variance; undefined for a single observation, so a
+        # lone-point group reports a zero variance rather than dividing by zero.
+        var = sq / (n - 1) if n > 1 else 0.0
+        group_stats.append({
+            "n": n,
+            "mean": mean,
+            "var": var,
+            "stdev": math.sqrt(var),
+        })
+
+    df_between = k - 1
+    ms_between = ss_between / df_between
+    ms_within = ss_within / df_within
+    if ms_within == 0.0:
+        # Every group is internally constant, so there is no within-group spread
+        # to test against and the F-statistic would divide by zero.
+        raise ValueError(
+            "every group is constant (zero within-group variance); "
+            "the F-statistic is undefined"
+        )
+
+    statistic = ms_between / ms_within
+    p_value = _f_distribution_sf(statistic, df_between, df_within)
+    return {
+        "category": category,
+        "unit": unit,
+        "k": k,
+        "n_total": n_total,
+        "grand_mean": grand_mean,
+        "groups": group_stats,
+        "ss_between": ss_between,
+        "ss_within": ss_within,
+        "df_between": df_between,
+        "df_within": df_within,
+        "ms_between": ms_between,
+        "ms_within": ms_within,
+        "statistic": statistic,
+        "alpha": alpha,
+        "p_value": p_value,
+        "significant": p_value < alpha,
+    }
+
+
+# Default significance level for Bartlett's test verdict, mirroring
+# ``VARIANCE_RATIO_DEFAULT_ALPHA`` and ``ANOVA_DEFAULT_ALPHA``: ``significant`` is
+# true when the chi-square p-value falls below it (i.e. at least one group's
+# variance differs by more than sampling noise can comfortably explain).
+BARTLETT_DEFAULT_ALPHA = 0.05
+
+
+def bartlett_test(groups, alpha=None, to_unit=None):
+    """Bartlett's test for homogeneity of variances across k>=2 groups.
+
+    The k-group generalisation of :func:`variance_ratio_test` (the two-sample
+    F-test for equal variances), exactly as :func:`one_way_anova` generalises the
+    two-sample t-test for equal *means*. Where the variance ratio asks "are these
+    two samples equally dispersed?", Bartlett asks the same question of three or
+    more **independent** samples at once — the classic homoscedasticity pre-check
+    that decides whether the equal-variance assumption behind :func:`one_way_anova`
+    holds. (Bartlett is the parametric, normal-theory test; it is sensitive to
+    departures from normality, for which Levene's test is the robust alternative.)
+
+    Every group must belong to the SAME linear category; the first group fixes a
+    single common ``to_unit`` (or, when omitted, its own first item's unit) and
+    every later group is restated into that very same unit, so all the variances
+    are apples-to-apples — exactly like :func:`one_way_anova` and the rest of the
+    aggregate family. With ``k`` groups, group sizes ``n_i``, total
+    ``N = sum n_i`` and unbiased (``/(n_i-1)``) group variances ``s_i**2``:
+
+    * the **pooled variance** is
+      ``s_p**2 = sum_i (n_i - 1)*s_i**2 / (N - k)`` (the same ``MSW`` that ANOVA
+      forms),
+    * the uncorrected statistic is
+      ``(N - k)*ln(s_p**2) - sum_i (n_i - 1)*ln(s_i**2)``,
+    * the **Bartlett correction** divides it by
+      ``C = 1 + (sum_i 1/(n_i-1) - 1/(N-k)) / (3*(k-1))`` (always ``>= 1``, so the
+      correction shrinks the statistic toward its asymptotic distribution).
+
+    The **statistic** ``T`` is the corrected ratio and the **p-value** is the
+    upper-tail ``P(chi2 >= T)`` under the chi-square distribution with ``k - 1``
+    degrees of freedom (see :func:`_chi_square_sf`). ``significant`` reports the
+    verdict at the ``alpha`` level (default 0.05): true when the p-value is
+    strictly below ``alpha``, i.e. the group variances differ by more than
+    sampling noise can comfortably explain.
+
+    ``groups`` is a list of groups; each group is a list of {"value": <number>,
+    "unit": <token>} dicts (a ``(value, unit)`` tuple is also accepted), exactly
+    like the groups of :func:`one_way_anova`.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised common unit>,
+            "k": <int>,                       # number of groups
+            "n_total": <int>,                 # total observations across groups
+            "pooled_variance": <float>,       # s_p**2, in the common unit squared
+            "groups": [                       # one entry per input group, in order
+                {"n": <int>, "mean": <float>, "var": <float>, "stdev": <float>},
+                ...
+            ],
+            "correction": <float>,            # the Bartlett correction C (>= 1)
+            "df": <int>,                      # k - 1
+            "statistic": <float>,             # the corrected chi-square statistic
+            "alpha": <float>,                 # the requested level
+            "p_value": <float>,               # upper-tail, in (0, 1]
+            "significant": <bool>,            # p_value < alpha
+        }
+
+    Raises ValueError for a non-list / empty ``groups`` argument, fewer than two
+    groups, an empty or malformed group, an unknown or cross-category unit (within
+    a group or between groups), a non-finite value, a non-linear category
+    (temperature is affine and fuel economy is reciprocal — neither has a
+    meaningful variance to compare), an ``alpha`` that is not a number strictly in
+    ``(0, 1)``, ANY group having fewer than two values (the sample variance is
+    undefined for one observation), or ANY group being constant (a zero variance
+    makes ``ln(s_i**2)`` undefined). Per-group validation is delegated through
+    :func:`_series_values` to :func:`sum_quantities`, so the accepted inputs stay
+    identical to the rest of the aggregate family.
+    """
+    alpha = _validate_alpha(alpha, BARTLETT_DEFAULT_ALPHA)
+
+    if not isinstance(groups, (list, tuple)):
+        raise ValueError("'groups' must be a list of groups")
+    if len(groups) < 2:
+        raise ValueError("Bartlett's test requires at least two groups")
+
+    # The first group fixes the common unit (and category); every later group is
+    # forced into that same unit, which also rejects a cross-category group. Mirror
+    # one_way_anova exactly so the accepted inputs stay identical.
+    first_vals, unit, category = _series_values(groups[0], to_unit)
+    group_values = [first_vals]
+    for grp in groups[1:]:
+        vals, _, _ = _series_values(grp, unit)
+        group_values.append(vals)
+
+    k = len(group_values)
+    for vals in group_values:
+        if len(vals) < 2:
+            raise ValueError(
+                "each group needs at least two values "
+                "(the sample variance is undefined for one observation)"
+            )
+
+    n_total = sum(len(v) for v in group_values)
+
+    group_stats = []
+    variances = []
+    sizes = []
+    for vals in group_values:
+        n = len(vals)
+        mean = sum(vals) / n
+        var = sum((x - mean) ** 2 for x in vals) / (n - 1)
+        if var == 0.0:
+            # A constant group has zero variance, so ln(s_i**2) is undefined and
+            # the test cannot run (mirrors variance_ratio_test's constant guard).
+            raise ValueError(
+                "each group must vary (a constant group has zero variance; "
+                "ln(variance) is undefined)"
+            )
+        variances.append(var)
+        sizes.append(n)
+        group_stats.append({
+            "n": n,
+            "mean": mean,
+            "var": var,
+            "stdev": math.sqrt(var),
+        })
+
+    df = k - 1
+    # Pooled variance == ANOVA's mean-square-within: sum (n_i-1) s_i^2 / (N-k).
+    pooled = sum((n - 1) * v for n, v in zip(sizes, variances)) / (n_total - k)
+    uncorrected = (n_total - k) * math.log(pooled) - sum(
+        (n - 1) * math.log(v) for n, v in zip(sizes, variances)
+    )
+    correction = 1.0 + (
+        sum(1.0 / (n - 1) for n in sizes) - 1.0 / (n_total - k)
+    ) / (3.0 * df)
+    statistic = uncorrected / correction
+    # Floating-point noise can drive a near-equal-variance statistic very slightly
+    # negative; chi-square has no mass below zero, so clamp before the tail.
+    if statistic < 0.0:
+        statistic = 0.0
+    p_value = _chi_square_sf(statistic, df)
+    return {
+        "category": category,
+        "unit": unit,
+        "k": k,
+        "n_total": n_total,
+        "pooled_variance": pooled,
+        "groups": group_stats,
+        "correction": correction,
+        "df": df,
+        "statistic": statistic,
+        "alpha": alpha,
+        "p_value": p_value,
+        "significant": p_value < alpha,
+    }
+
+
+# Default significance level for Levene's test verdict, mirroring
+# ``BARTLETT_DEFAULT_ALPHA`` and ``ANOVA_DEFAULT_ALPHA``: ``significant`` is true
+# when the F p-value falls below it (i.e. at least one group's spread differs by
+# more than sampling noise can comfortably explain).
+LEVENE_DEFAULT_ALPHA = 0.05
+
+# Accepted spread-centre choices for Levene's test. "mean" is the classic Levene
+# statistic; "median" is the Brown--Forsythe variant, which trades a little power
+# under perfect normality for robustness against skew and heavy tails.
+LEVENE_CENTERS = ("mean", "median")
+
+
+def levene_test(groups, alpha=None, center="mean", to_unit=None):
+    """Levene's test for homogeneity of variances across k>=2 groups.
+
+    The robust companion to :func:`bartlett_test`. Both ask the same question —
+    "do three or more **independent** samples share one variance?", the classic
+    homoscedasticity pre-check behind :func:`one_way_anova` — but Bartlett is the
+    parametric, normal-theory test and is sensitive to departures from normality,
+    whereas Levene replaces each observation by its *absolute deviation from its
+    group's centre* and runs an ordinary one-way ANOVA on those deviations, which
+    stays well-behaved under non-normal data.
+
+    Every group must belong to the SAME linear category; the first group fixes a
+    single common ``to_unit`` (or, when omitted, its own first item's unit) and
+    every later group is restated into that very same unit, so all the spreads are
+    apples-to-apples — exactly like :func:`bartlett_test` and the rest of the
+    aggregate family. With ``k`` groups, group sizes ``n_i`` and total
+    ``N = sum n_i``, let ``c_i`` be group ``i``'s centre (its mean when
+    ``center="mean"``, its median when ``center="median"`` — the Brown--Forsythe
+    variant) and form the absolute deviations ``Z_ij = |Y_ij - c_i|``. With group
+    means ``Zbar_i`` and grand mean ``Zbar`` of those deviations:
+
+    * **between** ``= sum_i n_i * (Zbar_i - Zbar)**2`` with ``df_between = k - 1``,
+    * **within** ``= sum_i sum_j (Z_ij - Zbar_i)**2`` with ``df_within = N - k``.
+
+    The **statistic** is ``W = ((N-k)/(k-1)) * between / within`` and the
+    **p-value** is the upper-tail ``P(F >= W)`` under the F distribution with
+    ``(df_between, df_within)`` degrees of freedom (see :func:`_f_distribution_sf`)
+    — Levene IS an ANOVA on the deviations, so reducing to constant deviations is
+    the only degenerate case. ``significant`` reports the verdict at the ``alpha``
+    level (default 0.05): true when the p-value is strictly below ``alpha``.
+
+    ``groups`` is a list of groups; each group is a list of {"value": <number>,
+    "unit": <token>} dicts (a ``(value, unit)`` tuple is also accepted), exactly
+    like the groups of :func:`bartlett_test`.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised common unit>,
+            "center": <"mean"|"median">,      # the centre used
+            "k": <int>,                       # number of groups
+            "n_total": <int>,                 # total observations across groups
+            "grand_mean_deviation": <float>,  # Zbar, in the common unit
+            "groups": [                       # one entry per input group, in order
+                {"n": <int>, "center": <float>, "mean_deviation": <float>},
+                ...
+            ],
+            "df_between": <int>, "df_within": <int>,
+            "statistic": <float>,             # the F-like W statistic
+            "alpha": <float>,                 # the requested level
+            "p_value": <float>,               # upper-tail, in (0, 1]
+            "significant": <bool>,            # p_value < alpha
+        }
+
+    Raises ValueError for a non-list / empty ``groups`` argument, fewer than two
+    groups, an empty or malformed group, an unknown or cross-category unit (within
+    a group or between groups), a non-finite value, a non-linear category
+    (temperature is affine and fuel economy is reciprocal — neither has a
+    meaningful spread to compare), an ``alpha`` that is not a number strictly in
+    ``(0, 1)``, a ``center`` other than ``"mean"`` / ``"median"``, a total count
+    not exceeding the group count (``df_within`` would be zero), or every absolute
+    deviation collapsing to its group centre (zero within-group spread leaves the
+    statistic undefined — e.g. every group is internally constant). Unlike
+    :func:`bartlett_test`, a single-observation group is allowed (its deviation is
+    simply zero). Per-group validation is delegated through :func:`_series_values`
+    to :func:`sum_quantities`, so the accepted inputs stay identical to the rest of
+    the aggregate family.
+    """
+    alpha = _validate_alpha(alpha, LEVENE_DEFAULT_ALPHA)
+
+    if center not in LEVENE_CENTERS:
+        raise ValueError("'center' must be 'mean' or 'median'")
+
+    if not isinstance(groups, (list, tuple)):
+        raise ValueError("'groups' must be a list of groups")
+    if len(groups) < 2:
+        raise ValueError("Levene's test requires at least two groups")
+
+    # The first group fixes the common unit (and category); every later group is
+    # forced into that same unit, which also rejects a cross-category group. Mirror
+    # bartlett_test exactly so the accepted inputs stay identical.
+    first_vals, unit, category = _series_values(groups[0], to_unit)
+    group_values = [first_vals]
+    for grp in groups[1:]:
+        vals, _, _ = _series_values(grp, unit)
+        group_values.append(vals)
+
+    k = len(group_values)
+    n_total = sum(len(v) for v in group_values)
+    df_within = n_total - k
+    if df_within < 1:
+        raise ValueError(
+            "Levene's test needs more observations than groups "
+            "(the within-group degrees of freedom must be positive)"
+        )
+
+    # Replace each observation by its absolute deviation from the group centre,
+    # then this becomes an ordinary one-way ANOVA on those deviations.
+    group_stats = []
+    deviations = []
+    for vals in group_values:
+        n = len(vals)
+        if center == "mean":
+            c = sum(vals) / n
+        else:
+            c = _median_sorted(sorted(vals))
+        z = [abs(x - c) for x in vals]
+        deviations.append(z)
+        group_stats.append({
+            "n": n,
+            "center": c,
+            "mean_deviation": sum(z) / n,
+        })
+
+    grand_mean = sum(sum(z) for z in deviations) / n_total
+    between = sum(
+        len(z) * (gs["mean_deviation"] - grand_mean) ** 2
+        for z, gs in zip(deviations, group_stats)
+    )
+    within = sum(
+        (zi - gs["mean_deviation"]) ** 2
+        for z, gs in zip(deviations, group_stats) for zi in z
+    )
+    if within == 0.0:
+        # Every absolute deviation equals its group's mean deviation, so there is
+        # no within-group spread to test against (e.g. every group is constant).
+        raise ValueError(
+            "no within-group spread in the absolute deviations; "
+            "the statistic is undefined"
+        )
+
+    df_between = k - 1
+    statistic = (df_within / df_between) * (between / within)
+    p_value = _f_distribution_sf(statistic, df_between, df_within)
+    return {
+        "category": category,
+        "unit": unit,
+        "center": center,
+        "k": k,
+        "n_total": n_total,
+        "grand_mean_deviation": grand_mean,
+        "groups": group_stats,
+        "df_between": df_between,
+        "df_within": df_within,
+        "statistic": statistic,
+        "alpha": alpha,
+        "p_value": p_value,
+        "significant": p_value < alpha,
+    }
+
+
+def _standard_normal_two_sided_p(z):
+    """Two-sided tail probability ``P(|Z| >= |z|)`` for the standard normal.
+
+    The normal-approximation companion to :func:`_student_t_two_sided_p` (the t
+    tail) and :func:`_f_distribution_sf` (the F tail). Using the complementary
+    error function the two-tailed mass is exactly
+    ``2*(1 - Phi(|z|)) == erfc(|z| / sqrt(2))``, so this is a one-line wrapper
+    over :func:`math.erfc`. It returns ``1.0`` at ``z == 0`` (all the mass lies
+    beyond zero) and decays monotonically to ``0`` as ``|z| -> inf``; the result
+    is symmetric in the sign of ``z``. Standard-library only.
+    """
+    return math.erfc(abs(z) / math.sqrt(2.0))
+
+
+# Default significance level for the Mann-Whitney U verdict, mirroring
+# ``T_TEST_DEFAULT_ALPHA``: ``significant`` is true when the two-sided p-value
+# falls below it (i.e. the two distributions differ in location by more than
+# sampling noise can comfortably explain).
+MANN_WHITNEY_DEFAULT_ALPHA = 0.05
+
+
+def mann_whitney_u(a_items, b_items, alpha=None, to_unit=None):
+    """Mann-Whitney U test (Wilcoxon rank-sum) for two independent samples.
+
+    The non-parametric, rank-based companion to :func:`two_sample_t_test`: where
+    the t-test compares two population *means* and assumes roughly normal data,
+    this compares the two distributions' *locations* using only the ranks of the
+    pooled observations, so it makes no normality assumption and is robust to
+    outliers and skew. It is the natural two-sample analogue of the rank-based
+    :func:`spearman` / :func:`kendall` correlations, and like
+    :func:`two_sample_t_test` it takes two **independent** samples ``a`` and ``b``
+    which may have *different* lengths.
+
+    Both samples must belong to the SAME linear category; sample ``a`` fixes a
+    single common ``to_unit`` (or, when omitted, ``a``'s first item's unit) and
+    sample ``b`` is restated into that very same unit — exactly like
+    :func:`sum_quantities` and the rest of the aggregate family. Because the test
+    operates purely on ranks, the choice of common unit never changes the result
+    (any monotonic re-scaling leaves the ordering, and hence every rank,
+    untouched).
+
+    The two samples (sizes ``n_a`` / ``n_b``) are pooled and assigned
+    average-tie ranks (the same fractional ranking as :func:`rank_quantities`).
+    With ``R_a`` the sum of sample ``a``'s ranks::
+
+        U_a = R_a - n_a*(n_a + 1)/2        # a's count of (a, b) wins
+        U_b = n_a*n_b - U_a                # symmetric; U_a + U_b == n_a*n_b
+        U   = min(U_a, U_b)                # the conventional reported statistic
+
+    The p-value uses the **normal approximation** with a continuity correction
+    (exact enumeration is intentionally not attempted — it is exponential and the
+    library is standard-library only). Under the null the U statistic has mean
+    ``mu = n_a*n_b/2`` and a **tie-corrected** standard deviation::
+
+        sigma = sqrt( n_a*n_b/12 * ((n + 1) - sum(t**3 - t)/(n*(n - 1))) )
+
+    where ``n = n_a + n_b`` and each ``t`` is the size of a group of tied values
+    (the correction vanishes when there are no ties). The standardised statistic
+    is ``z = (|U_a - mu| - 0.5) / sigma`` (the ``0.5`` is the continuity
+    correction, never pushing ``|U_a - mu|`` below zero), carrying the sign of
+    ``U_a - mu``, and the two-sided p-value is ``P(|Z| >= |z|)`` (see
+    :func:`_standard_normal_two_sided_p`). ``significant`` reports the verdict at
+    the ``alpha`` level (default 0.05): true when the p-value is strictly below
+    ``alpha``.
+
+    Each of ``a_items`` / ``b_items`` is a list of {"value": <number>,
+    "unit": <token>} dicts (a ``(value, unit)`` tuple is also accepted).
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised common unit>,
+            "n_a": <int>, "n_b": <int>,
+            "rank_sum_a": <float>, "rank_sum_b": <float>,   # ranks sum to n(n+1)/2
+            "mean_rank_a": <float>, "mean_rank_b": <float>,
+            "u_a": <float>, "u_b": <float>, "u": <float>,   # u == min(u_a, u_b)
+            "mu_u": <float>,                                # n_a*n_b/2
+            "sigma_u": <float>,                             # tie-corrected stdev
+            "has_ties": <bool>,                             # any tie across the pool
+            "z": <float>,                                   # continuity-corrected
+            "alpha": <float>,
+            "p_value": <float>,                             # two-sided, in (0, 1]
+            "significant": <bool>,                          # p_value < alpha
+        }
+
+    Raises ValueError for an empty/non-list sample, a malformed item, an unknown
+    or cross-category unit (within a sample or between the two), a non-finite
+    value, a non-linear category (temperature is affine and fuel economy is
+    reciprocal — neither has a meaningful rank ordering to compare), an ``alpha``
+    that is not a number strictly in ``(0, 1)``, or every pooled observation
+    being identical (zero rank spread leaves ``sigma`` zero and the z-statistic
+    undefined). Item validation is delegated through :func:`_series_values` to
+    :func:`sum_quantities`, so the accepted inputs stay identical to the rest of
+    the aggregate family.
+    """
+    if alpha is None:
+        alpha = MANN_WHITNEY_DEFAULT_ALPHA
+    if isinstance(alpha, bool) or not isinstance(alpha, (int, float)):
+        raise ValueError("'alpha' must be a number")
+    alpha = float(alpha)
+    if alpha != alpha or alpha in (float("inf"), float("-inf")):
+        raise ValueError("'alpha' must be finite")
+    if not (0.0 < alpha < 1.0):
+        raise ValueError("'alpha' must be strictly between 0 and 1")
+
+    # _series_values runs the full per-sample validation (list shape, item shape,
+    # finite values, single linear category, valid target) via sum_quantities and
+    # restates the values. Sample a fixes the common unit; sample b is forced into
+    # that same unit, which also rejects a cross-category second sample.
+    a_vals, unit, category = _series_values(a_items, to_unit)
+    b_vals, _, _ = _series_values(b_items, unit)
+
+    n_a = len(a_vals)
+    n_b = len(b_vals)
+    n = n_a + n_b
+
+    # Average-tie ranks over the pooled sample; the first n_a ranks belong to a.
+    pooled = a_vals + b_vals
+    ranks = _average_ranks(pooled)
+    rank_sum_a = sum(ranks[:n_a])
+    rank_sum_b = sum(ranks[n_a:])
+
+    u_a = rank_sum_a - n_a * (n_a + 1) / 2.0
+    u_b = n_a * n_b - u_a
+    u = min(u_a, u_b)
+    mu_u = n_a * n_b / 2.0
+
+    # Tie correction: sum over each group of equal values of (t**3 - t). Zero when
+    # every value is distinct, maximal (== n**3 - n) when all values are equal.
+    counts = {}
+    for v in pooled:
+        counts[v] = counts.get(v, 0) + 1
+    tie_term = sum(t ** 3 - t for t in counts.values())
+    has_ties = tie_term > 0
+
+    variance_u = (n_a * n_b / 12.0) * ((n + 1) - tie_term / (n * (n - 1)))
+    sigma_u = math.sqrt(variance_u) if variance_u > 0 else 0.0
+    if sigma_u == 0.0:
+        # Every pooled observation is identical: there is no rank spread to test
+        # against and the z-statistic would divide by zero.
+        raise ValueError(
+            "all observations are tied (zero rank spread); "
+            "the U statistic is undefined"
+        )
+
+    diff = u_a - mu_u
+    # Continuity correction shrinks the deviation toward the mean by 0.5, never
+    # past it (so a sub-half deviation lands exactly on z == 0 rather than flipping
+    # sign); the sign of the original deviation is preserved.
+    corrected = max(0.0, abs(diff) - 0.5)
+    z = (corrected / sigma_u) * (1.0 if diff >= 0 else -1.0)
+    p_value = min(1.0, _standard_normal_two_sided_p(z))
+    return {
+        "category": category,
+        "unit": unit,
+        "n_a": n_a,
+        "n_b": n_b,
+        "rank_sum_a": rank_sum_a,
+        "rank_sum_b": rank_sum_b,
+        "mean_rank_a": rank_sum_a / n_a,
+        "mean_rank_b": rank_sum_b / n_b,
+        "u_a": u_a,
+        "u_b": u_b,
+        "u": u,
+        "mu_u": mu_u,
+        "sigma_u": sigma_u,
+        "has_ties": has_ties,
+        "z": z,
+        "alpha": alpha,
+        "p_value": p_value,
+        "significant": p_value < alpha,
+    }
+
+
+def _regularized_lower_gamma_p(a, x):
+    """The regularized lower incomplete gamma function ``P(a, x)``.
+
+    Equals ``gamma(a, x) / Gamma(a)`` and rises monotonically from
+    ``P(a, 0) == 0`` to ``P(a, inf) == 1``. It is the gamma-family companion to
+    :func:`_regularized_incomplete_beta` (which underpins the t and F tails) and
+    is what the chi-square CDF is built on (see :func:`_chi_square_sf`).
+
+    Following the standard Numerical-Recipes split, the series representation is
+    used while ``x < a + 1`` and the continued fraction (for the complementary
+    ``Q == 1 - P``) is used otherwise, since each converges fastest on its own
+    side. The shared prefactor ``exp(-x + a*log(x) - lgamma(a))`` is formed in
+    log space via :func:`math.lgamma` so it never overflows. Standard-library
+    only — no scipy/statistics dependency.
+    """
+    if x <= 0.0:
+        return 0.0
+    log_prefactor = -x + a * math.log(x) - math.lgamma(a)
+    if x < a + 1.0:
+        # Series: P(a, x) = exp(prefactor) * sum_{n>=0} x**n / (a)(a+1)...(a+n).
+        term = 1.0 / a
+        total = term
+        ap = a
+        for _ in range(1000):
+            ap += 1.0
+            term *= x / ap
+            total += term
+            if abs(term) < abs(total) * 1e-16:
+                break
+        return total * math.exp(log_prefactor)
+    # Lentz's continued fraction for Q(a, x), then P = 1 - Q.
+    tiny = 1e-300
+    b = x + 1.0 - a
+    c = 1.0 / tiny
+    d = 1.0 / b
+    h = d
+    for i in range(1, 1000):
+        an = -i * (i - a)
+        b += 2.0
+        d = an * d + b
+        if abs(d) < tiny:
+            d = tiny
+        c = b + an / c
+        if abs(c) < tiny:
+            c = tiny
+        d = 1.0 / d
+        delta = d * c
+        h *= delta
+        if abs(delta - 1.0) < 1e-16:
+            break
+    q = math.exp(log_prefactor) * h
+    return 1.0 - q
+
+
+def _chi_square_sf(x, df):
+    """Upper-tail (survival) probability ``P(X >= x)`` for the chi-square
+    distribution with ``df`` degrees of freedom.
+
+    The chi-square companion to :func:`_f_distribution_sf` and
+    :func:`_standard_normal_two_sided_p`: the chi-square lower-tail CDF is exactly
+    the regularized lower incomplete gamma ``P(df/2, x/2)``, so the survival
+    function is ``1 - P(df/2, x/2)`` (see :func:`_regularized_lower_gamma_p`).
+    Returns ``1.0`` for ``x <= 0`` (all the mass lies at or beyond the origin)
+    and decays monotonically to ``0`` as ``x -> inf``. Used for the
+    Kruskal-Wallis H p-value. Standard-library only.
+    """
+    if x <= 0.0:
+        return 1.0
+    return 1.0 - _regularized_lower_gamma_p(df / 2.0, x / 2.0)
+
+
+# Default significance level for the Kruskal-Wallis verdict, mirroring
+# ``ANOVA_DEFAULT_ALPHA`` and ``MANN_WHITNEY_DEFAULT_ALPHA``: ``significant`` is
+# true when the chi-square p-value falls below it (i.e. at least one group's
+# distribution differs in location by more than sampling noise can explain).
+KRUSKAL_WALLIS_DEFAULT_ALPHA = 0.05
+
+
+def kruskal_wallis_h(groups, alpha=None, to_unit=None):
+    """Kruskal-Wallis H test for a difference in location among k samples.
+
+    The non-parametric, rank-based companion to :func:`one_way_anova` (which
+    compares group *means* and assumes roughly normal data) and the k-group
+    generalisation of :func:`mann_whitney_u` (which compares exactly two
+    samples). It pools all observations, replaces them with average-tie ranks,
+    and tests the null hypothesis that every group was drawn from the same
+    distribution — using only the ranks, so it makes no normality assumption and
+    is robust to outliers and skew. Reducing to two groups reproduces the
+    two-sided Mann-Whitney result (``H == z**2`` up to the tie/continuity
+    handling).
+
+    Every group must belong to the SAME linear category; the first group fixes a
+    single common ``to_unit`` (or, when omitted, its own first item's unit) and
+    every later group is restated into that very same unit — exactly like
+    :func:`one_way_anova` and the rest of the aggregate family. Because the test
+    operates purely on ranks, the choice of common unit never changes the result
+    (any monotonic re-scaling leaves every rank untouched).
+
+    With ``k`` groups, total count ``N``, group rank-sums ``R_i`` and sizes
+    ``n_i`` the raw statistic is::
+
+        H = 12 / (N*(N + 1)) * sum_i R_i**2 / n_i  -  3*(N + 1)
+
+    A **tie correction** divides ``H`` by ``C = 1 - sum(t**3 - t) / (N**3 - N)``
+    (each ``t`` the size of a group of tied values; ``C == 1`` with no ties),
+    giving the reported ``statistic``. Under the null ``statistic`` follows a
+    chi-square distribution with ``df = k - 1`` degrees of freedom, so the
+    **p-value** is the upper-tail ``P(X >= statistic)`` (see
+    :func:`_chi_square_sf`). ``significant`` reports the verdict at the ``alpha``
+    level (default 0.05): true when the p-value is strictly below ``alpha``.
+
+    ``groups`` is a list of groups; each group is a list of {"value": <number>,
+    "unit": <token>} dicts (a ``(value, unit)`` tuple is also accepted), exactly
+    like the groups of :func:`one_way_anova`.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised common unit>,
+            "k": <int>,                       # number of groups
+            "n_total": <int>,                 # total observations across groups
+            "groups": [                       # one entry per input group, in order
+                {"n": <int>, "rank_sum": <float>, "mean_rank": <float>},
+                ...
+            ],
+            "h": <float>,                     # the raw (uncorrected) statistic
+            "correction": <float>,            # the tie-correction divisor C
+            "has_ties": <bool>,               # any tie across the pooled sample
+            "statistic": <float>,             # the tie-corrected H (H / C)
+            "df": <int>,                      # k - 1
+            "alpha": <float>,
+            "p_value": <float>,               # upper-tail, in (0, 1]
+            "significant": <bool>,            # p_value < alpha
+        }
+
+    Raises ValueError for a non-list / empty ``groups`` argument, fewer than two
+    groups, an empty or malformed group, an unknown or cross-category unit (within
+    a group or between groups), a non-finite value, a non-linear category
+    (temperature is affine and fuel economy is reciprocal — neither has a
+    meaningful rank ordering to compare), an ``alpha`` that is not a number
+    strictly in ``(0, 1)``, or every pooled observation being identical (zero rank
+    spread leaves the tie correction zero and the statistic undefined). Per-group
+    validation is delegated through :func:`_series_values` to
+    :func:`sum_quantities`, so the accepted inputs stay identical to the rest of
+    the aggregate family.
+    """
+    if alpha is None:
+        alpha = KRUSKAL_WALLIS_DEFAULT_ALPHA
+    if isinstance(alpha, bool) or not isinstance(alpha, (int, float)):
+        raise ValueError("'alpha' must be a number")
+    alpha = float(alpha)
+    if alpha != alpha or alpha in (float("inf"), float("-inf")):
+        raise ValueError("'alpha' must be finite")
+    if not (0.0 < alpha < 1.0):
+        raise ValueError("'alpha' must be strictly between 0 and 1")
+
+    if not isinstance(groups, (list, tuple)):
+        raise ValueError("'groups' must be a list of groups")
+    if len(groups) < 2:
+        raise ValueError("Kruskal-Wallis requires at least two groups")
+
+    # The first group fixes the common unit (and category); every later group is
+    # forced into that same unit, which also rejects a cross-category group.
+    # _series_values runs the full per-group validation (and rejects an empty
+    # group via sum_quantities).
+    first_vals, unit, category = _series_values(groups[0], to_unit)
+    group_values = [first_vals]
+    for grp in groups[1:]:
+        vals, _, _ = _series_values(grp, unit)
+        group_values.append(vals)
+
+    k = len(group_values)
+    pooled = []
+    for vals in group_values:
+        pooled.extend(vals)
+    n_total = len(pooled)
+
+    # Average-tie ranks over the pooled sample, then split back per group in the
+    # original concatenation order (the same fractional ranking as
+    # rank_quantities / mann_whitney_u).
+    ranks = _average_ranks(pooled)
+    group_stats = []
+    sum_term = 0.0
+    idx = 0
+    for vals in group_values:
+        n_i = len(vals)
+        rank_sum = sum(ranks[idx:idx + n_i])
+        idx += n_i
+        sum_term += rank_sum ** 2 / n_i
+        group_stats.append({
+            "n": n_i,
+            "rank_sum": rank_sum,
+            "mean_rank": rank_sum / n_i,
+        })
+
+    h = 12.0 / (n_total * (n_total + 1)) * sum_term - 3.0 * (n_total + 1)
+
+    # Tie correction: sum over each group of equal values of (t**3 - t). Zero
+    # when every value is distinct; equals N**3 - N when every value is tied.
+    counts = {}
+    for v in pooled:
+        counts[v] = counts.get(v, 0) + 1
+    tie_term = sum(t ** 3 - t for t in counts.values())
+    has_ties = tie_term > 0
+    correction = 1.0 - tie_term / (n_total ** 3 - n_total)
+    if correction == 0.0:
+        # Every pooled observation is identical: no rank spread to test against
+        # and the corrected statistic would divide by zero.
+        raise ValueError(
+            "all observations are tied (zero rank spread); "
+            "the H statistic is undefined"
+        )
+
+    statistic = h / correction
+    df = k - 1
+    p_value = _chi_square_sf(statistic, df)
+    return {
+        "category": category,
+        "unit": unit,
+        "k": k,
+        "n_total": n_total,
+        "groups": group_stats,
+        "h": h,
+        "correction": correction,
+        "has_ties": has_ties,
+        "statistic": statistic,
+        "df": df,
+        "alpha": alpha,
+        "p_value": p_value,
+        "significant": p_value < alpha,
+    }
+
+
+def _validate_alpha(alpha, default):
+    """Coerce/validate a significance level shared by the hypothesis tests.
+
+    Returns ``alpha`` as a float strictly in ``(0, 1)``, substituting ``default``
+    when ``alpha`` is ``None``. Rejects booleans, non-numbers, non-finite values
+    and anything outside the open unit interval — the same contract every
+    significance-test family (t-test, ANOVA, Mann-Whitney, Kruskal-Wallis) has
+    always enforced, now stated in one place for the paired tests below.
+    """
+    if alpha is None:
+        alpha = default
+    if isinstance(alpha, bool) or not isinstance(alpha, (int, float)):
+        raise ValueError("'alpha' must be a number")
+    alpha = float(alpha)
+    if alpha != alpha or alpha in (float("inf"), float("-inf")):
+        raise ValueError("'alpha' must be finite")
+    if not (0.0 < alpha < 1.0):
+        raise ValueError("'alpha' must be strictly between 0 and 1")
+    return alpha
+
+
+def _paired_same_unit(x_items, y_items, to_unit):
+    """Validate two PAIRED, same-category series and restate both into one unit.
+
+    The paired-test counterpart to :func:`_paired_series` (which allows the two
+    series to live in different categories because correlation/regression never
+    subtract ``x`` from ``y``). The paired difference tests below *do* form
+    ``x - y`` point for point, so both series must share one category and one
+    common unit: the first series fixes the unit (``to_unit`` or its own first
+    item's unit) and the second is forced into that very same unit, which also
+    rejects a cross-category second series — exactly like
+    :func:`two_sample_t_test`. The pairing additionally requires equal lengths
+    and at least two pairs.
+
+    Returns ``(xs, ys, unit, category)`` with ``xs`` / ``ys`` lists of floats in
+    the original input order. Raises ValueError for any malformed/cross-category
+    series (delegated to :func:`sum_quantities`), mismatched lengths, or fewer
+    than two pairs.
+    """
+    xs, unit, category = _series_values(x_items, to_unit)
+    ys, _, _ = _series_values(y_items, unit)
+    if len(xs) != len(ys):
+        raise ValueError(
+            "'x' and 'y' must have the same number of items (%d vs %d)"
+            % (len(xs), len(ys))
+        )
+    if len(xs) < 2:
+        raise ValueError("at least two paired points are required")
+    return xs, ys, unit, category
+
+
+# Default significance level for the paired t-test verdict, mirroring
+# ``T_TEST_DEFAULT_ALPHA``: ``significant`` is true when the two-sided p-value
+# falls below it (i.e. the mean paired difference is judged statistically real).
+PAIRED_T_TEST_DEFAULT_ALPHA = 0.05
+
+
+def paired_t_test(x_items, y_items, alpha=None, to_unit=None):
+    """Paired (dependent) t-test for a non-zero mean DIFFERENCE within pairs.
+
+    The paired counterpart to :func:`two_sample_t_test`: where that test takes
+    two *independent* samples (which may differ in length) and compares their
+    means, this takes two series measured on the SAME subjects — a before/after
+    pairing, ``x`` paired with ``y`` point for point exactly like
+    :func:`correlation` and :func:`linear_regression` — and tests the null
+    hypothesis that the population mean of the within-pair differences
+    ``d_i = x_i - y_i`` is zero. Pairing removes the between-subject variation, so
+    it is the more powerful test whenever the two series are genuinely paired.
+
+    Both series must belong to the SAME linear category and have the SAME length;
+    ``x`` is restated in a single common ``to_unit`` (or, when omitted, ``x``'s
+    first item's unit) and ``y`` is restated into that very same unit, so the
+    differences are apples-to-apples — exactly like :func:`two_sample_t_test`.
+    With the sample mean difference ``dbar`` and the unbiased sample variance of
+    the differences ``s_d**2`` (the ``/(n-1)`` estimator) the statistic is
+    ``t = dbar / (s_d / sqrt(n))`` on ``df = n - 1`` degrees of freedom, and the
+    two-sided **p-value** is ``P(|T| >= |t|)`` under Student's t (see
+    :func:`_student_t_two_sided_p`). ``significant`` reports the verdict at the
+    ``alpha`` level (default 0.05): true when the p-value is strictly below it.
+    The test is exactly the one-sample t-test of the difference series against 0.
+
+    Each of ``x_items`` / ``y_items`` is a list of {"value": <number>,
+    "unit": <token>} dicts (a ``(value, unit)`` tuple is also accepted).
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised common unit>,
+            "n": <int>,                       # number of pairs
+            "mean_x": <float>, "mean_y": <float>,    # in the common unit
+            "mean_difference": <float>,              # dbar == mean_x - mean_y
+            "var_difference": <float>,               # unbiased (/(n-1))
+            "stdev_difference": <float>,             # unbiased sample stdev
+            "standard_error": <float>,               # s_d / sqrt(n)
+            "statistic": <float>,                    # the t-statistic
+            "df": <int>,                             # n - 1
+            "alpha": <float>,
+            "p_value": <float>,                      # two-sided, in (0, 1]
+            "significant": <bool>,                   # p_value < alpha
+        }
+
+    Raises ValueError for an empty/non-list series, a malformed item, an unknown
+    or cross-category unit (within a series or between the two), a non-finite
+    value, a non-linear category (temperature is affine and fuel economy is
+    reciprocal — neither has a meaningful difference to average), mismatched
+    series lengths, fewer than two pairs, an ``alpha`` that is not a number
+    strictly in ``(0, 1)``, or differences that are all identical (zero variance
+    leaves the t-statistic undefined). Item validation is delegated through
+    :func:`_series_values` to :func:`sum_quantities`, so the accepted inputs stay
+    identical to the rest of the aggregate family.
+    """
+    alpha = _validate_alpha(alpha, PAIRED_T_TEST_DEFAULT_ALPHA)
+    xs, ys, unit, category = _paired_same_unit(x_items, y_items, to_unit)
+
+    n = len(xs)
+    diffs = [x - y for x, y in zip(xs, ys)]
+    mean_x = sum(xs) / n
+    mean_y = sum(ys) / n
+    mean_d = sum(diffs) / n
+    var_d = sum((d - mean_d) ** 2 for d in diffs) / (n - 1)
+    if var_d == 0.0:
+        # Every difference is identical: there is no spread within the paired
+        # differences and the t-statistic would divide by zero.
+        raise ValueError(
+            "the paired differences have zero variance; "
+            "the t-statistic is undefined"
+        )
+
+    standard_error = math.sqrt(var_d / n)
+    statistic = mean_d / standard_error
+    df = n - 1
+    p_value = _student_t_two_sided_p(statistic, df)
+    return {
+        "category": category,
+        "unit": unit,
+        "n": n,
+        "mean_x": mean_x,
+        "mean_y": mean_y,
+        "mean_difference": mean_d,
+        "var_difference": var_d,
+        "stdev_difference": math.sqrt(var_d),
+        "standard_error": standard_error,
+        "statistic": statistic,
+        "df": df,
+        "alpha": alpha,
+        "p_value": p_value,
+        "significant": p_value < alpha,
+    }
+
+
+# Default significance level for the Wilcoxon signed-rank verdict, mirroring
+# ``MANN_WHITNEY_DEFAULT_ALPHA``: ``significant`` is true when the two-sided
+# p-value falls below it (i.e. the paired differences are not symmetric about
+# zero by more than sampling noise can comfortably explain).
+WILCOXON_DEFAULT_ALPHA = 0.05
+
+
+def wilcoxon_signed_rank(x_items, y_items, alpha=None, to_unit=None):
+    """Wilcoxon signed-rank test for a shift between two PAIRED series.
+
+    The non-parametric, rank-based companion to :func:`paired_t_test` (and the
+    paired analogue of :func:`mann_whitney_u`, just as the paired t-test is the
+    paired analogue of :func:`two_sample_t_test`): instead of the *mean*
+    difference it tests whether the within-pair differences ``d_i = x_i - y_i``
+    are symmetrically distributed about zero, using only the ranks of their
+    magnitudes, so it makes no normality assumption and is robust to outliers and
+    skew.
+
+    Both series must belong to the SAME linear category and have the SAME length;
+    ``x`` fixes a single common ``to_unit`` (or, when omitted, ``x``'s first
+    item's unit) and ``y`` is restated into that very same unit — exactly like
+    :func:`paired_t_test`. Zero differences (exact ties between a pair) are
+    **dropped** (the standard Wilcoxon treatment) before ranking; ``n_zero``
+    counts them and ``n_nonzero`` is the number that remain. The non-zero
+    differences are ranked by absolute value with average-tie ranks (the same
+    fractional ranking as :func:`rank_quantities`); ``W+`` is the sum of the
+    ranks whose difference is positive, ``W-`` the sum whose difference is
+    negative, and ``W == min(W+, W-)`` is the conventional reported statistic
+    (``W+ + W- == m*(m+1)/2`` for ``m == n_nonzero``).
+
+    The p-value uses the **normal approximation** with a continuity correction
+    (exact enumeration is intentionally not attempted — it is exponential and the
+    library is standard-library only). Under the null ``W+`` has mean
+    ``mu = m*(m+1)/4`` and a **tie-corrected** standard deviation::
+
+        sigma = sqrt( m*(m+1)*(2m+1)/24  -  sum(t**3 - t)/48 )
+
+    where each ``t`` is the size of a group of tied absolute differences (the
+    correction vanishes when every magnitude is distinct). The standardised
+    statistic is ``z = (|W+ - mu| - 0.5) / sigma`` (the ``0.5`` is the continuity
+    correction, never pushing ``|W+ - mu|`` below zero), carrying the sign of
+    ``W+ - mu``, and the two-sided p-value is ``P(|Z| >= |z|)`` (see
+    :func:`_standard_normal_two_sided_p`). ``significant`` reports the verdict at
+    the ``alpha`` level (default 0.05): true when the p-value is strictly below
+    it.
+
+    Each of ``x_items`` / ``y_items`` is a list of {"value": <number>,
+    "unit": <token>} dicts (a ``(value, unit)`` tuple is also accepted).
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised common unit>,
+            "n": <int>,            # number of pairs supplied
+            "n_zero": <int>,       # pairs with an exact zero difference (dropped)
+            "n_nonzero": <int>,    # pairs actually ranked (m above)
+            "w_plus": <float>, "w_minus": <float>,   # sum to m*(m+1)/2
+            "w": <float>,                            # min(w_plus, w_minus)
+            "mu_w": <float>,                         # m*(m+1)/4
+            "sigma_w": <float>,                      # tie-corrected stdev of W+
+            "has_ties": <bool>,    # any tie among the non-zero magnitudes
+            "z": <float>,                            # continuity-corrected
+            "alpha": <float>,
+            "p_value": <float>,                      # two-sided, in (0, 1]
+            "significant": <bool>,                   # p_value < alpha
+        }
+
+    Raises ValueError for an empty/non-list series, a malformed item, an unknown
+    or cross-category unit (within a series or between the two), a non-finite
+    value, a non-linear category (temperature is affine and fuel economy is
+    reciprocal — neither has a meaningful signed difference to rank), mismatched
+    series lengths, fewer than two pairs, an ``alpha`` that is not a number
+    strictly in ``(0, 1)``, every pair tying exactly (no signed difference is
+    left to test), or a degenerate non-zero set whose rank spread is zero (the
+    z-statistic would divide by zero). Item validation is delegated through
+    :func:`_series_values` to :func:`sum_quantities`, so the accepted inputs stay
+    identical to the rest of the aggregate family.
+    """
+    alpha = _validate_alpha(alpha, WILCOXON_DEFAULT_ALPHA)
+    xs, ys, unit, category = _paired_same_unit(x_items, y_items, to_unit)
+
+    n = len(xs)
+    diffs = [x - y for x, y in zip(xs, ys)]
+    nonzero = [d for d in diffs if d != 0.0]
+    n_zero = n - len(nonzero)
+    m = len(nonzero)
+    if m == 0:
+        # Every pair is an exact tie: there is no signed difference to test.
+        raise ValueError(
+            "all paired differences are zero; "
+            "there is no signed difference to test"
+        )
+
+    abs_diffs = [abs(d) for d in nonzero]
+    ranks = _average_ranks(abs_diffs)
+    w_plus = sum(r for r, d in zip(ranks, nonzero) if d > 0)
+    w_minus = sum(r for r, d in zip(ranks, nonzero) if d < 0)
+    w = min(w_plus, w_minus)
+    mu_w = m * (m + 1) / 4.0
+
+    # Tie correction over groups of equal absolute differences: sum of
+    # (t**3 - t). Zero when every magnitude is distinct.
+    counts = {}
+    for a in abs_diffs:
+        counts[a] = counts.get(a, 0) + 1
+    tie_term = sum(t ** 3 - t for t in counts.values())
+    has_ties = tie_term > 0
+
+    variance_w = m * (m + 1) * (2 * m + 1) / 24.0 - tie_term / 48.0
+    sigma_w = math.sqrt(variance_w) if variance_w > 0 else 0.0
+    if sigma_w == 0.0:
+        # No spread in the signed ranks (e.g. a single non-zero difference whose
+        # ties cancel the variance): the z-statistic would divide by zero.
+        raise ValueError(
+            "the non-zero differences have zero rank spread; "
+            "the signed-rank statistic is undefined"
+        )
+
+    diff = w_plus - mu_w
+    # Continuity correction shrinks the deviation toward the mean by 0.5, never
+    # past it; the sign of the original deviation is preserved.
+    corrected = max(0.0, abs(diff) - 0.5)
+    z = (corrected / sigma_w) * (1.0 if diff >= 0 else -1.0)
+    p_value = min(1.0, _standard_normal_two_sided_p(z))
+    return {
+        "category": category,
+        "unit": unit,
+        "n": n,
+        "n_zero": n_zero,
+        "n_nonzero": m,
+        "w_plus": w_plus,
+        "w_minus": w_minus,
+        "w": w,
+        "mu_w": mu_w,
+        "sigma_w": sigma_w,
+        "has_ties": has_ties,
+        "z": z,
+        "alpha": alpha,
+        "p_value": p_value,
+        "significant": p_value < alpha,
+    }
+
+
+# Default significance level for the sign-test verdict, mirroring
+# ``WILCOXON_DEFAULT_ALPHA``: ``significant`` is true when the exact two-sided
+# p-value falls below it (i.e. the split of positive vs negative within-pair
+# differences is too lopsided to be a fair coin).
+SIGN_TEST_DEFAULT_ALPHA = 0.05
+
+
+def sign_test(x_items, y_items, alpha=None, to_unit=None):
+    """Paired sign test for a non-zero MEDIAN within-pair difference.
+
+    The simplest of the paired-difference tests and the natural companion to
+    :func:`paired_t_test` (which tests the *mean* difference) and
+    :func:`wilcoxon_signed_rank` (which tests symmetry about zero using the
+    ranked *magnitudes*): the sign test throws away magnitude entirely and looks
+    only at the **direction** of each within-pair difference ``d_i = x_i - y_i``.
+    Under the null hypothesis that the population median difference is zero, each
+    non-zero difference is independently positive with probability one half, so
+    the count of positive differences follows a Binomial(m, 1/2). Because it uses
+    only signs it makes no distributional assumption whatsoever and is the most
+    robust (and least powerful) of the three — useful when even the symmetry
+    assumption of Wilcoxon is in doubt.
+
+    Both series must belong to the SAME linear category and have the SAME length;
+    ``x`` fixes a single common ``to_unit`` (or, when omitted, ``x``'s first
+    item's unit) and ``y`` is restated into that very same unit — exactly like
+    :func:`paired_t_test` and :func:`wilcoxon_signed_rank`. Exact zero
+    differences (a tie within a pair) carry no sign and are **dropped**:
+    ``n_zero`` counts them and ``n_nonzero == n_plus + n_minus`` is the number
+    that remain. The reported ``statistic`` is ``min(n_plus, n_minus)``.
+
+    The p-value is **exact** (no normal approximation): under the null the
+    smaller-tail probability is ``sum_{i=0}^{k} C(m, i) / 2**m`` with
+    ``k == min(n_plus, n_minus)`` and ``m == n_nonzero``, and the two-sided
+    p-value is twice that, capped at 1 (an even split would otherwise exceed it).
+    ``math.comb`` keeps the binomial coefficients exact. ``significant`` reports
+    the verdict at the ``alpha`` level (default 0.05): true when the p-value is
+    strictly below it.
+
+    Each of ``x_items`` / ``y_items`` is a list of {"value": <number>,
+    "unit": <token>} dicts (a ``(value, unit)`` tuple is also accepted).
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised common unit>,
+            "n": <int>,                  # number of pairs supplied
+            "n_zero": <int>,             # pairs tying exactly (dropped)
+            "n_plus": <int>,             # pairs with x_i > y_i
+            "n_minus": <int>,            # pairs with x_i < y_i
+            "n_nonzero": <int>,          # n_plus + n_minus == m above
+            "statistic": <int>,          # min(n_plus, n_minus)
+            "median_difference": <float>,        # median of all d_i, common unit
+            "proportion_positive": <float>,      # n_plus / n_nonzero
+            "alpha": <float>,
+            "p_value": <float>,                  # exact two-sided, in (0, 1]
+            "significant": <bool>,               # p_value < alpha
+        }
+
+    Raises ValueError for an empty/non-list series, a malformed item, an unknown
+    or cross-category unit (within a series or between the two), a non-finite
+    value, a non-linear category (temperature is affine and fuel economy is
+    reciprocal — neither has a meaningful signed difference), mismatched series
+    lengths, fewer than two pairs, an ``alpha`` that is not a number strictly in
+    ``(0, 1)``, or every pair tying exactly (no signed difference is left to
+    test). Item validation is delegated through :func:`_series_values` to
+    :func:`sum_quantities`, so the accepted inputs stay identical to the rest of
+    the aggregate family.
+    """
+    alpha = _validate_alpha(alpha, SIGN_TEST_DEFAULT_ALPHA)
+    xs, ys, unit, category = _paired_same_unit(x_items, y_items, to_unit)
+
+    n = len(xs)
+    diffs = [x - y for x, y in zip(xs, ys)]
+    n_plus = sum(1 for d in diffs if d > 0.0)
+    n_minus = sum(1 for d in diffs if d < 0.0)
+    n_zero = n - n_plus - n_minus
+    m = n_plus + n_minus
+    if m == 0:
+        # Every pair is an exact tie: there is no signed difference to test.
+        raise ValueError(
+            "all paired differences are zero; "
+            "there is no signed difference to test"
+        )
+
+    statistic = min(n_plus, n_minus)
+    # Exact two-sided binomial p-value under p = 1/2: twice the lower tail at the
+    # smaller count, capped at 1 (an even split doubles past it). math.comb keeps
+    # the coefficients exact, so no normal approximation is needed.
+    lower_tail = sum(math.comb(m, i) for i in range(statistic + 1)) / (2.0 ** m)
+    p_value = min(1.0, 2.0 * lower_tail)
+
+    median_difference = _median_sorted(sorted(diffs))
+    return {
+        "category": category,
+        "unit": unit,
+        "n": n,
+        "n_zero": n_zero,
+        "n_plus": n_plus,
+        "n_minus": n_minus,
+        "n_nonzero": m,
+        "statistic": statistic,
+        "median_difference": median_difference,
+        "proportion_positive": n_plus / m,
+        "alpha": alpha,
+        "p_value": p_value,
+        "significant": p_value < alpha,
+    }
+
+
+# Default significance level for the one-sample t-test verdict, mirroring
+# ``T_TEST_DEFAULT_ALPHA`` and ``PAIRED_T_TEST_DEFAULT_ALPHA``: ``significant`` is
+# true when the two-sided p-value falls below it (i.e. the sample mean differs
+# from the hypothesized value by more than sampling noise can comfortably
+# explain).
+ONE_SAMPLE_T_TEST_DEFAULT_ALPHA = 0.05
+
+
+def one_sample_t_test(items, mu=0.0, alpha=None, to_unit=None):
+    """One-sample t-test of a sample MEAN against a hypothesized value ``mu``.
+
+    The one-group inferential companion to the two-group :func:`two_sample_t_test`
+    and the paired :func:`paired_t_test` (whose own docstring notes it *is* the
+    one-sample test of the difference series against zero) — and the
+    hypothesis-test sibling of the interval estimators :func:`t_interval` /
+    :func:`confidence_interval`, which bound the same single mean instead of
+    testing it. It takes ONE sample of same-category quantities and tests the null
+    hypothesis that the population mean equals ``mu`` (expressed in the common
+    target unit), against the two-sided alternative that it does not.
+
+    Every quantity is first restated in a single common ``to_unit`` (or, when
+    omitted, the first item's unit), exactly like :func:`t_interval` and the rest
+    of the aggregate family; ``mu`` is interpreted in that very same unit. With the
+    sample mean ``xbar``, the unbiased sample standard deviation ``s`` (the
+    ``/(n-1)`` estimator) and ``n`` observations, the **standard error of the
+    mean** is ``SE = s / sqrt(n)``, the statistic is ``t = (xbar - mu) / SE`` on
+    ``df = n - 1`` degrees of freedom, and the two-sided **p-value** is
+    ``P(|T| >= |t|)`` under Student's t (see :func:`_student_t_two_sided_p`).
+    ``significant`` reports the verdict at the ``alpha`` level (default 0.05): true
+    when the p-value is strictly below it. As a convenience the matching two-sided
+    ``confidence_level = 1 - alpha`` interval for the mean (the same one
+    :func:`t_interval` would give at that level) is reported via ``lower`` /
+    ``upper``; the test rejects exactly when ``mu`` falls outside it.
+
+    ``items`` is a list of {"value": <number>, "unit": <token>} dicts (a
+    ``(value, unit)`` tuple is also accepted), identical to :func:`t_interval`.
+
+    Returns a dict::
+
+        {
+            "category": <name>,
+            "unit": <normalised target unit>,
+            "count": <int>,
+            "df": <int>,                      # degrees of freedom (count - 1)
+            "mu": <float>,                    # the hypothesized mean, target unit
+            "mean": <float>,                  # sample mean, in the target unit
+            "difference": <float>,            # mean - mu
+            "sample_stdev": <float>,          # unbiased (/(n-1)) stdev
+            "standard_error": <float>,        # s / sqrt(n)
+            "statistic": <float>,             # the t-statistic
+            "alpha": <float>,                 # the requested level
+            "p_value": <float>,               # two-sided, in (0, 1]
+            "significant": <bool>,            # p_value < alpha
+            "confidence_level": <float>,      # 1 - alpha
+            "critical_value": <float>,        # two-sided t quantile at that level
+            "margin_of_error": <float>,       # critical_value * standard_error
+            "lower": <float>,                 # mean - margin_of_error
+            "upper": <float>,                 # mean + margin_of_error
+        }
+
+    Raises ValueError for an empty/non-list input, a malformed item, an unknown
+    or cross-category unit, a non-finite value, a non-linear category (temperature
+    is affine and fuel economy is reciprocal — neither has a meaningful mean to
+    test), a ``mu`` that is not a finite number, an ``alpha`` that is not a number
+    strictly in ``(0, 1)``, a series of fewer than two values (the sample standard
+    error is undefined for one observation), or a series whose values are all
+    identical (zero variance leaves the t-statistic undefined). Item validation is
+    delegated through :func:`sum_quantities` so the accepted inputs stay identical
+    to the rest of the aggregate family.
+    """
+    if isinstance(mu, bool) or not isinstance(mu, (int, float)):
+        raise ValueError("'mu' must be a number")
+    mu = float(mu)
+    if mu != mu or mu in (float("inf"), float("-inf")):
+        raise ValueError("'mu' must be finite")
+
+    alpha = _validate_alpha(alpha, ONE_SAMPLE_T_TEST_DEFAULT_ALPHA)
+
+    # sum_quantities does the full validation (list shape, item shape, finite
+    # values, single linear category, valid target) and resolves both the running
+    # total and the common target unit, so a bad input fails here before any
+    # statistics run.
+    total, unit, category = sum_quantities(items, to_unit)
+    converted = _restate_items(items, unit)
+    count = len(converted)
+    if count < 2:
+        raise ValueError(
+            "one-sample t-test requires at least two values "
+            "(the sample standard error is undefined for one observation)"
+        )
+
+    df = count - 1
+    mean = total / count
+    sample_variance = sum((x - mean) ** 2 for x in converted) / df
+    if sample_variance == 0.0:
+        # Every value is identical: there is no spread, so the standard error is
+        # zero and the t-statistic would divide by zero.
+        raise ValueError(
+            "the sample has zero variance; the t-statistic is undefined"
+        )
+
+    sample_stdev = math.sqrt(sample_variance)
+    standard_error = sample_stdev / math.sqrt(count)
+    statistic = (mean - mu) / standard_error
+    p_value = _student_t_two_sided_p(statistic, df)
+
+    confidence_level = 1.0 - alpha
+    critical_value = _inv_student_t_cdf((1.0 + confidence_level) / 2.0, df)
+    margin = critical_value * standard_error
+    return {
+        "category": category,
+        "unit": unit,
+        "count": count,
+        "df": df,
+        "mu": mu,
+        "mean": mean,
+        "difference": mean - mu,
+        "sample_stdev": sample_stdev,
+        "standard_error": standard_error,
+        "statistic": statistic,
+        "alpha": alpha,
+        "p_value": p_value,
+        "significant": p_value < alpha,
+        "confidence_level": confidence_level,
+        "critical_value": critical_value,
+        "margin_of_error": margin,
+        "lower": mean - margin,
+        "upper": mean + margin,
+    }
+
+
+# Default significance level for the chi-square goodness-of-fit verdict, mirroring
+# the rest of the hypothesis-test family (t-test, ANOVA, Kruskal-Wallis, ...):
+# ``significant`` is true when the upper-tail p-value falls below it (i.e. the
+# observed counts depart from the expected distribution by more than sampling
+# noise can comfortably explain).
+CHI_SQUARE_GOF_DEFAULT_ALPHA = 0.05
+
+
+def _gof_counts(observed, name):
+    """Validate a list of non-negative finite counts for the goodness-of-fit test.
+
+    Returns the values as a list of floats in input order. Unlike the rest of the
+    aggregate family these are bare, DIMENSIONLESS counts (category frequencies),
+    so they are validated here directly rather than through :func:`_series_values`
+    / :func:`sum_quantities`, which expect unit-bearing quantities. Booleans are
+    rejected (Python ``bool`` is an ``int`` subclass but a count is never a flag),
+    as are non-numbers, non-finite values and negatives (a frequency cannot be
+    negative).
+    """
+    if not isinstance(observed, (list, tuple)):
+        raise ValueError("'%s' must be a list of counts" % name)
+    out = []
+    for x in observed:
+        if isinstance(x, bool) or not isinstance(x, (int, float)):
+            raise ValueError("every '%s' entry must be a number" % name)
+        x = float(x)
+        if x != x or x in (float("inf"), float("-inf")):
+            raise ValueError("every '%s' entry must be finite" % name)
+        if x < 0.0:
+            raise ValueError("every '%s' entry must be non-negative" % name)
+        out.append(x)
+    return out
+
+
+def chi_square_goodness_of_fit(observed, expected=None, alpha=None, ddof=0):
+    """Pearson's chi-square goodness-of-fit test for one categorical sample.
+
+    Tests whether a single set of observed category counts is consistent with a
+    hypothesised distribution. It is the categorical-frequency companion to the
+    numeric hypothesis tests in this module: where :func:`one_sample_t_test`
+    asks "is this sample's *mean* equal to ``mu``?", the goodness-of-fit test
+    asks "do these *counts* follow the expected proportions?" — the same
+    chi-square upper-tail machinery (:func:`_chi_square_sf`) that underpins the
+    Kruskal-Wallis and Bartlett p-values, here applied to raw frequencies.
+
+    Because the inputs are bare, dimensionless counts (not unit-bearing
+    quantities), this function does NOT take a ``to_unit`` and never touches the
+    conversion engine — it is purely additive.
+
+    With ``k`` categories, observed counts ``O_i``, total ``N = sum O_i`` and
+    expected counts ``E_i``:
+
+    * the **expected counts** come from ``expected``. When ``expected`` is
+      omitted, a **uniform** distribution is assumed (``E_i = N / k``, the
+      classic "is this die fair?" null). When supplied, ``expected`` is a list of
+      strictly positive weights of the same length that is **rescaled to the
+      observed total** (``E_i = N * w_i / sum w_j``). That means you may pass
+      either ready-made expected counts (already summing to ``N`` — left
+      unchanged), proportions such as ``[0.25, 0.25, 0.5]``, or any positive
+      relative weights; all three are equivalent.
+    * the **statistic** is ``X^2 = sum_i (O_i - E_i)^2 / E_i``,
+    * the **degrees of freedom** are ``k - 1 - ddof``. ``ddof`` (default 0) is the
+      number of distribution parameters estimated from the data, which each cost
+      one extra degree of freedom (e.g. fitting a Poisson rate before testing the
+      fit uses ``ddof = 1``).
+    * the **p-value** is the upper tail ``P(chi2 >= X^2)`` at ``df`` degrees of
+      freedom and ``significant`` is the verdict at the ``alpha`` level (default
+      0.05): true when ``p_value < alpha``.
+
+    Returns a dict::
+
+        {
+            "k": <int>,                       # number of categories
+            "n": <float>,                     # total observed count, sum O_i
+            "categories": [                   # one entry per category, in order
+                {
+                    "observed": <float>,      # O_i
+                    "expected": <float>,      # E_i
+                    "residual": <float>,      # O_i - E_i
+                    "contribution": <float>,  # (O_i - E_i)^2 / E_i
+                    "std_residual": <float>,  # (O_i - E_i) / sqrt(E_i)
+                },
+                ...
+            ],
+            "ddof": <int>,
+            "df": <int>,                      # k - 1 - ddof
+            "statistic": <float>,             # X^2
+            "alpha": <float>,
+            "p_value": <float>,               # upper-tail, in (0, 1]
+            "significant": <bool>,            # p_value < alpha
+        }
+
+    Raises ValueError when ``observed`` is not a list of at least two numeric,
+    finite, non-negative counts; when the observed total is zero (there is nothing
+    to test); when ``expected`` is supplied but is not a same-length list of
+    strictly positive finite weights; when ``ddof`` is not a non-negative integer;
+    or when ``df`` would fall below 1 (``ddof`` too large for ``k`` categories).
+    ``alpha`` is validated exactly like the rest of the hypothesis-test family.
+    """
+    alpha = _validate_alpha(alpha, CHI_SQUARE_GOF_DEFAULT_ALPHA)
+
+    obs = _gof_counts(observed, "observed")
+    k = len(obs)
+    if k < 2:
+        raise ValueError(
+            "the goodness-of-fit test needs at least two categories"
+        )
+
+    n = sum(obs)
+    if n <= 0.0:
+        raise ValueError(
+            "the observed counts must sum to a positive total"
+        )
+
+    if expected is None:
+        # No hypothesis given -> the uniform "every category equally likely" null.
+        exp = [n / k] * k
+    else:
+        weights = _gof_counts(expected, "expected")
+        if len(weights) != k:
+            raise ValueError(
+                "'expected' must have the same length as 'observed' (%d vs %d)"
+                % (len(weights), k)
+            )
+        weight_total = sum(weights)
+        if weight_total <= 0.0 or any(w <= 0.0 for w in weights):
+            # Dividing by E_i requires every expected count strictly positive; a
+            # zero-weight category can never receive any of the observed mass.
+            raise ValueError(
+                "every 'expected' entry must be strictly positive"
+            )
+        # Rescale the weights to the observed total so the comparison is on counts,
+        # whether the caller passed counts, proportions or raw relative weights.
+        exp = [n * w / weight_total for w in weights]
+
+    if isinstance(ddof, bool) or not isinstance(ddof, int):
+        raise ValueError("'ddof' must be a non-negative integer")
+    if ddof < 0:
+        raise ValueError("'ddof' must be a non-negative integer")
+    df = k - 1 - ddof
+    if df < 1:
+        raise ValueError(
+            "degrees of freedom (k - 1 - ddof) must be at least 1; "
+            "got %d for %d categories and ddof=%d" % (df, k, ddof)
+        )
+
+    categories = []
+    statistic = 0.0
+    for o, e in zip(obs, exp):
+        residual = o - e
+        contribution = residual * residual / e
+        statistic += contribution
+        categories.append({
+            "observed": o,
+            "expected": e,
+            "residual": residual,
+            "contribution": contribution,
+            "std_residual": residual / math.sqrt(e),
+        })
+
+    p_value = _chi_square_sf(statistic, df)
+    return {
+        "k": k,
+        "n": n,
+        "categories": categories,
+        "ddof": ddof,
+        "df": df,
+        "statistic": statistic,
+        "alpha": alpha,
+        "p_value": p_value,
+        "significant": p_value < alpha,
+    }
+
+
+# Default significance level for the chi-square test of independence, mirroring
+# the goodness-of-fit sibling and the rest of the hypothesis-test family:
+# ``significant`` is true when the upper-tail p-value falls below it (i.e. the
+# two categorical variables are associated by more than sampling noise can
+# comfortably explain).
+CHI_SQUARE_INDEPENDENCE_DEFAULT_ALPHA = 0.05
+
+
+def chi_square_independence(table, alpha=None):
+    """Pearson's chi-square test of independence for a two-way contingency table.
+
+    Tests whether two categorical variables are associated. Where the
+    goodness-of-fit sibling :func:`chi_square_goodness_of_fit` compares a single
+    row of counts against a hypothesised distribution, this test takes a full
+    ``r x c`` table of jointly observed counts and asks "are the row variable and
+    the column variable independent?" — the same chi-square upper-tail machinery
+    (:func:`_chi_square_sf`) that backs the goodness-of-fit, Kruskal-Wallis and
+    Bartlett p-values, here applied to a cross-tabulation.
+
+    Because the inputs are bare, dimensionless counts (not unit-bearing
+    quantities), this function does NOT take a ``to_unit`` and never touches the
+    conversion engine — it is purely additive.
+
+    For an ``r x c`` table with observed cell counts ``O_ij``, row totals
+    ``R_i = sum_j O_ij``, column totals ``C_j = sum_i O_ij`` and grand total
+    ``N = sum_ij O_ij``:
+
+    * the **expected counts** under independence are
+      ``E_ij = R_i * C_j / N`` (the product of the marginal proportions times
+      the grand total),
+    * the **statistic** is ``X^2 = sum_ij (O_ij - E_ij)^2 / E_ij``,
+    * the **degrees of freedom** are ``(r - 1) * (c - 1)``,
+    * the **p-value** is the upper tail ``P(chi2 >= X^2)`` at ``df`` degrees of
+      freedom and ``significant`` is the verdict at the ``alpha`` level (default
+      0.05): true when ``p_value < alpha``,
+    * **Cramer's V** ``sqrt(X^2 / (N * min(r - 1, c - 1)))`` is reported as a
+      unit-free effect size in ``[0, 1]`` (0 = perfect independence, 1 = perfect
+      association), the categorical companion to the correlation coefficients.
+
+    Returns a dict::
+
+        {
+            "rows": <int>,                    # r
+            "cols": <int>,                    # c
+            "n": <float>,                     # grand total, sum O_ij
+            "row_totals": [<float>, ...],     # R_i, one per row
+            "col_totals": [<float>, ...],     # C_j, one per column
+            "cells": [                        # r rows, each a list of c cells
+                [
+                    {
+                        "observed": <float>,      # O_ij
+                        "expected": <float>,      # E_ij
+                        "residual": <float>,      # O_ij - E_ij
+                        "contribution": <float>,  # (O_ij - E_ij)^2 / E_ij
+                        "std_residual": <float>,  # (O_ij - E_ij) / sqrt(E_ij)
+                    },
+                    ...
+                ],
+                ...
+            ],
+            "df": <int>,                      # (r - 1) * (c - 1)
+            "statistic": <float>,             # X^2
+            "cramers_v": <float>,             # effect size in [0, 1]
+            "alpha": <float>,
+            "p_value": <float>,               # upper-tail, in (0, 1]
+            "significant": <bool>,            # p_value < alpha
+        }
+
+    Raises ValueError when ``table`` is not a rectangular list of at least two
+    rows and two columns of numeric, finite, non-negative counts; when the grand
+    total is zero (there is nothing to test); or when any row or column total is
+    zero (an all-zero margin makes the corresponding expected counts zero and the
+    variable degenerate). ``alpha`` is validated exactly like the rest of the
+    hypothesis-test family.
+    """
+    alpha = _validate_alpha(alpha, CHI_SQUARE_INDEPENDENCE_DEFAULT_ALPHA)
+
+    if not isinstance(table, (list, tuple)):
+        raise ValueError("'table' must be a list of rows of counts")
+    r = len(table)
+    if r < 2:
+        raise ValueError(
+            "the test of independence needs a table with at least two rows"
+        )
+
+    # Validate every row as a list of non-negative finite counts (reusing the
+    # goodness-of-fit count validator), and require a consistent rectangular
+    # shape with at least two columns.
+    rows = [_gof_counts(row, "table row") for row in table]
+    c = len(rows[0])
+    if c < 2:
+        raise ValueError(
+            "the test of independence needs a table with at least two columns"
+        )
+    for row in rows:
+        if len(row) != c:
+            raise ValueError(
+                "every 'table' row must have the same length (%d expected)" % c
+            )
+
+    row_totals = [sum(row) for row in rows]
+    col_totals = [sum(rows[i][j] for i in range(r)) for j in range(c)]
+    n = sum(row_totals)
+    if n <= 0.0:
+        raise ValueError(
+            "the observed counts must sum to a positive total"
+        )
+    if any(rt <= 0.0 for rt in row_totals):
+        raise ValueError(
+            "every row total must be positive; an all-zero row is degenerate"
+        )
+    if any(ct <= 0.0 for ct in col_totals):
+        raise ValueError(
+            "every column total must be positive; an all-zero column is degenerate"
+        )
+
+    cells = []
+    statistic = 0.0
+    for i in range(r):
+        cell_row = []
+        for j in range(c):
+            o = rows[i][j]
+            e = row_totals[i] * col_totals[j] / n
+            residual = o - e
+            contribution = residual * residual / e
+            statistic += contribution
+            cell_row.append({
+                "observed": o,
+                "expected": e,
+                "residual": residual,
+                "contribution": contribution,
+                "std_residual": residual / math.sqrt(e),
+            })
+        cells.append(cell_row)
+
+    df = (r - 1) * (c - 1)
+    p_value = _chi_square_sf(statistic, df)
+    # Cramer's V normalises X^2 by the maximum it could reach (N times the
+    # smaller table dimension minus one) into a 0..1 effect size.
+    cramers_v = math.sqrt(statistic / (n * min(r - 1, c - 1)))
+    return {
+        "rows": r,
+        "cols": c,
+        "n": n,
+        "row_totals": row_totals,
+        "col_totals": col_totals,
+        "cells": cells,
+        "df": df,
+        "statistic": statistic,
+        "cramers_v": cramers_v,
+        "alpha": alpha,
+        "p_value": p_value,
+        "significant": p_value < alpha,
+    }

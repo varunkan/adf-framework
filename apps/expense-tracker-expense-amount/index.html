@@ -186,11 +186,29 @@
       <button type="button" class="btn" id="clearBudget" style="background:#9ca3af;">Clear</button>
     </div>
     <div class="budget-status" id="budgetStatus"></div>
+    <div class="budget-box" style="margin-top:12px;">
+      <div class="field">
+        <label for="paceAsof">Pace as of</label>
+        <input type="date" id="paceAsof">
+      </div>
+      <button type="button" class="btn" id="checkPace">Check pace</button>
+    </div>
+    <div class="budget-status" id="paceStatus"></div>
   </div>
 
   <div class="card">
     <h2>Monthly Breakdown</h2>
     <div class="bars" id="monthly"></div>
+  </div>
+
+  <div class="card">
+    <h2>Insights</h2>
+    <h3 class="sub" style="margin:0 0 6px;">Weekly spend</h3>
+    <div class="bars" id="weekly"></div>
+    <h3 class="sub" style="margin:14px 0 6px;">Category share</h3>
+    <div class="bars" id="percentages"></div>
+    <h3 class="sub" style="margin:14px 0 6px;">Top spends</h3>
+    <ul class="list" id="topSpends"></ul>
   </div>
 
   <div class="card">
@@ -205,6 +223,55 @@
       <button type="button" class="btn" id="importBtn">Import</button>
     </div>
     <div class="budget-status" id="importStatus"></div>
+  </div>
+
+  <div class="card">
+    <h2>Recurring expenses</h2>
+    <p class="sub" style="margin:0 0 12px;">Define a schedule once, then
+      <b>Generate due</b> materializes one real expense per occurrence from the
+      start date up to today. Running again is safe — already-generated dates
+      are skipped.</p>
+    <form id="recurForm">
+      <div class="row">
+        <div class="field">
+          <label for="rAmount">Amount</label>
+          <input type="number" id="rAmount" step="0.01" min="0.01" placeholder="0.00" required>
+        </div>
+        <div class="field">
+          <label for="rCategory">Category</label>
+          <select id="rCategory">
+            <option>Food</option>
+            <option>Transport</option>
+            <option>Bills</option>
+            <option>Fun</option>
+            <option>Other</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="rFreq">Frequency</label>
+          <select id="rFreq">
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="rDate">Starts</label>
+          <input type="date" id="rDate" required>
+        </div>
+        <div class="field" style="flex: 2 1 200px;">
+          <label for="rNote">Note (optional)</label>
+          <input type="text" id="rNote" placeholder="e.g. Rent">
+        </div>
+      </div>
+      <div class="err" id="recurErr"></div>
+      <div style="margin-top:4px;display:flex;gap:8px;">
+        <button type="submit" class="btn">Add schedule</button>
+        <button type="button" class="btn" id="runRecur" style="background:#6366f1;">Generate due</button>
+      </div>
+    </form>
+    <div class="budget-status" id="recurStatus"></div>
+    <ul class="list" id="recurList"></ul>
   </div>
 
   <div class="card">
@@ -223,6 +290,12 @@
       <input type="date" id="startDate">
       <label for="endDate">To:</label>
       <input type="date" id="endDate">
+      <label for="minAmount">Min $:</label>
+      <input type="number" id="minAmount" min="0" step="0.01" placeholder="0"
+             style="width:80px;">
+      <label for="maxAmount">Max $:</label>
+      <input type="number" id="maxAmount" min="0" step="0.01" placeholder="∞"
+             style="width:80px;">
       <button type="button" class="btn" id="clearFilters" style="background:#9ca3af;">Clear</button>
     </div>
     <div class="filter-row">
@@ -267,10 +340,14 @@ function filterQuery() {
   const q = document.getElementById('search').value;
   const sort = document.getElementById('sort').value;
   const order = document.getElementById('order').value;
+  const minAmount = document.getElementById('minAmount').value;
+  const maxAmount = document.getElementById('maxAmount').value;
   if (cat && cat !== 'All') params.set('category', cat);
   if (start) params.set('start', start);
   if (end) params.set('end', end);
   if (q) params.set('q', q);
+  if (minAmount !== '') params.set('min_amount', minAmount);
+  if (maxAmount !== '') params.set('max_amount', maxAmount);
   if (sort) { params.set('sort', sort); params.set('order', order); }
   const qs = params.toString();
   return qs ? '?' + qs : '';
@@ -281,6 +358,65 @@ async function load() {
   if (res.ok) state = await res.json();
   render();
   loadMonthly();
+  loadInsights();
+}
+
+function renderBars(boxId, entries, color) {
+  const box = document.getElementById(boxId);
+  box.innerHTML = '';
+  if (!entries.length) {
+    box.innerHTML = '<div class="empty">No data yet.</div>';
+    return;
+  }
+  const max = Math.max(1, ...entries.map(e => e.value));
+  entries.forEach(e => {
+    const pct = (e.value / max) * 100;
+    const row = document.createElement('div');
+    row.className = 'month-row';
+    row.innerHTML =
+      '<div class="month-label">' + e.label + '</div>' +
+      '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%;background:' + color + '"></div></div>' +
+      '<div class="month-val">' + e.text + '</div>';
+    box.appendChild(row);
+  });
+}
+
+async function loadInsights() {
+  const [wRes, pRes, tRes] = await Promise.all([
+    fetch('/api/summary/weekly'),
+    fetch('/api/summary/percentages'),
+    fetch('/api/summary/top?n=5'),
+  ]);
+  const weekly = (await wRes.json()).weekly || {};
+  renderBars('weekly', Object.keys(weekly).map(k => ({
+    label: k, value: weekly[k], text: money(weekly[k]),
+  })), '#0ea5e9');
+
+  const pct = (await pRes.json()).percentages || { categories: {} };
+  const cats = pct.categories || {};
+  renderBars('percentages', Object.keys(cats)
+    .filter(c => cats[c].spent > 0)
+    .map(c => ({
+      label: c, value: cats[c].percent,
+      text: cats[c].percent.toFixed(1) + '%',
+    })), '#f59e0b');
+
+  const top = (await tRes.json()).top || [];
+  const box = document.getElementById('topSpends');
+  box.innerHTML = '';
+  if (!top.length) {
+    box.innerHTML = '<div class="empty">No data yet.</div>';
+    return;
+  }
+  top.forEach(e => {
+    const li = document.createElement('li');
+    li.className = 'item';
+    li.innerHTML =
+      '<div><b>' + money(e.amount) + '</b> · ' + e.category +
+      (e.note ? ' — ' + e.note : '') + '</div>' +
+      '<div class="sub">' + e.date + '</div>';
+    box.appendChild(li);
+  });
 }
 
 async function loadBudget() {
@@ -486,11 +622,15 @@ document.getElementById('endDate').addEventListener('change', load);
 document.getElementById('search').addEventListener('input', load);
 document.getElementById('sort').addEventListener('change', load);
 document.getElementById('order').addEventListener('change', load);
+document.getElementById('minAmount').addEventListener('input', load);
+document.getElementById('maxAmount').addEventListener('input', load);
 document.getElementById('clearFilters').addEventListener('click', () => {
   document.getElementById('filter').value = 'All';
   document.getElementById('startDate').value = '';
   document.getElementById('endDate').value = '';
   document.getElementById('search').value = '';
+  document.getElementById('minAmount').value = '';
+  document.getElementById('maxAmount').value = '';
   document.getElementById('sort').value = '';
   document.getElementById('order').value = 'asc';
   load();
@@ -518,9 +658,44 @@ async function importCsv() {
   await load();
 }
 
+async function checkPace() {
+  const status = document.getElementById('paceStatus');
+  const asof = document.getElementById('paceAsof').value;
+  if (!asof) { status.textContent = 'Pick a date to pace against.'; status.className = 'budget-status'; return; }
+  const res = await fetch('/api/summary/pace?asof=' + encodeURIComponent(asof));
+  const data = await res.json();
+  if (!res.ok || !data.pace) {
+    status.textContent = (data && data.error) || 'Could not compute pace.';
+    status.className = 'budget-status budget-over';
+    return;
+  }
+  const p = data.pace;
+  if (p.budget === null) {
+    status.textContent = 'Projected month-end spend ' + money(p.projected) +
+      ' (no budget set).';
+    status.className = 'budget-status';
+    return;
+  }
+  let msg = 'Projected ' + money(p.projected) + ' of ' + money(p.budget) + ' budget. ';
+  if (p.already_over) {
+    msg += 'Already over budget.';
+  } else if (p.on_track) {
+    msg += 'On track — ' + money(p.projected_remaining) + ' to spare';
+    if (p.daily_budget_remaining !== null) {
+      msg += ' (' + money(p.daily_budget_remaining) + '/day for ' + p.days_left + ' days left)';
+    }
+    msg += '.';
+  } else {
+    msg += 'Projected over by ' + money(Math.abs(p.projected_remaining)) + '.';
+  }
+  status.textContent = msg;
+  status.className = 'budget-status ' + (p.on_track ? 'budget-ok' : 'budget-over');
+}
+
 document.getElementById('saveBudget').addEventListener('click', saveBudget);
 document.getElementById('clearBudget').addEventListener('click', clearBudget);
 document.getElementById('importBtn').addEventListener('click', importCsv);
+document.getElementById('checkPace').addEventListener('click', checkPace);
 loadBudget();
 
 // default date = today
@@ -530,6 +705,7 @@ loadBudget();
     String(d.getMonth() + 1).padStart(2, '0') + '-' +
     String(d.getDate()).padStart(2, '0');
   document.getElementById('date').value = iso;
+  document.getElementById('paceAsof').value = iso;
 })();
 
 load();

@@ -1,0 +1,7 @@
+CREATE TABLE IF NOT EXISTS timer_presets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  minutes INTEGER NOT NULL,
+  seconds INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);

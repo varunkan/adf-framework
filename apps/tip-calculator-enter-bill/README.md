@@ -46,6 +46,34 @@ Validation errors return `400` with `{ "error": "..." }`:
 
 Results are rounded to two decimal places.
 
+### POST `/api/split`
+
+Split a bill across payers. Body: `{ "bill", "tip_percent", "people", "round_total", "weights" }`.
+Returns tip, total, per-person amounts and an exact `shares` list whose cents
+sum to the total. Pass `weights` (a list of positive numbers, e.g. `[1, 1, 2]`)
+to split **unevenly** — `people` is then taken from the weight count.
+
+### POST `/api/tax`
+
+Tax-aware totals. Body: `{ "bill", "tip_percent", "tax_percent", "tip_on" }`
+where `bill` is the pre-tax subtotal and `tip_on` is `"pretax"` (default) or
+`"posttax"`. Returns `subtotal`, `tax`, `tip` and `total`.
+
+### POST `/api/suggest`
+
+Suggest a tip from a 1–5 service rating. Body: `{ "bill", "rating" }`.
+Ratings map to conventional percents (1→10%, 2→15%, 3→18%, 4→20%, 5→25%) and
+the response carries the rating `label`, `tip_percent`, `tip` and `total`.
+
+### POST `/api/presets`
+
+Compare several tip percentages for one bill. Body: `{ "bill", "percents" }`
+(defaults to `[10, 15, 18, 20, 25]`).
+
+### POST `/api/reverse`
+
+Derive the tip percent needed to hit a target total. Body: `{ "bill", "total" }`.
+
 ### GET `/`
 
 Serves the frontend `index.html`.

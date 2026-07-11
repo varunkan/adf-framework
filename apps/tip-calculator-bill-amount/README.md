@@ -20,10 +20,16 @@ The canonical implementation is a zero-dependency Python 3 build (stdlib only):
     python3 -m unittest -v       # full test suite
 
 Domain logic and the HTTP layer both live in `server.py`; tests in `test_app.py`.
+The Python build owns its own local SQLite file (`data.db`, schema in
+`schema.sql`, path overridable via `TIP_DB_PATH`): each `/api/calculate` result
+is saved and can be read back via `GET /api/history`. The schema columns mirror
+the Python domain's output keys, so a result round-trips without renaming.
+
 JSON endpoints (all `POST` unless noted):
 
 - `/api/calculate` — tip + total from bill/percent, with tax-awareness, pre/post-tax
-  tipping, round-up, and per-person split (REQ-001/REQ-002).
+  tipping, round-up, and per-person split (REQ-001/REQ-002); the result is persisted.
+- `/api/history` — **GET**: the most recent saved calculations, newest first.
 - `/api/suggestions` — tip/total across several tip tiers.
 - `/api/reverse` — back out the tip needed to hit a target grand total.
 - `/api/round-split` — split with each share rounded up to a clean increment.

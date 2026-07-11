@@ -1,0 +1,69 @@
+{
+  "build": {
+    "backend": "auto",
+    "model": null,
+    "prompt": "@orch-orchestrator revise calculator\n\nPhase 6 \u2014 judge verdict: REVISE\nClient confirmed: YES \u2014 proceed only with confirmed direction.\n\n(Read judge-verdicts/phase-6.md for combined recommendation.)\n\n## Additional client notes\ndgfdsgdsg\n\n## Required actions\n1. Treat the **combined recommendation** as the feedback loop \u2014 do not advance gates until addressed.\n2. Update `requirement.md`, Spec Kit `specs/calculator/plan.md` (and spec/tasks as needed), and phase artifacts (`00-intake.md`, etc.).\n3. Ask the client any remaining clarifying questions in chat before large scope changes.\n4. Re-run phase 6 builders and BMAD review until judge verdict is **PASS**.",
+    "verified": true,
+    "verify_summary": ".........\n----------------------------------------------------------------------\nRan 9 tests in 4.559s\n\nOK\n\nboot check: server.py serves on :58411"
+  },
+  "created_at": "2026-06-19T19:51:44+00:00",
+  "feature_id": "calculator",
+  "files": [
+    {
+      "bytes": 1349,
+      "path": "README.md",
+      "sha256": "ea72765c7dafe5ab12b37ddcdb1f0d5c8cca247646b53af7575c3d72ba381f8b"
+    },
+    {
+      "bytes": 418,
+      "path": "history.json",
+      "sha256": "4753b43474d63892a1e50948fcbf6b442b5c8f5573cd998e771233ee994d6799"
+    },
+    {
+      "bytes": 7762,
+      "path": "index.html",
+      "sha256": "73b00cb38f82bc4cfeadf1890939df5861ef375e2d55d76ca8b16fd2302c8949"
+    },
+    {
+      "bytes": 5232,
+      "path": "server.py",
+      "sha256": "170e3add82a18745bf625d546892883c5c80fa189e6e64862e9d607df8e78888"
+    },
+    {
+      "bytes": 3190,
+      "path": "test_app.py",
+      "sha256": "e417bb85107e357669db6f24954abce227518e27cb84f5b28c06df64255b547b"
+    }
+  ],
+  "merkle_root": "9e258b55f81048f9aee0a85ce9b2742dc6e3daa3556a41f3a068f331033f92fc",
+  "schema": "adf-proof/1",
+  "seal": "adf1:9e258b55f810",
+  "spec_sha256": "dfd90904442d084ed5f43a8691d96c1b63a0ec6f0e244b03b000c8de6b400a1f",
+  "stack": "stdlib",
+  "verdict": {
+    "policy": {
+      "blocked": [],
+      "checked": true,
+      "enforced": [
+        "no_network_egress",
+        "no_plaintext_pii",
+        "no_secrets",
+        "no_weak_crypto"
+      ],
+      "n_violations": 0,
+      "ok": true,
+      "policy_id": "adf-default-secure",
+      "rules": [
+        "dependency_allowlist:pass",
+        "no_network_egress:pass",
+        "no_plaintext_pii:pass",
+        "no_secrets:pass",
+        "no_weak_crypto:pass",
+        "offline_capable:pass"
+      ]
+    },
+    "stack": "stdlib",
+    "verified": true,
+    "verify_summary": ".........\n----------------------------------------------------------------------\nRan 9 tests in 4.559s\n\nOK\n\nboot check: server.py serves on :58411"
+  }
+}

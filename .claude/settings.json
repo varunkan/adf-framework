@@ -12,6 +12,18 @@
         ]
       }
     ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cat >/dev/null || true; R=/Users/varunkumar/ands-platform; [ -f \"$R/.dev-logs/.mesh-active\" ] && [ -x \"$R/dev-up.sh\" ] && \"$R/dev-up.sh\" >>\"$R/.dev-logs/auto-heal.log\" 2>&1 || true",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "matcher": "",

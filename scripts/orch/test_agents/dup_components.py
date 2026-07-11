@@ -83,10 +83,22 @@ def _markup_dups(html):
     return findings
 
 
+# Vendored deps / build output / VCS / caches — NOT app-authored code. Duplication
+# inside third-party bundles (rollup, vite, chokidar, …) or compiled output is not a
+# reuse violation the heal loop can or should fix, so never scan these.
+_SKIP_DIRS = {
+    "node_modules", "dist", "build", "out", ".next", "coverage",
+    ".venv", "venv", "__pycache__", ".git", ".cache", "vendor",
+}
+
+
 def run(app_dir):
     code_files, html = [], ""
-    for root, _d, names in os.walk(app_dir):
-        if any(s in root for s in (".adf-", "__pycache__", ".git")):
+    for root, dirs, names in os.walk(app_dir):
+        # prune vendored/build/cache dirs in place so os.walk doesn't descend into them
+        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS and not d.startswith(".adf-")]
+        if any(s in root for s in (".adf-", "__pycache__", ".git")) or \
+                any(part in _SKIP_DIRS for part in root.split(os.sep)):
             continue
         for n in names:
             # Skip test files: duplicated test setup is expected and DRY-ing tests

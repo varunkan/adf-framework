@@ -252,10 +252,73 @@
       <button id="ti" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">t-CI</button>
     </div>
 
+    <label for="ostExpr" style="margin-top:0.9rem;">One-sample t-test — does the sample mean differ from a hypothesized value μ (in the target unit, default 0)? The one-group sibling of the t-test, t-CI and confidence interval (small p rejects)</label>
+    <div class="row">
+      <div><input id="ostExpr" type="text" placeholder="e.g. 10 m, 12 m, 14 m, 16 m, 18 m" style="margin-bottom:0;" /></div>
+      <div style="flex:0 0 auto;"><input id="ostMu" type="number" step="any" placeholder="μ = 0" title="hypothesized mean in the target unit (default 0)" style="margin-bottom:0;width:7rem;" /></div>
+      <div style="flex:0 0 auto;"><input id="ostAlpha" type="number" step="any" min="0" max="1" placeholder="α = 0.05" title="significance level in (0, 1)" style="margin-bottom:0;width:7rem;" /></div>
+      <button id="ost" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">1-sample t</button>
+    </div>
+
+    <label for="gofObs" style="margin-top:0.9rem;">Chi-square goodness-of-fit — do observed category counts follow an expected distribution? Counts are bare numbers (no units). Leave "expected" blank for a uniform null, or give matching weights/proportions (small p rejects)</label>
+    <div class="row">
+      <div><input id="gofObs" type="text" placeholder="observed, e.g. 18, 22, 20, 16, 24, 20" style="margin-bottom:0;" /></div>
+      <div><input id="gofExp" type="text" placeholder="expected (optional), e.g. 1, 1, 1, 1, 1, 1" style="margin-bottom:0;" /></div>
+      <div style="flex:0 0 auto;"><input id="gofDdof" type="number" step="1" min="0" placeholder="ddof = 0" title="parameters estimated from the data (lowers df)" style="margin-bottom:0;width:7rem;" /></div>
+      <div style="flex:0 0 auto;"><input id="gofAlpha" type="number" step="any" min="0" max="1" placeholder="α = 0.05" title="significance level in (0, 1)" style="margin-bottom:0;width:7rem;" /></div>
+      <button id="gof" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">χ² GOF</button>
+    </div>
+
     <label for="jbExpr" style="margin-top:0.9rem;">Jarque-Bera normality test — is the sample shape (skew + kurtosis) consistent with a normal distribution? (small p rejects)</label>
     <div class="row">
       <div><input id="jbExpr" type="text" placeholder="e.g. 10 m, 12 m, 14 m, 16 m, 18 m" style="margin-bottom:0;" /></div>
       <button id="jb" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">JB</button>
+    </div>
+
+    <label for="anovaExpr" style="margin-top:0.9rem;">One-way ANOVA (F-test) — do three-or-more groups share the same mean? Separate groups with ';' (small p rejects)</label>
+    <div class="row">
+      <div><input id="anovaExpr" type="text" placeholder="e.g. 1 m, 2 m, 3 m ; 4 m, 5 m, 6 m ; 7 m, 8 m, 9 m" style="margin-bottom:0;" /></div>
+      <button id="anova" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">ANOVA</button>
+    </div>
+
+    <label for="kruskalExpr" style="margin-top:0.9rem;">Kruskal-Wallis H test — the rank-based (non-normal) ANOVA: do k groups share one distribution? Separate groups with ';' (small p rejects)</label>
+    <div class="row">
+      <div><input id="kruskalExpr" type="text" placeholder="e.g. 1 m, 2 m, 3 m ; 4 m, 5 m, 6 m ; 7 m, 8 m, 9 m" style="margin-bottom:0;" /></div>
+      <button id="kruskal" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Kruskal-Wallis</button>
+    </div>
+
+    <label for="bartlettExpr" style="margin-top:0.9rem;">Bartlett's test — do k groups share one variance? (the homogeneity-of-variances pre-check behind ANOVA). Separate groups with ';' (small p rejects equal spread)</label>
+    <div class="row">
+      <div><input id="bartlettExpr" type="text" placeholder="e.g. 1 m, 2 m, 3 m, 4 m ; 2 m, 4 m, 6 m, 8 m ; 1 m, 1 m, 1 m, 2 m" style="margin-bottom:0;" /></div>
+      <button id="bartlett" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Bartlett</button>
+    </div>
+
+    <label for="leveneExpr" style="margin-top:0.9rem;">Levene's test — do k groups share one variance? The robust alternative to Bartlett (centres on each group's mean, or median for Brown&ndash;Forsythe). Separate groups with ';' (small p rejects equal spread)</label>
+    <div class="row">
+      <div><input id="leveneExpr" type="text" placeholder="e.g. 1 m, 2 m, 3 m, 4 m ; 2 m, 4 m, 6 m, 8 m ; 1 m, 1 m, 1 m, 2 m" style="margin-bottom:0;" /></div>
+      <select id="leveneCenter" style="width:auto;margin-bottom:0;">
+        <option value="mean">mean</option>
+        <option value="median">median</option>
+      </select>
+      <button id="levene" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Levene</button>
+    </div>
+
+    <label for="signExpr" style="margin-top:0.9rem;">Sign test — the assumption-free paired test: did the median shift? Uses only the direction of each before/after change. Separate the two paired series with ';' (small p rejects)</label>
+    <div class="row">
+      <div><input id="signExpr" type="text" placeholder="e.g. 5 m, 6 m, 7 m, 8 m ; 4 m, 5 m, 6 m, 9 m" style="margin-bottom:0;" /></div>
+      <button id="sign" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Sign test</button>
+    </div>
+
+    <label for="cohensExpr" style="margin-top:0.9rem;">Cohen's d effect size — how big is the gap between two samples' means (in pooled-stdev units)? Separate the two samples with ';'</label>
+    <div class="row">
+      <div><input id="cohensExpr" type="text" placeholder="e.g. 1 m, 2 m, 3 m, 4 m, 5 m ; 6 m, 7 m, 8 m, 9 m, 10 m" style="margin-bottom:0;" /></div>
+      <button id="cohens" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">Cohen's d</button>
+    </div>
+
+    <label for="fTestExpr" style="margin-top:0.9rem;">F-test for equal variances — are two samples equally spread out (the pooled-vs-Welch t-test pre-check)? Separate the two samples with ';'</label>
+    <div class="row">
+      <div><input id="fTestExpr" type="text" placeholder="e.g. 1 m, 2 m, 3 m, 4 m, 5 m ; 2 m, 4 m, 6 m, 8 m, 10 m" style="margin-bottom:0;" /></div>
+      <button id="fTest" type="button" style="width:auto;padding:0.7rem 0.9rem;background:rgba(255,255,255,0.15);color:#fff;margin-bottom:0;">F-test</button>
     </div>
 
     <label for="giniExpr" style="margin-top:0.9rem;">Gini inequality coefficient — how evenly the total is shared (0 = equal, →1 = concentrated)</label>
@@ -325,6 +388,18 @@
 
   let UNITS = {};
 
+  function escapeHtml(value) {
+    return String(value == null ? "" : value).replace(/[&<>"']/g, function (ch) {
+      return {
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      }[ch];
+    });
+  }
+
   function fillSelect(sel, units, selectedIndex) {
     sel.innerHTML = "";
     units.forEach(function (u, i) {
@@ -380,7 +455,8 @@
       }
       const tag = delta ? " <span style=\"opacity:0.7;font-size:0.85rem;\">(interval)</span>" : "";
       resultEl.innerHTML =
-        data.input + " " + data.from + " = <strong>" + data.result + " " + data.to + "</strong>" + tag;
+        escapeHtml(data.input) + " " + escapeHtml(data.from) + " = <strong>" +
+        escapeHtml(data.result) + " " + escapeHtml(data.to) + "</strong>" + tag;
     } catch (e) {
       resultEl.innerHTML = '<span class="err">Network error.</span>';
     }
@@ -1269,6 +1345,105 @@
     }
   }
 
+  async function oneSampleT() {
+    const items = parseQuantityList(document.getElementById("ostExpr").value);
+    if (!items) return;
+    allResultsEl.innerHTML = "";
+    const muRaw = document.getElementById("ostMu").value;
+    const alphaRaw = document.getElementById("ostAlpha").value;
+    const body = { items: items, to: toEl.value };
+    if (muRaw !== "") body.mu = Number(muRaw);
+    if (alphaRaw !== "") body.alpha = Number(alphaRaw);
+    try {
+      const resp = await fetch("/api/one-sample-t-test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "One-sample t-test failed") + "</span>";
+        return;
+      }
+      const verdict = data.significant
+        ? "mean differs from μ (p < " + data.alpha + ")"
+        : "no significant difference from μ (p ≥ " + data.alpha + ")";
+      const pct = (data.confidence_level * 100);
+      resultEl.innerHTML =
+        "<strong>p = " + data.p_value + "</strong> &middot; " + verdict +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' +
+        "mean " + data.mean + " " + data.unit + " vs μ = " + data.mu + " " + data.unit +
+        " (difference " + data.difference + ")<br>" +
+        "t = " + data.statistic + " (df " + data.df + ", SE = " + data.standard_error + ")<br>" +
+        pct + "% CI [" + data.lower + ", " + data.upper + "] " + data.unit + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  function parseNumberList(raw) {
+    // Bare, dimensionless numbers separated by commas/whitespace (the χ² GOF
+    // counts and expected weights carry no units). Returns null on any
+    // non-numeric token so the caller can surface an error, [] for empty input.
+    const text = (raw || "").trim();
+    if (!text) return [];
+    const tokens = text.split(/[\s,]+/).filter(function (t) { return t.length; });
+    const out = [];
+    for (const tok of tokens) {
+      const n = Number(tok);
+      if (!isFinite(n)) return null;
+      out.push(n);
+    }
+    return out;
+  }
+
+  async function chiSquareGof() {
+    const observed = parseNumberList(document.getElementById("gofObs").value);
+    if (!observed || observed.length < 2) {
+      resultEl.innerHTML = '<span class="err">Enter at least two observed counts (comma-separated).</span>';
+      return;
+    }
+    const expected = parseNumberList(document.getElementById("gofExp").value);
+    if (expected === null) {
+      resultEl.innerHTML = '<span class="err">Expected counts must all be numbers.</span>';
+      return;
+    }
+    allResultsEl.innerHTML = "";
+    const ddofRaw = document.getElementById("gofDdof").value;
+    const alphaRaw = document.getElementById("gofAlpha").value;
+    const body = { observed: observed };
+    if (expected.length) body.expected = expected;
+    if (ddofRaw !== "") body.ddof = Number(ddofRaw);
+    if (alphaRaw !== "") body.alpha = Number(alphaRaw);
+    try {
+      const resp = await fetch("/api/chi-square-gof", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Goodness-of-fit test failed") + "</span>";
+        return;
+      }
+      const verdict = data.significant
+        ? "departs from expected (p < " + data.alpha + ")"
+        : "consistent with expected (p ≥ " + data.alpha + ")";
+      const rows = data.categories.map(function (c, i) {
+        return "cat " + i + ": observed " + c.observed + ", expected " + c.expected +
+          " (residual " + c.residual + ")";
+      }).join("<br>");
+      resultEl.innerHTML =
+        "<strong>χ² = " + data.statistic + "</strong> (p = " + data.p_value + ", df " + data.df + ")" +
+        " &middot; " + verdict +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' +
+        data.k + " categories &middot; total " + data.n + " &middot; ddof " + data.ddof + "<br>" +
+        rows + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
   async function jarqueBera() {
     const items = parseQuantityList(document.getElementById("jbExpr").value);
     if (!items) return;
@@ -1293,6 +1468,241 @@
         data.count + " " + data.category + " quantities &middot; " + verdict + "<br>" +
         "skewness " + data.skewness + ", excess kurtosis " + data.kurtosis + "<br>" +
         "mean " + data.mean + " " + data.unit + ", stdev " + data.stdev + " " + data.unit + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function anova() {
+    const raw = document.getElementById("anovaExpr").value || "";
+    const groupStrings = raw.split(";").map(function (s) { return s.trim(); }).filter(Boolean);
+    if (groupStrings.length < 2) {
+      resultEl.innerHTML = '<span class="err">List at least two groups separated by \';\', e.g. "1 m, 2 m ; 3 m, 4 m".</span>';
+      return;
+    }
+    const groups = [];
+    for (let i = 0; i < groupStrings.length; i++) {
+      const items = parseQuantityList(groupStrings[i]);
+      if (!items) return;
+      groups.push(items);
+    }
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/anova", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ groups: groups, to: toEl.value }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "ANOVA failed") + "</span>";
+        return;
+      }
+      const verdict = data.significant
+        ? "means differ (reject equal-means at " + (data.alpha * 100) + "%)"
+        : "no detected difference (fail to reject at " + (data.alpha * 100) + "%)";
+      const rows = data.groups.map(function (g, i) {
+        return "&nbsp;&nbsp;group " + (i + 1) + ": n=" + g.n + ", mean " + g.mean + " " + data.unit;
+      }).join("<br>");
+      resultEl.innerHTML =
+        "<strong>F " + data.statistic + "</strong> (p = " + data.p_value + ", df " + data.df_between + ", " + data.df_within + ")" +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' +
+        data.k + " groups, " + data.n_total + " " + data.category + " quantities &middot; " + verdict + "<br>" +
+        "grand mean " + data.grand_mean + " " + data.unit + "<br>" + rows + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function kruskal() {
+    const raw = document.getElementById("kruskalExpr").value || "";
+    const groupStrings = raw.split(";").map(function (s) { return s.trim(); }).filter(Boolean);
+    if (groupStrings.length < 2) {
+      resultEl.innerHTML = '<span class="err">List at least two groups separated by \';\', e.g. "1 m, 2 m ; 3 m, 4 m".</span>';
+      return;
+    }
+    const groups = [];
+    for (let i = 0; i < groupStrings.length; i++) {
+      const items = parseQuantityList(groupStrings[i]);
+      if (!items) return;
+      groups.push(items);
+    }
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/kruskal-wallis", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ groups: groups, to: toEl.value }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Kruskal-Wallis failed") + "</span>";
+        return;
+      }
+      const verdict = data.significant
+        ? "distributions differ (reject equal-location at " + (data.alpha * 100) + "%)"
+        : "no detected difference (fail to reject at " + (data.alpha * 100) + "%)";
+      const rows = data.groups.map(function (g, i) {
+        return "&nbsp;&nbsp;group " + (i + 1) + ": n=" + g.n + ", mean rank " + g.mean_rank;
+      }).join("<br>");
+      resultEl.innerHTML =
+        "<strong>H " + data.statistic + "</strong> (p = " + data.p_value + ", df " + data.df + ")" +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' +
+        data.k + " groups, " + data.n_total + " " + data.category + " quantities &middot; " + verdict +
+        (data.has_ties ? "<br>tie-corrected (C = " + data.correction + ")" : "") + "<br>" + rows + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function bartlett() {
+    const raw = document.getElementById("bartlettExpr").value || "";
+    const groupStrings = raw.split(";").map(function (s) { return s.trim(); }).filter(Boolean);
+    if (groupStrings.length < 2) {
+      resultEl.innerHTML = '<span class="err">List at least two groups separated by \';\', e.g. "1 m, 2 m ; 3 m, 6 m".</span>';
+      return;
+    }
+    const groups = [];
+    for (let i = 0; i < groupStrings.length; i++) {
+      const items = parseQuantityList(groupStrings[i]);
+      if (!items) return;
+      groups.push(items);
+    }
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/bartlett", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ groups: groups, to: toEl.value }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Bartlett's test failed") + "</span>";
+        return;
+      }
+      const verdict = data.significant
+        ? "variances differ (reject equal-variance at " + (data.alpha * 100) + "%)"
+        : "no detected difference (fail to reject at " + (data.alpha * 100) + "%)";
+      const rows = data.groups.map(function (g, i) {
+        return "&nbsp;&nbsp;group " + (i + 1) + ": n=" + g.n + ", var " + g.var + " (sd " + g.stdev + " " + data.unit + ")";
+      }).join("<br>");
+      resultEl.innerHTML =
+        "<strong>&chi;&sup2; " + data.statistic + "</strong> (p = " + data.p_value + ", df " + data.df + ")" +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' +
+        data.k + " groups, " + data.n_total + " " + data.category + " quantities &middot; " + verdict + "<br>" +
+        "pooled variance " + data.pooled_variance + " &middot; correction " + data.correction + "<br>" + rows + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function signTest() {
+    const raw = document.getElementById("signExpr").value || "";
+    const seriesStrings = raw.split(";").map(function (s) { return s.trim(); }).filter(Boolean);
+    if (seriesStrings.length !== 2) {
+      resultEl.innerHTML = '<span class="err">List exactly two paired series separated by \';\', e.g. "5 m, 6 m ; 4 m, 7 m".</span>';
+      return;
+    }
+    const x = parseQuantityList(seriesStrings[0]);
+    if (!x) return;
+    const y = parseQuantityList(seriesStrings[1]);
+    if (!y) return;
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/sign-test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ x: x, y: y, to: toEl.value }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Sign test failed") + "</span>";
+        return;
+      }
+      const verdict = data.significant
+        ? "median shift is real (p < " + data.alpha + ")"
+        : "no significant shift (p ≥ " + data.alpha + ")";
+      resultEl.innerHTML =
+        "<strong>p = " + data.p_value + "</strong> &middot; " + verdict +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' +
+        data.n_plus + " positive, " + data.n_minus + " negative, " + data.n_zero + " tied (dropped)<br>" +
+        "median difference " + data.median_difference + " " + data.unit + " &middot; statistic " + data.statistic + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function cohens() {
+    const raw = document.getElementById("cohensExpr").value || "";
+    const sampleStrings = raw.split(";").map(function (s) { return s.trim(); }).filter(Boolean);
+    if (sampleStrings.length !== 2) {
+      resultEl.innerHTML = '<span class="err">List exactly two samples separated by \';\', e.g. "1 m, 2 m ; 3 m, 4 m".</span>';
+      return;
+    }
+    const a = parseQuantityList(sampleStrings[0]);
+    if (!a) return;
+    const b = parseQuantityList(sampleStrings[1]);
+    if (!b) return;
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/cohens-d", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ a: a, b: b, to: toEl.value }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "Cohen's d failed") + "</span>";
+        return;
+      }
+      const glass = data.glass_delta === null ? "n/a (sample B constant)" : data.glass_delta;
+      resultEl.innerHTML =
+        "<strong>d = " + data.cohens_d + "</strong> (" + data.magnitude + " effect)" +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' +
+        "sample A: n=" + data.n_a + ", mean " + data.mean_a + " " + data.unit + "<br>" +
+        "sample B: n=" + data.n_b + ", mean " + data.mean_b + " " + data.unit + "<br>" +
+        "difference " + data.difference + " " + data.unit + " &middot; pooled stdev " + data.pooled_stdev + " " + data.unit + "<br>" +
+        "Hedges' g " + data.hedges_g + " &middot; Glass's delta " + glass + "</div>";
+    } catch (e) {
+      resultEl.innerHTML = '<span class="err">Network error.</span>';
+    }
+  }
+
+  async function fTest() {
+    const raw = document.getElementById("fTestExpr").value || "";
+    const sampleStrings = raw.split(";").map(function (s) { return s.trim(); }).filter(Boolean);
+    if (sampleStrings.length !== 2) {
+      resultEl.innerHTML = '<span class="err">List exactly two samples separated by \';\', e.g. "1 m, 2 m ; 3 m, 4 m".</span>';
+      return;
+    }
+    const a = parseQuantityList(sampleStrings[0]);
+    if (!a) return;
+    const b = parseQuantityList(sampleStrings[1]);
+    if (!b) return;
+    allResultsEl.innerHTML = "";
+    try {
+      const resp = await fetch("/api/variance-ratio-test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ a: a, b: b, to: toEl.value }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        resultEl.innerHTML = '<span class="err">' + (data.error || "F-test failed") + "</span>";
+        return;
+      }
+      const verdict = data.significant
+        ? "variances differ (p < " + data.alpha + ")"
+        : "no significant difference (p ≥ " + data.alpha + ")";
+      const bigger = data.larger_variance === "equal"
+        ? "the two variances are equal"
+        : "sample " + data.larger_variance.toUpperCase() + " varies more";
+      resultEl.innerHTML =
+        "<strong>F = " + data.variance_ratio + "</strong> (df " + data.df_a + ", " + data.df_b + ") &middot; p = " + data.p_value +
+        '<div style="margin-top:0.5rem;opacity:0.9;font-size:0.95rem;text-align:left;">' +
+        verdict + " &middot; " + bigger + "<br>" +
+        "sample A: n=" + data.n_a + ", var " + data.var_a + ", stdev " + data.stdev_a + " " + data.unit + "<br>" +
+        "sample B: n=" + data.n_b + ", var " + data.var_b + ", stdev " + data.stdev_b + " " + data.unit + "</div>";
     } catch (e) {
       resultEl.innerHTML = '<span class="err">Network error.</span>';
     }
@@ -1560,6 +1970,17 @@
   document.getElementById("lorenz").addEventListener("click", lorenz);
   document.getElementById("jb").addEventListener("click", jarqueBera);
   document.getElementById("jbExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") jarqueBera(); });
+  document.getElementById("anova").addEventListener("click", anova);
+  document.getElementById("anovaExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") anova(); });
+  document.getElementById("kruskal").addEventListener("click", kruskal);
+  document.getElementById("sign").addEventListener("click", signTest);
+  document.getElementById("kruskalExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") kruskal(); });
+  document.getElementById("bartlett").addEventListener("click", bartlett);
+  document.getElementById("bartlettExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") bartlett(); });
+  document.getElementById("cohens").addEventListener("click", cohens);
+  document.getElementById("cohensExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") cohens(); });
+  document.getElementById("fTest").addEventListener("click", fTest);
+  document.getElementById("fTestExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") fTest(); });
   document.getElementById("giniExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") gini(); });
   document.getElementById("lorenzExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") lorenz(); });
   document.getElementById("trim").addEventListener("click", trimmedMean);
@@ -1586,6 +2007,11 @@
   document.getElementById("ciExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") confidenceInterval(); });
   document.getElementById("ti").addEventListener("click", tInterval);
   document.getElementById("tiExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") tInterval(); });
+  document.getElementById("ost").addEventListener("click", oneSampleT);
+  document.getElementById("ostExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") oneSampleT(); });
+  document.getElementById("gof").addEventListener("click", chiSquareGof);
+  document.getElementById("gofObs").addEventListener("keydown", function (e) { if (e.key === "Enter") chiSquareGof(); });
+  document.getElementById("gofExp").addEventListener("keydown", function (e) { if (e.key === "Enter") chiSquareGof(); });
   document.getElementById("means").addEventListener("click", means);
   document.getElementById("meansExpr").addEventListener("keydown", function (e) { if (e.key === "Enter") means(); });
   document.getElementById("rankAsc").addEventListener("click", function () { rank(false); });

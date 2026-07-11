@@ -1,0 +1,50 @@
+{
+  "enforce": [
+    "no_network_egress",
+    "no_plaintext_pii",
+    "no_secrets",
+    "no_weak_crypto"
+  ],
+  "n_files": 5,
+  "n_violations": 0,
+  "ok": true,
+  "policy_id": "adf-default-secure",
+  "rules": [
+    {
+      "enabled": true,
+      "ok": true,
+      "rule": "no_secrets",
+      "violations": []
+    },
+    {
+      "enabled": true,
+      "ok": true,
+      "rule": "no_weak_crypto",
+      "violations": []
+    },
+    {
+      "enabled": true,
+      "ok": true,
+      "rule": "no_network_egress",
+      "violations": []
+    },
+    {
+      "enabled": true,
+      "ok": true,
+      "rule": "offline_capable",
+      "violations": []
+    },
+    {
+      "enabled": true,
+      "ok": true,
+      "rule": "no_plaintext_pii",
+      "violations": []
+    },
+    {
+      "enabled": true,
+      "ok": true,
+      "rule": "dependency_allowlist",
+      "violations": []
+    }
+  ]
+}

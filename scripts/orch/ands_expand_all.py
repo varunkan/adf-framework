@@ -53,6 +53,29 @@ SLICES = [
      ["REQ-053", "REQ-054", "REQ-060", "REQ-067", "REQ-068", "REQ-069"]),
     ("platform-versioning", "Version-plugin architecture, HC ruleset/vocab updates, stylesheets, DR/BCP",
      ["REQ-041", "REQ-055", "REQ-056", "REQ-065", "REQ-066"]),
+    # --- v2 SaaS/UI expansion — DECOMPOSED into small, single-turn landable increments
+    #     (S2 of docs/ANDS_V2_DELIVERY_ANALYSIS.md). Each slice must reach green+commit on
+    #     its own so progress survives rate-limit throttling. Phase A REQ-077..084 done. ---
+    ("v2a-router-nav", "Router + persistent nav SKELETON: distinct deep-linkable route per area, URL changes, breadcrumbs, active-nav (no heavy styling yet)",
+     ["REQ-085", "UI-1"]),
+    ("v2b-prism-css", "Prism/3D design system: design tokens + self-contained glass/elevation CSS applied across existing pages (WCAG AA preserved)",
+     ["REQ-086", "UI-4", "UI-5"]),
+    ("v2c-dashboard", "Readiness Dashboard page: per-submission journey position + Resume",
+     ["REQ-071", "UI-2"]),
+    ("v2d-ectd-tree", "Content & eCTD document/backbone TREE page (bound to existing backbone/ectd/content_model)",
+     ["REQ-071", "UI-2"]),
+    ("v2e-journey", "Guided self-advancing submission JOURNEY: ordered gated stages with click-next nav",
+     ["REQ-073", "UI-6"]),
+    ("v2f-teaching", "Self-teaching layer: in-context tutor, plain-language how-to-fix, drug-type benchmarks + HC KB",
+     ["REQ-072", "UI-7", "UI-8", "UI-9", "UI-10"]),
+    ("v2g-export", "CESG-ready checksummed package EXPORT (ZIP) via existing transmission/ectd",
+     ["REQ-074"]),
+    ("v2h-validate-ux", "Validation results UX: link/checksum integrity surfacing with plain-language fixes",
+     ["REQ-075"]),
+    ("v2i-reviews-owner", "Review/approval workflow + owner control-plane pages over built tenancy/entitlements",
+     ["REQ-076", "UI-3"]),
+    ("v2j-rep-stylesheet", "REP XML stylesheet bundling + render-for-review (needs external HC .xsl asset)",
+     ["REQ-065"]),
 ]
 
 
@@ -78,7 +101,7 @@ def req_block(rids):
     out, i = [], 0
     import re
     while i < len(lines):
-        m = re.match(r'^###\s+(REQ-\d+)\s*(.*)$', lines[i])
+        m = re.match(r'^###\s+((?:REQ|UI)-\d+)\.?\s*(.*)$', lines[i])
         if m and m.group(1) in want:
             title = m.group(2).strip()
             j = i + 1
@@ -92,15 +115,32 @@ def req_block(rids):
 
 
 def write_scope(name, desc, rids):
+    is_v2 = name.startswith("v2-")
+    detail = f"""
+## READ THE DETAILED DESIGN BEFORE WRITING CODE (authoritative — the list above is only an index)
+Open and build to these IN FULL; do not infer the design from the one-line summaries:
+- `specs/{ID}/requirements.md` — the COMPLETE `### <id>` section (EARS text + acceptance criteria)
+  for EACH requirement/UI id in this slice.
+- `specs/{ID}/spec.md` — exact field names, formats, and rules."""
+    if is_v2:
+        detail += f"""
+- `specs/{ID}/v2-ui-build-plan.md` — the slice plan (U0..U6) and the per-slice acceptance bar.
+- `specs/{ID}/v2-design-spec.md` — the v2 SaaS/UI design: multi-page shell, route map, owner
+  control plane, Prism/3D design language, and interaction patterns.
+- `specs/{ID}/hc-guidelines.md` — the sourced+dated HC guidelines that seed the guided tutor /
+  knowledge base (for the journey + self-teaching slices).
+GUARDRAILS: single `server.py`, Python-3 stdlib ONLY, runs offline (no pip/CDN/framework); the UI
+MUST keep WCAG 2.1 AA (labels/focus/ARIA — never sacrificed for the glass aesthetic); REUSE the
+existing built backend modules — do not rebuild, weaken, or shrink them."""
     body = f"""# ANDS Portal — slice: {desc} (ADDITIVELY extend the existing app)
 
 The app at `apps/{ID}/` ALREADY EXISTS and passes its tests. ADD coverage for the
 requirements below WITHOUT removing, weakening, or shrinking anything already built.
-Keep every existing test green and add new tests for each requirement here. Use
-`requirements.md` and `spec.md` for the exact rules, formats, and field names.
+Keep every existing test green and add new tests for each requirement here.
 
 ## Requirements to ADD in this slice
 {req_block(rids)}
+{detail}
 
 Build real domain logic + JSON API endpoints + UI for each, plus unittest coverage.
 The full suite (old + new) must pass with `python3 -m unittest -v`, and
@@ -187,8 +227,8 @@ def write_review_scope():
 The app at `apps/{ID}/` implements the ANDS portal and passes its tests. Now do a
 RIGOROUS REVIEW against the FULL spec and HARDEN it. Do NOT remove features or tests.
 
-1. Read EVERY requirement in `specs/{ID}/requirements.md` (REQ-001..REQ-070) and the
-   spec. For EACH, confirm it is REALLY implemented (not a stub, TODO, or partial).
+1. Read EVERY requirement in `specs/{ID}/requirements.md` (REQ-001..REQ-086 + UI-1..UI-10)
+   and the spec. For EACH, confirm it is REALLY implemented (not a stub, TODO, or partial).
    Where one is missing/stubbed/partial, IMPLEMENT IT FULLY and add tests proving it.
 2. Review for CORRECTNESS bugs; fix each and add a regression test.
 3. Review for SECURITY: input validation, path traversal, SQL/HTML injection,

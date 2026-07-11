@@ -1,0 +1,146 @@
+{
+  "build": {
+    "backend": "auto",
+    "model": null,
+    "prompt": "@orch-orchestrator revise snake-ladder-games\n\nPhase 6 \u2014 judge verdict: REVISE\nClient confirmed: YES \u2014 proceed only with confirmed direction.\n\n(Read judge-verdicts/phase-6.md for combined recommendation.)\n\n## Additional client notes\n(No extra client notes \u2014 combined recommendation is the primary feedback.)\n\n## Required actions\n1. Treat the **combined recommendation** as the feedback loop \u2014 do not advance gates until addressed.\n2. Update `requirement.md`, Spec Kit `specs/snake-ladder-games/plan.md` (and spec/tasks as needed), and phase artifacts (`00-intake.md`, etc.).\n3. Ask the client any remaining clarifying questions in chat before large scope changes.\n4. Re-run phase 6 builders and BMAD review until judge verdict is **PASS**.",
+    "verified": true,
+    "verify_summary": "build + vitest passed; node serves / and /api/health on :63046; render OK \u2014 body has 5 interactive element(s) and 285 chars of text"
+  },
+  "created_at": "2026-06-16T11:05:47+00:00",
+  "feature_id": "snake-ladder-games",
+  "files": [
+    {
+      "bytes": 517,
+      "path": "README.md",
+      "sha256": "9aa00e9f81b24bf599af2d418f319bf98ac86f7b6b55d8324bed8a85110e87f3"
+    },
+    {
+      "bytes": 294,
+      "path": "index.html",
+      "sha256": "96d86f0cee80469fa6b60b6a871da8d963539560c63dd9cc83441926601c6a4f"
+    },
+    {
+      "bytes": 722,
+      "path": "package.json",
+      "sha256": "836b28f8b04b0aa57a016e60c65ffe32df751ecc737b00efb4108ecb81aedeb2"
+    },
+    {
+      "bytes": 69,
+      "path": "postcss.config.js",
+      "sha256": "f291af35aed970d241227c61b79861d3ff8f08705babd56649fd8fe8776c360b"
+    },
+    {
+      "bytes": 646,
+      "path": "schema.sql",
+      "sha256": "3f0e41bfab66d77b170ed7357c896497cabb848a3f1594ca102f29c628a7032c"
+    },
+    {
+      "bytes": 4213,
+      "path": "server/api/snake-ladder-games.mjs",
+      "sha256": "bdae1cccb669cf37e195c90a14869380e0ae4bad3ce33de2ca7937475c58774a"
+    },
+    {
+      "bytes": 1065,
+      "path": "server/app.mjs",
+      "sha256": "d9d02c8a982ba95db70b6d7699503ee7e0341d72c23ec6333527fc6f15c69b63"
+    },
+    {
+      "bytes": 2732,
+      "path": "server/auth.mjs",
+      "sha256": "5c5a1cb63e7723ea4565c236083eb5f74f11ef7c37454873a567b33769278377"
+    },
+    {
+      "bytes": 802,
+      "path": "server/board.mjs",
+      "sha256": "2e36dbaef25f5594ba3e0665ee0f6c81395588c049e20d1445bb26827987e72a"
+    },
+    {
+      "bytes": 495,
+      "path": "server/db.mjs",
+      "sha256": "6fcf0dae7e7cc219e96bf50f78dc28097dff3f79c627ed00bfe1de6e8d878685"
+    },
+    {
+      "bytes": 304,
+      "path": "server/index.mjs",
+      "sha256": "42d2dbe5a1363404cddc0045fb8e55a25a20989de53809e7777533b99a4e11a9"
+    },
+    {
+      "bytes": 5711,
+      "path": "src/App.tsx",
+      "sha256": "c2a4cc8819fee35df200191f48fc30cf09319c0e3af70d6d76cfa1c7441517e5"
+    },
+    {
+      "bytes": 2512,
+      "path": "src/components/Board.tsx",
+      "sha256": "365f3f72979307474107db5923cb509dd30956e72600453c6dc9b2355a013f76"
+    },
+    {
+      "bytes": 59,
+      "path": "src/index.css",
+      "sha256": "cc1a7ad0d019ddb1d32d0ecb588ba0ac26ce41d8625dd6c366348b25f83a28ec"
+    },
+    {
+      "bytes": 246,
+      "path": "src/main.tsx",
+      "sha256": "b07deb33042809cd442ff9fbffc451b8ae05f6fe9a0c6d11dc9a283e3f8916ff"
+    },
+    {
+      "bytes": 477,
+      "path": "src/types.ts",
+      "sha256": "8c6783f987c93e90e76991baff975900ec50fffebe63a7613664d9c6fde186c2"
+    },
+    {
+      "bytes": 155,
+      "path": "tailwind.config.js",
+      "sha256": "0e5b1720ee81cff033cd39c39298ce7df6e41f9559325560d8dd5c261420d0da"
+    },
+    {
+      "bytes": 953,
+      "path": "test/auth.test.mjs",
+      "sha256": "f4b83fe79cab30f7c7cba52ec8dcb5fb238546f79eb3a912db16a322218dfbb3"
+    },
+    {
+      "bytes": 4077,
+      "path": "test/snake-ladder-games.test.mjs",
+      "sha256": "00ad3ad05516009580b2f0f20d8d86c5ae8907b5a78a1805925defc58ffb618a"
+    },
+    {
+      "bytes": 510,
+      "path": "tsconfig.json",
+      "sha256": "83672d2660de080f79e2f9db04811760bc2b1ae475c3c6da33662e6b0de5a94c"
+    },
+    {
+      "bytes": 162,
+      "path": "vite.config.ts",
+      "sha256": "dc9b8c2c4e81b143be4e522bcae8abb4af5df6b28f43469a8ecf0c02704c3117"
+    },
+    {
+      "bytes": 213,
+      "path": "vitest.config.mjs",
+      "sha256": "77fb49e5dcb4bacb5cc3d23a5a679e78476e098483b2ac3381b1faeab46a4d15"
+    }
+  ],
+  "merkle_root": "3fe6672533f626de574f751877db07ae805addd5fc9e35ddc89fb9aece4a5712",
+  "schema": "adf-proof/1",
+  "seal": "adf1:3fe6672533f6",
+  "spec_sha256": "2c60fbcc5d12fd1f2ed00abec38e75b83814fa770ca37f6af730c7f56999bf4d",
+  "stack": "react-vite-sqlite",
+  "verdict": {
+    "policy": {
+      "checked": true,
+      "n_violations": 0,
+      "ok": true,
+      "policy_id": "adf-default-secure",
+      "rules": [
+        "dependency_allowlist:pass",
+        "no_network_egress:pass",
+        "no_plaintext_pii:pass",
+        "no_secrets:pass",
+        "offline_capable:pass"
+      ]
+    },
+    "stack": "react-vite-sqlite",
+    "verified": true,
+    "verify_summary": "build + vitest passed; node serves / and /api/health on :63046; render OK \u2014 body has 5 interactive element(s) and 285 chars of text"
+  }
+}

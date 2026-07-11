@@ -1,11 +1,7 @@
-# Notes App (notes-where-can-note)
+# Notes — `notes-where-can-note`
 
-A minimal notes app: add a note and see the list of notes.
-Pure Python standard library backend + single static HTML frontend.
-
-## Requirements
-
-- Python 3 (standard library only — no pip installs)
+A tiny notes app: add a note and see the list of notes. Backend is Python
+standard library only; frontend is a single static HTML file.
 
 ## Run
 
@@ -13,24 +9,26 @@ Pure Python standard library backend + single static HTML frontend.
 python3 server.py
 ```
 
-Then open your browser to:
+The server binds to the `PORT` environment variable (default `8000`).
 
-```
-http://127.0.0.1:8000
-```
+Open: http://localhost:8000
 
-You will see a text box. Type a note, click **Add Note** (or press Ctrl/Cmd+Enter),
-and it appears in the list below. The list and count update immediately.
+Override the port:
+
+```bash
+PORT=9000 python3 server.py
+```
 
 ## API
 
-- `GET /` — serves the frontend (index.html)
-- `GET /api/notes` — returns `{"notes": [{"id":1,"text":"..."}, ...]}`
-- `POST /api/notes` with JSON body `{"text": "my note"}`
-  - `200` → `{"note": {"id": N, "text": "my note"}}`
-  - `400` → empty text or invalid JSON
+- `GET /` — serves the frontend (`index.html`).
+- `GET /api/notes` — returns `{"notes": [{"id": 1, "text": "..."}, ...]}` with status `200`.
+- `POST /api/notes` — body `{"text": "your note"}`.
+  - `201` with the created note `{"id": N, "text": "..."}` on success.
+  - `400` `{"error": "..."}` if the JSON body is invalid or text is empty.
+- Any other path returns `404`.
 
-Notes are stored in memory and reset when the server restarts.
+Notes are persisted to `notes_data.json` next to `server.py`.
 
 ## Test
 
@@ -38,5 +36,7 @@ Notes are stored in memory and reset when the server restarts.
 python3 test_app.py
 ```
 
-All tests should pass with zero failures. The test suite starts the server on a
-random free port in a background thread and exercises the API directly.
+This starts the server on an ephemeral port in a background thread, exercises
+the create + list success path, and asserts the validation (`400`) and
+not-found (`404`) error cases. It uses an isolated test data file that is
+removed afterward.

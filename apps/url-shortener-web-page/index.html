@@ -1,53 +1,514 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>URL Shortener</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-        }
-        #result {
-            margin-top: 20px;
-        }
-    </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>URL Shortener</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+    min-height: 100vh;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 40px 16px;
+    color: #1e293b;
+  }
+  .card {
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.25);
+    width: 100%;
+    max-width: 560px;
+    padding: 32px;
+  }
+  h1 { margin: 0 0 4px; font-size: 1.6rem; }
+  p.sub { margin: 0 0 24px; color: #64748b; font-size: 0.95rem; }
+  .row { display: flex; gap: 10px; }
+  .row.opts { margin-top: 10px; }
+  .search { width: 100%; margin-bottom: 12px; }
+  select {
+    padding: 12px 14px;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    font-size: 1rem;
+    background: #fff;
+    color: #1e293b;
+  }
+  .clicks {
+    color: #64748b;
+    font-size: .8rem;
+    white-space: nowrap;
+  }
+  .badge {
+    font-size: .7rem;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 6px;
+    background: #ede9fe;
+    color: #6d28d9;
+  }
+  .badge.expired { background: #fee2e2; color: #b91c1c; }
+  .badge.disabled { background: #e2e8f0; color: #475569; }
+  .tag {
+    font-size: .68rem;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 6px;
+    background: #dbeafe;
+    color: #1d4ed8;
+  }
+  li.is-disabled { opacity: .6; }
+  .toggle-btn {
+    background: #64748b;
+    padding: 6px 10px;
+    font-size: .8rem;
+  }
+  .toggle-btn:hover { background: #475569; }
+  .del-btn {
+    background: #ef4444;
+    padding: 6px 10px;
+    font-size: .8rem;
+  }
+  .del-btn:hover { background: #dc2626; }
+  .edit-btn {
+    background: #f59e0b;
+    padding: 6px 10px;
+    font-size: .8rem;
+  }
+  .edit-btn:hover { background: #d97706; }
+  .summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 0 0 4px;
+  }
+  .summary .stat {
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: .85rem;
+    color: #475569;
+  }
+  .summary .stat b { color: #1e293b; font-size: 1rem; }
+  input[type=url], input[type=text] {
+    flex: 1;
+    padding: 12px 14px;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    font-size: 1rem;
+    outline: none;
+  }
+  input:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,.2); }
+  button {
+    background: #6366f1;
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 12px 20px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s;
+  }
+  button:hover { background: #4f46e5; }
+  button:disabled { opacity: .6; cursor: not-allowed; }
+  .msg { margin-top: 14px; font-size: 0.9rem; min-height: 1.2em; }
+  .msg.error { color: #dc2626; }
+  .result {
+    margin-top: 18px;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 14px;
+    display: none;
+  }
+  .result.show { display: block; }
+  .result a { color: #4f46e5; font-weight: 600; word-break: break-all; }
+  .result .orig { color: #64748b; font-size: 0.85rem; word-break: break-all; margin-top: 6px; }
+  .copy-btn {
+    margin-top: 10px;
+    background: #10b981;
+    padding: 8px 14px;
+    font-size: .9rem;
+  }
+  .copy-btn:hover { background: #059669; }
+  h2 { font-size: 1rem; margin: 28px 0 10px; color: #334155; }
+  ul { list-style: none; padding: 0; margin: 0; }
+  li {
+    padding: 10px 12px;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    margin-bottom: 8px;
+    font-size: .9rem;
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: center;
+  }
+  li a { color: #4f46e5; font-weight: 600; }
+  li .u { color: #64748b; word-break: break-all; flex: 1; }
+  .visually-hidden {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0,0,0,0);
+    white-space: nowrap; border: 0;
+  }
+</style>
 </head>
 <body>
-    <h1>URL Shortener</h1>
-    <input id="url" type="text" placeholder="Enter URL">
-    <button id="shorten">Shorten</button>
-    <div id="result"></div>
-    <script>
-        const urlInput = document.getElementById('url');
-        const shortenButton = document.getElementById('shorten');
-        const resultDiv = document.getElementById('result');
-        shortenButton.addEventListener('click', async () => {
-            const url = urlInput.value;
-            if (url) {
-                try {
-                    const response = await fetch('/api/shorten', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ url })
-                    });
-                    const data = await response.json();
-                    resultDiv.innerHTML = `Short URL: <a href="${data.short_url}">${data.short_url}</a> (<a href="#" onclick="copyToClipboard('${data.short_url}')">Copy</a>)`;
-                } catch (error) {
-                    resultDiv.innerHTML = 'Error: ' + error.message;
-                }
-            } else {
-                resultDiv.innerHTML = 'Please enter a URL';
-            }
-        });
+  <div class="card">
+    <h1>🔗 URL Shortener</h1>
+    <p class="sub">Paste a long link and get a short, shareable one.</p>
+    <div class="row">
+      <label class="visually-hidden" for="urlInput">Long URL to shorten</label>
+      <input type="url" id="urlInput" placeholder="https://example.com/very/long/path"
+             aria-label="Long URL to shorten" />
+      <button id="shortenBtn" type="button">Shorten</button>
+    </div>
+    <div class="row opts">
+      <label class="visually-hidden" for="aliasInput">Custom alias (optional)</label>
+      <input type="text" id="aliasInput" placeholder="custom-alias (optional)"
+             aria-label="Custom alias" />
+      <label class="visually-hidden" for="tagsInput">Tags (comma separated)</label>
+      <input type="text" id="tagsInput" placeholder="tags, comma, separated"
+             aria-label="Tags" />
+      <label class="visually-hidden" for="expiryInput">Link expiry</label>
+      <select id="expiryInput" aria-label="Link expiry">
+        <option value="">Never expires</option>
+        <option value="3600">Expires in 1 hour</option>
+        <option value="86400">Expires in 1 day</option>
+        <option value="604800">Expires in 1 week</option>
+        <option value="2592000">Expires in 30 days</option>
+      </select>
+      <label class="visually-hidden" for="maxClicksInput">Max clicks (optional)</label>
+      <input type="number" id="maxClicksInput" min="1" step="1"
+             placeholder="max clicks" aria-label="Maximum clicks" />
+    </div>
+    <div class="msg" id="msg"></div>
 
-        function copyToClipboard(text) {
-            navigator.clipboard.writeText(text).then(() => {
-                resultDiv.innerHTML = 'Copied to clipboard!';
-            }, () => {
-                resultDiv.innerHTML = 'Failed to copy to clipboard';
-            });
+    <div class="result" id="result">
+      <div>Short link: <a id="shortLink" href="#" target="_blank" rel="noopener"></a></div>
+      <div class="orig" id="origUrl"></div>
+      <button class="copy-btn" id="copyBtn">Copy</button>
+    </div>
+
+    <h2>Summary</h2>
+    <div id="summary" class="summary" aria-live="polite">
+      <span class="stat"><b id="statLinks">0</b> links</span>
+      <span class="stat"><b id="statClicks">0</b> clicks</span>
+      <span class="stat"><b id="statActive">0</b> active</span>
+      <span class="stat"><b id="statExpired">0</b> expired</span>
+    </div>
+
+    <h2>Your links</h2>
+    <label class="visually-hidden" for="searchInput">Search your links</label>
+    <input type="text" id="searchInput" class="search"
+           placeholder="Search links…" aria-label="Search your links" />
+    <div class="row opts">
+      <label class="visually-hidden" for="sortInput">Sort links</label>
+      <select id="sortInput" aria-label="Sort links">
+        <option value="">Newest first</option>
+        <option value="clicks:desc">Most clicks</option>
+        <option value="clicks:asc">Fewest clicks</option>
+        <option value="code:asc">Code A→Z</option>
+        <option value="url:asc">URL A→Z</option>
+      </select>
+      <a id="exportBtn" href="/api/export" download="links.csv" role="button"
+         style="text-decoration:none;display:inline-flex;align-items:center;background:#10b981;color:#fff;border-radius:10px;padding:12px 20px;font-weight:600;">Export CSV</a>
+      <label for="importInput" role="button"
+         style="cursor:pointer;display:inline-flex;align-items:center;background:#0ea5e9;color:#fff;border-radius:10px;padding:12px 20px;font-weight:600;">Import CSV</label>
+      <input type="file" id="importInput" accept=".csv,text/csv"
+             class="visually-hidden" aria-label="Import links from CSV" />
+    </div>
+    <ul id="list"></ul>
+  </div>
+
+<script>
+  const urlInput = document.getElementById('urlInput');
+  const aliasInput = document.getElementById('aliasInput');
+  const tagsInput = document.getElementById('tagsInput');
+  const expiryInput = document.getElementById('expiryInput');
+  const maxClicksInput = document.getElementById('maxClicksInput');
+  const searchInput = document.getElementById('searchInput');
+  const sortInput = document.getElementById('sortInput');
+  const shortenBtn = document.getElementById('shortenBtn');
+  const msg = document.getElementById('msg');
+  const result = document.getElementById('result');
+  const shortLink = document.getElementById('shortLink');
+  const origUrl = document.getElementById('origUrl');
+  const copyBtn = document.getElementById('copyBtn');
+  const list = document.getElementById('list');
+
+  function setMsg(text, isError) {
+    msg.textContent = text || '';
+    msg.className = 'msg' + (isError ? ' error' : '');
+  }
+
+  function absUrl(path) {
+    return window.location.origin + path;
+  }
+
+  async function shorten() {
+    const url = urlInput.value.trim();
+    setMsg('');
+    result.classList.remove('show');
+    if (!url) { setMsg('Please enter a URL.', true); return; }
+    const alias = aliasInput.value.trim();
+    const tags = tagsInput.value.trim();
+    const expiresIn = expiryInput.value;
+    const maxClicks = maxClicksInput ? maxClicksInput.value.trim() : '';
+    const body = { url };
+    if (alias) body.alias = alias;
+    if (tags) body.tags = tags;
+    if (expiresIn) body.expires_in = Number(expiresIn);
+    if (maxClicks) body.max_clicks = Number(maxClicks);
+    shortenBtn.disabled = true;
+    try {
+      const resp = await fetch('/api/shorten', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        setMsg(data.error || 'Failed to shorten URL.', true);
+        return;
+      }
+      const full = absUrl(data.short_path);
+      shortLink.href = full;
+      shortLink.textContent = full;
+      origUrl.textContent = '→ ' + data.url;
+      result.classList.add('show');
+      setMsg('Shortened!');
+      urlInput.value = '';
+      aliasInput.value = '';
+      tagsInput.value = '';
+      if (maxClicksInput) maxClicksInput.value = '';
+      loadList();
+    } catch (e) {
+      setMsg('Network error.', true);
+    } finally {
+      shortenBtn.disabled = false;
+    }
+  }
+
+  async function deleteCode(code) {
+    try {
+      await fetch('/api/delete/' + encodeURIComponent(code), { method: 'DELETE' });
+    } catch (e) { /* ignore */ }
+    loadList();
+  }
+
+  async function toggleDisabled(code, makeDisabled) {
+    const action = makeDisabled ? 'disable' : 'enable';
+    try {
+      const resp = await fetch('/api/' + action + '/' + encodeURIComponent(code),
+                               { method: 'POST' });
+      const data = await resp.json();
+      if (!resp.ok) { setMsg(data.error || 'Failed to ' + action + ' link.', true); return; }
+      setMsg('/' + code + ' ' + action + 'd.');
+    } catch (e) {
+      setMsg('Network error.', true);
+    }
+    loadList();
+  }
+
+  async function editCode(code, current) {
+    const next = window.prompt('New destination URL for /' + code + ':', current);
+    if (next === null) return;
+    const url = next.trim();
+    if (!url) return;
+    try {
+      const resp = await fetch('/api/update/' + encodeURIComponent(code), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      });
+      const data = await resp.json();
+      if (!resp.ok) { setMsg(data.error || 'Failed to update link.', true); return; }
+      setMsg('Updated /' + code + '.');
+    } catch (e) {
+      setMsg('Network error.', true);
+    }
+    loadList();
+  }
+
+  async function showHistory(code) {
+    try {
+      const resp = await fetch('/api/history/' + encodeURIComponent(code));
+      const data = await resp.json();
+      if (!resp.ok) { setMsg(data.error || 'No history.', true); return; }
+      const lines = (data.history || []);
+      const recent = lines.slice(-10).reverse().join('\n') || '(no clicks yet)';
+      window.alert('Click history for /' + code +
+                   ' (' + data.count + ' recorded):\n\n' + recent);
+    } catch (e) {
+      setMsg('Network error.', true);
+    }
+  }
+
+  async function importCsv(text) {
+    if (!text || !text.trim()) return;
+    try {
+      const resp = await fetch('/api/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/csv' },
+        body: text
+      });
+      const data = await resp.json();
+      if (!resp.ok) { setMsg(data.error || 'Import failed.', true); return; }
+      setMsg('Imported ' + data.created + ' of ' + data.total + ' link(s).');
+      loadList();
+    } catch (e) {
+      setMsg('Network error.', true);
+    }
+  }
+
+  async function loadSummary() {
+    try {
+      const resp = await fetch('/api/summary');
+      const data = await resp.json();
+      document.getElementById('statLinks').textContent = data.total_links || 0;
+      document.getElementById('statClicks').textContent = data.total_clicks || 0;
+      document.getElementById('statActive').textContent = data.active_links || 0;
+      document.getElementById('statExpired').textContent = data.expired_links || 0;
+    } catch (e) { /* ignore */ }
+  }
+
+  async function loadList() {
+    try {
+      const q = searchInput ? searchInput.value.trim() : '';
+      const params = [];
+      if (q) params.push('q=' + encodeURIComponent(q));
+      const sortVal = sortInput ? sortInput.value : '';
+      if (sortVal) {
+        const [sortKey, sortOrder] = sortVal.split(':');
+        params.push('sort=' + encodeURIComponent(sortKey));
+        if (sortOrder) params.push('order=' + encodeURIComponent(sortOrder));
+      }
+      const url = '/api/list' + (params.length ? '?' + params.join('&') : '');
+      const resp = await fetch(url);
+      const data = await resp.json();
+      list.innerHTML = '';
+      (data.items || []).forEach(it => {
+        const li = document.createElement('li');
+        const a = document.createElement('a');
+        const full = absUrl('/' + it.code);
+        a.href = full;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        a.textContent = '/' + it.code;
+        const span = document.createElement('span');
+        span.className = 'u';
+        span.textContent = it.url;
+        const clicks = document.createElement('span');
+        clicks.className = 'clicks';
+        clicks.textContent = (it.clicks || 0) + ' click' + (it.clicks === 1 ? '' : 's');
+        li.appendChild(a);
+        if (it.disabled) li.classList.add('is-disabled');
+        if (it.expired) {
+          const badge = document.createElement('span');
+          badge.className = 'badge expired';
+          badge.textContent = 'expired';
+          li.appendChild(badge);
+        } else if (it.expires_at) {
+          const badge = document.createElement('span');
+          badge.className = 'badge';
+          badge.textContent = 'expires';
+          li.appendChild(badge);
         }
-    </script>
+        if (it.disabled) {
+          const badge = document.createElement('span');
+          badge.className = 'badge disabled';
+          badge.textContent = 'disabled';
+          li.appendChild(badge);
+        }
+        if (it.exhausted) {
+          const badge = document.createElement('span');
+          badge.className = 'badge expired';
+          badge.textContent = 'exhausted';
+          li.appendChild(badge);
+        } else if (it.max_clicks) {
+          const badge = document.createElement('span');
+          badge.className = 'badge';
+          badge.textContent = (it.clicks || 0) + '/' + it.max_clicks;
+          li.appendChild(badge);
+        }
+        (it.tags || []).forEach(t => {
+          const chip = document.createElement('span');
+          chip.className = 'tag';
+          chip.textContent = t;
+          li.appendChild(chip);
+        });
+        li.appendChild(span);
+        li.appendChild(clicks);
+        const toggle = document.createElement('button');
+        toggle.className = 'toggle-btn';
+        toggle.type = 'button';
+        toggle.textContent = it.disabled ? 'Enable' : 'Disable';
+        toggle.addEventListener('click', () => toggleDisabled(it.code, !it.disabled));
+        li.appendChild(toggle);
+        const edit = document.createElement('button');
+        edit.className = 'edit-btn';
+        edit.type = 'button';
+        edit.textContent = 'Edit';
+        edit.addEventListener('click', () => editCode(it.code, it.url));
+        li.appendChild(edit);
+        const hist = document.createElement('button');
+        hist.className = 'toggle-btn';
+        hist.type = 'button';
+        hist.textContent = 'History';
+        hist.addEventListener('click', () => showHistory(it.code));
+        li.appendChild(hist);
+        const del = document.createElement('button');
+        del.className = 'del-btn';
+        del.type = 'button';
+        del.textContent = 'Delete';
+        del.addEventListener('click', () => deleteCode(it.code));
+        li.appendChild(del);
+        list.appendChild(li);
+      });
+      loadSummary();
+    } catch (e) { /* ignore */ }
+  }
+
+  copyBtn.addEventListener('click', async () => {
+    const text = shortLink.textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      copyBtn.textContent = 'Copied!';
+      setTimeout(() => copyBtn.textContent = 'Copy', 1200);
+    } catch (e) {
+      copyBtn.textContent = 'Copy failed';
+      setTimeout(() => copyBtn.textContent = 'Copy', 1200);
+    }
+  });
+
+  shortenBtn.addEventListener('click', shorten);
+  urlInput.addEventListener('keydown', e => { if (e.key === 'Enter') shorten(); });
+  aliasInput.addEventListener('keydown', e => { if (e.key === 'Enter') shorten(); });
+  tagsInput.addEventListener('keydown', e => { if (e.key === 'Enter') shorten(); });
+  searchInput.addEventListener('input', loadList);
+  sortInput.addEventListener('change', loadList);
+
+  const importInput = document.getElementById('importInput');
+  if (importInput) {
+    importInput.addEventListener('change', () => {
+      const file = importInput.files && importInput.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => { importCsv(String(reader.result)); importInput.value = ''; };
+      reader.readAsText(file);
+    });
+  }
+
+  loadList();
+</script>
 </body>
 </html>

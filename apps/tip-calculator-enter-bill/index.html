@@ -22,6 +22,14 @@
   .row.total { font-weight: 700; font-size: 18px; border-top: 1px solid #cdd; padding-top: 8px; }
   .error { margin-top: 16px; color: #c0392b; font-size: 14px; display: none; }
   .error.show { display: block; }
+  .ratings { display: flex; flex-wrap: wrap; gap: 6px; }
+  .ratings .rate { margin-top: 0; width: auto; flex: 1 1 auto; padding: 8px 6px;
+                   font-size: 12px; background: #eef2ff; color: #3650c8; }
+  .ratings .rate:hover { background: #dde5ff; }
+  .ratings .rate.active { background: #4361ee; color: #fff; }
+  .check { font-weight: 400; }
+  .shares { margin-top: 8px; font-size: 14px; }
+  .shares .row { font-size: 14px; }
 </style>
 </head>
 <body>
@@ -31,16 +39,65 @@
     <input id="bill" type="number" min="0" step="0.01" placeholder="0.00">
     <label for="tip">Tip percent (%)</label>
     <input id="tip" type="number" min="0" max="100" step="1" placeholder="15">
+    <label>Rate the service (sets the tip %)</label>
+    <div class="ratings" id="ratings">
+      <button type="button" class="rate" data-rating="1">★ Poor</button>
+      <button type="button" class="rate" data-rating="2">★★ Fair</button>
+      <button type="button" class="rate" data-rating="3">★★★ Good</button>
+      <button type="button" class="rate" data-rating="4">★★★★ Great</button>
+      <button type="button" class="rate" data-rating="5">★★★★★ Excellent</button>
+    </div>
+    <label for="tax">Sales tax (%)</label>
+    <input id="tax" type="number" min="0" max="100" step="0.01" value="0" placeholder="0">
+    <label class="check"><input id="tiptax" type="checkbox"> Tip on the post-tax amount</label>
+    <label for="people">Split between (people)</label>
+    <input id="people" type="number" min="1" step="1" value="1" placeholder="1">
+    <label for="weights">Uneven split — weights (comma separated, optional)</label>
+    <input id="weights" type="text" placeholder="e.g. 1, 1, 2">
+    <label class="check"><input id="roundup" type="checkbox"> Round total up to the nearest dollar</label>
     <button id="calc">Calculate</button>
     <div class="error" id="error"></div>
     <div class="result" id="result">
+      <div class="row"><span>Subtotal</span><span id="subtotalAmount">$0.00</span></div>
+      <div class="row" id="taxRow"><span>Tax</span><span id="taxAmount">$0.00</span></div>
       <div class="row"><span>Tip</span><span id="tipAmount">$0.00</span></div>
       <div class="row total"><span>Total</span><span id="totalAmount">$0.00</span></div>
+      <div class="row split" id="perPersonRow"><span id="perPersonLabel">Per person</span><span id="perPersonAmount">$0.00</span></div>
+      <div class="shares" id="sharesRow"></div>
     </div>
   </div>
 <script>
   const $ = (id) => document.getElementById(id);
   function fmt(n) { return "$" + Number(n).toFixed(2); }
+
+  function parseWeights() {
+    const raw = $("weights").value.trim();
+    if (!raw) return null;
+    return raw.split(",").map(s => parseFloat(s.trim()));
+  }
+
+  async function postJSON(path, body) {
+    const resp = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    return { ok: resp.ok, data: await resp.json() };
+  }
+
+  // Rating buttons: derive a tip percent from the service rating.
+  async function applyRating(rating, btn) {
+    const error = $("error");
+    error.classList.remove("show");
+    const bill = parseFloat($("bill").value);
+    const { ok, data } = await postJSON("/api/suggest", {
+      bill: isNaN(bill) ? 0 : bill, rating: rating
+    });
+    if (!ok) { error.textContent = data.error || "Could not suggest tip"; error.classList.add("show"); return; }
+    $("tip").value = data.tip_percent;
+    document.querySelectorAll(".rate").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+  }
 
   async function calculate() {
     const error = $("error");
@@ -50,24 +107,75 @@
 
     const bill = parseFloat($("bill").value);
     const tip_percent = parseFloat($("tip").value);
+    const people = parseInt($("people").value, 10);
+    const round_total = $("roundup").checked;
+    const tax_percent = parseFloat($("tax").value);
+    const tip_on = $("tiptax").checked ? "posttax" : "pretax";
+    const weights = parseWeights();
+    const hasTax = !isNaN(tax_percent) && tax_percent > 0;
 
     try {
-      const resp = await fetch("/api/tip", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          bill: isNaN(bill) ? null : bill,
-          tip_percent: isNaN(tip_percent) ? null : tip_percent
-        })
+      // Tax path uses the tax-aware endpoint; otherwise the split endpoint.
+      const taxResp = hasTax ? await postJSON("/api/tax", {
+        bill: isNaN(bill) ? null : bill,
+        tip_percent: isNaN(tip_percent) ? null : tip_percent,
+        tax_percent: tax_percent,
+        tip_on: tip_on
+      }) : null;
+
+      const splitBill = hasTax && taxResp.ok ? taxResp.data.total - taxResp.data.tip - taxResp.data.tax : (isNaN(bill) ? null : bill);
+      const splitTip = hasTax && taxResp.ok ? null : (isNaN(tip_percent) ? null : tip_percent);
+
+      const { ok, data } = await postJSON("/api/split", {
+        bill: hasTax && taxResp.ok ? taxResp.data.total : (isNaN(bill) ? null : bill),
+        tip_percent: 0,
+        people: isNaN(people) ? null : people,
+        round_total: hasTax ? false : round_total,
+        weights: weights
       });
-      const data = await resp.json();
-      if (!resp.ok) {
+      if (hasTax && !taxResp.ok) {
+        error.textContent = taxResp.data.error || "Calculation failed";
+        error.classList.add("show");
+        return;
+      }
+      if (!ok) {
         error.textContent = data.error || "Calculation failed";
         error.classList.add("show");
         return;
       }
-      $("tipAmount").textContent = fmt(data.tip);
-      $("totalAmount").textContent = fmt(data.total);
+
+      const tip = hasTax ? taxResp.data.tip : data.tip;
+      const tax = hasTax ? taxResp.data.tax : 0;
+      const subtotal = hasTax ? taxResp.data.subtotal : (data.total - data.tip);
+      const grandTotal = data.total;
+
+      $("subtotalAmount").textContent = fmt(subtotal);
+      $("taxRow").style.display = hasTax ? "" : "none";
+      $("taxAmount").textContent = fmt(tax);
+      $("tipAmount").textContent = fmt(tip);
+      $("totalAmount").textContent = fmt(grandTotal);
+
+      const perPersonRow = $("perPersonRow");
+      const sharesRow = $("sharesRow");
+      sharesRow.innerHTML = "";
+      if (data.people > 1) {
+        if (data.shares && (data.weights || new Set(data.shares).size > 1)) {
+          $("perPersonLabel").textContent = "Per person (×" + data.people + ")";
+          $("perPersonAmount").textContent = "see below";
+          data.shares.forEach((s, i) => {
+            const div = document.createElement("div");
+            div.className = "row";
+            div.innerHTML = "<span>Person " + (i + 1) + "</span><span>" + fmt(s) + "</span>";
+            sharesRow.appendChild(div);
+          });
+        } else {
+          $("perPersonLabel").textContent = "Per person (×" + data.people + ")";
+          $("perPersonAmount").textContent = fmt(data.per_person);
+        }
+        perPersonRow.style.display = "";
+      } else {
+        perPersonRow.style.display = "none";
+      }
       result.classList.add("show");
     } catch (e) {
       error.textContent = "Network error";
@@ -76,6 +184,8 @@
   }
 
   $("calc").addEventListener("click", calculate);
+  document.querySelectorAll(".rate").forEach(btn =>
+    btn.addEventListener("click", () => applyRating(parseInt(btn.dataset.rating, 10), btn)));
 </script>
 </body>
 </html>

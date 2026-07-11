@@ -192,7 +192,12 @@ class RequestHandler(BaseHTTPRequestHandler):
         On success error_payload is None; on failure data is None and the
         caller should emit a 400 with error_payload.
         """
-        length = int(self.headers.get("Content-Length", 0) or 0)
+        try:
+            length = int(self.headers.get("Content-Length", 0) or 0)
+        except (TypeError, ValueError):
+            return None, {"error": "invalid Content-Length header"}
+        if length < 0:
+            return None, {"error": "invalid Content-Length header"}
         raw = self.rfile.read(length) if length > 0 else b""
         try:
             data = json.loads(raw.decode("utf-8")) if raw else {}
@@ -239,6 +244,87 @@ class RequestHandler(BaseHTTPRequestHandler):
         if precision is None:
             return None
         return items, data.get("to"), precision
+
+    def _items_or_400(self, fn):
+        """Run the full preamble shared by every single-series aggregate handler:
+        read the JSON object body, validate it as a ``{items, to?}`` request, call
+        ``fn(items, to_unit)`` and trap its ``ValueError`` as a 400.
+
+        Returns ``(result, precision)`` on success, or ``None`` after the relevant
+        400 has already been emitted. Collapses the identical opening that was
+        copy-pasted across the ``{items, to?}`` aggregate handlers into one place."""
+        data = self._json_body_obj()
+        if data is None:
+            return None
+        parsed = self._items_request(data)
+        if parsed is None:
+            return None
+        items, to_unit, precision = parsed
+        try:
+            return fn(items, to_unit), precision
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return None
+
+    def _items_proportion_or_400(self, fn):
+        """Like :meth:`_items_or_400` but for the ``{items, proportion?, to?}``
+        trim family: also pulls the optional ``proportion`` (default 0.1, validated
+        by the domain layer) and calls ``fn(items, proportion, to_unit)``.
+
+        Returns ``(result, precision)`` on success, or ``None`` after the relevant
+        400 has been emitted. Shared by /api/trimmed-mean and /api/winsorize."""
+        data = self._json_body_obj()
+        if data is None:
+            return None
+        parsed = self._items_request(data)
+        if parsed is None:
+            return None
+        items, to_unit, precision = parsed
+        # proportion is optional; the domain layer defaults and validates it.
+        proportion = data.get("proportion", 0.1)
+        try:
+            return fn(items, proportion, to_unit), precision
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return None
+
+    def _two_sample_or_400(self, fn):
+        """Run the preamble shared by the two-independent-sample handlers: read the
+        JSON object body, validate it as a ``{a, b, to?}`` request, call
+        ``fn(a, b, to_unit, data)`` (``data`` is passed so the caller can pull
+        optional fields like ``alpha``/``equal_var``) and trap its ``ValueError``
+        as a 400. Returns ``(result, precision)`` or ``None`` after the 400."""
+        data = self._json_body_obj()
+        if data is None:
+            return None
+        parsed = self._two_sample_request(data)
+        if parsed is None:
+            return None
+        a, b, to_unit, precision = parsed
+        try:
+            return fn(a, b, to_unit, data), precision
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return None
+
+    def _groups_or_400(self, fn):
+        """Run the preamble shared by the k-group handlers: read the JSON object
+        body, validate it as a ``{groups, to?}`` request, call
+        ``fn(groups, to_unit, data)`` (``data`` is passed so the caller can pull
+        optional fields like ``alpha``) and trap its ``ValueError`` as a 400.
+        Returns ``(result, precision)`` or ``None`` after the 400."""
+        data = self._json_body_obj()
+        if data is None:
+            return None
+        parsed = self._groups_request(data)
+        if parsed is None:
+            return None
+        groups, to_unit, precision = parsed
+        try:
+            return fn(groups, to_unit, data), precision
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return None
 
     def _value_from_request(self, data):
         """Validate the shared ``{value, from}`` body. Returns
@@ -292,6 +378,28 @@ class RequestHandler(BaseHTTPRequestHandler):
             return None
         return x, y, data.get("to_x"), data.get("to_y"), precision
 
+    def _paired_or_400(self, fn):
+        """Run the full preamble shared by every bivariate paired-series handler:
+        read the JSON object body, validate it as a ``{x, y, to_x?, to_y?}`` paired
+        request, call ``fn(x, y, to_x, to_y)`` and trap its ``ValueError`` as a 400.
+
+        Returns ``(result, precision)`` on success, or ``None`` after the relevant
+        400 has already been emitted. Collapses the identical 11-line opening that
+        was copy-pasted across covariance/correlation/regression/residuals/
+        theil-sen/spearman/kendall into one place."""
+        data = self._json_body_obj()
+        if data is None:
+            return None
+        parsed = self._paired_request(data)
+        if parsed is None:
+            return None
+        x, y, to_x, to_y, precision = parsed
+        try:
+            return fn(x, y, to_x, to_y), precision
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return None
+
     def _two_sample_request(self, data):
         """Validate the shared two-independent-sample ``{a:[...], b:[...], to?}``
         body. Returns (a, b, to_unit, precision) or None after emitting a 400.
@@ -308,6 +416,42 @@ class RequestHandler(BaseHTTPRequestHandler):
         if precision is None:
             return None
         return a, b, data.get("to"), precision
+
+    def _paired_one_unit_request(self, data):
+        """Validate the shared PAIRED same-unit ``{x:[...], y:[...], to?}`` body.
+        Returns (x, y, to_unit, precision) or None after emitting a 400.
+
+        Distinct from :meth:`_paired_request`: the paired *difference* tests form
+        ``x - y`` point for point, so the two series share ONE target unit (``to``,
+        not separate ``to_x``/``to_y``) and must end up in the same category."""
+        x = data.get("x")
+        y = data.get("y")
+        if not isinstance(x, list) or not isinstance(y, list):
+            self._send_json(400, {"error": "'x' and 'y' must be lists"})
+            return None
+        precision = self._precision_or_400(data)
+        if precision is None:
+            return None
+        return x, y, data.get("to"), precision
+
+    def _groups_request(self, data):
+        """Validate the shared k-independent-sample ``{groups:[[...], ...], to?}``
+        body. Returns (groups, to_unit, precision) or None after emitting a 400.
+
+        The k-group generalisation of :meth:`_two_sample_request`: ``groups`` is a
+        list of groups (each itself a list of {value, unit} items), so it shares
+        one target unit but allows three-or-more independent samples for ANOVA."""
+        groups = data.get("groups")
+        if not isinstance(groups, list):
+            self._send_json(400, {"error": "'groups' must be a list"})
+            return None
+        if not all(isinstance(g, list) for g in groups):
+            self._send_json(400, {"error": "each group must be a list"})
+            return None
+        precision = self._precision_or_400(data)
+        if precision is None:
+            return None
+        return groups, data.get("to"), precision
 
     def _round_opt(self, value, places):
         """Round ``value`` to ``places``, passing ``None`` straight through.
@@ -335,13 +479,53 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _aggregate_payload(self, result, precision, items):
         """Build the shared {category, unit, count, total, items} body used by
         the running-total style aggregate responses."""
-        return {
+        return self._stat_payload(
+            result, total=round(result["total"], precision), items=items)
+
+    def _items_result(self, data, fn, *args):
+        """Run an items-aggregate endpoint: validate the shared ``{items, to?}``
+        body, invoke ``fn(items, to_unit, *args)`` and map ValueError -> 400.
+
+        Returns (result, precision), or None when a 400 was already emitted.
+        Collapses the request prologue + error handling shared by every
+        univariate aggregate handler into one place."""
+        parsed = self._items_request(data)
+        if parsed is None:
+            return None
+        items, to_unit, precision = parsed
+        try:
+            result = fn(items, to_unit, *args)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return None
+        return result, precision
+
+    def _stat_payload(self, result, **fields):
+        """Build a univariate aggregate response body: the shared
+        ``{category, unit, count}`` header followed by the endpoint-specific
+        ``fields``. The single source of truth for that header so handlers never
+        re-spell it."""
+        body = {
             "category": result["category"],
             "unit": result["unit"],
             "count": result["count"],
-            "total": round(result["total"], precision),
-            "items": items,
         }
+        body.update(fields)
+        return body
+
+    def _paired_payload(self, result, **fields):
+        """Build a bivariate aggregate response body: the shared
+        ``{x_category, y_category, x_unit, y_unit, count}`` header followed by
+        the endpoint-specific ``fields``."""
+        body = {
+            "x_category": result["x_category"],
+            "y_category": result["y_category"],
+            "x_unit": result["x_unit"],
+            "y_unit": result["y_unit"],
+            "count": result["count"],
+        }
+        body.update(fields)
+        return body
 
     def do_POST(self):
         if self.path == "/api/convert-all":
@@ -490,6 +674,45 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/t-test":
             self._handle_t_test()
+            return
+        if self.path == "/api/variance-ratio-test":
+            self._handle_variance_ratio_test()
+            return
+        if self.path == "/api/mann-whitney":
+            self._handle_mann_whitney()
+            return
+        if self.path == "/api/cohens-d":
+            self._handle_cohens_d()
+            return
+        if self.path == "/api/anova":
+            self._handle_anova()
+            return
+        if self.path == "/api/kruskal-wallis":
+            self._handle_kruskal_wallis()
+            return
+        if self.path == "/api/bartlett":
+            self._handle_bartlett()
+            return
+        if self.path == "/api/levene":
+            self._handle_levene()
+            return
+        if self.path == "/api/paired-t-test":
+            self._handle_paired_t_test()
+            return
+        if self.path == "/api/wilcoxon":
+            self._handle_wilcoxon()
+            return
+        if self.path == "/api/sign-test":
+            self._handle_sign_test()
+            return
+        if self.path == "/api/one-sample-t-test":
+            self._handle_one_sample_t_test()
+            return
+        if self.path == "/api/chi-square-gof":
+            self._handle_chi_square_gof()
+            return
+        if self.path == "/api/chi-square-independence":
+            self._handle_chi_square_independence()
             return
         if self.path != "/api/convert":
             self._send_json(404, {"error": "not found"})
@@ -843,27 +1066,20 @@ class RequestHandler(BaseHTTPRequestHandler):
         data = self._json_body_obj()
         if data is None:
             return
-        parsed = self._items_request(data)
-        if parsed is None:
+        got = self._items_result(data, domain.aggregate_quantities)
+        if got is None:
             return
-        items, to_unit, precision = parsed
-        try:
-            stats = domain.aggregate_quantities(items, to_unit)
-        except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
-            return
-        self._send_json(200, {
-            "category": stats["category"],
-            "unit": stats["unit"],
-            "count": stats["count"],
-            "sum": round(stats["sum"], precision),
-            "mean": round(stats["mean"], precision),
-            "min": {"value": round(stats["min"]["value"], precision),
-                    "index": stats["min"]["index"]},
-            "max": {"value": round(stats["max"]["value"], precision),
-                    "index": stats["max"]["index"]},
-            "range": round(stats["range"], precision),
-        })
+        stats, precision = got
+        self._send_json(200, self._stat_payload(
+            stats,
+            sum=round(stats["sum"], precision),
+            mean=round(stats["mean"], precision),
+            min={"value": round(stats["min"]["value"], precision),
+                 "index": stats["min"]["index"]},
+            max={"value": round(stats["max"]["value"], precision),
+                 "index": stats["max"]["index"]},
+            range=round(stats["range"], precision),
+        ))
 
     def _handle_sort(self):
         """POST /api/sort — {items: [{value, unit}, ...], to?, descending?} ->
@@ -874,26 +1090,19 @@ class RequestHandler(BaseHTTPRequestHandler):
         data = self._json_body_obj()
         if data is None:
             return
-        parsed = self._items_request(data)
-        if parsed is None:
-            return
-        items, to_unit, precision = parsed
         descending = bool(data.get("descending", False))
-        try:
-            result = domain.sort_quantities(items, to_unit, descending)
-        except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
+        got = self._items_result(data, domain.sort_quantities, descending)
+        if got is None:
             return
-        self._send_json(200, {
-            "category": result["category"],
-            "unit": result["unit"],
-            "count": result["count"],
-            "descending": result["descending"],
-            "items": [
+        result, precision = got
+        self._send_json(200, self._stat_payload(
+            result,
+            descending=result["descending"],
+            items=[
                 {"index": r["index"], "value": round(r["value"], precision)}
                 for r in result["items"]
             ],
-        })
+        ))
 
     def _handle_describe(self):
         """POST /api/describe — {items: [{value, unit}, ...], to?} -> the full
@@ -905,36 +1114,29 @@ class RequestHandler(BaseHTTPRequestHandler):
         data = self._json_body_obj()
         if data is None:
             return
-        parsed = self._items_request(data)
-        if parsed is None:
+        got = self._items_result(data, domain.describe_quantities)
+        if got is None:
             return
-        items, to_unit, precision = parsed
-        try:
-            stats = domain.describe_quantities(items, to_unit)
-        except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
-            return
+        stats, precision = got
         sample_variance = stats["sample_variance"]
         sample_stdev = stats["sample_stdev"]
-        self._send_json(200, {
-            "category": stats["category"],
-            "unit": stats["unit"],
-            "count": stats["count"],
-            "sum": round(stats["sum"], precision),
-            "mean": round(stats["mean"], precision),
-            "median": round(stats["median"], precision),
-            "variance": round(stats["variance"], precision),
-            "stdev": round(stats["stdev"], precision),
-            "sample_variance": (round(sample_variance, precision)
-                                if sample_variance is not None else None),
-            "sample_stdev": (round(sample_stdev, precision)
-                             if sample_stdev is not None else None),
-            "min": {"value": round(stats["min"]["value"], precision),
-                    "index": stats["min"]["index"]},
-            "max": {"value": round(stats["max"]["value"], precision),
-                    "index": stats["max"]["index"]},
-            "range": round(stats["range"], precision),
-        })
+        self._send_json(200, self._stat_payload(
+            stats,
+            sum=round(stats["sum"], precision),
+            mean=round(stats["mean"], precision),
+            median=round(stats["median"], precision),
+            variance=round(stats["variance"], precision),
+            stdev=round(stats["stdev"], precision),
+            sample_variance=(round(sample_variance, precision)
+                             if sample_variance is not None else None),
+            sample_stdev=(round(sample_stdev, precision)
+                          if sample_stdev is not None else None),
+            min={"value": round(stats["min"]["value"], precision),
+                 "index": stats["min"]["index"]},
+            max={"value": round(stats["max"]["value"], precision),
+                 "index": stats["max"]["index"]},
+            range=round(stats["range"], precision),
+        ))
 
     def _handle_shape(self):
         """POST /api/shape — {items: [{value, unit}, ...], to?} -> the
@@ -947,26 +1149,19 @@ class RequestHandler(BaseHTTPRequestHandler):
         data = self._json_body_obj()
         if data is None:
             return
-        parsed = self._items_request(data)
-        if parsed is None:
+        got = self._items_result(data, domain.shape_quantities)
+        if got is None:
             return
-        items, to_unit, precision = parsed
-        try:
-            result = domain.shape_quantities(items, to_unit)
-        except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
-            return
-        self._send_json(200, {
-            "category": result["category"],
-            "unit": result["unit"],
-            "count": result["count"],
-            "mean": round(result["mean"], precision),
-            "stdev": round(result["stdev"], precision),
-            "skewness": self._round_opt(result["skewness"], precision),
-            "sample_skewness": self._round_opt(result["sample_skewness"], precision),
-            "kurtosis": self._round_opt(result["kurtosis"], precision),
-            "sample_kurtosis": self._round_opt(result["sample_kurtosis"], precision),
-        })
+        result, precision = got
+        self._send_json(200, self._stat_payload(
+            result,
+            mean=round(result["mean"], precision),
+            stdev=round(result["stdev"], precision),
+            skewness=self._round_opt(result["skewness"], precision),
+            sample_skewness=self._round_opt(result["sample_skewness"], precision),
+            kurtosis=self._round_opt(result["kurtosis"], precision),
+            sample_kurtosis=self._round_opt(result["sample_kurtosis"], precision),
+        ))
 
     def _handle_cumsum(self):
         """POST /api/cumsum — {items: [{value, unit}, ...], to?} -> the running
@@ -977,27 +1172,20 @@ class RequestHandler(BaseHTTPRequestHandler):
         data = self._json_body_obj()
         if data is None:
             return
-        parsed = self._items_request(data)
-        if parsed is None:
+        got = self._items_result(data, domain.cumulative_quantities)
+        if got is None:
             return
-        items, to_unit, precision = parsed
-        try:
-            result = domain.cumulative_quantities(items, to_unit)
-        except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
-            return
-        self._send_json(200, {
-            "category": result["category"],
-            "unit": result["unit"],
-            "count": result["count"],
-            "total": round(result["total"], precision),
-            "items": [
+        result, precision = got
+        self._send_json(200, self._stat_payload(
+            result,
+            total=round(result["total"], precision),
+            items=[
                 {"index": r["index"],
                  "value": round(r["value"], precision),
                  "cumulative": round(r["cumulative"], precision)}
                 for r in result["items"]
             ],
-        })
+        ))
 
     def _handle_percentile(self):
         """POST /api/percentile — {items: [{value, unit}, ...], percentile, to?}
@@ -1025,13 +1213,11 @@ class RequestHandler(BaseHTTPRequestHandler):
         except ValueError as exc:
             self._send_json(400, {"error": str(exc)})
             return
-        self._send_json(200, {
-            "category": result["category"],
-            "unit": result["unit"],
-            "count": result["count"],
-            "percentile": result["percentile"],
-            "value": round(result["value"], precision),
-        })
+        self._send_json(200, self._stat_payload(
+            result,
+            percentile=result["percentile"],
+            value=round(result["value"], precision),
+        ))
 
     def _handle_proportions(self):
         """POST /api/proportions — {items: [{value, unit}, ...], to?} -> each
@@ -1042,28 +1228,21 @@ class RequestHandler(BaseHTTPRequestHandler):
         data = self._json_body_obj()
         if data is None:
             return
-        parsed = self._items_request(data)
-        if parsed is None:
+        got = self._items_result(data, domain.proportions)
+        if got is None:
             return
-        items, to_unit, precision = parsed
-        try:
-            result = domain.proportions(items, to_unit)
-        except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
-            return
-        self._send_json(200, {
-            "category": result["category"],
-            "unit": result["unit"],
-            "count": result["count"],
-            "total": round(result["total"], precision),
-            "items": [
+        result, precision = got
+        self._send_json(200, self._stat_payload(
+            result,
+            total=round(result["total"], precision),
+            items=[
                 {"index": r["index"],
                  "value": round(r["value"], precision),
                  "fraction": round(r["fraction"], precision),
                  "percent": round(r["percent"], precision)}
                 for r in result["items"]
             ],
-        })
+        ))
 
     def _handle_diff(self):
         """POST /api/diff — {items: [{value, unit}, ...], to?} -> the successive
@@ -1074,27 +1253,20 @@ class RequestHandler(BaseHTTPRequestHandler):
         data = self._json_body_obj()
         if data is None:
             return
-        parsed = self._items_request(data)
-        if parsed is None:
+        got = self._items_result(data, domain.differences)
+        if got is None:
             return
-        items, to_unit, precision = parsed
-        try:
-            result = domain.differences(items, to_unit)
-        except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
-            return
-        self._send_json(200, {
-            "category": result["category"],
-            "unit": result["unit"],
-            "count": result["count"],
-            "total": round(result["total"], precision),
-            "items": [
+        result, precision = got
+        self._send_json(200, self._stat_payload(
+            result,
+            total=round(result["total"], precision),
+            items=[
                 {"index": r["index"],
                  "value": round(r["value"], precision),
                  "difference": round(r["difference"], precision)}
                 for r in result["items"]
             ],
-        })
+        ))
 
     def _handle_zscore(self):
         """POST /api/zscore — {items: [{value, unit}, ...], to?} -> each quantity's
@@ -1105,28 +1277,21 @@ class RequestHandler(BaseHTTPRequestHandler):
         data = self._json_body_obj()
         if data is None:
             return
-        parsed = self._items_request(data)
-        if parsed is None:
+        got = self._items_result(data, domain.zscores)
+        if got is None:
             return
-        items, to_unit, precision = parsed
-        try:
-            result = domain.zscores(items, to_unit)
-        except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
-            return
-        self._send_json(200, {
-            "category": result["category"],
-            "unit": result["unit"],
-            "count": result["count"],
-            "mean": round(result["mean"], precision),
-            "stdev": round(result["stdev"], precision),
-            "items": [
+        result, precision = got
+        self._send_json(200, self._stat_payload(
+            result,
+            mean=round(result["mean"], precision),
+            stdev=round(result["stdev"], precision),
+            items=[
                 {"index": r["index"],
                  "value": round(r["value"], precision),
                  "zscore": round(r["zscore"], precision)}
                 for r in result["items"]
             ],
-        })
+        ))
 
     def _handle_normalize(self):
         """POST /api/normalize — {items: [{value, unit}, ...], to?} -> each
@@ -1138,28 +1303,21 @@ class RequestHandler(BaseHTTPRequestHandler):
         data = self._json_body_obj()
         if data is None:
             return
-        parsed = self._items_request(data)
-        if parsed is None:
+        got = self._items_result(data, domain.normalize_quantities)
+        if got is None:
             return
-        items, to_unit, precision = parsed
-        try:
-            result = domain.normalize_quantities(items, to_unit)
-        except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
-            return
-        self._send_json(200, {
-            "category": result["category"],
-            "unit": result["unit"],
-            "count": result["count"],
-            "min": round(result["min"], precision),
-            "max": round(result["max"], precision),
-            "items": [
+        result, precision = got
+        self._send_json(200, self._stat_payload(
+            result,
+            min=round(result["min"], precision),
+            max=round(result["max"], precision),
+            items=[
                 {"index": r["index"],
                  "value": round(r["value"], precision),
                  "normalized": round(r["normalized"], precision)}
                 for r in result["items"]
             ],
-        })
+        ))
 
     def _handle_quartiles(self):
         """POST /api/quartiles — {items: [{value, unit}, ...], to?} -> the
@@ -1171,26 +1329,19 @@ class RequestHandler(BaseHTTPRequestHandler):
         data = self._json_body_obj()
         if data is None:
             return
-        parsed = self._items_request(data)
-        if parsed is None:
+        got = self._items_result(data, domain.quartiles)
+        if got is None:
             return
-        items, to_unit, precision = parsed
-        try:
-            result = domain.quartiles(items, to_unit)
-        except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
-            return
-        self._send_json(200, {
-            "category": result["category"],
-            "unit": result["unit"],
-            "count": result["count"],
-            "min": round(result["min"], precision),
-            "q1": round(result["q1"], precision),
-            "median": round(result["median"], precision),
-            "q3": round(result["q3"], precision),
-            "max": round(result["max"], precision),
-            "iqr": round(result["iqr"], precision),
-        })
+        result, precision = got
+        self._send_json(200, self._stat_payload(
+            result,
+            min=round(result["min"], precision),
+            q1=round(result["q1"], precision),
+            median=round(result["median"], precision),
+            q3=round(result["q3"], precision),
+            max=round(result["max"], precision),
+            iqr=round(result["iqr"], precision),
+        ))
 
     def _handle_outliers(self):
         """POST /api/outliers — {items: [{value, unit}, ...], to?, k?} -> each
@@ -1202,35 +1353,28 @@ class RequestHandler(BaseHTTPRequestHandler):
         data = self._json_body_obj()
         if data is None:
             return
-        parsed = self._items_request(data)
-        if parsed is None:
-            return
-        items, to_unit, precision = parsed
         # k is optional; the domain layer defaults and validates it.
         k = data.get("k", 1.5)
-        try:
-            result = domain.outliers(items, to_unit, k)
-        except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
+        got = self._items_result(data, domain.outliers, k)
+        if got is None:
             return
-        self._send_json(200, {
-            "category": result["category"],
-            "unit": result["unit"],
-            "count": result["count"],
-            "k": result["k"],
-            "q1": round(result["q1"], precision),
-            "q3": round(result["q3"], precision),
-            "iqr": round(result["iqr"], precision),
-            "lower_fence": round(result["lower_fence"], precision),
-            "upper_fence": round(result["upper_fence"], precision),
-            "outlier_count": result["outlier_count"],
-            "items": [
+        result, precision = got
+        self._send_json(200, self._stat_payload(
+            result,
+            k=result["k"],
+            q1=round(result["q1"], precision),
+            q3=round(result["q3"], precision),
+            iqr=round(result["iqr"], precision),
+            lower_fence=round(result["lower_fence"], precision),
+            upper_fence=round(result["upper_fence"], precision),
+            outlier_count=result["outlier_count"],
+            items=[
                 {"index": r["index"],
                  "value": round(r["value"], precision),
                  "is_outlier": r["is_outlier"]}
                 for r in result["items"]
             ],
-        })
+        ))
 
     def _handle_histogram(self):
         """POST /api/histogram — {items: [{value, unit}, ...], bins, to?} -> the
@@ -1258,21 +1402,19 @@ class RequestHandler(BaseHTTPRequestHandler):
         except ValueError as exc:
             self._send_json(400, {"error": str(exc)})
             return
-        self._send_json(200, {
-            "category": result["category"],
-            "unit": result["unit"],
-            "count": result["count"],
-            "bins": result["bins"],
-            "min": round(result["min"], precision),
-            "max": round(result["max"], precision),
-            "items": [
+        self._send_json(200, self._stat_payload(
+            result,
+            bins=result["bins"],
+            min=round(result["min"], precision),
+            max=round(result["max"], precision),
+            items=[
                 {"index": r["index"],
                  "start": round(r["start"], precision),
                  "end": round(r["end"], precision),
                  "count": r["count"]}
                 for r in result["items"]
             ],
-        })
+        ))
 
     def _handle_means(self):
         """POST /api/means — {items: [{value, unit}, ...], to?} -> the four
@@ -1283,24 +1425,17 @@ class RequestHandler(BaseHTTPRequestHandler):
         data = self._json_body_obj()
         if data is None:
             return
-        parsed = self._items_request(data)
-        if parsed is None:
+        got = self._items_result(data, domain.means)
+        if got is None:
             return
-        items, to_unit, precision = parsed
-        try:
-            result = domain.means(items, to_unit)
-        except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
-            return
-        self._send_json(200, {
-            "category": result["category"],
-            "unit": result["unit"],
-            "count": result["count"],
-            "arithmetic": round(result["arithmetic"], precision),
-            "geometric": round(result["geometric"], precision),
-            "harmonic": round(result["harmonic"], precision),
-            "quadratic": round(result["quadratic"], precision),
-        })
+        result, precision = got
+        self._send_json(200, self._stat_payload(
+            result,
+            arithmetic=round(result["arithmetic"], precision),
+            geometric=round(result["geometric"], precision),
+            harmonic=round(result["harmonic"], precision),
+            quadratic=round(result["quadratic"], precision),
+        ))
 
     def _handle_mad(self):
         """POST /api/mad — {items: [{value, unit}, ...], to?} -> the
@@ -1311,18 +1446,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         restated in 'to' (or the first item's unit). The outlier-robust companion
         to /api/describe (which reports variance/stdev). Additive: reuses
         ``domain.mad_quantities`` and never touches the other convert paths."""
-        data = self._json_body_obj()
-        if data is None:
+        got = self._items_or_400(domain.mad_quantities)
+        if got is None:
             return
-        parsed = self._items_request(data)
-        if parsed is None:
-            return
-        items, to_unit, precision = parsed
-        try:
-            result = domain.mad_quantities(items, to_unit)
-        except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
-            return
+        result, precision = got
         self._send_json(200, {
             "category": result["category"],
             "unit": result["unit"],
@@ -1351,18 +1478,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         /api/describe (absolute spread) and /api/mad (robust spread). Additive:
         reuses ``domain.cv_quantities`` and never touches the other convert
         paths."""
-        data = self._json_body_obj()
-        if data is None:
+        got = self._items_or_400(domain.cv_quantities)
+        if got is None:
             return
-        parsed = self._items_request(data)
-        if parsed is None:
-            return
-        items, to_unit, precision = parsed
-        try:
-            result = domain.cv_quantities(items, to_unit)
-        except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
-            return
+        result, precision = got
         self._send_json(200, {
             "category": result["category"],
             "unit": result["unit"],
@@ -1422,18 +1541,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         central tendency, companion to the mean/median of /api/describe.
         Additive: reuses ``domain.mode_quantities`` and never touches the other
         convert paths."""
-        data = self._json_body_obj()
-        if data is None:
+        got = self._items_or_400(domain.mode_quantities)
+        if got is None:
             return
-        parsed = self._items_request(data)
-        if parsed is None:
-            return
-        items, to_unit, precision = parsed
-        try:
-            result = domain.mode_quantities(items, to_unit)
-        except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
-            return
+        result, precision = got
         self._send_json(200, {
             "category": result["category"],
             "unit": result["unit"],
@@ -1449,18 +1560,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         weight defaults to 1, reducing to the plain mean). The "some measurements
         count more" companion to /api/describe. Additive: reuses
         ``domain.weighted_mean`` and never touches the other convert paths."""
-        data = self._json_body_obj()
-        if data is None:
+        got = self._items_or_400(domain.weighted_mean)
+        if got is None:
             return
-        parsed = self._items_request(data)
-        if parsed is None:
-            return
-        items, to_unit, precision = parsed
-        try:
-            result = domain.weighted_mean(items, to_unit)
-        except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
-            return
+        result, precision = got
         self._send_json(200, {
             "category": result["category"],
             "unit": result["unit"],
@@ -1573,18 +1676,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         -> the population and sample covariance of two paired quantity series.
         The raw "do they move together?" companion to /api/correlation. Additive:
         reuses ``domain.covariance`` and never touches the convert paths."""
-        data = self._json_body_obj()
-        if data is None:
+        got = self._paired_or_400(domain.covariance)
+        if got is None:
             return
-        parsed = self._paired_request(data)
-        if parsed is None:
-            return
-        x, y, to_x, to_y, precision = parsed
-        try:
-            result = domain.covariance(x, y, to_x, to_y)
-        except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
-            return
+        result, precision = got
         self._send_json(200, {
             "x_category": result["x_category"],
             "y_category": result["y_category"],
@@ -1603,18 +1698,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         quantity series, plus their covariance, means and standard deviations.
         The normalised companion to /api/covariance. Additive: reuses
         ``domain.correlation`` and never touches the convert paths."""
-        data = self._json_body_obj()
-        if data is None:
+        got = self._paired_or_400(domain.correlation)
+        if got is None:
             return
-        parsed = self._paired_request(data)
-        if parsed is None:
-            return
-        x, y, to_x, to_y, precision = parsed
-        try:
-            result = domain.correlation(x, y, to_x, to_y)
-        except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
-            return
+        result, precision = got
         self._send_json(200, {
             "x_category": result["x_category"],
             "y_category": result["y_category"],
@@ -1637,18 +1724,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         Pearson r and r-squared. The predictive companion to /api/correlation.
         Additive: reuses ``domain.linear_regression`` and never touches the
         convert paths."""
-        data = self._json_body_obj()
-        if data is None:
+        got = self._paired_or_400(domain.linear_regression)
+        if got is None:
             return
-        parsed = self._paired_request(data)
-        if parsed is None:
-            return
-        x, y, to_x, to_y, precision = parsed
-        try:
-            result = domain.linear_regression(x, y, to_x, to_y)
-        except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
-            return
+        result, precision = got
         self._send_json(200, {
             "x_category": result["x_category"],
             "y_category": result["y_category"],
@@ -1670,18 +1749,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         decomposition (sst, ssr, sse), r-squared and the residual standard error.
         The per-point diagnostic companion to /api/regression. Additive: reuses
         ``domain.residuals`` and never touches the convert paths."""
-        data = self._json_body_obj()
-        if data is None:
+        got = self._paired_or_400(domain.residuals)
+        if got is None:
             return
-        parsed = self._paired_request(data)
-        if parsed is None:
-            return
-        x, y, to_x, to_y, precision = parsed
-        try:
-            result = domain.residuals(x, y, to_x, to_y)
-        except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
-            return
+        result, precision = got
         self._send_json(200, {
             "x_category": result["x_category"],
             "y_category": result["y_category"],
@@ -1716,18 +1787,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         and the intercept the median of (y - slope*x), so up to ~29% of the data
         can be corrupted without swinging the line. Additive: reuses
         ``domain.theil_sen`` and never touches the convert paths."""
-        data = self._json_body_obj()
-        if data is None:
+        got = self._paired_or_400(domain.theil_sen)
+        if got is None:
             return
-        parsed = self._paired_request(data)
-        if parsed is None:
-            return
-        x, y, to_x, to_y, precision = parsed
-        try:
-            result = domain.theil_sen(x, y, to_x, to_y)
-        except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
-            return
+        result, precision = got
         self._send_json(200, {
             "x_category": result["x_category"],
             "y_category": result["y_category"],
@@ -1753,18 +1816,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         robust to outliers and invariant under any monotonic rescaling of either
         series. Additive: reuses ``domain.spearman`` and never touches the
         convert paths."""
-        data = self._json_body_obj()
-        if data is None:
+        got = self._paired_or_400(domain.spearman)
+        if got is None:
             return
-        parsed = self._paired_request(data)
-        if parsed is None:
-            return
-        x, y, to_x, to_y, precision = parsed
-        try:
-            result = domain.spearman(x, y, to_x, to_y)
-        except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
-            return
+        result, precision = got
         self._send_json(200, {
             "x_category": result["x_category"],
             "y_category": result["y_category"],
@@ -1786,18 +1841,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         pair of observations, so like Spearman it is dimensionless, monotonic and
         outlier-robust, but interpreted as a probability of concordance. Additive:
         reuses ``domain.kendall`` and never touches the convert paths."""
-        data = self._json_body_obj()
-        if data is None:
+        got = self._paired_or_400(domain.kendall)
+        if got is None:
             return
-        parsed = self._paired_request(data)
-        if parsed is None:
-            return
-        x, y, to_x, to_y, precision = parsed
-        try:
-            result = domain.kendall(x, y, to_x, to_y)
-        except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
-            return
+        result, precision = got
         self._send_json(200, {
             "x_category": result["x_category"],
             "y_category": result["y_category"],
@@ -1822,18 +1869,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         concentration companion to /api/proportions (which reports each item's
         share of the total). Additive: reuses ``domain.gini_quantities`` and
         never touches the other convert paths."""
-        data = self._json_body_obj()
-        if data is None:
+        got = self._items_or_400(domain.gini_quantities)
+        if got is None:
             return
-        parsed = self._items_request(data)
-        if parsed is None:
-            return
-        items, to_unit, precision = parsed
-        try:
-            result = domain.gini_quantities(items, to_unit)
-        except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
-            return
+        result, precision = got
         self._send_json(200, {
             "category": result["category"],
             "unit": result["unit"],
@@ -1854,18 +1893,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         /api/winsorize is the per-item companion to /api/trimmed-mean). Additive:
         reuses ``domain.lorenz_quantities`` and never touches the other convert
         paths."""
-        data = self._json_body_obj()
-        if data is None:
+        got = self._items_or_400(domain.lorenz_quantities)
+        if got is None:
             return
-        parsed = self._items_request(data)
-        if parsed is None:
-            return
-        items, to_unit, precision = parsed
-        try:
-            result = domain.lorenz_quantities(items, to_unit)
-        except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
-            return
+        result, precision = got
         self._send_json(200, {
             "category": result["category"],
             "unit": result["unit"],
@@ -1893,18 +1924,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         (inequality) and /api/proportions (per-item share). Additive: reuses
         ``domain.entropy_quantities`` and never touches the other convert
         paths."""
-        data = self._json_body_obj()
-        if data is None:
+        got = self._items_or_400(domain.entropy_quantities)
+        if got is None:
             return
-        parsed = self._items_request(data)
-        if parsed is None:
-            return
-        items, to_unit, precision = parsed
-        try:
-            result = domain.entropy_quantities(items, to_unit)
-        except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
-            return
+        result, precision = got
         self._send_json(200, {
             "category": result["category"],
             "unit": result["unit"],
@@ -1928,20 +1951,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         outlier-resistant location companion to /api/means (the classical means)
         and /api/mad (robust spread). Additive: reuses ``domain.trimmed_mean`` and
         never touches the other convert paths."""
-        data = self._json_body_obj()
-        if data is None:
+        got = self._items_proportion_or_400(domain.trimmed_mean)
+        if got is None:
             return
-        parsed = self._items_request(data)
-        if parsed is None:
-            return
-        items, to_unit, precision = parsed
-        # proportion is optional; the domain layer defaults and validates it.
-        proportion = data.get("proportion", 0.1)
-        try:
-            result = domain.trimmed_mean(items, proportion, to_unit)
-        except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
-            return
+        result, precision = got
         self._send_json(200, {
             "category": result["category"],
             "unit": result["unit"],
@@ -1966,20 +1979,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         scalar winsorized mean), alongside /api/zscore, /api/normalize and
         /api/outliers. Additive: reuses ``domain.winsorize_quantities`` and never
         touches the other convert paths."""
-        data = self._json_body_obj()
-        if data is None:
+        got = self._items_proportion_or_400(domain.winsorize_quantities)
+        if got is None:
             return
-        parsed = self._items_request(data)
-        if parsed is None:
-            return
-        items, to_unit, precision = parsed
-        # proportion is optional; the domain layer defaults and validates it.
-        proportion = data.get("proportion", 0.1)
-        try:
-            result = domain.winsorize_quantities(items, proportion, to_unit)
-        except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
-            return
+        result, precision = got
         self._send_json(200, {
             "category": result["category"],
             "unit": result["unit"],
@@ -2130,18 +2133,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         a common unit. The inferential, normality-testing companion to /api/shape
         (just as /api/confidence-interval is to /api/describe). Additive: reuses
         ``domain.jarque_bera`` and never touches the other convert paths."""
-        data = self._json_body_obj()
-        if data is None:
+        got = self._items_or_400(domain.jarque_bera)
+        if got is None:
             return
-        parsed = self._items_request(data)
-        if parsed is None:
-            return
-        items, to_unit, precision = parsed
-        try:
-            result = domain.jarque_bera(items, to_unit)
-        except ValueError as exc:
-            self._send_json(400, {"error": str(exc)})
-            return
+        result, precision = got
         self._send_json(200, {
             "category": result["category"],
             "unit": result["unit"],
@@ -2196,6 +2191,116 @@ class RequestHandler(BaseHTTPRequestHandler):
             "upper": round(result["upper"], precision),
         })
 
+    def _handle_one_sample_t_test(self):
+        """POST /api/one-sample-t-test — {items:[{value,unit},...], mu?, alpha?,
+        to?} -> a one-sample t-test of the sample MEAN against a hypothesized value
+        'mu' (in the common target unit; default 0). The one-group inferential
+        companion to the two-sample /api/t-test and the paired /api/paired-t-test,
+        and the hypothesis-test sibling of /api/t-interval / /api/confidence-interval
+        (which bound the same mean instead of testing it). Reports the sample mean,
+        the difference from mu, the unbiased sample stdev, the standard error, the
+        t-statistic on df = n - 1, the two-sided p-value, a verdict at the 'alpha'
+        level (default 0.05) and the matching (1 - alpha) confidence interval for
+        the mean. 'mu' and 'alpha' are optional and validated by the domain layer,
+        which also requires at least two values and a non-constant sample. Additive:
+        reuses ``domain.one_sample_t_test`` and never touches the other convert
+        paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        parsed = self._items_request(data)
+        if parsed is None:
+            return
+        items, to_unit, precision = parsed
+        # mu defaults to 0; alpha defaults to 0.05. Both validated by the domain.
+        mu = data.get("mu")
+        if mu is None:
+            mu = 0.0
+        try:
+            result = domain.one_sample_t_test(items, mu, data.get("alpha"), to_unit)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "category": result["category"],
+            "unit": result["unit"],
+            "count": result["count"],
+            "df": result["df"],
+            "mu": round(result["mu"], precision),
+            "mean": round(result["mean"], precision),
+            "difference": round(result["difference"], precision),
+            "sample_stdev": round(result["sample_stdev"], precision),
+            "standard_error": round(result["standard_error"], precision),
+            "statistic": round(result["statistic"], precision),
+            "alpha": result["alpha"],
+            "p_value": round(result["p_value"], precision),
+            "significant": result["significant"],
+            "confidence_level": result["confidence_level"],
+            "critical_value": round(result["critical_value"], precision),
+            "margin_of_error": round(result["margin_of_error"], precision),
+            "lower": round(result["lower"], precision),
+            "upper": round(result["upper"], precision),
+        })
+
+    def _handle_chi_square_gof(self):
+        """POST /api/chi-square-gof — {observed:[n0, n1, ...], expected?:[...],
+        alpha?, ddof?, precision?} -> Pearson's chi-square goodness-of-fit test
+        for a single categorical sample. The categorical-frequency companion to
+        the numeric hypothesis tests: where /api/one-sample-t-test asks whether a
+        sample MEAN equals a target, this asks whether observed category COUNTS
+        follow an expected distribution, using the same chi-square upper tail that
+        backs /api/kruskal-wallis and /api/bartlett. Inputs are bare, dimensionless
+        counts, so there is no unit/'to' here and the conversion engine is never
+        touched. 'expected' is optional: when omitted a uniform distribution is
+        assumed (the "is this die fair?" null); when given it is a same-length list
+        of strictly positive weights rescaled to the observed total, so expected
+        counts, proportions or raw relative weights are all accepted. 'ddof'
+        (default 0) is the number of parameters estimated from the data and lowers
+        the degrees of freedom (k - 1 - ddof). Reports per-category
+        observed/expected/residual/contribution/standardised-residual, the total
+        count, the (integer) degrees of freedom, the X^2 statistic, the upper-tail
+        p-value and a verdict at the 'alpha' level (default 0.05). 'alpha', 'ddof'
+        and 'expected' are validated by the domain layer, which also requires at
+        least two non-negative counts summing to a positive total. Additive:
+        reuses ``domain.chi_square_goodness_of_fit`` and never touches the other
+        convert paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        precision, err = resolve_precision(data)
+        if err is not None:
+            self._send_json(400, {"error": err})
+            return
+        # observed/expected/alpha/ddof are validated by the domain layer; ddof
+        # defaults to 0 when absent.
+        ddof = data.get("ddof")
+        if ddof is None:
+            ddof = 0
+        try:
+            result = domain.chi_square_goodness_of_fit(
+                data.get("observed"), data.get("expected"), data.get("alpha"), ddof
+            )
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "k": result["k"],
+            "n": round(result["n"], precision),
+            "categories": [{
+                "observed": round(c["observed"], precision),
+                "expected": round(c["expected"], precision),
+                "residual": round(c["residual"], precision),
+                "contribution": round(c["contribution"], precision),
+                "std_residual": round(c["std_residual"], precision),
+            } for c in result["categories"]],
+            "ddof": result["ddof"],
+            "df": result["df"],
+            "statistic": round(result["statistic"], precision),
+            "alpha": result["alpha"],
+            "p_value": round(result["p_value"], precision),
+            "significant": result["significant"],
+        })
+
     def _handle_t_test(self):
         """POST /api/t-test — {a:[{value,unit},...], b:[...], equal_var?, alpha?,
         to?} -> a two-sample t-test for the difference between two population
@@ -2245,6 +2350,484 @@ class RequestHandler(BaseHTTPRequestHandler):
             "significant": result["significant"],
         })
 
+    def _handle_variance_ratio_test(self):
+        """POST /api/variance-ratio-test — {a:[{value,unit},...], b:[...], alpha?,
+        to?} -> an F-test for the equality of two independent samples' VARIANCES.
+        The spread-comparison companion to /api/t-test (which compares the two
+        means): it tests whether the two samples are equally dispersed, the
+        classic pre-check that decides between a pooled and a Welch t-test. The
+        statistic is the unbiased variance ratio s_a**2 / s_b**2 with numerator/
+        denominator degrees of freedom n_a-1 / n_b-1; reports both sample means/
+        variances/stdevs, the ratio, which sample varies more, the two-sided
+        p-value and a verdict at the 'alpha' level (default 0.05). Swapping the two
+        samples reciprocates the statistic but leaves the p-value unchanged.
+        'alpha' is optional and validated by the domain layer, which also requires
+        at least two values per sample, a common linear category and that NEITHER
+        sample is constant (a zero variance makes the ratio undefined). Additive:
+        reuses ``domain.variance_ratio_test`` and never touches the other convert
+        paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        parsed = self._two_sample_request(data)
+        if parsed is None:
+            return
+        a, b, to_unit, precision = parsed
+        # alpha is optional; the domain layer defaults and validates.
+        try:
+            result = domain.variance_ratio_test(a, b, data.get("alpha"), to_unit)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "category": result["category"],
+            "unit": result["unit"],
+            "n_a": result["n_a"],
+            "n_b": result["n_b"],
+            "mean_a": round(result["mean_a"], precision),
+            "mean_b": round(result["mean_b"], precision),
+            "var_a": round(result["var_a"], precision),
+            "var_b": round(result["var_b"], precision),
+            "stdev_a": round(result["stdev_a"], precision),
+            "stdev_b": round(result["stdev_b"], precision),
+            "df_a": result["df_a"],
+            "df_b": result["df_b"],
+            "variance_ratio": round(result["variance_ratio"], precision),
+            "statistic": round(result["statistic"], precision),
+            "larger_variance": result["larger_variance"],
+            "alpha": result["alpha"],
+            "p_value": round(result["p_value"], precision),
+            "significant": result["significant"],
+        })
+
+    def _handle_cohens_d(self):
+        """POST /api/cohens-d — {a:[{value,unit},...], b:[...], to?} -> the
+        standardized effect size (Cohen's d) for the difference between two
+        independent samples' MEANS. The effect-size companion to /api/t-test and
+        /api/mann-whitney (which report significance): it expresses the
+        difference in pooled-standard-deviation units, so unlike a p-value it
+        does not shrink toward zero as the samples grow. Reports both sample
+        means/variances/stdevs, the difference, the pooled stdev, Cohen's d,
+        the bias-corrected Hedges' g (with its correction factor), Glass's delta
+        (standardised by sample b's stdev, or null when b is constant) and a
+        plain-language magnitude label. The two samples are independent, may
+        differ in length, and must share one linear category; the domain layer
+        requires at least two values per sample. Additive: reuses
+        ``domain.cohens_d`` and never touches the other convert paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        parsed = self._two_sample_request(data)
+        if parsed is None:
+            return
+        a, b, to_unit, precision = parsed
+        try:
+            result = domain.cohens_d(a, b, to_unit)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "category": result["category"],
+            "unit": result["unit"],
+            "n_a": result["n_a"],
+            "n_b": result["n_b"],
+            "mean_a": round(result["mean_a"], precision),
+            "mean_b": round(result["mean_b"], precision),
+            "var_a": round(result["var_a"], precision),
+            "var_b": round(result["var_b"], precision),
+            "stdev_a": round(result["stdev_a"], precision),
+            "stdev_b": round(result["stdev_b"], precision),
+            "difference": round(result["difference"], precision),
+            "pooled_stdev": round(result["pooled_stdev"], precision),
+            "cohens_d": round(result["cohens_d"], precision),
+            "hedges_g": round(result["hedges_g"], precision),
+            "correction_factor": round(result["correction_factor"], precision),
+            "glass_delta": self._round_opt(result["glass_delta"], precision),
+            "magnitude": result["magnitude"],
+        })
+
+    def _handle_mann_whitney(self):
+        """POST /api/mann-whitney — {a:[{value,unit},...], b:[...], alpha?, to?}
+        -> a Mann-Whitney U test (Wilcoxon rank-sum) for two independent samples.
+        The non-parametric, rank-based companion to /api/t-test: it compares the
+        two distributions' locations using only the pooled ranks, so it assumes
+        no normality and is robust to outliers and skew. The samples are
+        independent and may differ in length. Reports each sample's rank sum and
+        mean rank, the U statistics (u_a, u_b and the reported min u), the null
+        mean/tie-corrected stdev of U, a ties flag, the continuity-corrected
+        z-score, the two-sided p-value and a verdict at the 'alpha' level (default
+        0.05). 'alpha' is optional and validated by the domain layer, which also
+        requires a common linear category and some rank spread across the pool.
+        Additive: reuses ``domain.mann_whitney_u`` and never touches the other
+        convert paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        parsed = self._two_sample_request(data)
+        if parsed is None:
+            return
+        a, b, to_unit, precision = parsed
+        # alpha is optional; the domain layer defaults and validates.
+        try:
+            result = domain.mann_whitney_u(a, b, data.get("alpha"), to_unit)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "category": result["category"],
+            "unit": result["unit"],
+            "n_a": result["n_a"],
+            "n_b": result["n_b"],
+            "rank_sum_a": round(result["rank_sum_a"], precision),
+            "rank_sum_b": round(result["rank_sum_b"], precision),
+            "mean_rank_a": round(result["mean_rank_a"], precision),
+            "mean_rank_b": round(result["mean_rank_b"], precision),
+            "u_a": round(result["u_a"], precision),
+            "u_b": round(result["u_b"], precision),
+            "u": round(result["u"], precision),
+            "mu_u": round(result["mu_u"], precision),
+            "sigma_u": round(result["sigma_u"], precision),
+            "has_ties": result["has_ties"],
+            "z": round(result["z"], precision),
+            "alpha": result["alpha"],
+            "p_value": round(result["p_value"], precision),
+            "significant": result["significant"],
+        })
+
+    def _handle_anova(self):
+        """POST /api/anova — {groups:[[{value,unit},...], ...], alpha?, to?} -> a
+        one-way ANOVA (F-test) for a difference among three-or-more population
+        MEANS. The k-group generalisation of /api/t-test (which compares exactly
+        two means): the groups are independent and may differ in length, reducing
+        to the pooled t-test for two groups (F == t**2, identical p-value).
+        Reports each group's count/mean/variance/stdev, the grand mean, the
+        between/within sums of squares and mean squares, the (integer) degrees of
+        freedom, the F-statistic, the upper-tail p-value and a verdict at the
+        'alpha' level (default 0.05). 'alpha' is optional and validated by the
+        domain layer, which also requires at least two groups, more observations
+        than groups, and a common linear category. Additive: reuses
+        ``domain.one_way_anova`` and never touches the other convert paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        parsed = self._groups_request(data)
+        if parsed is None:
+            return
+        groups, to_unit, precision = parsed
+        # alpha is optional; the domain layer defaults and validates.
+        try:
+            result = domain.one_way_anova(groups, data.get("alpha"), to_unit)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "category": result["category"],
+            "unit": result["unit"],
+            "k": result["k"],
+            "n_total": result["n_total"],
+            "grand_mean": round(result["grand_mean"], precision),
+            "groups": [{
+                "n": g["n"],
+                "mean": round(g["mean"], precision),
+                "var": round(g["var"], precision),
+                "stdev": round(g["stdev"], precision),
+            } for g in result["groups"]],
+            "ss_between": round(result["ss_between"], precision),
+            "ss_within": round(result["ss_within"], precision),
+            "df_between": result["df_between"],
+            "df_within": result["df_within"],
+            "ms_between": round(result["ms_between"], precision),
+            "ms_within": round(result["ms_within"], precision),
+            "statistic": round(result["statistic"], precision),
+            "alpha": result["alpha"],
+            "p_value": round(result["p_value"], precision),
+            "significant": result["significant"],
+        })
+
+    def _handle_kruskal_wallis(self):
+        """POST /api/kruskal-wallis — {groups:[[{value,unit},...], ...], alpha?,
+        to?} -> a Kruskal-Wallis H test for a difference in location among k
+        independent samples. The non-parametric, rank-based companion to
+        /api/anova (which compares group means and assumes normality) and the
+        k-group generalisation of /api/mann-whitney: it pools all observations,
+        ranks them, and tests whether every group shares one distribution using
+        only the ranks, so it assumes no normality and is robust to outliers and
+        skew. The groups are independent and may differ in length. Reports each
+        group's count/rank-sum/mean-rank, the raw and tie-corrected H statistic,
+        the tie-correction divisor, a ties flag, the (integer) degrees of freedom,
+        the chi-square upper-tail p-value and a verdict at the 'alpha' level
+        (default 0.05). 'alpha' is optional and validated by the domain layer,
+        which also requires at least two groups, a common linear category and some
+        rank spread across the pool. Additive: reuses ``domain.kruskal_wallis_h``
+        and never touches the other convert paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        parsed = self._groups_request(data)
+        if parsed is None:
+            return
+        groups, to_unit, precision = parsed
+        # alpha is optional; the domain layer defaults and validates.
+        try:
+            result = domain.kruskal_wallis_h(groups, data.get("alpha"), to_unit)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "category": result["category"],
+            "unit": result["unit"],
+            "k": result["k"],
+            "n_total": result["n_total"],
+            "groups": [{
+                "n": g["n"],
+                "rank_sum": round(g["rank_sum"], precision),
+                "mean_rank": round(g["mean_rank"], precision),
+            } for g in result["groups"]],
+            "h": round(result["h"], precision),
+            "correction": round(result["correction"], precision),
+            "has_ties": result["has_ties"],
+            "statistic": round(result["statistic"], precision),
+            "df": result["df"],
+            "alpha": result["alpha"],
+            "p_value": round(result["p_value"], precision),
+            "significant": result["significant"],
+        })
+
+    def _handle_bartlett(self):
+        """POST /api/bartlett — {groups:[[{value,unit},...], ...], alpha?, to?} ->
+        Bartlett's test for homogeneity of variances across k>=2 groups. The
+        k-group generalisation of /api/variance-ratio-test (the two-sample F-test
+        for equal variances), exactly as /api/anova generalises the two-sample
+        t-test for equal means: it tests whether three or more independent samples
+        share one variance — the classic homoscedasticity pre-check behind ANOVA.
+        Reports each group's count/mean/variance/stdev, the pooled variance (the
+        same mean-square-within ANOVA forms), the Bartlett correction factor, the
+        (integer) degrees of freedom, the corrected chi-square statistic, the
+        upper-tail p-value and a verdict at the 'alpha' level (default 0.05).
+        'alpha' is optional and validated by the domain layer, which also requires
+        at least two groups, at least two values per group, a common linear
+        category and a non-constant variance per group. Additive: reuses
+        ``domain.bartlett_test`` and never touches the other convert paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        parsed = self._groups_request(data)
+        if parsed is None:
+            return
+        groups, to_unit, precision = parsed
+        # alpha is optional; the domain layer defaults and validates.
+        try:
+            result = domain.bartlett_test(groups, data.get("alpha"), to_unit)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "category": result["category"],
+            "unit": result["unit"],
+            "k": result["k"],
+            "n_total": result["n_total"],
+            "pooled_variance": round(result["pooled_variance"], precision),
+            "groups": [{
+                "n": g["n"],
+                "mean": round(g["mean"], precision),
+                "var": round(g["var"], precision),
+                "stdev": round(g["stdev"], precision),
+            } for g in result["groups"]],
+            "correction": round(result["correction"], precision),
+            "df": result["df"],
+            "statistic": round(result["statistic"], precision),
+            "alpha": result["alpha"],
+            "p_value": round(result["p_value"], precision),
+            "significant": result["significant"],
+        })
+
+    def _handle_levene(self):
+        """POST /api/levene — {groups:[[{value,unit},...], ...], alpha?, center?,
+        to?} -> Levene's test for homogeneity of variances across k>=2 groups. The
+        robust companion to /api/bartlett: where Bartlett is the parametric,
+        normal-theory homoscedasticity check, Levene replaces each observation by
+        its absolute deviation from its group's centre and runs a one-way ANOVA on
+        those deviations, so it stays well-behaved under non-normal data. The
+        optional 'center' selects the spread centre — 'mean' (default, classic
+        Levene) or 'median' (the Brown-Forsythe variant). Reports each group's
+        count/centre/mean-absolute-deviation, the grand mean deviation, the
+        (integer) degrees of freedom, the F-like W statistic, the upper-tail
+        p-value and a verdict at the 'alpha' level (default 0.05). 'alpha' and
+        'center' are optional and validated by the domain layer, which also
+        requires at least two groups, a common linear category, more observations
+        than groups and some within-group spread in the deviations. Additive:
+        reuses ``domain.levene_test`` and never touches the other convert paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        parsed = self._groups_request(data)
+        if parsed is None:
+            return
+        groups, to_unit, precision = parsed
+        # alpha and center are optional; the domain layer defaults and validates.
+        center = data.get("center", "mean")
+        try:
+            result = domain.levene_test(
+                groups, data.get("alpha"), center, to_unit)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "category": result["category"],
+            "unit": result["unit"],
+            "center": result["center"],
+            "k": result["k"],
+            "n_total": result["n_total"],
+            "grand_mean_deviation": round(
+                result["grand_mean_deviation"], precision),
+            "groups": [{
+                "n": g["n"],
+                "center": round(g["center"], precision),
+                "mean_deviation": round(g["mean_deviation"], precision),
+            } for g in result["groups"]],
+            "df_between": result["df_between"],
+            "df_within": result["df_within"],
+            "statistic": round(result["statistic"], precision),
+            "alpha": result["alpha"],
+            "p_value": round(result["p_value"], precision),
+            "significant": result["significant"],
+        })
+
+    def _handle_paired_t_test(self):
+        """POST /api/paired-t-test — {x:[{value,unit},...], y:[...], alpha?, to?}
+        -> a paired (dependent) t-test for a non-zero mean within-pair difference.
+        The paired companion to /api/t-test (which compares two independent
+        samples): x and y are measured on the same subjects and paired point for
+        point, so they must share a category and have equal length. Tests whether
+        the mean of d = x - y is zero. Reports both means, the mean/variance/stdev
+        of the differences, the standard error, the t-statistic, the integer
+        degrees of freedom (n-1), the two-sided p-value and a verdict at the
+        'alpha' level (default 0.05). 'alpha' is optional and validated by the
+        domain layer, which also requires at least two pairs and a common linear
+        category. Additive: reuses ``domain.paired_t_test`` and never touches the
+        other convert paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        parsed = self._paired_one_unit_request(data)
+        if parsed is None:
+            return
+        x, y, to_unit, precision = parsed
+        # alpha is optional; the domain layer defaults and validates.
+        try:
+            result = domain.paired_t_test(x, y, data.get("alpha"), to_unit)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "category": result["category"],
+            "unit": result["unit"],
+            "n": result["n"],
+            "mean_x": round(result["mean_x"], precision),
+            "mean_y": round(result["mean_y"], precision),
+            "mean_difference": round(result["mean_difference"], precision),
+            "var_difference": round(result["var_difference"], precision),
+            "stdev_difference": round(result["stdev_difference"], precision),
+            "standard_error": round(result["standard_error"], precision),
+            "statistic": round(result["statistic"], precision),
+            "df": result["df"],
+            "alpha": result["alpha"],
+            "p_value": round(result["p_value"], precision),
+            "significant": result["significant"],
+        })
+
+    def _handle_wilcoxon(self):
+        """POST /api/wilcoxon — {x:[{value,unit},...], y:[...], alpha?, to?} -> a
+        Wilcoxon signed-rank test for a shift between two paired series. The
+        non-parametric, rank-based companion to /api/paired-t-test (and the paired
+        analogue of /api/mann-whitney): it ranks the magnitudes of the within-pair
+        differences d = x - y, so it assumes no normality and is robust to
+        outliers and skew. x and y are paired point for point and must share a
+        category and have equal length; exact zero differences are dropped before
+        ranking. Reports the pair count, the dropped/ranked counts, the signed
+        rank sums (w_plus, w_minus and the reported min w), the null mean and
+        tie-corrected stdev of W+, a ties flag, the continuity-corrected z-score,
+        the two-sided p-value and a verdict at the 'alpha' level (default 0.05).
+        'alpha' is optional and validated by the domain layer, which also requires
+        at least two pairs, a common linear category and some non-zero difference.
+        Additive: reuses ``domain.wilcoxon_signed_rank`` and never touches the
+        other convert paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        parsed = self._paired_one_unit_request(data)
+        if parsed is None:
+            return
+        x, y, to_unit, precision = parsed
+        # alpha is optional; the domain layer defaults and validates.
+        try:
+            result = domain.wilcoxon_signed_rank(x, y, data.get("alpha"), to_unit)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "category": result["category"],
+            "unit": result["unit"],
+            "n": result["n"],
+            "n_zero": result["n_zero"],
+            "n_nonzero": result["n_nonzero"],
+            "w_plus": round(result["w_plus"], precision),
+            "w_minus": round(result["w_minus"], precision),
+            "w": round(result["w"], precision),
+            "mu_w": round(result["mu_w"], precision),
+            "sigma_w": round(result["sigma_w"], precision),
+            "has_ties": result["has_ties"],
+            "z": round(result["z"], precision),
+            "alpha": result["alpha"],
+            "p_value": round(result["p_value"], precision),
+            "significant": result["significant"],
+        })
+
+    def _handle_sign_test(self):
+        """POST /api/sign-test — {x:[{value,unit},...], y:[...], alpha?, to?} -> a
+        paired sign test for a non-zero median within-pair difference. The
+        simplest paired-difference test and the assumption-free companion to
+        /api/paired-t-test (mean difference) and /api/wilcoxon (signed ranks): it
+        uses only the direction of each difference d = x - y, so under the null
+        the count of positive differences is Binomial(m, 1/2) and the p-value is
+        EXACT (no normal approximation). x and y are paired point for point and
+        must share a category and have equal length; exact zero differences are
+        dropped. Reports the pair count, the dropped/positive/negative/ranked
+        counts, the min(n_plus, n_minus) statistic, the median difference, the
+        positive proportion, the exact two-sided p-value and a verdict at the
+        'alpha' level (default 0.05). 'alpha' is optional and validated by the
+        domain layer, which also requires at least two pairs, a common linear
+        category and some non-zero difference. Additive: reuses
+        ``domain.sign_test`` and never touches the other convert paths."""
+        data = self._json_body_obj()
+        if data is None:
+            return
+        parsed = self._paired_one_unit_request(data)
+        if parsed is None:
+            return
+        x, y, to_unit, precision = parsed
+        # alpha is optional; the domain layer defaults and validates.
+        try:
+            result = domain.sign_test(x, y, data.get("alpha"), to_unit)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+        self._send_json(200, {
+            "category": result["category"],
+            "unit": result["unit"],
+            "n": result["n"],
+            "n_zero": result["n_zero"],
+            "n_plus": result["n_plus"],
+            "n_minus": result["n_minus"],
+            "n_nonzero": result["n_nonzero"],
+            "statistic": result["statistic"],
+            "median_difference": round(result["median_difference"], precision),
+            "proportion_positive": round(result["proportion_positive"], precision),
+            "alpha": result["alpha"],
+            "p_value": round(result["p_value"], precision),
+            "significant": result["significant"],
+        })
+
 
 def make_server(port=0):
     ThreadingTCPServer.allow_reuse_address = True
@@ -2253,7 +2836,7 @@ def make_server(port=0):
 
 
 if __name__ == "__main__":
-    srv = make_server(8000)
+    srv = make_server(int(os.environ.get("ADF_SMOKE_PORT") or os.environ.get("PORT") or 8000))
     host, port = srv.server_address
     print("Multi-category unit converter ready on http://127.0.0.1:%d/" % port)
     try:
