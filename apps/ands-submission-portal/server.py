@@ -36,6 +36,7 @@ import entitlements as entitlements_mod
 import esign
 import fees
 import hc_calendar
+import journey
 import lifecycle
 import navigation
 import privacy
@@ -956,12 +957,24 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
                 "drug_product": (body.get("drug_product") or "").strip(),
                 "dossier_id": (body.get("dossier_id") or "").strip(),
                 "by": sess["email"]}
+            # REQ-073 journey identity: company_id / sequence / applicant let
+            # the guided journey (GET /api/journey/{id}) advance past the
+            # orientation → company → dossier → submission stages; 'oriented'
+            # marks the orientation prologue read. Each optional string is only
+            # stored when non-empty.
+            for ident in ("company_id", "sequence", "applicant"):
+                value = body.get(ident)
+                if isinstance(value, str) and value.strip():
+                    record[ident] = value.strip()
+            if body.get("oriented"):
+                record["oriented"] = True
             # REQ-071: carry through any readiness signals the caller supplies
             # (validation, Module-1 content, fees, e-sign, transmission,
-            # lifecycle, deadline) so the dashboard reflects real progress —
-            # each is optional and only stored when it's a JSON object.
+            # lifecycle, deadline) plus the REQ-076 review approval — so both
+            # the dashboard and the journey reflect real progress; each is
+            # optional and only stored when it's a JSON object.
             for signal in ("validation", "content", "fees", "esign",
-                           "transmission", "lifecycle", "deadline"):
+                           "transmission", "lifecycle", "deadline", "reviews"):
                 value = body.get(signal)
                 if isinstance(value, dict):
                     record[signal] = value
@@ -1542,6 +1555,44 @@ def make_handler(store: SubmissionStore, companies: "CompanyStore" = None,
                 finally:
                     data.close()
                 self._send_json(readiness.dashboard(subs, today=today))
+                return
+            if path.startswith("/api/journey/"):
+                # JRNY-REQ-001 (MUST): the gated 11-stage journey spine served
+                # by the BFF, not buried in a module — returns stages
+                # (done/current/locked + plain-language reason) + position (the
+                # one-click Resume target) + the REQ-071 readiness card, for one
+                # submission. Gated by the 'dashboard' entitlement (REQ-082).
+                sess = self._tenant_session()
+                if sess is None:
+                    return
+                if not self._require_feature(sess, "dashboard"):
+                    return
+                raw_id = path[len("/api/journey/"):].strip("/")
+                try:
+                    sub_id = int(raw_id)
+                except (TypeError, ValueError):
+                    self._send_json({"error": "not found"}, 404)
+                    return
+                qs = parse_qs(urlparse(self.path).query)
+                today = (qs.get("today") or [""])[0].strip()
+                if not today:
+                    today = date.today().isoformat()
+                data = self._tenant_data(sess["tenant_id"])
+                try:
+                    rec = next((r for r in data.list("submission")
+                                if r.get("id") == sub_id), None)
+                finally:
+                    data.close()
+                if rec is None:
+                    self._send_json(
+                        {"error": "not found",
+                         "detail": f"no submission {sub_id} in this "
+                                   "workspace"}, 404)
+                    return
+                view = journey.journey(rec, sub_id=sub_id)
+                view["readiness"] = readiness.submission_readiness(
+                    rec, today=today)
+                self._send_json(view)
                 return
             if path == "/api/owner/tenants":
                 if self._require_owner() is None:

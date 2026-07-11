@@ -31,6 +31,7 @@ import ectd
 import esign
 import fees
 import hc_calendar
+import journey
 import lifecycle
 import privacy
 import qos
@@ -5902,6 +5903,234 @@ class ControlPlaneApiTests(unittest.TestCase):
         self.assertIn("/api/tenant/dashboard", page)
         self.assertIn("REQ-071", page)
         self.assertIn('lang="en"', page)
+
+    # -- JRNY-REQ-001: GET /api/journey/{id} (journey spine as an API) ---
+    def _new_submission(self, tok, body):
+        s, data = self._req("POST", "/api/tenant/submissions", body, token=tok)
+        self.assertEqual(s, 201)
+        return data["saved"]["id"]
+
+    def test_journey_endpoint_returns_stages_position_and_readiness(self):
+        # JRNY-REQ-001 (MUST): the gated journey served by the BFF returns
+        # stages (done/current/locked + reason) + position + readiness.
+        _, signup = self._signup("Acme", "admin@acme.com")
+        tok = signup["token"]
+        sid = self._new_submission(
+            tok, {"drug_product": "Aspirin", "dossier_id": "e123456"})
+        s, data = self._req("GET", f"/api/journey/{sid}", token=tok)
+        self.assertEqual(s, 200)
+        # stages: the full gated walk, each annotated with a status
+        self.assertEqual(len(data["stages"]), len(journey.STAGES))
+        for st in data["stages"]:
+            self.assertIn(st["status"], ("done", "current", "locked"))
+        locked = [st for st in data["stages"] if st["status"] == "locked"]
+        self.assertTrue(all(st["gate"]["reason"] for st in locked))  # +reason
+        # position: the compact Resume roll-up
+        self.assertIn("resume", data["position"])
+        self.assertEqual(data["position"]["current"], data["current"])
+        # readiness: the READY/BLOCKED card (REQ-071) folded in
+        self.assertIn(data["readiness"]["status"], ("READY", "BLOCKED"))
+        self.assertEqual(data["readiness"]["dossier_id"], "e123456")
+        self.assertIn("tiles", data["readiness"])
+
+    def test_journey_endpoint_404_for_unknown_submission(self):
+        _, signup = self._signup("Acme", "admin@acme.com")
+        s, data = self._req("GET", "/api/journey/999999",
+                            token=signup["token"])
+        self.assertEqual(s, 404)
+
+    def test_journey_endpoint_404_for_non_numeric_id(self):
+        _, signup = self._signup("Acme", "admin@acme.com")
+        s, _d = self._req("GET", "/api/journey/not-an-id",
+                          token=signup["token"])
+        self.assertEqual(s, 404)
+
+    def test_journey_endpoint_requires_tenant_session(self):
+        s, _d = self._req("GET", "/api/journey/1")   # no token
+        self.assertEqual(s, 401)
+
+    def test_journey_endpoint_is_tenant_isolated(self):
+        # A submission created in tenant A is not reachable from tenant B.
+        _, a = self._signup("Acme", "admin@acme.com")
+        sid = self._new_submission(a["token"], {"drug_product": "Aspirin"})
+        _, b = self._signup("Beta", "admin@beta.com")
+        s, _d = self._req("GET", f"/api/journey/{sid}", token=b["token"])
+        self.assertEqual(s, 404)
+
+    def test_journey_endpoint_advances_with_carried_signals(self):
+        # Carry-through: a submission that records company_id + dossier_id +
+        # sequence has walked past orientation/company/dossier, so the journey
+        # reports 'submission' (create-the-sequence) as the current stage.
+        _, signup = self._signup("Acme", "admin@acme.com")
+        tok = signup["token"]
+        sid = self._new_submission(tok, {
+            "drug_product": "Aspirin", "dossier_id": "e123456",
+            "company_id": "100000", "sequence": "0000"})
+        s, data = self._req("GET", f"/api/journey/{sid}", token=tok)
+        self.assertEqual(s, 200)
+        self.assertEqual(data["position"]["current_key"], "content")
+        # orientation/company/dossier/submission are done
+        done = {st["key"] for st in data["stages"] if st["status"] == "done"}
+        self.assertTrue({"orient", "company", "dossier", "submission"} <= done)
+
+    def test_journey_endpoint_today_anchors_readiness_countdown(self):
+        _, signup = self._signup("Acme", "admin@acme.com")
+        tok = signup["token"]
+        sid = self._new_submission(tok, {
+            "drug_product": "Aspirin", "dossier_id": "e123456",
+            "deadline": {"start": "2026-06-01", "days": 45,
+                         "notice_type": "SDN"}})
+        s, data = self._req("GET", f"/api/journey/{sid}?today=2026-06-27",
+                            token=tok)
+        self.assertEqual(s, 200)
+        deadline = [t for t in data["readiness"]["tiles"]
+                    if t["key"] == "deadline"][0]
+        self.assertIsNotNone(deadline.get("days_remaining"))
+
+
+class JourneyDomainTests(unittest.TestCase):
+    """REQ-073 / JRNY-REQ-001 guided-journey spine — pure domain (no HTTP).
+
+    Characterises every stage of the gated 11-stage walk and the compact
+    ``position`` roll-up. journey.py had zero tests before this class; these
+    lock in the linear-gate contract (exactly one CURRENT stage; everything
+    after it LOCKED with a plain-language reason; everything before it DONE)."""
+
+    @staticmethod
+    def _content_present():
+        # A content sub-object that satisfies content_model's checklist gate,
+        # built the same way the REQ-071 dashboard tests do.
+        present = [{"key": d["key"], "formats": d["formats"]}
+                   for d in content_model.required_documents(False)]
+        return {"present_documents": present}
+
+    def _walk_payload(self, upto_key):
+        """Return a payload whose signals make every stage BEFORE ``upto_key``
+        complete, so ``upto_key`` is the CURRENT stage."""
+        order = [s["key"] for s in journey.STAGES]
+        idx = order.index(upto_key)
+        signals = {
+            "orient":     {"oriented": True},
+            "company":    {"company_id": "100000"},
+            "dossier":    {"dossier_id": "e123456"},
+            "submission": {"sequence": "0000"},
+            "content":    {"content": self._content_present()},
+            "validate":   {"validation": {"ran": True, "errors": 0,
+                                          "warnings": 2}},
+            "fees":       {"fees": {"paid": True}},
+            "review":     {"reviews": {"approved": True}},
+            "sign":       {"esign": {"signed": True}},
+            "transmit":   {"transmission": {"state": "RECEIVED_BY_HC"}},
+        }
+        payload: dict = {}
+        for key in order[:idx]:            # complete every predecessor
+            payload.update(signals.get(key, {}))
+        return payload
+
+    # -- new / empty journey -------------------------------------------
+    def test_empty_payload_starts_at_orientation(self):
+        sts = journey.stages({})
+        self.assertEqual(len(sts), len(journey.STAGES))     # all 11 present
+        self.assertEqual(sts[0]["status"], journey.CURRENT)  # orient current
+        self.assertTrue(sts[0]["current"])
+        self.assertFalse(sts[0]["done"])
+        # everything after the current stage is locked with a gate reason
+        for st in sts[1:]:
+            self.assertEqual(st["status"], journey.LOCKED)
+            self.assertIsNotNone(st["gate"])
+
+    def test_locked_stage_gate_names_the_exact_predecessor(self):
+        sts = journey.stages({})
+        company = sts[1]                    # "Set up your company" is locked
+        self.assertEqual(company["status"], journey.LOCKED)
+        gate = company["gate"]
+        self.assertIn("Get oriented", gate["reason"])       # plain-language
+        self.assertEqual(gate["needs_key"], "orient")
+        self.assertEqual(gate["needs_route"], "/submit")    # where to satisfy
+        self.assertEqual(gate["requirement"], journey.STAGES[1]["unlocks"])
+
+    # -- the linear walk, stage by stage -------------------------------
+    def test_each_stage_becomes_current_when_predecessors_complete(self):
+        for key in [s["key"] for s in journey.STAGES if s["key"] != "track"]:
+            payload = self._walk_payload(key)
+            pos = journey.position(payload)
+            self.assertEqual(pos["current_key"], key,
+                             f"expected {key} to be current for {payload}")
+            sts = journey.stages(payload)
+            n = pos["current"]
+            self.assertEqual(sts[n]["status"], journey.CURRENT)
+            # predecessors done, successors locked
+            for i in range(n):
+                self.assertEqual(sts[i]["status"], journey.DONE)
+            for i in range(n + 1, len(sts)):
+                self.assertEqual(sts[i]["status"], journey.LOCKED)
+
+    def test_company_id_implies_orientation_is_done(self):
+        # A Company ID means the user has visibly moved past orientation.
+        sts = journey.stages({"company_id": "100000"})
+        self.assertEqual(sts[0]["status"], journey.DONE)     # orient
+        self.assertEqual(sts[1]["status"], journey.DONE)     # company
+        self.assertEqual(sts[2]["status"], journey.CURRENT)  # dossier
+
+    def test_validation_with_errors_does_not_advance_past_validate(self):
+        payload = self._walk_payload("validate")
+        payload["validation"] = {"ran": True, "errors": 3}
+        pos = journey.position(payload)
+        self.assertEqual(pos["current_key"], "validate")
+        self.assertFalse(journey.stages(payload)[5]["done"])
+
+    # -- terminal / track stage ----------------------------------------
+    def test_fully_transmitted_lives_in_track(self):
+        payload = self._walk_payload("transmit")
+        payload["transmission"] = {"state": "RECEIVED_BY_HC"}
+        pos = journey.position(payload)
+        self.assertTrue(pos["complete"])
+        self.assertTrue(pos["transmitted"])
+        self.assertEqual(pos["done"], pos["total"])          # 10 of 10
+        self.assertEqual(pos["percent"], 100)
+        sts = journey.stages(payload)
+        track = sts[-1]
+        self.assertEqual(track["key"], "track")
+        self.assertEqual(track["status"], journey.CURRENT)   # ongoing, not done
+
+    def test_track_is_locked_before_transmit(self):
+        payload = self._walk_payload("transmit")             # at transmit, not sent
+        self.assertEqual(journey.stages(payload)[-1]["status"], journey.LOCKED)
+
+    # -- position roll-up ----------------------------------------------
+    def test_position_resume_target_is_the_current_stage(self):
+        payload = self._walk_payload("fees")
+        pos = journey.position(payload)
+        self.assertEqual(pos["resume"]["key"], "fees")
+        self.assertEqual(pos["resume"]["route"], "/fees")
+        self.assertEqual(pos["current_route"], "/fees")
+        self.assertEqual(pos["done"], 6)                     # orient..review? no
+        self.assertEqual(pos["percent"], round(6 * 100 / 10))
+
+    # -- journey() wrapper + payload shapes ----------------------------
+    def test_journey_wraps_record_identity_and_title(self):
+        rec = {"id": 7, "payload": {"drug_product": "Aspirin",
+                                    "dossier_id": "e123456"}}
+        view = journey.journey(rec)
+        self.assertEqual(view["id"], 7)
+        self.assertEqual(view["title"], "Aspirin")
+        self.assertEqual(view["dossier_id"], "e123456")
+        self.assertEqual(len(view["stages"]), len(journey.STAGES))
+        self.assertIn("position", view)
+        self.assertEqual(view["current"], view["position"]["current"])
+
+    def test_journey_title_falls_back_to_submission_id(self):
+        view = journey.journey({}, sub_id=42)
+        self.assertEqual(view["title"], "Submission 42")
+        view2 = journey.journey({})
+        self.assertEqual(view2["title"], "New submission")
+
+    def test_record_and_bare_payload_are_equivalent(self):
+        payload = {"company_id": "100000", "dossier_id": "e1"}
+        bare = journey.stages(payload)
+        wrapped = journey.stages(journey._payload_of({"payload": payload}))
+        self.assertEqual([s["status"] for s in bare],
+                         [s["status"] for s in wrapped])
 
 
 class ReadinessDashboardDomainTests(unittest.TestCase):

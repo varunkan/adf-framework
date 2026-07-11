@@ -71,7 +71,7 @@ transmission, lifecycle, and governance. Core surface:
 | Transmission | `POST /api/transmission/{configure,test-round-trip,route,submit,ack,monitor,resend}`, `POST /api/transmission/media/{build,ship,receive}` |
 | Lifecycle | `GET /api/lifecycle/dossiers`, `POST /api/lifecycle/{start,transition,service-standard}`, `POST /api/calendar/deadline` |
 | Governance | `GET /api/rbac/roles`, `GET /api/audit`, `GET /api/retention/policy`, `GET /api/esign/policy`, `GET /api/fees/reference` |
-| Workspace | `GET /api/tenant/{nav,entitlements,submissions}`, `GET /api/tenant/dashboard` (REQ-071 submission-readiness aggregation: per-submission lifecycle / validation / Module-1 X-of-Y / fees / e-sign / transmission / next-deadline tiles + READY\|BLOCKED + drill-in to blocking items) |
+| Workspace | `GET /api/tenant/{nav,entitlements,submissions}`, `GET /api/tenant/dashboard` (REQ-071 submission-readiness aggregation: per-submission lifecycle / validation / Module-1 X-of-Y / fees / e-sign / transmission / next-deadline tiles + READY\|BLOCKED + drill-in to blocking items), `GET /api/journey/{id}` (JRNY-REQ-001 guided-journey spine: the gated 11-stage walk — stages done/current/locked + plain-language reason — + Resume position + folded-in readiness card) |
 
 Each intake error is `{"rule": "<id>", "message": "<human-readable>"}`; the
 validation engine's findings additionally carry a `severity` (`Error` /
@@ -110,7 +110,8 @@ half fully closed-with-tests and the remainder partial or open.
 
 - `server.py` — HTTP shell: sqlite store, 70+-route JSON API, single-page UI at `/`.
 - `test_app.py` — 370-test `unittest` suite.
-- 19 dependency-free domain modules: `validation`, `lifecycle`, `transmission`,
+- 20 dependency-free domain modules: `validation`, `lifecycle`, `transmission`,
   `ectd`, `rep`, `bioequivalence`, `esign`, `content_model`, `rbac`, `fees`,
   `backbone`, `report_ingest`, `hc_calendar`, `stf`, `dr`, `retention`, `qos`,
-  `readiness` (REQ-071 submission-readiness aggregation), `domain`.
+  `readiness` (REQ-071 submission-readiness aggregation),
+  `journey` (REQ-073 guided-journey spine), `domain`.
