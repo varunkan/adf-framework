@@ -1,3 +1,23 @@
+## ⛔ MUST #0 — Headroom is mandatory (verify BEFORE any model token exchange)
+
+**ALWAYS run through Headroom. Before ANY token exchange with a model — your own
+turns, `Workflow`/`Task`/`Agent` subagents, persona/SSR elicitation, ANY model
+call — FIRST confirm the Headroom compression proxy is running AND in the request
+path:**
+
+1. Proxy is up: `curl -s http://127.0.0.1:8787/health` responds.
+2. Routing is active: `ANTHROPIC_BASE_URL` == `http://127.0.0.1:8787` (NOT
+   `https://api.anthropic.com`).
+
+**If either check fails, STOP — do not make model calls.** Headroom routing is a
+LAUNCH-TIME choice: relaunch Claude Code with `headroom wrap claude` (starts the
+proxy and sets the base URL). A session already started against
+`api.anthropic.com` CANNOT be switched onto Headroom mid-run — surface this to
+the user and wait for a relaunch rather than burning uncompressed tokens. Start
+the proxy with `headroom proxy` (background) and verify with `headroom doctor`.
+
+This gate precedes every other directive below.
+
 ## Working principles (standing directives — apply to EVERY task)
 
 **NEVER start a dev/preview/web server that could displace the user's running
