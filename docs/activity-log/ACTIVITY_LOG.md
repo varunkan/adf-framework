@@ -13,6 +13,24 @@ Per-campaign logs (linked from entries):
 
 ## 2026-07-10 — Session: process directives + journey traceability + next swarm round
 
+### Entry 9 — Extract ANDS to its own repo `/Users/varunkumar/ands-platform`
+- **What:** Moved `apps/ands-platform` OUT of the adf-framework monorepo into a
+  standalone repo at `~/ands-platform` (sibling of `ai_pos_system`). Fresh git repo
+  (user chose: fresh, not history-preserving). adf-framework commit **4a3521f** removed
+  `apps/ands-platform` (693 files) + the 9 `ands-*` launch configs; new repo initial
+  commit **e6f5b97** (+ launch.json 9e75a9a).
+- **Why:** User: "remove all ands-platform code from ai_pos_system and put under a
+  separate folder ands-platform parallel to ai_pos_system." ANDS is a distinct product
+  from ADF Studio (the builder) — clean separation.
+- **Safety:** Copied via `git archive` (tracked files only, excludes .venv/node_modules/
+  .next), **byte-verified** (checksum + 693=693 tracked-file parity) and committed at the
+  new location BEFORE deleting here. Source also retained in adf-framework git history.
+  Running mesh processes (:3000 + 8010-8018) left untouched per user — they restart from
+  the new location. NOTE: this session stays rooted in adf-framework; ANDS work should now
+  happen in a session rooted at `~/ands-platform`.
+- **Verification:** new repo 694 tracked files, tree clean; adf-framework `apps/` has no
+  `ands-*`; adf launch.json keeps only `adf-dashboard`; graph updated (742 files, 0 errors).
+
 ### Entry 8 — Re-target: swarm moves to the mesh (Entries 1,6 were on the wrong app)
 - **What:** The regulatory work must run against the mesh, not the monolith. Re-running
   the persona + dosage-form swarm against `apps/ands-platform/services/*`
