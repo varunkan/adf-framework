@@ -63,3 +63,4 @@ apps/*/.adf-visual/
 
 # ADF runner per-app working context (compaction snapshots, not source)
 apps/*/.adf-context/
+/apps/ands-platform/
