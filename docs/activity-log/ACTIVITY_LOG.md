@@ -13,6 +13,28 @@ Per-campaign logs (linked from entries):
 
 ## 2026-07-10 — Session: process directives + journey traceability + next swarm round
 
+### Entry 8 — Re-target: swarm moves to the mesh (Entries 1,6 were on the wrong app)
+- **What:** The regulatory work must run against the mesh, not the monolith. Re-running
+  the persona + dosage-form swarm against `apps/ands-platform/services/*`
+  (dossier/journey/validation/fees/readiness). Round-12's monolith probe is discarded.
+- **Correction:** Entries 1 (REQ-075) and 6 (JRNY-REQ-001) were built into the now-deleted
+  monolith — REQ-075 must be re-checked against the mesh's `ectd_validation.py` and added
+  there only if genuinely missing; the journey endpoint was already a first-class mesh
+  service (:8011), so no port needed. Memory `ands-microservices-rewrite` corrected.
+
+### Entry 7 — Commit `73cce82` — REMOVE the stdlib monolith (apps/ands-submission-portal)
+- **What:** Deleted `apps/ands-submission-portal/` (73 files), dropped the `ands-app`
+  launch config, fixed two live references (ands-platform README dead link + dossier
+  `pm_xml.py` comment). The mesh `apps/ands-platform` is the sole product.
+- **Why:** User flagged that this session's changes went into the WRONG app (the
+  monolith), which they had asked to remove (documented in memory 2026-07-01). Verified:
+  monolith was NOT a runtime dependency of the mesh (only doc/comment refs).
+- **Verification:** launch.json valid + `ands-app` gone; **:3000 mesh app still serving**;
+  **mesh dossier suite still 719 passed** (unchanged before/after). Graph updated.
+- **Remaining monolith footprint (flagged to user, NOT yet removed):** `specs/ands-submission-portal/`,
+  `.adf/orchestration/features/ands-submission-portal/`, and orch scripts
+  (`ands_expand_all.py`, `measure_efficiency.py`, `ands_campaign.sh`) that name it.
+
 ### Entry 6 — Commit `da1d564` — JRNY-REQ-001: journey spine as GET /api/journey/{id}
 - **What:** Closed the "journey.py gap". `journey.py` is now a tracked, tested
   domain module (was untracked scratch). `server.py`: new `GET /api/journey/{id}`

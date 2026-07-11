@@ -50,5 +50,15 @@ append an entry here + in ACTIVITY_LOG.md, re-run the suite.
 
 ## Rounds
 
-### Round 12 — kickoff (in progress)
-- Baseline captured above. Launching the swarm workflow. Results appended below.
+### Round 12 — kickoff, then RE-TARGET
+- **VOIDED against the monolith.** The first probe was pointed at the now-deleted
+  monolith `apps/ands-submission-portal` — wrong app. Discarded.
+- **The real target is the mesh** `apps/ands-platform/services/*`. The regulatory
+  logic lives in the **dossier** service (`be_ruleset.py`, `fees.py`,
+  `content_model.py`, `ectd_validation.py`, `comparative_evidence.py`,
+  `controlled_substances.py`, `special_pathways.py`, `monograph.py`,
+  `product_scope.py`, `form_schemas.py`, `section_tree.py`), plus the **journey**,
+  **validation**, **fees**, and **readiness** services. Mesh dossier baseline:
+  **719 tests green** (`apps/ands-platform/.venv`).
+- Re-running the same persona × Canadian-dosage-form/drug-type taxonomy against
+  the mesh modules. Results below.
