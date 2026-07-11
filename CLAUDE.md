@@ -97,6 +97,21 @@ in the real running app AND self-reviewed AND committed — never claimed from
 assumptions. Report outcomes faithfully (failures with output, skipped steps as
 skipped).
 
+**Visually test the UI after EVERY change, whenever a UI is available.** If the
+change touches any rendered surface (a page, component, style, layout, copy,
+route, or the data a view renders), you are not done until you have VISUALLY
+verified it in the running UI — do not stop at tests/`tsc`/`build`. Drive the
+app's ALREADY-RUNNING server READ-ONLY (never start a competing one — see the
+first directive): load the affected view, take a screenshot, and check the DOM
+(`read_page`), console, and network for errors; confirm the change renders as
+intended AND that nothing adjacent regressed. Check the states that matter for
+the change — the relevant routes, empty/error/loading states, and (when layout
+or theming moved) responsive breakpoints and light/dark. Share the visual proof
+(screenshot / observed values), never "looks fine" from assumption. If the app
+isn't running and a UI check is genuinely required, ASK before starting a server
+(non-conflicting port). SKIP only when the change has no rendered surface at all
+(pure backend/CLI/lib/test/tooling) — and say that you skipped and why.
+
 **Adversarially self-review before every commit.** Do a pass that actively tries
 to REFUTE your own change — security holes, edge cases, unfaithful claims, broken
 invariants. This cheap pass repeatedly catches real defects pre-ship.
