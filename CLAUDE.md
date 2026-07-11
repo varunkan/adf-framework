@@ -9,14 +9,32 @@ path:**
 2. Routing is active: `ANTHROPIC_BASE_URL` == `http://127.0.0.1:8787` (NOT
    `https://api.anthropic.com`).
 
-**If either check fails, STOP — do not make model calls.** Headroom routing is a
-LAUNCH-TIME choice: relaunch Claude Code with `headroom wrap claude` (starts the
-proxy and sets the base URL). A session already started against
-`api.anthropic.com` CANNOT be switched onto Headroom mid-run — surface this to
-the user and wait for a relaunch rather than burning uncompressed tokens. Start
-the proxy with `headroom proxy` (background) and verify with `headroom doctor`.
+**SELF-HEAL (deterministic) — run `headroom_patch` whenever routing is missing.**
+The durable routing state (proxy up + Claude Desktop binary shim applied +
+re-patch agent loaded) is guaranteed by ONE idempotent utility:
 
-This gate precedes every other directive below.
+    /Users/varunkumar/.claude/headroom-desktop-shim/headroom_patch ensure
+
+It runs automatically at SessionStart (hook in `~/.claude/settings.json`), and
+**you MUST run it whenever the two checks above fail** (or run `headroom_patch
+status` to diagnose), then re-verify. It rebuilds the compiled arm64 trampoline,
+(re)wraps every desktop `claude.app`, starts the proxy, and loads the launchd
+agent — all idempotent and race-safe. See
+`~/.claude/headroom-desktop-shim/README.md` and memory [[headroom-desktop-shim]].
+
+**Hard reality — a running session's route is fixed at launch.** `headroom_patch`
+makes routing correct for the NEXT spawn; it CANNOT reroute the already-running
+session. So:
+- **Terminal**: if unrouted, relaunch (`headroom wrap claude`, or plain `claude`
+  since `settings.json` sets the base URL). Do not burn uncompressed tokens —
+  wait for relaunch.
+- **Desktop app**: the shim makes every NEW session route automatically. If the
+  current session shows `ANTHROPIC_BASE_URL=https://api.anthropic.com`, run
+  `headroom_patch ensure` (fixes the durable state) and tell the user to open a
+  new session / reopen the app to pick it up — this specific session stays direct.
+
+Start the proxy with `headroom proxy` (background) and verify with `headroom
+doctor`. This gate precedes every other directive below.
 
 ## Working principles (standing directives — apply to EVERY task)
 
@@ -108,6 +126,27 @@ then implement. No fix starts from assumption; ground each one in the real code.
 **Root-cause before any fix; never blind-regenerate.** When a build/test/gate/
 review fails, read the error and trace the actual cause before changing code. No
 shotgun edits, no regenerating a whole file to dodge a diagnosis.
+
+**ALWAYS self-heal every stopper or failed process — to completion.** When ANY
+process stalls, blocks, or fails (build, test, gate, server, workflow, agent
+run, pipeline step, tool call), never abandon it, retry it blindly, or route
+around it. Run the full self-heal loop every time:
+1. **Find the root cause with deep analysis** — read the actual error/logs/
+   state, trace the failing path in the code, reproduce it minimally, and
+   cross-check every data point (process state, env, config, recent changes,
+   git history) before concluding anything.
+2. **Design a real solution** that addresses that root cause — not a symptom
+   patch, not a workaround that leaves the defect in place.
+3. **Implement it.**
+4. **Test it** — prove the original failure is gone (re-run the exact failed
+   process) plus the relevant test suite so nothing regressed.
+5. **Ensure the expected outcome is achieved** — the originally-intended
+   result must now be observed end-to-end in the real running system, not
+   inferred. A stopper counts as resolved ONLY when the original process
+   completes successfully and its intended outcome is verified.
+Then log the root cause + fix (activity log) so it never has to be
+re-diagnosed. This loop applies recursively: if the fix itself fails, self-heal
+that failure the same way.
 
 **Test-first (TDD).** For any code change, write the test first, prove it RED,
 then implement to GREEN. Let the tests, not vibes, define done.
