@@ -11,6 +11,31 @@ Per-campaign logs (linked from entries):
 
 ---
 
+## 2026-07-11 — Commit the v3.2.0 working tree (fleet rebuild + Proof-of-Build) + self-heal directive
+
+**Trace:** user asks "commit the working tree changes with a sensible message"
+and (earlier) the self-heal standing directive.
+
+**Commits:**
+- `e4a9b51` docs(claude): NEW standing self-heal directive (root-cause deep
+  analysis → solution → implement → test → verify outcome, recursive) + the
+  headroom_patch MUST-#0 rewrite that was uncommitted WIP on disk. (First cut
+  `dd3eef7` swept the WIP in with a message that under-described it; caught via
+  insertion-count mismatch and amended — commit was unpushed.)
+- `5dfd96a` feat(v3.2.0): 210 files, +72,471/−1,451 — regenerated 10 sample
+  apps, 5 NEW apps (countdown-2 Node/Vite, tip-calculator-2 Vite/TS,
+  mobile-habit-tracker Expo, snake-ladder-games, url1), per-app Proof-of-Build
+  artifacts (PROOF.md, .adf-proof*, .adf-policy-report, .adf-stack, .adf-process),
+  Stop-hook mesh auto-heal REPOINTED to ~/ands-platform (old in-repo path was
+  deleted at extraction; dev-up.sh verified idempotent — never kills), .gitignore
+  runtime-junk classes (root *.db, err/srv logs, .coverage, app state JSONs).
+
+**Verification:** staged-junk sweep clean (no .db/.log/.coverage/node_modules/
+runtime JSONs staged); junk classes proven ignored via git check-ignore; tree
+clean post-commit. App test suites not re-run here (committing existing WIP
+as-is; the fleet's own PROOF artifacts record their build-time verification).
+
+
 ## 2026-07-10 — Session: process directives + journey traceability + next swarm round
 
 ### Entry 9 — Extract ANDS to its own repo `/Users/varunkumar/ands-platform`
