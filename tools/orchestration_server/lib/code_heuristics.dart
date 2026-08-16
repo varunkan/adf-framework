@@ -1,6 +1,6 @@
 /// CANONICAL "is this text code rather than prose?" predicate — the single source
 /// of truth (D3). An IDENTICAL copy lives at
-/// tools/orchestration_dashboard/lib/utils/code_heuristics.dart; both are pinned to the
+/// tools/orchestration_server/lib/code_heuristics.dart; both are pinned to the
 /// SAME contract vector tools/code_heuristics_golden.json (each package's test
 /// loads it), so editing one copy without the other fails CI. Keep them in sync.
 ///
@@ -14,8 +14,14 @@ class CodeHeuristics {
   static const String _notArticle =
       r'(?!(?:the|a|an|all|any|each|some|every|both|one|your|my|our|his|her|'
       r'their|its|this|that|these|those)\b)';
+  // These are RAW strings: interpolation would mean dropping the r-prefix and
+  // double-escaping every backslash in the pattern, which is how regex bugs get
+  // introduced. Concatenating a raw fragment is the safer form, so the lint is
+  // suppressed on each composing line rather than the pattern being rewritten.
   static final RegExp _sqlStrong = RegExp(
+    // ignore: prefer_interpolation_to_compose_strings
     r'\binsert\s+into\s+' + _notArticle + r'\w'
+        // ignore: prefer_interpolation_to_compose_strings
         r'|\bdelete\s+from\s+' + _notArticle + r'\w'
         r'|\bupdate\s+\w+\s+set\b'
         r'|\bcreate\s+(table|index|view)\b'

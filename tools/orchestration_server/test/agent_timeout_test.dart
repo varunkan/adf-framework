@@ -280,18 +280,46 @@ void main() {
       expect(crew.agentBudget, const Duration(seconds: 9));
     });
 
-    test('runner budget honors ORCH_RUNNER_TIMEOUT_SEC with a 30s default',
-        () {
-      expect(PhaseRunner(store, env: {}).runnerTimeout,
-          const Duration(seconds: 30));
+    // The fixed one-shot `runnerTimeout` was replaced by a sliding idle window
+    // (runnerIdleTimeout) plus an absolute ceiling (maxRunDuration). This test
+    // still asserted the removed getter, so `dart analyze --fatal-infos` failed
+    // with three undefined_getter errors. Rewritten against the real API.
+    test('runner idle timeout honors env with a 300s default', () {
+      expect(PhaseRunner(store, env: {}).runnerIdleTimeout,
+          const Duration(seconds: 300));
       expect(
-          PhaseRunner(store, env: {'ORCH_RUNNER_TIMEOUT_SEC': '5'})
-              .runnerTimeout,
+          PhaseRunner(store, env: {'ORCH_RUNNER_IDLE_TIMEOUT_SEC': '5'})
+              .runnerIdleTimeout,
           const Duration(seconds: 5));
       expect(
-          PhaseRunner(store, env: {'ORCH_RUNNER_TIMEOUT_SEC': '-1'})
-              .runnerTimeout,
-          const Duration(seconds: 30));
+          PhaseRunner(store, env: {'ORCH_RUNNER_IDLE_TIMEOUT_SEC': '-1'})
+              .runnerIdleTimeout,
+          const Duration(seconds: 300));
+    });
+
+    test('a small legacy ORCH_RUNNER_TIMEOUT_SEC is read as an idle window', () {
+      expect(
+          PhaseRunner(store, env: {'ORCH_RUNNER_TIMEOUT_SEC': '5'})
+              .runnerIdleTimeout,
+          const Duration(seconds: 5));
+      // >600s is the old one-shot budget, not an idle window: it must NOT
+      // shorten the idle timeout, and must raise the hard ceiling instead.
+      expect(
+          PhaseRunner(store, env: {'ORCH_RUNNER_TIMEOUT_SEC': '1800'})
+              .runnerIdleTimeout,
+          const Duration(seconds: 300));
+      expect(
+          PhaseRunner(store, env: {'ORCH_RUNNER_TIMEOUT_SEC': '1800'})
+              .maxRunDuration,
+          const Duration(seconds: 1800));
+    });
+
+    test('max run duration honors ORCH_RUNNER_MAX_SEC with a 7200s default', () {
+      expect(PhaseRunner(store, env: {}).maxRunDuration,
+          const Duration(seconds: 7200));
+      expect(
+          PhaseRunner(store, env: {'ORCH_RUNNER_MAX_SEC': '60'}).maxRunDuration,
+          const Duration(seconds: 60));
     });
   });
 }
