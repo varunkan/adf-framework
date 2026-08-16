@@ -177,7 +177,7 @@ treating raw stdout as the reply.
 ## Install on any IDE
 
 ```bash
-adf install -t . -i cursor      # .cursor/orchestration + skills + hooks
+adf install -t . -i cursor      # .adf/orchestration + skills + hooks
 adf install -t . -i vscode      # .adf/orchestration + Copilot instructions
 adf install -t . -i windsurf    # .adf/orchestration + .windsurf/rules
 adf install -t . -i claude      # CLAUDE.md + .claude/skills + runner.env

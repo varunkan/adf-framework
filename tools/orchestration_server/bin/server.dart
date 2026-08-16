@@ -5,7 +5,6 @@ import 'dart:typed_data';
 
 import 'package:orchestration_server/adf_brain.dart';
 import 'package:orchestration_server/agent_crew.dart';
-import 'package:orchestration_server/orchestration_paths.dart';
 import 'package:orchestration_server/trace_tailer.dart';
 import 'package:orchestration_server/app_runner.dart';
 import 'package:orchestration_server/approval_gate.dart';
@@ -259,13 +258,6 @@ Future<void> main(List<String> args) async {
       ) ??
       3847;
   final repoRoot = resolveRepoRoot();
-  // CURSOR-6: migrate a legacy .cursor/orchestration data dir to the new default
-  // .adf/orchestration (non-destructive copy; no-op once migrated) BEFORE anything
-  // reads the store, so existing features move forward without ever vanishing.
-  if (OrchestrationPaths.migrateLegacyIfNeeded(repoRoot)) {
-    stdout.writeln(
-        'Migrated .cursor/orchestration → .adf/orchestration (legacy kept as backup)');
-  }
   // Platform.environment is unmodifiable, so merge repo-local .env values over
   // it into a plain map the router/chat read from. Exported keys still win.
   final env = <String, String>{

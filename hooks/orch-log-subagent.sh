@@ -3,7 +3,7 @@
 set +e
 
 INPUT=$(cat)
-FEATURE_DIR_ROOT=".cursor/orchestration/features"
+FEATURE_DIR_ROOT=".adf/orchestration/features"
 
 # Best-effort: find feature with status active and awaiting work
 FEATURE_ID=""

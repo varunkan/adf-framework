@@ -5,7 +5,7 @@ import 'orchestration_paths.dart';
 
 /// Self-evolution memory: every autopilot outcome (success, failure, heal)
 /// is appended to `<orchestration>/learnings.jsonl` (`.adf/orchestration` by
-/// default; legacy `.cursor/orchestration` still resolves). Future runs consult
+/// default; legacy `.adf/orchestration` still resolves). Future runs consult
 /// it to avoid repeating past failures — the framework gets measurably better
 /// with every feature it builds.
 class LearningStore {
@@ -13,7 +13,7 @@ class LearningStore {
 
   final String repoRoot;
 
-  // CURSOR-6: follow the resolver instead of hardcoding .cursor/orchestration.
+  // CURSOR-6: follow the resolver instead of hardcoding .adf/orchestration.
   String get path =>
       '${OrchestrationPaths(repoRoot).orchestrationRoot}/learnings.jsonl';
 

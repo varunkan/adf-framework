@@ -7,7 +7,7 @@ Read [ADF.md](ADF.md) and [grok-determinism.md](grok-determinism.md) before ever
 ## Feature directory layout
 
 ```
-.cursor/orchestration/features/<feature-id>/
+.adf/orchestration/features/<feature-id>/
   requirement.md
   state.json
   approvals.json

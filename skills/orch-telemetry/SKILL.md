@@ -20,8 +20,8 @@ description: >-
 
 Traces are written to:
 
-- `.cursor/orchestration/otel-traces.jsonl` (global)
-- `.cursor/orchestration/features/<id>/otel-traces.jsonl` (per feature)
+- `.adf/orchestration/otel-traces.jsonl` (global)
+- `.adf/orchestration/features/<id>/otel-traces.jsonl` (per feature)
 
 ## Before orchestration run
 

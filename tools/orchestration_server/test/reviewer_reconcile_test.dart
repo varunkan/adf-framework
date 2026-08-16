@@ -10,8 +10,10 @@ void main() {
 
   setUp(() {
     repoRoot = Directory.current.path;
-    while (!Directory('$repoRoot/.cursor/orchestration').existsSync()) {
-      repoRoot = Directory(repoRoot).parent.path;
+    while (!Directory('$repoRoot/.adf/orchestration').existsSync()) {
+      final parent = Directory(repoRoot).parent.path;
+      if (parent == repoRoot) throw StateError('repo root not found');
+      repoRoot = parent;
     }
     store = FeatureStore(repoRoot);
     if (!store.featureExists(id)) {

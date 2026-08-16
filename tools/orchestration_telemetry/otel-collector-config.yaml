@@ -14,7 +14,7 @@ exporters:
   debug:
     verbosity: detailed
   file:
-    path: ./.cursor/orchestration/otel-collector-export.jsonl
+    path: ./.adf/orchestration/otel-collector-export.jsonl
 
 service:
   pipelines:

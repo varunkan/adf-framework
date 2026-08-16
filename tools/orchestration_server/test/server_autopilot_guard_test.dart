@@ -55,10 +55,10 @@ void main() {
   late int port;
   final createdIds = <String>[];
 
-  // Resolve the real repo root (walk up to .cursor/orchestration).
+  // Resolve the real repo root (walk up to .adf/orchestration).
   String findRepoRoot() {
     var dir = Directory.current.path;
-    while (!Directory('$dir/.cursor/orchestration').existsSync()) {
+    while (!Directory('$dir/.adf/orchestration').existsSync()) {
       final parent = Directory(dir).parent;
       if (parent.path == dir) throw StateError('repo root not found');
       dir = parent.path;

@@ -10,8 +10,8 @@ This directory is a **vendored copy** of the Grok `ultimate-ai-dev-framework` pa
 
 ## Do
 
-- Use prompts under `prompts/` via `.cursor/orchestration/prompt-registry.yaml`
-- Merge templates from `.specify/` into `.cursor/orchestration/templates/` (already done in ADF)
+- Use prompts under `prompts/` via `.adf/orchestration/prompt-registry.yaml`
+- Merge templates from `.specify/` into `.adf/orchestration/templates/` (already done in ADF)
 - Read `MANIFEST.yaml` for version compatibility
 
 ## Upgrade procedure
@@ -21,4 +21,4 @@ This directory is a **vendored copy** of the Grok `ultimate-ai-dev-framework` pa
 3. Update `MANIFEST.yaml` version and `adf_compatibility`
 4. Re-run `./scripts/orch/validate_adf_artifacts.sh` on a smoke feature
 
-See [ADF.md](../../.cursor/orchestration/ADF.md) and [adf-grok-refinement.md](../../.cursor/orchestration/adf-grok-refinement.md).
+See [ADF.md](../../.adf/orchestration/ADF.md) and [adf-grok-refinement.md](../../.adf/orchestration/adf-grok-refinement.md).

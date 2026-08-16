@@ -16,7 +16,7 @@ if [[ -f "$SCRIPT" ]]; then
   # the hook's stdout — Cursor requires exactly one JSON object, emitted below.
   printf '%s' "$INPUT" | python3 "$SCRIPT" >/dev/null 2>&1
 else
-  LOG="$ROOT/.cursor/orchestration/otel-traces.jsonl"
+  LOG="$ROOT/.adf/orchestration/otel-traces.jsonl"
   mkdir -p "$(dirname "$LOG")"
   printf '{"hook":"%s","ts":"%s","payload":%s}\n' \
     "$EVENT" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${INPUT:-{}}" >> "$LOG" 2>/dev/null || true

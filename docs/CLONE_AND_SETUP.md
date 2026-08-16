@@ -16,7 +16,7 @@ ADF v3 (**Proof-Governed Agentic Development**) is **not** a single binary — i
 |-------|------|
 | **Orchestration server** | Dart Shelf API — features, gates, runner, approve |
 | **Orchestration dashboard** | Flutter web/macOS UI |
-| **`.cursor/orchestration/`** | Policy, routing, templates, per-feature state |
+| **`.adf/orchestration/`** | Policy, routing, templates, per-feature state |
 | **`.cursor/skills/`** | Cursor agent skills (orchestrator, TDD, tests, …) |
 | **`scripts/orch/`** | Seed, validate, gates, worktrees |
 | **Cursor IDE** | Primary execution path when headless fails |
@@ -56,7 +56,7 @@ cd ai_pos_system
 If you only need orchestration (no POS app), these directories are **required**:
 
 ```text
-.cursor/orchestration/          # Policy, routing, features, templates
+.adf/orchestration/          # Policy, routing, features, templates
 .cursor/skills/                 # Orchestrator + orch-* skills (partial — see §5)
 .cursor/hooks/                  # Optional telemetry
 .cursor/hooks.json
@@ -134,7 +134,7 @@ Routing expects:
 
 - `speckit-clarify`, `speckit-constitution`, `speckit-specify`, `speckit-plan`, `speckit-tasks`, `speckit-analyze`, `speckit-implement`
 
-**Action:** Install [Spec Kit](https://github.com/github/spec-kit) (or your team’s Cursor Spec Kit plugin) so these skills exist in Cursor. Without them, run phases manually in IDE using templates under `.cursor/orchestration/templates/`.
+**Action:** Install [Spec Kit](https://github.com/github/spec-kit) (or your team’s Cursor Spec Kit plugin) so these skills exist in Cursor. Without them, run phases manually in IDE using templates under `.adf/orchestration/templates/`.
 
 ### 5.2 BMAD reviewer skills
 
@@ -158,7 +158,7 @@ Routing expects paths like:
 | `orch-self-healer` | Yes | — |
 | `uaidf-tdd-executor` | Yes | — |
 | `orch-review-coordinator` | **No** | Use `orch-judge` skill + merge verdicts manually; or add skill |
-| `orch-product-analyst` | **No** | Agent doc: `.cursor/orchestration/agents/product-analyst.md` |
+| `orch-product-analyst` | **No** | Agent doc: `.adf/orchestration/agents/product-analyst.md` |
 | `orch-test-architect` | **No** | Agent doc: `agents/test-architect.md` |
 | `orch-verifier` | **No** | Agent doc: `agents/verifier.md` |
 | `orch-code-reviewer` | Yes | — |
@@ -298,14 +298,14 @@ export ORCH_REPO_ROOT="$(pwd)"
 ./scripts/orch/performance_gate.sh my-feature
 ```
 
-Document waivers in `.cursor/orchestration/features/my-feature/07-verification-report.md` for greenfield packages.
+Document waivers in `.adf/orchestration/features/my-feature/07-verification-report.md` for greenfield packages.
 
 ---
 
 ## 9. Directory layout after first feature
 
 ```text
-.cursor/orchestration/features/my-feature/
+.adf/orchestration/features/my-feature/
   requirement.md
   state.json
   run-status.json

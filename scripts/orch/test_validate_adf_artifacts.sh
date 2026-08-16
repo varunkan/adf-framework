@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="${ORCH_REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
-TMP="$ROOT/.cursor/orchestration/_adf_validate_test"
+TMP="$ROOT/.adf/orchestration/_adf_validate_test"
 rm -rf "$TMP"
 mkdir -p "$TMP/tasks"
 

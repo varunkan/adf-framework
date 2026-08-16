@@ -16,7 +16,7 @@ void main() {
 
   setUp(() {
     repoRoot = Directory.current.path;
-    while (!Directory('$repoRoot/.cursor/orchestration').existsSync()) {
+    while (!Directory('$repoRoot/.adf/orchestration').existsSync()) {
       final parent = Directory(repoRoot).parent;
       if (parent.path == repoRoot) throw StateError('repo root not found');
       repoRoot = parent.path;

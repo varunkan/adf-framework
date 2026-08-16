@@ -169,7 +169,7 @@ void main() {
         capturedEnv = environment;
         // Faithful stub: write the verdict to wherever the env says to.
         final envOrchDir = environment?['ORCH_ORCHESTRATION_DIR'] ??
-            '${repo.path}/.cursor/orchestration';
+            '${repo.path}/.adf/orchestration';
         File('$envOrchDir/features/feat-x/judge-verdicts/phase-2.md')
           ..createSync(recursive: true)
           ..writeAsStringSync('# PO verdict (phase 2): PASS');

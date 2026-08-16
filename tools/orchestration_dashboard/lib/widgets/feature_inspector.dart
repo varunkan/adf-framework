@@ -95,7 +95,7 @@ class FeatureInspector extends StatelessWidget {
                   title: const Text('ADF v3 guide'),
                   content: const SingleChildScrollView(
                     child: Text(
-                      'Read .cursor/orchestration/ADF.md and adf-grok-refinement.md.\n\n'
+                      'Read .adf/orchestration/ADF.md and adf-grok-refinement.md.\n\n'
                       'Before approve on phases 2–4, run:\n'
                       './scripts/orch/validate_adf_artifacts.sh <feature-id> --phase <N>',
                     ),

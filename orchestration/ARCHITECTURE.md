@@ -64,7 +64,7 @@ flowchart TB
   subgraph persistence [Persistence]
     State["features/id/state.json"]
     Specs["specs/id/"]
-    OrchArt[".cursor/orchestration/features/id/"]
+    OrchArt[".adf/orchestration/features/id/"]
   end
 
   subgraph runtime [Agent runtime]
@@ -186,7 +186,7 @@ Start: `./scripts/start_orchestration_dashboard.sh web` → http://localhost:384
 ### 4.1 Feature directory layout
 
 ```text
-.cursor/orchestration/features/<feature-id>/
+.adf/orchestration/features/<feature-id>/
   requirement.md          # Client intent + clarifications
   state.json              # Phase, gates, completed_* skills
   run-status.json         # Runner: idle | running | queued | needs_login

@@ -4,7 +4,7 @@ version: "3.0.0"
 conductor:
   skill: orch-orchestrator
   path: .cursor/skills/orch-orchestrator/SKILL.md
-  agent_doc: .cursor/orchestration/agents/orchestrator.md
+  agent_doc: .adf/orchestration/agents/orchestrator.md
 
 grok_overlays:
   meta_orchestrator:
@@ -31,10 +31,10 @@ bmad:
   coordinator: .cursor/skills/orch-review-coordinator/SKILL.md
 
 policy:
-  adf: .cursor/orchestration/ADF.md
-  constitution: .cursor/orchestration/constitution.md
-  grok_determinism: .cursor/orchestration/grok-determinism.md
-  routing: .cursor/orchestration/framework-routing.yaml
+  adf: .adf/orchestration/ADF.md
+  constitution: .adf/orchestration/constitution.md
+  grok_determinism: .adf/orchestration/grok-determinism.md
+  routing: .adf/orchestration/framework-routing.yaml
 
 scripts:
   seed: scripts/orch/seed_adf_artifacts.sh

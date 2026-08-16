@@ -16,7 +16,7 @@ Standalone products (e.g. URL shortener, new services) may live outside `lib/` w
 4. `specs/<feature-id>/spec.md` (what / why)  
 5. `specs/<feature-id>/plan.md` (how)  
 6. `specs/<feature-id>/tasks.md`, `task-graph.yaml`, `tasks/*.md` (DAG + micro-tasks)  
-7. `.cursor/orchestration/features/<id>/04-test-plan.md`, `05-test-cases.md`, `06-traceability-matrix.md`  
+7. `.adf/orchestration/features/<id>/04-test-plan.md`, `05-test-cases.md`, `06-traceability-matrix.md`  
 8. Production code under declared `source_paths` (default `lib/` for POS)  
 9. Tests under `testcases/` (POS) or paths declared in spec
 

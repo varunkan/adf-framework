@@ -18,7 +18,7 @@
 - A runnable eval harness `scripts/eval/platform_eval.sh` (before/after, the guardrail).
 
 **In scope (added per §7 decision 2026-06-21):**
-- **Rename the `.cursor/orchestration` data directory → `.adf/orchestration`.** `orchestration_paths.dart` already resolves multiple layouts (env → `.adf-install.json` → probe `.cursor`/`adf-framework`/`.adf` → default). Flip the DEFAULT to `.adf/orchestration`, keep a `.cursor/orchestration` fallback so a not-yet-migrated install still resolves, and ship a one-time migration that moves existing features (NO data loss — the "features vanished" footgun must not recur). Update launchers/e2e/tests that hardcode `.cursor/orchestration`.
+- **Rename the `.adf/orchestration` data directory → `.adf/orchestration`.** `orchestration_paths.dart` already resolves multiple layouts (env → `.adf-install.json` → probe `.cursor`/`adf-framework`/`.adf` → default). Flip the DEFAULT to `.adf/orchestration`, keep a `.adf/orchestration` fallback so a not-yet-migrated install still resolves, and ship a one-time migration that moves existing features (NO data loss — the "features vanished" footgun must not recur). Update launchers/e2e/tests that hardcode `.adf/orchestration`.
 
 **Out of scope (this program)**
 - The smooth-streaming backbone (S1/S3/S2) — separate Tier-1 program. NOTE: purging cursor makes the cursor-only live-stream path dead code; wiring the custom-runner token stream (S1) is the immediate follow-on, tracked separately.
@@ -64,11 +64,11 @@
 6. **CURSOR-3** — `pipeline_planner` cursorCommand→runHint, kill `@orch-orchestrator` literal; tests.
 7. **CURSOR-4** — dashboard cursor removal (runner_setup_card/new_feature/api_client); rebuild + E2E.
 8. **CURSOR-5** — server/runner glue cleanup (phase_runner/orchestrator_chat/etc.).
-9. **CURSOR-6** — data-dir rename `.cursor/orchestration` → `.adf/orchestration`: flip default in `orchestration_paths.dart` (keep `.cursor` fallback), one-time no-loss migration of existing features, update launchers/e2e/tests; TDD + migration E2E (C11/C12).
+9. **CURSOR-6** — data-dir rename `.adf/orchestration` → `.adf/orchestration`: flip default in `orchestration_paths.dart` (keep `.cursor` fallback), one-time no-loss migration of existing features, update launchers/e2e/tests; TDD + migration E2E (C11/C12).
 10. **EVAL-1** — re-run `platform_eval.sh` (extended with C11/C12); record AFTER; assert all C1–C12 met; commit the proof.
 
 ## 7. Decision (RESOLVED 2026-06-21)
-- **`.cursor/orchestration` → `.adf/orchestration`: RENAME NOW (user-approved).** Now in scope (§2). Execution batch **CURSOR-6** with a no-data-loss migration. New criteria C11/C12.
+- **`.adf/orchestration` → `.adf/orchestration`: RENAME NOW (user-approved).** Now in scope (§2). Execution batch **CURSOR-6** with a no-data-loss migration. New criteria C11/C12.
 
 Added criteria:
 | ID | Criterion | TARGET |

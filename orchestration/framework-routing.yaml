@@ -62,7 +62,7 @@ phases:
         path: .agents/skills/bmad-agent-pm/SKILL.md
         discipline: pm_po
         review_mode: readonly
-        charter: .cursor/orchestration/agents/bmad-pm-review-charter.md
+        charter: .adf/orchestration/agents/bmad-pm-review-charter.md
         parallel_group: 1
         required: true
       - skill: bmad-validate-prd
@@ -123,7 +123,7 @@ phases:
         path: .agents/skills/bmad-agent-pm/SKILL.md
         discipline: pm_trace
         review_mode: readonly
-        charter: .cursor/orchestration/agents/bmad-pm-review-charter.md
+        charter: .adf/orchestration/agents/bmad-pm-review-charter.md
         parallel_group: 1
         required: true
       - skill: bmad-review-adversarial-general

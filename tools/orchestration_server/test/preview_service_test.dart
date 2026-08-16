@@ -15,7 +15,7 @@ void main() {
 
   setUp(() {
     repoRoot = Directory.current.path;
-    while (!Directory('$repoRoot/.cursor/orchestration').existsSync()) {
+    while (!Directory('$repoRoot/.adf/orchestration').existsSync()) {
       final parent = Directory(repoRoot).parent;
       if (parent.path == repoRoot) throw StateError('repo root not found');
       repoRoot = parent.path;
@@ -69,9 +69,9 @@ void main() {
     final tmp = Directory.systemTemp.createTempSync('adf-preview-');
     addTearDown(() => tmp.deleteSync(recursive: true));
     const localId = 'auth-login';
-    Directory('${tmp.path}/.cursor/orchestration/features/$localId')
+    Directory('${tmp.path}/.adf/orchestration/features/$localId')
         .createSync(recursive: true);
-    File('${tmp.path}/.cursor/orchestration/features/$localId/state.json')
+    File('${tmp.path}/.adf/orchestration/features/$localId/state.json')
         .writeAsStringSync(
       '{"current_phase":1,"status":"active","gates":{},"track":"M"}',
     );

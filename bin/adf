@@ -154,7 +154,7 @@ case "$cmd" in
     esac
     ;;
   studio)
-    if [[ -z "${ORCH_REPO_ROOT:-}" && -d "$(pwd)/.cursor/orchestration" ]]; then
+    if [[ -z "${ORCH_REPO_ROOT:-}" && -d "$(pwd)/.adf/orchestration" ]]; then
       export ORCH_REPO_ROOT="$(pwd)"
     fi
     exec "$FRAMEWORK_ROOT/scripts/orch/respin_dashboard.sh" "$@"
