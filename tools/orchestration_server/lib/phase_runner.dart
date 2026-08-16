@@ -969,7 +969,7 @@ class PhaseRunner {
     // A focused MVP scope file BOUNDS the build: when present it is authoritative
     // and the agent must build ONLY that slice (the full spec is reference for
     // detail). Without it, a large spec makes a single build pass run past the
-    // timeout — exactly what happened on the 91-requirement ANDS spec.
+    // timeout — exactly what happened on a 91-requirement spec.
     final hasMvp = File('$repoRoot/$specDir/mvp-scope.md').existsSync();
     final scopeBlock = hasMvp
         ? '0. SCOPE — AUTHORITATIVE. Build EXACTLY this slice and nothing beyond it; '

@@ -106,3 +106,13 @@ jobs:
           python3 scripts/test/proof_of_build_demo.py
           python3 scripts/test/policy_gate_demo.py
           python3 scripts/test/moat_demo.py
+
+  policy:
+    name: Repository policy check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Runs the SAME checks as .githooks/pre-commit, but server-side where
+      # `git commit --no-verify` cannot skip them. The hook is fast feedback;
+      # this is the backstop. See scripts/policy_check.sh and CLAUDE.md.
+      - run: bash scripts/policy_check.sh
