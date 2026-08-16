@@ -160,7 +160,7 @@ def main(app_dir):
                 pass
             # Clean scratch DBs the gate's form-submissions created, so the next
             # unit-test run starts from a clean slate (the boot path used to do this).
-            for db in ("submissions.db", "ands.db", "data.db", "app.db"):
+            for db in ("submissions.db", "data.db", "app.db"):
                 try:
                     os.remove(os.path.join(app_dir, db))
                 except Exception:

@@ -222,7 +222,9 @@ MODE_BRIEF = {
         "unused functions), and LOGIC ERRORS (off-by-one, wrong comparison, swapped "
         "args, incorrect state transitions, missing validation a branch assumes). "
         "Cross-reference test_app.py to judge what is actually covered. Prioritize "
-        "critical domain logic (validation, lifecycle, eCTD backbone, transmission)."
+        "the critical domain logic of the app under test, as described by its "
+        "requirements (validation rules, state/lifecycle transitions, and any "
+        "external transmission or integration paths)."
     ),
 }
 
@@ -233,9 +235,10 @@ def build_prompt(mode, source, requirements, base_url):
         f"{brief}\n\n"
         f"The app under test is a Python 3 standard-library single-page app. "
         f"server.py runs http.server on {base_url}, serving an HTML/JS UI at \"/\" "
-        f"and a JSON API under /api/... . Domain logic lives in domain.py plus ~14 "
-        f"modules; data persists in a local sqlite database. This is the Canada ANDS "
-        f"(Abbreviated New Drug Submission) regulatory submission portal.\n\n"
+        f"and a JSON API under /api/... . Domain logic lives in domain.py plus its "
+        f"sibling modules; data persists in a local sqlite database. Infer the "
+        f"application's domain from the requirements and source below — do not "
+        f"assume one.\n\n"
         f"================ REQUIREMENTS (requirements.md) ================\n"
         f"{requirements}\n\n"
         f"================ APP SOURCE (.py files) ================\n"

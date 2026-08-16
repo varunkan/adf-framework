@@ -175,7 +175,7 @@ def verify(app_dir):
                 proc.kill()
             except Exception:
                 pass
-        for db in ("submissions.db", "ands.db", "data.db", "app.db"):
+        for db in ("submissions.db", "data.db", "app.db"):
             try:
                 os.remove(os.path.join(app_dir, db))
             except Exception:
