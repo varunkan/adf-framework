@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# ADF pre-commit guardrail.
+#
+# Thin wrapper: the rules live in scripts/policy_check.sh so CI runs the IDENTICAL
+# checks. A rule enforced only here is on the honour system — `git commit
+# --no-verify` skips every hook.
+set -uo pipefail
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+exec bash "$ROOT/scripts/policy_check.sh" --staged

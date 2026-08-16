@@ -1,3 +1,24 @@
+## 2026-08-16 — Policies enforced in three layers
+
+Guardrails were documented in CLAUDE.md but nothing checked them — `core.hooksPath`
+was unset with zero tracked hooks, exactly the "stated but not enforced" pattern
+that let two domain leaks and a path split-brain survive unnoticed.
+
+Now: scripts/policy_check.sh (the rules) called by .githooks/pre-commit (staged,
+fast) AND the ci.yml `policy` job (whole tree, server-side, unbypassable), with
+.claude/settings.json SessionStart auto-installing core.hooksPath so there is no
+forgotten setup step. The existing PostToolUse/SessionStart hooks were preserved.
+
+Policies: no product domain knowledge in generic code (ANDS/eCTD/CESG and POS
+order-schema terms — both leaked for real), no absolute paths into another repo,
+ORCH_REPO_ROOT required in every scripts/orch/*_gate.sh, no .cursor/orchestration
+regression (matching the grep-evading os.path.join form too), no live secrets
+(this repo is PUBLIC), activity log on code change.
+
+Test-first: scripts/test_policy_check.sh, 16 cases asserting both directions.
+Running whole-tree against the real repo then found one genuine leftover — a
+comment in phase_runner.dart:972 still named a product — now rephrased.
+
 # ANDS / ADF — Activity Log
 
 Durable, human-readable record of **every** activity on this repo: analysis,
