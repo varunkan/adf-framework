@@ -1,5 +1,6 @@
 /// Pure helpers for the pipeline-rail phase selection (D6), so the deselect /
 /// auto-clear behaviour is unit-testable instead of buried in the screen build.
+library;
 
 /// The phase the rail should HIGHLIGHT: the explicitly-selected phase when one is
 /// picked, else the live phase — so DESELECTING returns the highlight to the

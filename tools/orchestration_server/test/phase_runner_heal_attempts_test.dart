@@ -51,8 +51,12 @@ void main() {
       expect(runnerWith({'ORCH_STALE_RUN_SEC': 'x'}).staleRunSec, 180);
     });
 
-    test('maxOrphanResumes defaults to 8 and honors env', () {
-      expect(runnerWith(<String, String>{}).maxOrphanResumes, 8);
+    // Default raised 8 -> 100 in da16923, which routed idle-incomplete builds
+    // into progress-based healing instead of the orphan cap. The cap is now a
+    // crash-loop backstop, not a build-length limit, so it is deliberately
+    // generous (see phase_runner.dart:70-73). This test still asserted 8.
+    test('maxOrphanResumes defaults to 100 and honors env', () {
+      expect(runnerWith(<String, String>{}).maxOrphanResumes, 100);
       expect(runnerWith({'ORCH_MAX_ORPHAN_RESUMES': '3'}).maxOrphanResumes, 3);
     });
 
