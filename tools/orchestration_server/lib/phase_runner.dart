@@ -1011,9 +1011,9 @@ class PhaseRunner {
     final implLine = hasMvp
         ? '   - Implement the CORE DOMAIN LOGIC named in mvp-scope.md for real, not stubs '
             '(use the full spec for the exact rule details). Do NOT expand beyond the MVP scope.\n'
-        : '   - Implement the CORE DOMAIN LOGIC for real, not stubs — especially the rules in the spec '
-            '(for this ANDS/eCTD portal: dossier-ID validation, the eCTD validation rules, sequence/lifecycle, '
-            'REP identifiers, CESG packaging model). Prioritize MUST requirements; COULD items may be scoped down.\n';
+        : '   - Implement the CORE DOMAIN LOGIC for real, not stubs — especially the rules stated in the spec '
+            '(identifier/format validation, domain validation rules, sequence and lifecycle transitions, and any '
+            'packaging or transmission model the spec defines). Prioritize MUST requirements; COULD items may be scoped down.\n';
     return 'You are the ADF build agent. Build a complete, runnable, well-tested '
         'application for the feature "$featureId" in THIS repository.\n\n'
         '$scopeBlock'

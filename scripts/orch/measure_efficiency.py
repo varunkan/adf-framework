@@ -59,7 +59,8 @@ def measure(runs, label):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--feature", default="ands-submission-portal")
+    ap.add_argument("--feature", required=True,
+                    help="feature id to score (no default — this is repo/app specific)")
     ap.add_argument("--since", type=int, default=0, help="score only runs[since:]")
     ap.add_argument("--label", default="window")
     ap.add_argument("--count", action="store_true", help="just print the turn count")
