@@ -202,6 +202,70 @@ intend, that no earlier change was lost or double-applied, and that nothing
 unrelated is being swept in. Never commit blind on the assumption a previous step
 completed; verify it did, then commit.
 
+## This framework is standalone — consumers reference it, never vendor it
+
+ADF is its own repository. Projects that use it check it out as a **sibling
+directory** and call into it; they do **not** copy `scripts/orch/` in, and they
+do **not** add ADF as a git submodule.
+
+```
+/Users/varunkumar/
+├── ai_pos_system/     <- a consumer (Flutter POS product)
+└── adf-framework/     <- this repo
+```
+
+This was not always true. Until 2026-08-16 the POS repo vendored ~265 tracked
+ADF files plus an `adf-framework` submodule, and the two copies diverged: the
+POS copy reached v3.2.0 with 550 commits that existed on no remote, while this
+repo sat at v3.1.0 with a single commit. That work has been pushed here and the
+POS copy removed. **Do not recreate that split.** Framework changes belong here;
+if a consumer needs a change, make it here and let the consumer pick it up.
+
+Equally, **do not bring consumer product code into this repo.** The POS app, its
+Flutter sources, and its product specs belong to the consumer.
+
+### `ORCH_REPO_ROOT` is a hard contract — never regress it
+
+Every gate in `scripts/orch/` MUST resolve the tree it scans as:
+
+```bash
+ROOT="${ORCH_REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+```
+
+A gate that resolves `ROOT` from its own location only — as **v3.1.0 did** —
+scans *this* repo instead of the consumer's when invoked externally. Since this
+repo has no `lib/*.dart`, it finds nothing, prints `PASS` and exits **0**. That
+false green is indistinguishable from a real pass by exit code.
+
+This was observed directly, same invocation, same consumer repo:
+
+| framework version | result |
+|---|---|
+| v3.1.0 | `PASS` — scanned **0** files |
+| v3.2.0 | 3 hard-delete patterns found in the consumer's `lib/`, then `PASS` |
+
+Consumers are expected to preflight-check for `ORCH_REPO_ROOT` and refuse to run
+without it, but that guard is a backstop — **the contract is owned here.** Any
+gate added or edited must honour it, and any change that drops it is a
+regression that silently disables a consumer's merge gate.
+
+### Two gates are broken and must be repaired HERE
+
+Both were moved out of the POS repo, which can no longer fix them:
+
+- **`lint_gate.sh`** — runs `flutter analyze --fatal-infos` and greps for any
+  `error|warning|info`, so against a real codebase with pre-existing info-level
+  lints (the POS repo has 553) it exits 1 **unconditionally**. A gate that can
+  never pass gets ignored, which is worse than no gate. It should fail on *new*
+  issues relative to a baseline, not on the existing backlog.
+- **`coverage_gate.sh`** — defaults `MIN_PCT` to **100** and its repo mode
+  demands 100% line coverage on every `lib/**/*.dart`. Nothing real meets that.
+  It is also built around a `testcases/` layout that consumers may not use.
+
+Until repaired, consumers can only enforce `security_gate` and
+`performance_gate`. Fixing these restores a consumer's merge gate to full
+strength.
+
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph
 
