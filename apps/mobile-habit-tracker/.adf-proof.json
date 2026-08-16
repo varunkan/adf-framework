@@ -1,0 +1,200 @@
+{
+  "build": {
+    "backend": "anthropic",
+    "model": null,
+    "prompt": "build mobile-habit-tracker",
+    "verified": true,
+    "verify_summary": "typecheck + jest + web render + rendered on the iOS Simulator (4E50325F\u2026), 157KB screenshot passed; native toolchain present (xcodebuild); full device build is a later node"
+  },
+  "created_at": "2026-06-19T06:14:14+00:00",
+  "feature_id": "mobile-habit-tracker",
+  "files": [
+    {
+      "bytes": 1201,
+      "path": "README.md",
+      "sha256": "8c5dd6aa5fc302633e6c5078ff6bd081c2ab40ef19ce0d41751f679be059bdb0"
+    },
+    {
+      "bytes": 4658,
+      "path": "__tests__/habits.test.tsx",
+      "sha256": "b394701b9ca4faacc89bcceab846baa668f2a43eadf7b2f84711f13a2b6b8204"
+    },
+    {
+      "bytes": 1399,
+      "path": "__tests__/kit.test.tsx",
+      "sha256": "e0735f110f98f219442ed94cfcdffe69956c654afefe149fac43602bdf55477b"
+    },
+    {
+      "bytes": 1263,
+      "path": "__tests__/theme.test.tsx",
+      "sha256": "de265446eab074080efc19299ac8144a6a82e07bc234b02583f468a318024c4b"
+    },
+    {
+      "bytes": 448,
+      "path": "app.json",
+      "sha256": "90693ff53d672cd7f7f2c29842e2325e10a8c795c19185957f9e00acf94a5044"
+    },
+    {
+      "bytes": 1887,
+      "path": "app/[id].tsx",
+      "sha256": "47c8e889eaadf21c253cb1ee0ce51d039f2185e724f6e66dba90919de40ec5e1"
+    },
+    {
+      "bytes": 404,
+      "path": "app/_layout.tsx",
+      "sha256": "0ba27b7ee4a0315f19267af1749d16c5e948629407cd5320a18195c7aa0cff54"
+    },
+    {
+      "bytes": 1146,
+      "path": "app/index.tsx",
+      "sha256": "ac1b3e13960b16f6505e092108ba7ea6841d2eb625fb339c03bb6c86095314ae"
+    },
+    {
+      "bytes": 101,
+      "path": "babel.config.js",
+      "sha256": "4b96981e76f4da97464e553a3af2c16fbb8e2da6d8a1983246087ed5a0e6afa8"
+    },
+    {
+      "bytes": 338,
+      "path": "jest.config.js",
+      "sha256": "a3d18032211136f3c26d7c6265f71464bd74fbb1d680e3c3e4318f3551c51313"
+    },
+    {
+      "bytes": 1186,
+      "path": "package.json",
+      "sha256": "cfbb6f628bfa28968b47ce2cbe9a023875bb9c8a8b7b73b170677bc279a01eb8"
+    },
+    {
+      "bytes": 1715,
+      "path": "serve-web.mjs",
+      "sha256": "8d55551caf0608452c0b0e6215af6ecb6a0bd5030b103396fbf5c548a71c50a8"
+    },
+    {
+      "bytes": 1056,
+      "path": "src/components/HabitForm.tsx",
+      "sha256": "faea580d6bda16676c04d60302de007962d69ddf983d3feefb959def2a417174"
+    },
+    {
+      "bytes": 1415,
+      "path": "src/components/HabitList.tsx",
+      "sha256": "f98d29cde8cdbd9145013bf2f4439d5e8e9a5b2585f2560a1306215d00d07e04"
+    },
+    {
+      "bytes": 756,
+      "path": "src/components/ui/Badge.tsx",
+      "sha256": "d69bd8f341b22c35599e607865b1955ea3ed80f781d7bacfd733a28b142cdffd"
+    },
+    {
+      "bytes": 1307,
+      "path": "src/components/ui/Button.tsx",
+      "sha256": "01d93de2d1bf4273c585cc1ae43db1d6ee7853ba064ac136e8a038c1f8188214"
+    },
+    {
+      "bytes": 943,
+      "path": "src/components/ui/Card.tsx",
+      "sha256": "eec483dda089e95408264369f8274c00f2d0c4679f02fa6f9cff49e54787d25e"
+    },
+    {
+      "bytes": 836,
+      "path": "src/components/ui/EmptyState.tsx",
+      "sha256": "b880710f021990ada70b77ce7bf12821abcd795cdfcff572e75ac4cd0f5bdab9"
+    },
+    {
+      "bytes": 1315,
+      "path": "src/components/ui/Header.tsx",
+      "sha256": "06cc7f6ff7f5c56d882e239c22f46becf37dde74b1c44fe4e4a7d8e1d7dc4597"
+    },
+    {
+      "bytes": 782,
+      "path": "src/components/ui/Icon.tsx",
+      "sha256": "730a8ef808c606f3aa777a1b775e08a3ec6eff6429caa3151d1453727a8e016e"
+    },
+    {
+      "bytes": 1209,
+      "path": "src/components/ui/Input.tsx",
+      "sha256": "33b3a60ddc9c9d69191dbd3dc446788513edfa0ca6c2fede3d35e30fe62612d4"
+    },
+    {
+      "bytes": 1347,
+      "path": "src/components/ui/ListItem.tsx",
+      "sha256": "513892d958f3edf6e0ba8ca995b49418820e45055f995e5a5255a7f0ba22914e"
+    },
+    {
+      "bytes": 631,
+      "path": "src/components/ui/Screen.tsx",
+      "sha256": "fe8a7a3a0c704d2c027cc781db63bef94ab1f6aab3a41a1cf4d2b21cf8b9a7ee"
+    },
+    {
+      "bytes": 979,
+      "path": "src/components/ui/Text.tsx",
+      "sha256": "599d05bff401a402c0954005ba2d4a1ff21b754fd9ea6232fa810eab0e223ff5"
+    },
+    {
+      "bytes": 1055,
+      "path": "src/components/ui/index.ts",
+      "sha256": "f5a935b1e17a773f79cb85573a6359c967e532507ad96f58e6700d19ef09b71d"
+    },
+    {
+      "bytes": 2179,
+      "path": "src/db.ts",
+      "sha256": "d6f672c78a264cc316e45b46390356675ee3815af65284e72c4bcdf3a69d1bd8"
+    },
+    {
+      "bytes": 3016,
+      "path": "src/hooks/useHabits.ts",
+      "sha256": "b76eb5fd0430b119d3f15e379b5b54595b5ef07e80d4d80cf05eb7b10acda5f2"
+    },
+    {
+      "bytes": 65,
+      "path": "src/theme/index.ts",
+      "sha256": "dcbdbd35473d32ad4d5a19f12f16d30c065dc098c3e5021e6f7f88281501076a"
+    },
+    {
+      "bytes": 2388,
+      "path": "src/theme/tokens.ts",
+      "sha256": "eecf6e3eb8a1adc584fa8b2e8f886d864848f161ceb097c25bf0dc3f7d697353"
+    },
+    {
+      "bytes": 321,
+      "path": "src/theme/useTheme.ts",
+      "sha256": "65b6698d39ed4dd9c3d6cf27cf9a3e0748d1e9a6d2a09268fa00dab5b4fa531f"
+    },
+    {
+      "bytes": 166,
+      "path": "tsconfig.json",
+      "sha256": "ebc45c95f510159f477a466d8ef85285d66c3b8fc9c921f2e98ebed6cb5dafbe"
+    }
+  ],
+  "merkle_root": "db204616cfffdb2158343ed74835beabdcee52157c9bc58554ee1b9a08f106b6",
+  "schema": "adf-proof/1",
+  "seal": "adf1:db204616cfff",
+  "spec_sha256": "ae35b29fa6d97198673383c1f8af5597400302603aa7628cd9b3e3678fb992bb",
+  "stack": "expo-rn",
+  "verdict": {
+    "policy": {
+      "checked": true,
+      "n_violations": 0,
+      "ok": true,
+      "policy_id": "adf-expo-secure",
+      "rules": [
+        "dependency_allowlist:pass",
+        "no_network_egress:pass",
+        "no_plaintext_pii:pass",
+        "no_raw_hex:pass",
+        "no_secrets:pass",
+        "offline_capable:pass"
+      ]
+    },
+    "render": {
+      "js_bytes": 1321242,
+      "platforms": [
+        "web",
+        "ios"
+      ],
+      "proven": true
+    },
+    "stack": "expo-rn",
+    "verified": true,
+    "verify_summary": "typecheck + jest + web render + rendered on the iOS Simulator (4E50325F\u2026), 157KB screenshot passed; native toolchain present (xcodebuild); full device build is a later node"
+  }
+}

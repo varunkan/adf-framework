@@ -1,0 +1,50 @@
+{
+  "_doc": "SHARED contract for CodeHeuristics.isCodeLike — the single source of truth for 'is this text code rather than prose?'. Both tools/orchestration_server/lib/code_heuristics.dart and tools/orchestration_dashboard/lib/utils/code_heuristics.dart MUST satisfy this vector (their tests load this file). Editing one impl without the other breaks its test against this contract — that is the anti-drift mechanism (D3).",
+  "cases": [
+    { "text": "const router = express.Router();", "code": true },
+    { "text": "import 'package:flutter/material.dart';", "code": true },
+    { "text": "export default function App() {", "code": true },
+    { "text": "def add_bookmark(url): return db.save(url)", "code": true },
+    { "text": "class Bookmark {", "code": true },
+    { "text": "SELECT * FROM users WHERE active = 1", "code": true },
+    { "text": "CREATE TABLE bookmarks (id INTEGER PRIMARY KEY);", "code": true },
+    { "text": "npm install express", "code": true },
+    { "text": "flutter pub get", "code": true },
+    { "text": "{ \"timeout\": 240, \"retries\": 3 }", "code": true },
+    { "text": "\"dependencies\": {", "code": true },
+    { "text": "```dart", "code": true },
+    { "text": "if (user == null) {", "code": true },
+
+    { "text": "I'll create the bookmarks table and wire the add-bookmark route.", "code": false },
+    { "text": "The SQLite database stores each bookmark with its URL and title.", "code": false },
+    { "text": "Generating the data layer now.", "code": false },
+    { "text": "Next, wire the API route that adds a bookmark.", "code": false },
+    { "text": "This validates the user input before saving.", "code": false },
+
+    { "text": "Update the spec to add the validation rule.", "code": false },
+    { "text": "Select the best export format for the user.", "code": false },
+    { "text": "Return the new bookmark id to the client.", "code": false },
+    { "text": "From the spec, derive the data schema.", "code": false },
+    { "text": "Static analysis shows no leaks.", "code": false },
+    { "text": "Flutter rebuilds the widget tree on setState.", "code": false },
+    { "text": "Create a new bookmark for the signed-in user.", "code": false },
+    { "text": "Delete the old record once it has been archived.", "code": false },
+    { "text": "Import the existing data before the first run.", "code": false },
+
+    { "text": "UPDATE users SET active = 1 WHERE id = 5", "code": true },
+    { "text": "DELETE FROM sessions WHERE expired = 1", "code": true },
+    { "text": "INSERT INTO logs (msg) VALUES ('x')", "code": true },
+
+    { "text": "The request => response cycle now works.", "code": false },
+    { "text": "See ci.example.com::8080 for the dashboard.", "code": false },
+    { "text": "verify(); confirm the output is correct.", "code": false },
+    { "text": "I refactored the parser; it is faster now.", "code": false },
+    { "text": "Select the rows from the cache, limit to 10.", "code": false },
+    { "text": "delete from your mind any assumption about the schema.", "code": false },
+
+    { "text": "db.save(url);", "code": true },
+    { "text": "obj.foo()", "code": true },
+    { "text": "x => x + 1", "code": true },
+    { "text": "SELECT id, name FROM users", "code": true }
+  ]
+}

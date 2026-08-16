@@ -1,0 +1,385 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:orchestration_server/audit_bundle.dart';
+import 'package:orchestration_server/cost_meter.dart';
+import 'package:orchestration_server/feature_store.dart';
+import 'package:orchestration_server/integrity_chain.dart';
+import 'package:orchestration_server/runner_backend.dart';
+import 'package:test/test.dart';
+
+void main() {
+  late Directory tmp;
+  late FeatureStore store;
+  late IntegrityChain chain;
+  late CostMeter costs;
+  late AuditBundleBuilder bundles;
+  const id = 'audit-bundle-test';
+
+  setUp(() {
+    tmp = Directory.systemTemp.createTempSync('orch_audit_test_');
+    store = FeatureStore(tmp.path);
+    chain = IntegrityChain(store);
+    costs = CostMeter(store, env: const {});
+    bundles = AuditBundleBuilder(
+      store,
+      integrity: chain,
+      costs: costs,
+      backend: ClaudeBackend(), // CURSOR-1: cursor backend removed; any backend works here
+    );
+    store.createFeature(
+      id: id,
+      requirement: 'Export a bundle that proves what was built.',
+      track: 'S',
+    );
+    File('${tmp.path}/specs/$id/spec.md')
+        .writeAsStringSync('# Spec\n\nSealed proof artifact.\n');
+    // Writing spec.md completes bootstrap, which makes the next readState
+    // repair-and-rewrite state.json. Trigger that now so the state sealed
+    // into the chain is stable (no drift between seal and export).
+    store.readState(id);
+  });
+
+  tearDown(() {
+    if (tmp.existsSync()) tmp.deleteSync(recursive: true);
+  });
+
+  // Recomputes the digest the same way the builder stamps it.
+  String digestOf(Map<String, dynamic> bundle) {
+    final body = Map<String, dynamic>.from(bundle)..remove('bundle_digest');
+    return IntegrityChain.hashString(IntegrityChain.canonical(body));
+  }
+
+  Map<String, dynamic> sealedBundle() {
+    costs.recordFromResultEvent(
+      id,
+      {
+        'type': 'result',
+        'total_cost_usd': 0.042,
+        'usage': {'input_tokens': 1200, 'output_tokens': 350},
+      },
+      phase: 6,
+    );
+    chain.seal(id, phase: 1);
+    return bundles.build(id);
+  }
+
+  test('sealed feature exports the full contract payload', () {
+    final bundle = sealedBundle();
+
+    expect(bundle['format'], 'adf-audit-bundle/1');
+    expect(bundle['feature_id'], id);
+    expect(DateTime.tryParse(bundle['created_at'] as String), isNotNull);
+
+    final runner = bundle['runner'] as Map<String, dynamic>;
+    expect(runner['runner'], 'claude'); // CURSOR-1: bundle backend is ClaudeBackend now
+    expect(runner['runner_label'], 'Claude Code CLI (claude)');
+
+    final blocks = (bundle['chain'] as List).cast<Map<String, dynamic>>();
+    expect(blocks, hasLength(1));
+    expect(blocks.first['prev_hash'], 'genesis');
+
+    // Artifacts are lifted from the sealed manifest (never re-hashed),
+    // sorted by path, with on-disk sizes attached.
+    final manifest = (blocks.last['manifest'] as Map).cast<String, String>();
+    final artifacts = (bundle['artifacts'] as List).cast<Map<String, dynamic>>();
+    expect(
+      artifacts.map((a) => a['path']),
+      orderedEquals(manifest.keys.toList()..sort()),
+    );
+    expect(artifacts.map((a) => a['path']), contains('specs/$id/spec.md'));
+    for (final artifact in artifacts) {
+      expect(artifact['sha256'], manifest[artifact['path']]);
+      expect(artifact['bytes'], greaterThan(0));
+    }
+
+    final gates = bundle['gates'] as Map<String, dynamic>;
+    expect(gates, isNotEmpty);
+
+    final cost = bundle['cost'] as Map<String, dynamic>;
+    expect(cost['feature_id'], id);
+    expect(cost['total_usd'], closeTo(0.042, 1e-9));
+
+    expect(bundle['bundle_digest'], hasLength(64));
+    expect(bundle['bundle_digest'], digestOf(bundle));
+  });
+
+  test('never-sealed feature exports chain: null and still gets a digest', () {
+    final bundle = bundles.build(id);
+    expect(bundle['chain'], isNull);
+    expect(bundle['artifacts'], isEmpty);
+    expect(bundle['cost'], isNull); // no cost evidence recorded
+    expect(bundle['bundle_digest'], hasLength(64));
+    expect(bundle['bundle_digest'], digestOf(bundle));
+  });
+
+  test('tampering one byte breaks the digest; a clean round-trip keeps it',
+      () {
+    final bundle = sealedBundle();
+
+    // JSON round-trip (what export to disk does) must preserve the digest.
+    final roundTrip = jsonDecode(jsonEncode(bundle)) as Map<String, dynamic>;
+    expect(digestOf(roundTrip), bundle['bundle_digest']);
+
+    // One flipped gate bit and the digest no longer matches.
+    final tampered = jsonDecode(jsonEncode(bundle)) as Map<String, dynamic>;
+    (tampered['gates'] as Map<String, dynamic>)['tests_green'] = true;
+    expect(digestOf(tampered), isNot(bundle['bundle_digest']));
+  });
+
+  // The per-app moat artifacts the runner seals into apps/<id>/.
+  void writeMoatArtifacts() {
+    final app = Directory('${tmp.path}/apps/$id')..createSync(recursive: true);
+    File('${app.path}/.adf-proof.json').writeAsStringSync(jsonEncode({
+      'seal': 'adf1:abc123def456',
+      // Canonical key is 'merkle_root' per proof_of_build.py:238 (SSOT). The
+      // first 12 hex chars match the seal suffix, by design.
+      'merkle_root':
+          'abc123def456aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      'files': [
+        {'path': 'src/App.tsx', 'sha256': 'aa'},
+        {'path': 'server/index.mjs', 'sha256': 'bb'},
+      ],
+    }));
+    File('${app.path}/.adf-policy-report.json').writeAsStringSync(jsonEncode({
+      'policy_id': 'adf-default-secure',
+      'ok': true,
+      'n_violations': 0,
+      'rules': [],
+    }));
+    Directory('${app.path}/.adf-context').createSync();
+    File('${app.path}/.adf-context/compaction-1.json').writeAsStringSync(jsonEncode({
+      'kind': 'edit',
+      'tokens_before': 5000,
+      'tokens_after': 400,
+      'n_summarized': 3,
+    }));
+  }
+
+  test('the bundle attests the per-app moat (proof + policy + compaction)', () {
+    writeMoatArtifacts();
+    final bundle = sealedBundle();
+    final moat = bundle['moat'] as Map<String, dynamic>;
+    expect((moat['proof'] as Map)['seal'], 'adf1:abc123def456');
+    expect((moat['proof'] as Map)['n_files'], 2);
+    // The real Merkle root is surfaced (read from 'merkle_root'), not null.
+    final proofMap = moat['proof'] as Map;
+    expect(proofMap['root'], isNotNull);
+    expect((proofMap['root'] as String).length, 64);
+    // Seal prefix must match the first 12 chars of the root.
+    expect(proofMap['seal'],
+        'adf1:${(proofMap['root'] as String).substring(0, 12)}');
+    expect((moat['policy'] as Map)['ok'], isTrue);
+    expect((moat['policy'] as Map)['policy_id'], 'adf-default-secure');
+    expect((moat['context'] as Map)['cards'], 1);
+    expect(((moat['context'] as Map)['last'] as Map)['tokens_after'], 400);
+    // the digest covers the moat: flip the policy verdict and it no longer matches.
+    expect(bundle['bundle_digest'], digestOf(bundle));
+    final tampered = jsonDecode(jsonEncode(bundle)) as Map<String, dynamic>;
+    ((tampered['moat'] as Map)['policy'] as Map)['ok'] = false;
+    expect(digestOf(tampered), isNot(bundle['bundle_digest']));
+  });
+
+  test('a feature never built into an app has moat: null', () {
+    final bundle = sealedBundle();
+    expect(bundle['moat'], isNull);
+  });
+
+  group('python3 verifier interop', () {
+    late String script;
+    String? python;
+
+    setUpAll(() async {
+      var dir = Directory.current.absolute.path;
+      while (!File('$dir/scripts/orch/verify_audit_bundle.py').existsSync()) {
+        final parent = Directory(dir).parent.path;
+        if (parent == dir) {
+          throw StateError('verify_audit_bundle.py not found above $dir');
+        }
+        dir = parent;
+      }
+      script = '$dir/scripts/orch/verify_audit_bundle.py';
+      try {
+        final probe = await Process.run('python3', ['--version']);
+        if (probe.exitCode == 0) python = 'python3';
+      } on ProcessException {
+        python = null;
+      }
+    });
+
+    File writeBundle(Map<String, dynamic> bundle) =>
+        File('${tmp.path}/bundle.json')..writeAsStringSync(jsonEncode(bundle));
+
+    test('accepts a genuine bundle, including --repo re-hash (exit 0)',
+        () async {
+      if (python == null) {
+        markTestSkipped('python3 not on PATH — skipping verifier interop');
+        return;
+      }
+      final file = writeBundle(sealedBundle());
+      final result = await Process.run(
+        python!,
+        [script, '--json', '--repo', tmp.path, file.path],
+      );
+      expect(result.exitCode, 0,
+          reason: '${result.stdout}\n${result.stderr}');
+      final report =
+          jsonDecode(result.stdout as String) as Map<String, dynamic>;
+      expect(report['valid'], isTrue);
+      expect(report['feature_id'], id);
+      expect(
+        (report['checks'] as List).map((c) => c['ok']),
+        everyElement(isTrue),
+      );
+    });
+
+    test('rejects a bundle tampered by one byte (exit 1)', () async {
+      if (python == null) {
+        markTestSkipped('python3 not on PATH — skipping verifier interop');
+        return;
+      }
+      final file = writeBundle(sealedBundle());
+      file.writeAsStringSync(file.readAsStringSync().replaceFirst(
+            '"feature_id":"$id"',
+            '"feature_id":"${id.substring(0, id.length - 1)}x"',
+          ));
+      final result =
+          await Process.run(python!, [script, '--json', file.path]);
+      expect(result.exitCode, 1,
+          reason: '${result.stdout}\n${result.stderr}');
+      final report =
+          jsonDecode(result.stdout as String) as Map<String, dynamic>;
+      expect(report['valid'], isFalse);
+    });
+
+    test('rejects a rewritten chain block even with a fixed-up digest',
+        () async {
+      if (python == null) {
+        markTestSkipped('python3 not on PATH — skipping verifier interop');
+        return;
+      }
+      final bundle =
+          jsonDecode(jsonEncode(sealedBundle())) as Map<String, dynamic>;
+      ((bundle['chain'] as List).first as Map<String, dynamic>)['actor'] =
+          'attacker';
+      bundle['bundle_digest'] = digestOf(bundle); // digest passes, links fail
+      final result =
+          await Process.run(python!, [script, '--json', writeBundle(bundle).path]);
+      expect(result.exitCode, 1,
+          reason: '${result.stdout}\n${result.stderr}');
+      final report =
+          jsonDecode(result.stdout as String) as Map<String, dynamic>;
+      final failing = (report['checks'] as List)
+          .where((c) => c['ok'] != true)
+          .map((c) => c['check']);
+      expect(failing, ['chain_links']);
+    });
+
+    test('flags artifact drift in a checkout via --repo (exit 1)', () async {
+      if (python == null) {
+        markTestSkipped('python3 not on PATH — skipping verifier interop');
+        return;
+      }
+      final file = writeBundle(sealedBundle());
+      File('${tmp.path}/specs/$id/spec.md')
+          .writeAsStringSync('drifted after sealing');
+      final result = await Process.run(
+        python!,
+        [script, '--json', '--repo', tmp.path, file.path],
+      );
+      expect(result.exitCode, 1,
+          reason: '${result.stdout}\n${result.stderr}');
+      final report =
+          jsonDecode(result.stdout as String) as Map<String, dynamic>;
+      final failing = (report['checks'] as List)
+          .where((c) => c['ok'] != true)
+          .map((c) => c['check']);
+      expect(failing, ['repo_artifacts']);
+    });
+
+    test('self-test guards the canonical-encoding replication (exit 0)',
+        () async {
+      if (python == null) {
+        markTestSkipped('python3 not on PATH — skipping verifier interop');
+        return;
+      }
+      final result = await Process.run(python!, [script, '--self-test']);
+      expect(result.exitCode, 0,
+          reason: '${result.stdout}\n${result.stderr}');
+    });
+
+    test('accepts a bundle whose moat is attested + surfaces it (exit 0)',
+        () async {
+      if (python == null) {
+        markTestSkipped('python3 not on PATH — skipping verifier interop');
+        return;
+      }
+      writeMoatArtifacts();
+      final result = await Process.run(
+          python!, [script, '--json', writeBundle(sealedBundle()).path]);
+      expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
+      final report =
+          jsonDecode(result.stdout as String) as Map<String, dynamic>;
+      expect(report['valid'], isTrue);
+      expect(((report['moat'] as Map)['proof'] as Map)['seal'],
+          'adf1:abc123def456');
+      final moatCheck = (report['checks'] as List)
+          .firstWhere((c) => c['check'] == 'moat_attested');
+      expect(moatCheck['ok'], isTrue);
+    });
+
+    test('a forged proof seal in the moat fails even with a fixed-up digest',
+        () async {
+      if (python == null) {
+        markTestSkipped('python3 not on PATH — skipping verifier interop');
+        return;
+      }
+      writeMoatArtifacts();
+      final bundle =
+          jsonDecode(jsonEncode(sealedBundle())) as Map<String, dynamic>;
+      ((bundle['moat'] as Map)['proof'] as Map)['seal'] = 'forged-not-adf1';
+      bundle['bundle_digest'] = digestOf(bundle); // digest passes; semantics fail
+      final result = await Process.run(
+          python!, [script, '--json', writeBundle(bundle).path]);
+      expect(result.exitCode, 1, reason: '${result.stdout}\n${result.stderr}');
+      final report =
+          jsonDecode(result.stdout as String) as Map<String, dynamic>;
+      final failing = (report['checks'] as List)
+          .where((c) => c['ok'] != true)
+          .map((c) => c['check']);
+      expect(failing, ['moat_attested']);
+    });
+
+    test('a tampered moat proof.root fails moat_attested even with a fixed-up '
+        'digest', () async {
+      if (python == null) {
+        markTestSkipped('python3 not on PATH — skipping verifier interop');
+        return;
+      }
+      writeMoatArtifacts();
+      final bundle =
+          jsonDecode(jsonEncode(sealedBundle())) as Map<String, dynamic>;
+      // The genuine bundle surfaces merkle_root as proof.root, consistent with
+      // seal 'adf1:abc123def456'. Swap the root to a DIFFERENT valid 64-hex
+      // value while leaving the seal alone, so seal != 'adf1:' + root[:12].
+      // This is NOT the seal-string mutation the prior test exercises: the seal
+      // stays well-formed; only the full 256-bit root is forged.
+      final proof = (bundle['moat'] as Map)['proof'] as Map;
+      expect(proof['root'],
+          'abc123def456aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+      proof['root'] =
+          'deadbeefcafe1111111111111111111111111111111111111111111111111111';
+      expect(proof['seal'], 'adf1:abc123def456'); // seal untouched, still valid
+      bundle['bundle_digest'] = digestOf(bundle); // digest passes; root binding fails
+      final result = await Process.run(
+          python!, [script, '--json', writeBundle(bundle).path]);
+      expect(result.exitCode, 1, reason: '${result.stdout}\n${result.stderr}');
+      final report =
+          jsonDecode(result.stdout as String) as Map<String, dynamic>;
+      final failing = (report['checks'] as List)
+          .where((c) => c['ok'] != true)
+          .map((c) => c['check']);
+      expect(failing, ['moat_attested']);
+    });
+  });
+}

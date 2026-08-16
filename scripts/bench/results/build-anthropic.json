@@ -1,0 +1,62 @@
+{
+  "results": [
+    {
+      "id": "todo",
+      "built": true,
+      "tests_pass": true,
+      "files": 7,
+      "seconds": 41.2,
+      "attempts": 1,
+      "in_tokens": 1348,
+      "out_tokens": 4375,
+      "proof_ok": true,
+      "policy_ok": true,
+      "offline_ok": true,
+      "governed": true
+    },
+    {
+      "id": "kanban",
+      "built": true,
+      "tests_pass": true,
+      "files": 4,
+      "seconds": 42.6,
+      "attempts": 1,
+      "in_tokens": 1354,
+      "out_tokens": 4608,
+      "proof_ok": true,
+      "policy_ok": true,
+      "offline_ok": true,
+      "governed": true
+    },
+    {
+      "id": "expense-tracker",
+      "built": true,
+      "tests_pass": true,
+      "files": 4,
+      "seconds": 43.8,
+      "attempts": 1,
+      "in_tokens": 1360,
+      "out_tokens": 4822,
+      "proof_ok": true,
+      "policy_ok": true,
+      "offline_ok": true,
+      "governed": true
+    }
+  ],
+  "summary": {
+    "apps": 3,
+    "governed": 3,
+    "proven": 3,
+    "compliant": 3,
+    "offline": 3,
+    "total_files": 15
+  },
+  "capability": {
+    "apps": 3,
+    "built": 3,
+    "tests_pass": 3,
+    "avg_seconds": 42.5,
+    "total_out_tokens": 13805,
+    "backend": "anthropic"
+  }
+}

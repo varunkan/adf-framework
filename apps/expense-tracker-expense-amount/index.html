@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Expense Tracker</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: linear-gradient(135deg, #f0f4ff 0%, #f9fafb 100%);
+    color: #1f2937;
+    min-height: 100vh;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 32px 18px 60px; }
+  h1 { font-size: 28px; margin: 0 0 4px; }
+  .sub { color: #6b7280; margin: 0 0 24px; }
+  .card {
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.06);
+    padding: 22px;
+    margin-bottom: 22px;
+  }
+  .card h2 { margin: 0 0 16px; font-size: 18px; }
+  form .row { display: flex; flex-wrap: wrap; gap: 12px; }
+  .field { display: flex; flex-direction: column; flex: 1 1 140px; }
+  .field label { font-size: 12px; font-weight: 600; color: #6b7280; margin-bottom: 5px; }
+  input, select {
+    padding: 10px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 10px;
+    font-size: 14px;
+    background: #fff;
+    outline: none;
+  }
+  input:focus, select:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.15); }
+  .btn {
+    cursor: pointer;
+    border: none;
+    border-radius: 10px;
+    padding: 10px 18px;
+    font-size: 14px;
+    font-weight: 600;
+    background: #6366f1;
+    color: #fff;
+    transition: background .15s;
+  }
+  .btn:hover { background: #4f46e5; }
+  .btn-add { align-self: flex-end; margin-top: 22px; flex: 0 0 auto; background: #16a34a; }
+  .btn-add:hover { background: #15803d; }
+  .total-box { display: flex; align-items: baseline; gap: 10px; }
+  .total-amt { font-size: 32px; font-weight: 700; color: #111827; }
+  .bars { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .bar-row { display: flex; align-items: center; gap: 10px; }
+  .bar-label { width: 84px; font-size: 13px; font-weight: 600; }
+  .bar-track { flex: 1; background: #eef0f5; border-radius: 8px; height: 20px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 8px; transition: width .3s; }
+  .bar-val { width: 86px; text-align: right; font-size: 13px; color: #374151; }
+  .filter-row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .filter-row label { font-size: 13px; font-weight: 600; color: #6b7280; }
+  ul.list { list-style: none; margin: 0; padding: 0; }
+  li.exp {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 4px;
+    border-bottom: 1px solid #f0f1f4;
+  }
+  li.exp:last-child { border-bottom: none; }
+  .cat-pill {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 999px;
+    color: #fff;
+    white-space: nowrap;
+  }
+  .exp-main { flex: 1; min-width: 0; }
+  .exp-note { font-size: 14px; font-weight: 600; }
+  .exp-meta { font-size: 12px; color: #9ca3af; }
+  .exp-amt { font-size: 16px; font-weight: 700; white-space: nowrap; }
+  .del {
+    cursor: pointer;
+    border: none;
+    background: #fee2e2;
+    color: #dc2626;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .del:hover { background: #fecaca; }
+  .empty { color: #9ca3af; text-align: center; padding: 24px 0; }
+  .err { color: #dc2626; font-size: 13px; margin-top: 8px; min-height: 16px; }
+  .edit {
+    cursor: pointer;
+    border: none;
+    background: #eef2ff;
+    color: #4f46e5;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .edit:hover { background: #e0e7ff; }
+  .stat-row { display: flex; gap: 24px; flex-wrap: wrap; margin-top: 6px; color: #6b7280; font-size: 13px; }
+  .stat-row b { color: #111827; }
+  .budget-box { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+  .budget-box .field { flex: 0 1 160px; }
+  .budget-status { font-size: 14px; font-weight: 600; margin-top: 10px; min-height: 18px; }
+  .budget-ok { color: #16a34a; }
+  .budget-over { color: #dc2626; }
+  .links { margin-top: 10px; }
+  .links a { color: #4f46e5; font-size: 13px; font-weight: 600; text-decoration: none; }
+  .links a:hover { text-decoration: underline; }
+  .month-row { display: flex; align-items: center; gap: 10px; }
+  .month-label { width: 84px; font-size: 13px; font-weight: 600; }
+  .month-val { font-size: 13px; color: #374151; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>💸 My Money Tracker</h1>
+  <p class="sub">Track your spending across categories.</p>
+
+  <div class="card">
+    <h2>Add Expense</h2>
+    <form id="addForm">
+      <div class="row">
+        <div class="field">
+          <label for="amount">Amount</label>
+          <input type="number" id="amount" step="0.01" min="0.01" placeholder="0.00" required>
+        </div>
+        <div class="field">
+          <label for="category">Category</label>
+          <select id="category">
+            <option>Food</option>
+            <option>Transport</option>
+            <option>Bills</option>
+            <option>Fun</option>
+            <option>Other</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="date">Date</label>
+          <input type="date" id="date" required>
+        </div>
+        <div class="field" style="flex: 2 1 200px;">
+          <label for="note">Note (optional)</label>
+          <input type="text" id="note" placeholder="e.g. Lunch with friends">
+        </div>
+        <button type="submit" class="btn btn-add">Add</button>
+      </div>
+      <div class="err" id="formErr"></div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Summary</h2>
+    <div class="total-box">
+      <span>Total spent:</span>
+      <span class="total-amt" id="total">$0.00</span>
+    </div>
+    <div class="stat-row">
+      <span>Entries: <b id="count">0</b></span>
+      <span>Average: <b id="average">$0.00</b></span>
+      <span>Top category: <b id="topCategory">—</b></span>
+      <span>Largest: <b id="largest">—</b></span>
+    </div>
+    <div class="bars" id="bars"></div>
+    <div class="links">
+      <a id="exportCsv" href="/api/expenses.csv">⬇ Export CSV</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Monthly Budget</h2>
+    <div class="budget-box">
+      <div class="field">
+        <label for="budget">Budget amount</label>
+        <input type="number" id="budget" step="0.01" min="0" placeholder="e.g. 500">
+      </div>
+      <button type="button" class="btn" id="saveBudget">Save budget</button>
+      <button type="button" class="btn" id="clearBudget" style="background:#9ca3af;">Clear</button>
+    </div>
+    <div class="budget-status" id="budgetStatus"></div>
+    <div class="budget-box" style="margin-top:12px;">
+      <div class="field">
+        <label for="paceAsof">Pace as of</label>
+        <input type="date" id="paceAsof">
+      </div>
+      <button type="button" class="btn" id="checkPace">Check pace</button>
+    </div>
+    <div class="budget-status" id="paceStatus"></div>
+  </div>
+
+  <div class="card">
+    <h2>Monthly Breakdown</h2>
+    <div class="bars" id="monthly"></div>
+  </div>
+
+  <div class="card">
+    <h2>Insights</h2>
+    <h3 class="sub" style="margin:0 0 6px;">Weekly spend</h3>
+    <div class="bars" id="weekly"></div>
+    <h3 class="sub" style="margin:14px 0 6px;">Category share</h3>
+    <div class="bars" id="percentages"></div>
+    <h3 class="sub" style="margin:14px 0 6px;">Top spends</h3>
+    <ul class="list" id="topSpends"></ul>
+  </div>
+
+  <div class="card">
+    <h2>Import CSV</h2>
+    <p class="sub" style="margin:0 0 12px;">Paste rows with a header like
+      <code>date,category,amount,note,tags</code> (tags semicolon-separated, optional).
+      Re-importing an exported file is safe — each row gets a fresh id.</p>
+    <textarea id="importText" rows="4"
+      style="width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:10px;font-size:13px;font-family:monospace;resize:vertical;"
+      placeholder="date,category,amount,note&#10;2024-01-01,Food,12.50,Lunch"></textarea>
+    <div style="margin-top:12px;">
+      <button type="button" class="btn" id="importBtn">Import</button>
+    </div>
+    <div class="budget-status" id="importStatus"></div>
+  </div>
+
+  <div class="card">
+    <h2>Recurring expenses</h2>
+    <p class="sub" style="margin:0 0 12px;">Define a schedule once, then
+      <b>Generate due</b> materializes one real expense per occurrence from the
+      start date up to today. Running again is safe — already-generated dates
+      are skipped.</p>
+    <form id="recurForm">
+      <div class="row">
+        <div class="field">
+          <label for="rAmount">Amount</label>
+          <input type="number" id="rAmount" step="0.01" min="0.01" placeholder="0.00" required>
+        </div>
+        <div class="field">
+          <label for="rCategory">Category</label>
+          <select id="rCategory">
+            <option>Food</option>
+            <option>Transport</option>
+            <option>Bills</option>
+            <option>Fun</option>
+            <option>Other</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="rFreq">Frequency</label>
+          <select id="rFreq">
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="rDate">Starts</label>
+          <input type="date" id="rDate" required>
+        </div>
+        <div class="field" style="flex: 2 1 200px;">
+          <label for="rNote">Note (optional)</label>
+          <input type="text" id="rNote" placeholder="e.g. Rent">
+        </div>
+      </div>
+      <div class="err" id="recurErr"></div>
+      <div style="margin-top:4px;display:flex;gap:8px;">
+        <button type="submit" class="btn">Add schedule</button>
+        <button type="button" class="btn" id="runRecur" style="background:#6366f1;">Generate due</button>
+      </div>
+    </form>
+    <div class="budget-status" id="recurStatus"></div>
+    <ul class="list" id="recurList"></ul>
+  </div>
+
+  <div class="card">
+    <h2>Expenses</h2>
+    <div class="filter-row">
+      <label for="filter">Filter by category:</label>
+      <select id="filter">
+        <option value="All">All</option>
+        <option>Food</option>
+        <option>Transport</option>
+        <option>Bills</option>
+        <option>Fun</option>
+        <option>Other</option>
+      </select>
+      <label for="startDate">From:</label>
+      <input type="date" id="startDate">
+      <label for="endDate">To:</label>
+      <input type="date" id="endDate">
+      <label for="minAmount">Min $:</label>
+      <input type="number" id="minAmount" min="0" step="0.01" placeholder="0"
+             style="width:80px;">
+      <label for="maxAmount">Max $:</label>
+      <input type="number" id="maxAmount" min="0" step="0.01" placeholder="∞"
+             style="width:80px;">
+      <button type="button" class="btn" id="clearFilters" style="background:#9ca3af;">Clear</button>
+    </div>
+    <div class="filter-row">
+      <label for="search">Search note:</label>
+      <input type="text" id="search" placeholder="e.g. lunch" style="flex:1 1 160px;">
+      <label for="sort">Sort by:</label>
+      <select id="sort">
+        <option value="">Newest</option>
+        <option value="date">Date</option>
+        <option value="amount">Amount</option>
+        <option value="category">Category</option>
+        <option value="note">Note</option>
+      </select>
+      <select id="order">
+        <option value="asc">Asc</option>
+        <option value="desc">Desc</option>
+      </select>
+    </div>
+    <ul class="list" id="list"></ul>
+  </div>
+</div>
+
+<script>
+const CAT_COLORS = {
+  Food: '#f59e0b',
+  Transport: '#3b82f6',
+  Bills: '#ef4444',
+  Fun: '#8b5cf6',
+  Other: '#10b981'
+};
+const CATS = ['Food', 'Transport', 'Bills', 'Fun', 'Other'];
+
+let state = { expenses: [], total: 0, breakdown: {}, count: 0, average: 0 };
+
+function money(n) { return '$' + Number(n).toFixed(2); }
+
+function filterQuery() {
+  const params = new URLSearchParams();
+  const cat = document.getElementById('filter').value;
+  const start = document.getElementById('startDate').value;
+  const end = document.getElementById('endDate').value;
+  const q = document.getElementById('search').value;
+  const sort = document.getElementById('sort').value;
+  const order = document.getElementById('order').value;
+  const minAmount = document.getElementById('minAmount').value;
+  const maxAmount = document.getElementById('maxAmount').value;
+  if (cat && cat !== 'All') params.set('category', cat);
+  if (start) params.set('start', start);
+  if (end) params.set('end', end);
+  if (q) params.set('q', q);
+  if (minAmount !== '') params.set('min_amount', minAmount);
+  if (maxAmount !== '') params.set('max_amount', maxAmount);
+  if (sort) { params.set('sort', sort); params.set('order', order); }
+  const qs = params.toString();
+  return qs ? '?' + qs : '';
+}
+
+async function load() {
+  const res = await fetch('/api/expenses' + filterQuery());
+  if (res.ok) state = await res.json();
+  render();
+  loadMonthly();
+  loadInsights();
+}
+
+function renderBars(boxId, entries, color) {
+  const box = document.getElementById(boxId);
+  box.innerHTML = '';
+  if (!entries.length) {
+    box.innerHTML = '<div class="empty">No data yet.</div>';
+    return;
+  }
+  const max = Math.max(1, ...entries.map(e => e.value));
+  entries.forEach(e => {
+    const pct = (e.value / max) * 100;
+    const row = document.createElement('div');
+    row.className = 'month-row';
+    row.innerHTML =
+      '<div class="month-label">' + e.label + '</div>' +
+      '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%;background:' + color + '"></div></div>' +
+      '<div class="month-val">' + e.text + '</div>';
+    box.appendChild(row);
+  });
+}
+
+async function loadInsights() {
+  const [wRes, pRes, tRes] = await Promise.all([
+    fetch('/api/summary/weekly'),
+    fetch('/api/summary/percentages'),
+    fetch('/api/summary/top?n=5'),
+  ]);
+  const weekly = (await wRes.json()).weekly || {};
+  renderBars('weekly', Object.keys(weekly).map(k => ({
+    label: k, value: weekly[k], text: money(weekly[k]),
+  })), '#0ea5e9');
+
+  const pct = (await pRes.json()).percentages || { categories: {} };
+  const cats = pct.categories || {};
+  renderBars('percentages', Object.keys(cats)
+    .filter(c => cats[c].spent > 0)
+    .map(c => ({
+      label: c, value: cats[c].percent,
+      text: cats[c].percent.toFixed(1) + '%',
+    })), '#f59e0b');
+
+  const top = (await tRes.json()).top || [];
+  const box = document.getElementById('topSpends');
+  box.innerHTML = '';
+  if (!top.length) {
+    box.innerHTML = '<div class="empty">No data yet.</div>';
+    return;
+  }
+  top.forEach(e => {
+    const li = document.createElement('li');
+    li.className = 'item';
+    li.innerHTML =
+      '<div><b>' + money(e.amount) + '</b> · ' + e.category +
+      (e.note ? ' — ' + e.note : '') + '</div>' +
+      '<div class="sub">' + e.date + '</div>';
+    box.appendChild(li);
+  });
+}
+
+async function loadBudget() {
+  const res = await fetch('/api/budget');
+  const data = await res.json();
+  if (data.budget !== null && data.budget !== undefined) {
+    document.getElementById('budget').value = data.budget;
+  }
+}
+
+async function loadMonthly() {
+  const res = await fetch('/api/summary/monthly');
+  const data = await res.json();
+  const box = document.getElementById('monthly');
+  box.innerHTML = '';
+  const months = data.monthly || {};
+  const keys = Object.keys(months);
+  if (keys.length === 0) {
+    box.innerHTML = '<div class="empty">No data yet.</div>';
+    return;
+  }
+  const max = Math.max(1, ...keys.map(k => months[k]));
+  keys.forEach(k => {
+    const val = months[k];
+    const pct = (val / max) * 100;
+    const row = document.createElement('div');
+    row.className = 'month-row';
+    row.innerHTML =
+      '<div class="month-label">' + k + '</div>' +
+      '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%;background:#6366f1"></div></div>' +
+      '<div class="month-val">' + money(val) + '</div>';
+    box.appendChild(row);
+  });
+}
+
+function renderBudget() {
+  const el = document.getElementById('budgetStatus');
+  if (state.budget === null || state.budget === undefined) {
+    el.textContent = 'No budget set.';
+    el.className = 'budget-status';
+    return;
+  }
+  if (state.over_budget) {
+    el.textContent = 'Over budget by ' + money(Math.abs(state.remaining)) + ' (budget ' + money(state.budget) + ').';
+    el.className = 'budget-status budget-over';
+  } else {
+    el.textContent = money(state.remaining) + ' remaining of ' + money(state.budget) + '.';
+    el.className = 'budget-status budget-ok';
+  }
+}
+
+function render() {
+  document.getElementById('total').textContent = money(state.total);
+  document.getElementById('count').textContent = state.count || 0;
+  document.getElementById('average').textContent = money(state.average || 0);
+  document.getElementById('topCategory').textContent = state.top_category || '—';
+  document.getElementById('largest').textContent =
+    state.largest ? money(state.largest.amount) : '—';
+  renderBudget();
+
+  const max = Math.max(1, ...CATS.map(c => state.breakdown[c] || 0));
+  const bars = document.getElementById('bars');
+  bars.innerHTML = '';
+  CATS.forEach(c => {
+    const val = state.breakdown[c] || 0;
+    const pct = (val / max) * 100;
+    const row = document.createElement('div');
+    row.className = 'bar-row';
+    row.innerHTML =
+      '<div class="bar-label">' + c + '</div>' +
+      '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%;background:' + CAT_COLORS[c] + '"></div></div>' +
+      '<div class="bar-val">' + money(val) + '</div>';
+    bars.appendChild(row);
+  });
+
+  const list = document.getElementById('list');
+  list.innerHTML = '';
+  let items = state.expenses.slice();
+  // Respect an explicit server-side sort; otherwise default to newest first.
+  if (!document.getElementById('sort').value) {
+    items.sort((a, b) => (a.date < b.date ? 1 : -1));
+  }
+
+  if (items.length === 0) {
+    list.innerHTML = '<div class="empty">No expenses to show.</div>';
+    return;
+  }
+
+  items.forEach(e => {
+    const li = document.createElement('li');
+    li.className = 'exp';
+    const pill = document.createElement('span');
+    pill.className = 'cat-pill';
+    pill.style.background = CAT_COLORS[e.category] || '#6b7280';
+    pill.textContent = e.category;
+
+    const main = document.createElement('div');
+    main.className = 'exp-main';
+    const note = document.createElement('div');
+    note.className = 'exp-note';
+    note.textContent = e.note || e.category;
+    const meta = document.createElement('div');
+    meta.className = 'exp-meta';
+    meta.textContent = e.date;
+    main.appendChild(note);
+    main.appendChild(meta);
+
+    const amt = document.createElement('div');
+    amt.className = 'exp-amt';
+    amt.textContent = money(e.amount);
+
+    const edit = document.createElement('button');
+    edit.className = 'edit';
+    edit.textContent = 'Edit';
+    edit.onclick = () => editExpense(e);
+
+    const del = document.createElement('button');
+    del.className = 'del';
+    del.textContent = 'Delete';
+    del.onclick = () => removeExpense(e.id);
+
+    li.appendChild(pill);
+    li.appendChild(main);
+    li.appendChild(amt);
+    li.appendChild(edit);
+    li.appendChild(del);
+    list.appendChild(li);
+  });
+}
+
+async function removeExpense(id) {
+  await fetch('/api/expenses/' + id, { method: 'DELETE' });
+  await load();
+}
+
+async function editExpense(e) {
+  const raw = prompt('New amount for "' + (e.note || e.category) + '":', e.amount);
+  if (raw === null) return;
+  const amount = parseFloat(raw);
+  if (isNaN(amount) || amount <= 0) { alert('Amount must be a positive number.'); return; }
+  const res = await fetch('/api/expenses/' + e.id, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ amount: amount })
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    alert(data.error || 'Failed to update expense.');
+    return;
+  }
+  await load();
+}
+
+async function saveBudget() {
+  const raw = document.getElementById('budget').value;
+  const body = raw === '' ? { budget: null } : { budget: parseFloat(raw) };
+  await fetch('/api/budget', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  await load();
+}
+
+async function clearBudget() {
+  document.getElementById('budget').value = '';
+  await fetch('/api/budget', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ budget: null })
+  });
+  await load();
+}
+
+document.getElementById('addForm').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const errEl = document.getElementById('formErr');
+  errEl.textContent = '';
+  const payload = {
+    amount: parseFloat(document.getElementById('amount').value),
+    category: document.getElementById('category').value,
+    date: document.getElementById('date').value,
+    note: document.getElementById('note').value
+  };
+  const res = await fetch('/api/expenses', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    errEl.textContent = data.error || 'Failed to add expense.';
+    return;
+  }
+  document.getElementById('amount').value = '';
+  document.getElementById('note').value = '';
+  await load();
+});
+
+document.getElementById('filter').addEventListener('change', load);
+document.getElementById('startDate').addEventListener('change', load);
+document.getElementById('endDate').addEventListener('change', load);
+document.getElementById('search').addEventListener('input', load);
+document.getElementById('sort').addEventListener('change', load);
+document.getElementById('order').addEventListener('change', load);
+document.getElementById('minAmount').addEventListener('input', load);
+document.getElementById('maxAmount').addEventListener('input', load);
+document.getElementById('clearFilters').addEventListener('click', () => {
+  document.getElementById('filter').value = 'All';
+  document.getElementById('startDate').value = '';
+  document.getElementById('endDate').value = '';
+  document.getElementById('search').value = '';
+  document.getElementById('minAmount').value = '';
+  document.getElementById('maxAmount').value = '';
+  document.getElementById('sort').value = '';
+  document.getElementById('order').value = 'asc';
+  load();
+});
+async function importCsv() {
+  const status = document.getElementById('importStatus');
+  const text = document.getElementById('importText').value;
+  if (!text.trim()) { status.textContent = 'Nothing to import.'; status.className = 'budget-status'; return; }
+  const res = await fetch('/api/expenses/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ csv: text })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    status.textContent = data.error || 'Import failed.';
+    status.className = 'budget-status budget-over';
+    return;
+  }
+  let msg = 'Imported ' + data.imported + ' expense' + (data.imported === 1 ? '' : 's') + '.';
+  if (data.skipped) msg += ' Skipped ' + data.skipped + ' invalid row' + (data.skipped === 1 ? '' : 's') + '.';
+  status.textContent = msg;
+  status.className = data.skipped ? 'budget-status budget-over' : 'budget-status budget-ok';
+  if (data.imported) document.getElementById('importText').value = '';
+  await load();
+}
+
+async function checkPace() {
+  const status = document.getElementById('paceStatus');
+  const asof = document.getElementById('paceAsof').value;
+  if (!asof) { status.textContent = 'Pick a date to pace against.'; status.className = 'budget-status'; return; }
+  const res = await fetch('/api/summary/pace?asof=' + encodeURIComponent(asof));
+  const data = await res.json();
+  if (!res.ok || !data.pace) {
+    status.textContent = (data && data.error) || 'Could not compute pace.';
+    status.className = 'budget-status budget-over';
+    return;
+  }
+  const p = data.pace;
+  if (p.budget === null) {
+    status.textContent = 'Projected month-end spend ' + money(p.projected) +
+      ' (no budget set).';
+    status.className = 'budget-status';
+    return;
+  }
+  let msg = 'Projected ' + money(p.projected) + ' of ' + money(p.budget) + ' budget. ';
+  if (p.already_over) {
+    msg += 'Already over budget.';
+  } else if (p.on_track) {
+    msg += 'On track — ' + money(p.projected_remaining) + ' to spare';
+    if (p.daily_budget_remaining !== null) {
+      msg += ' (' + money(p.daily_budget_remaining) + '/day for ' + p.days_left + ' days left)';
+    }
+    msg += '.';
+  } else {
+    msg += 'Projected over by ' + money(Math.abs(p.projected_remaining)) + '.';
+  }
+  status.textContent = msg;
+  status.className = 'budget-status ' + (p.on_track ? 'budget-ok' : 'budget-over');
+}
+
+document.getElementById('saveBudget').addEventListener('click', saveBudget);
+document.getElementById('clearBudget').addEventListener('click', clearBudget);
+document.getElementById('importBtn').addEventListener('click', importCsv);
+document.getElementById('checkPace').addEventListener('click', checkPace);
+loadBudget();
+
+// default date = today
+(function () {
+  const d = new Date();
+  const iso = d.getFullYear() + '-' +
+    String(d.getMonth() + 1).padStart(2, '0') + '-' +
+    String(d.getDate()).padStart(2, '0');
+  document.getElementById('date').value = iso;
+  document.getElementById('paceAsof').value = iso;
+})();
+
+load();
+</script>
+</body>
+</html>

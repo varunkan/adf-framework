@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 import 'config/api_config.dart';
 import 'screens/feature_list_screen.dart';
 import 'services/api_client.dart';
-import 'theme/app_theme.dart';
+import 'theme/studio_theme.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -20,10 +20,10 @@ class OrchestrationDashboardApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Orchestration',
-      theme: AppTheme.light(),
-      darkTheme: AppTheme.dark(),
-      themeMode: ThemeMode.system,
+      title: 'ADF Studio',
+      theme: StudioTheme.dark(),
+      darkTheme: StudioTheme.dark(),
+      themeMode: ThemeMode.dark,
       home: FeatureListScreen(api: api),
     );
   }

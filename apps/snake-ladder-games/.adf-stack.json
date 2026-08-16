@@ -1,0 +1,8 @@
+{
+  "stack": "react-vite-sqlite",
+  "build_cmd": ["npm", "ci", "--no-audit", "--no-fund"],
+  "post_build": ["npm", "run", "build"],
+  "run_cmd": ["node", "server/index.mjs"],
+  "port_env": "PORT",
+  "health_path": "/api/health"
+}

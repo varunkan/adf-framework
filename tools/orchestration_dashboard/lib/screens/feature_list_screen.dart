@@ -9,6 +9,7 @@ import '../theme/orchestration_colors.dart';
 import '../widgets/runner_setup_card.dart';
 import 'feature_detail_screen.dart';
 import 'new_feature_screen.dart';
+import '../widgets/prompt_hero.dart';
 
 class FeatureListScreen extends StatefulWidget {
   const FeatureListScreen({super.key, required this.api});
@@ -28,6 +29,7 @@ class _FeatureListScreenState extends State<FeatureListScreen> {
   Timer? _poll;
   final _searchController = TextEditingController();
   String _query = '';
+  bool _creatingFromPrompt = false;
 
   @override
   void initState() {
@@ -93,6 +95,34 @@ class _FeatureListScreenState extends State<FeatureListScreen> {
     }
   }
 
+  Future<void> _createFromPrompt(String prompt) async {
+    setState(() => _creatingFromPrompt = true);
+    try {
+      final detail = await widget.api.createFromPrompt(prompt);
+      if (!mounted) return;
+      final id = detail['id'] as String? ?? '';
+      final msg = detail['message'] as String?;
+      final building = detail['mode'] == 'building' || detail['autopilot_started'] == true;
+      if (building) {
+        showMessage(context, 'Building — crew is generating artifacts (zero tokens)…');
+      } else if (msg != null && msg.isNotEmpty) {
+        showMessage(context, msg);
+      }
+      if (id.isNotEmpty) {
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => FeatureDetailScreen(api: widget.api, featureId: id, justCreated: true),
+          ),
+        );
+      }
+      await _refresh(silent: true);
+    } catch (e) {
+      if (mounted) showMessage(context, 'Could not create feature: $e');
+    } finally {
+      if (mounted) setState(() => _creatingFromPrompt = false);
+    }
+  }
+
   Future<void> _openNewFeature() async {
     final created = await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => NewFeatureScreen(api: widget.api)),
@@ -107,7 +137,7 @@ class _FeatureListScreenState extends State<FeatureListScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Orchestration'),
+        title: const Text('ADF Studio'),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(56),
           child: Padding(
@@ -171,6 +201,7 @@ class _FeatureListScreenState extends State<FeatureListScreen> {
                     ),
               ),
             ),
+          if (_serverUp) PromptHero(onSubmit: _createFromPrompt, busy: _creatingFromPrompt),
           Expanded(child: _buildList(context)),
         ],
       ),

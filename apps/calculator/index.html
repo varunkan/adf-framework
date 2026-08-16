@@ -1,0 +1,1435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calculator</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: linear-gradient(135deg, #1e293b, #0f172a);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    color: #e2e8f0;
+  }
+  .app {
+    width: 100%;
+    max-width: 360px;
+  }
+  .app-title {
+    margin: 0 0 14px;
+    font-size: 22px;
+    font-weight: 700;
+    color: #f8fafc;
+    text-align: center;
+  }
+  .calc {
+    background: #1e293b;
+    border-radius: 18px;
+    padding: 20px;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+  }
+  .display {
+    background: #0f172a;
+    border-radius: 12px;
+    padding: 18px;
+    text-align: right;
+    margin-bottom: 16px;
+    min-height: 90px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+  }
+  .expr {
+    color: #64748b;
+    font-size: 16px;
+    min-height: 20px;
+    word-break: break-all;
+  }
+  .result {
+    color: #f8fafc;
+    font-size: 40px;
+    font-weight: 600;
+    word-break: break-all;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+  }
+  button {
+    border: none;
+    border-radius: 12px;
+    padding: 18px 0;
+    font-size: 20px;
+    font-weight: 600;
+    cursor: pointer;
+    color: #f1f5f9;
+    background: #334155;
+    transition: filter 0.1s;
+  }
+  button:hover { filter: brightness(1.15); }
+  button:active { transform: scale(0.96); }
+  .op { background: #475569; }
+  .eq { background: #2563eb; }
+  .clear { background: #dc2626; }
+  .wide { grid-column: span 2; }
+  .sci-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .sci { background: #1e3a5f; font-size: 16px; padding: 12px 0; }
+  .mem-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .mem { background: #3f2d5f; font-size: 14px; padding: 10px 0; }
+  .mem-ind {
+    font-size: 13px;
+    color: #a78bfa;
+    font-weight: 600;
+    padding-left: 6px;
+    white-space: nowrap;
+  }
+  .exprbar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .exprbar input {
+    flex: 1;
+    border: none;
+    border-radius: 12px;
+    padding: 0 14px;
+    font-size: 16px;
+    background: #0f172a;
+    color: #f1f5f9;
+  }
+  .exprbar input::placeholder { color: #475569; }
+  .exprbar button { background: #2563eb; padding: 12px 18px; }
+  .history {
+    margin-top: 18px;
+    background: #1e293b;
+    border-radius: 14px;
+    padding: 14px 16px;
+  }
+  .history h2 {
+    margin: 0 0 8px;
+    font-size: 14px;
+    color: #94a3b8;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .history h2 button {
+    padding: 4px 10px;
+    font-size: 12px;
+    background: #334155;
+    border-radius: 8px;
+  }
+  .history ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 180px;
+    overflow-y: auto;
+  }
+  .history li {
+    padding: 6px 0;
+    border-bottom: 1px solid #334155;
+    font-size: 14px;
+    color: #cbd5e1;
+    display: flex;
+    justify-content: space-between;
+  }
+  .history li:last-child { border-bottom: none; }
+  .history li span:last-child { color: #60a5fa; font-weight: 600; }
+  .empty { color: #475569; font-size: 13px; }
+  .tool-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+  .tool-row input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 14px;
+    background: #0f172a;
+    color: #f1f5f9;
+  }
+  .tool-row input::placeholder { color: #475569; }
+  .tool-row select {
+    border: none;
+    border-radius: 10px;
+    padding: 10px 8px;
+    font-size: 14px;
+    background: #334155;
+    color: #f1f5f9;
+    cursor: pointer;
+  }
+  .tool-row .arrow { color: #94a3b8; }
+  .tool-row button {
+    padding: 10px 14px;
+    font-size: 14px;
+    background: #2563eb;
+    border-radius: 10px;
+  }
+  .tool-out {
+    font-size: 14px;
+    color: #60a5fa;
+    font-weight: 600;
+    word-break: break-all;
+    min-height: 20px;
+  }
+  .tool-out.err { color: #f87171; }
+</style>
+</head>
+<body>
+<div class="app">
+  <h1 class="app-title">Calculator</h1>
+  <div class="calc">
+    <div class="display">
+      <div class="expr" id="expr">&nbsp;</div>
+      <div class="result" id="result">0</div>
+    </div>
+    <div class="exprbar">
+      <input id="exprInput" aria-label="Expression to evaluate" type="text" placeholder="Type an expression e.g. (2+3)*pi^2" autocomplete="off">
+      <button id="evalBtn">=</button>
+    </div>
+    <div class="mem-grid">
+      <button class="mem" data-mem="clear">MC</button>
+      <button class="mem" data-mem="recall">MR</button>
+      <button class="mem" data-mem="add">M+</button>
+      <button class="mem" data-mem="subtract">M−</button>
+      <button class="mem" data-mem="store">MS</button>
+      <span class="mem-ind" id="memInd">M: 0</span>
+    </div>
+    <div class="sci-grid">
+      <button class="sci" data-unary="sqrt">√</button>
+      <button class="sci" data-unary="cbrt">∛</button>
+      <button class="sci" data-unary="square">x²</button>
+      <button class="sci" data-unary="cube">x³</button>
+      <button class="sci" data-unary="reciprocal">1/x</button>
+      <button class="sci" data-unary="sin">sin</button>
+      <button class="sci" data-unary="cos">cos</button>
+      <button class="sci" data-unary="tan">tan</button>
+      <button class="sci" data-unary="sinh">sinh</button>
+      <button class="sci" data-unary="cosh">cosh</button>
+      <button class="sci" data-unary="tanh">tanh</button>
+      <button class="sci" data-unary="factorial">n!</button>
+      <button class="sci" data-unary="ln">ln</button>
+      <button class="sci" data-unary="log10">log</button>
+      <button class="sci" data-unary="log2">log₂</button>
+      <button class="sci" data-unary="exp">eˣ</button>
+      <button class="sci" data-unary="floor">⌊x⌋</button>
+      <button class="sci" data-unary="ceil">⌈x⌉</button>
+      <button class="sci" data-unary="round">≈</button>
+      <button class="sci" data-unary="percent">%</button>
+    </div>
+    <div class="grid">
+      <button class="clear wide" data-action="clear">AC</button>
+      <button data-action="back">⌫</button>
+      <button class="op" data-op="divide">÷</button>
+
+      <button data-digit="7">7</button>
+      <button data-digit="8">8</button>
+      <button data-digit="9">9</button>
+      <button class="op" data-op="multiply">×</button>
+
+      <button data-digit="4">4</button>
+      <button data-digit="5">5</button>
+      <button data-digit="6">6</button>
+      <button class="op" data-op="subtract">−</button>
+
+      <button data-digit="1">1</button>
+      <button data-digit="2">2</button>
+      <button data-digit="3">3</button>
+      <button class="op" data-op="add">+</button>
+
+      <button data-digit="0" class="wide">0</button>
+      <button data-digit=".">.</button>
+      <button class="eq" data-action="equals">=</button>
+    </div>
+  </div>
+
+  <div class="history">
+    <h2>Base converter</h2>
+    <div class="tool-row">
+      <input id="convValue" aria-label="Value to convert" type="text" placeholder="value" autocomplete="off">
+      <select id="convFrom" aria-label="Convert from base">
+        <option value="dec">dec</option>
+        <option value="bin">bin</option>
+        <option value="oct">oct</option>
+        <option value="hex">hex</option>
+      </select>
+      <span class="arrow">→</span>
+      <select id="convTo" aria-label="Convert to base">
+        <option value="hex">hex</option>
+        <option value="bin">bin</option>
+        <option value="oct">oct</option>
+        <option value="dec">dec</option>
+      </select>
+      <button id="convBtn">Go</button>
+    </div>
+    <div class="tool-out" id="convOut">&nbsp;</div>
+  </div>
+
+  <div class="history">
+    <h2>Statistics</h2>
+    <div class="tool-row">
+      <input id="statsValues" aria-label="Statistics values" type="text" placeholder="comma-separated numbers e.g. 2, 4, 4, 5" autocomplete="off">
+      <button id="statsBtn">Calc</button>
+    </div>
+    <div class="tool-out" id="statsOut">&nbsp;</div>
+  </div>
+
+  <div class="history">
+    <h2>Bitwise &amp; combinatorics</h2>
+    <div class="tool-row">
+      <input id="bitA" aria-label="a" type="text" placeholder="a" autocomplete="off">
+      <select id="bitOp" aria-label="Bitwise operation">
+        <option value="and">AND</option>
+        <option value="or">OR</option>
+        <option value="xor">XOR</option>
+        <option value="lshift">&lt;&lt;</option>
+        <option value="rshift">&gt;&gt;</option>
+        <option value="ncr">nCr</option>
+        <option value="npr">nPr</option>
+      </select>
+      <input id="bitB" aria-label="b" type="text" placeholder="b" autocomplete="off">
+      <button id="bitBtn">Go</button>
+    </div>
+    <div class="tool-out" id="bitOut">&nbsp;</div>
+  </div>
+
+  <div class="history">
+    <h2>Percentage</h2>
+    <div class="tool-row">
+      <input id="pctA" aria-label="a" type="text" placeholder="a" autocomplete="off">
+      <select id="pctOp" aria-label="Percentage operation">
+        <option value="of">% of</option>
+        <option value="change">% change</option>
+        <option value="increase">increase %</option>
+        <option value="decrease">decrease %</option>
+      </select>
+      <input id="pctB" aria-label="b" type="text" placeholder="b" autocomplete="off">
+      <button id="pctBtn">Go</button>
+    </div>
+    <div class="tool-out" id="pctOut">&nbsp;</div>
+  </div>
+
+  <div class="history">
+    <h2>Number theory</h2>
+    <div class="tool-row">
+      <select id="ntOp" aria-label="Number-theory operation">
+        <option value="is_prime">is prime?</option>
+        <option value="next_prime">next prime</option>
+        <option value="prime_factors">prime factors</option>
+        <option value="divisors">divisors</option>
+        <option value="divisor_count">divisor count</option>
+        <option value="divisor_sum">divisor sum</option>
+        <option value="is_perfect">is perfect?</option>
+        <option value="totient">totient φ</option>
+        <option value="fibonacci">fibonacci</option>
+      </select>
+      <input id="ntN" aria-label="n" type="text" placeholder="n" autocomplete="off">
+      <button id="ntBtn">Go</button>
+    </div>
+    <div class="tool-out" id="ntOut">&nbsp;</div>
+  </div>
+
+  <div class="history">
+    <h2>Fractions (exact)</h2>
+    <div class="tool-row">
+      <input id="frN1" aria-label="n1" type="text" placeholder="n1" autocomplete="off">
+      <span class="arrow">/</span>
+      <input id="frD1" aria-label="d1" type="text" placeholder="d1" autocomplete="off">
+      <select id="frOp" aria-label="Fraction operation">
+        <option value="add">+</option>
+        <option value="subtract">−</option>
+        <option value="multiply">×</option>
+        <option value="divide">÷</option>
+      </select>
+      <input id="frN2" aria-label="n2" type="text" placeholder="n2" autocomplete="off">
+      <span class="arrow">/</span>
+      <input id="frD2" aria-label="d2" type="text" placeholder="d2" autocomplete="off">
+      <button id="frBtn">Go</button>
+    </div>
+    <div class="tool-out" id="frOut">&nbsp;</div>
+  </div>
+
+  <div class="history">
+    <h2>Equation solver</h2>
+    <div class="tool-row">
+      <select id="solveKind" aria-label="Equation kind">
+        <option value="quadratic">ax² + bx + c = 0</option>
+        <option value="linear">ax + b = 0</option>
+        <option value="system2">2×2 linear system</option>
+      </select>
+      <button id="solveBtn">Solve</button>
+    </div>
+    <div class="tool-row">
+      <input id="solveA" aria-label="a" type="text" placeholder="a" autocomplete="off">
+      <input id="solveB" aria-label="b" type="text" placeholder="b" autocomplete="off">
+      <input id="solveC" aria-label="c" type="text" placeholder="c" autocomplete="off">
+    </div>
+    <div class="tool-row" id="solveRow2" style="display:none;">
+      <input id="solveD" aria-label="a₂" type="text" placeholder="a₂" autocomplete="off">
+      <input id="solveE" aria-label="b₂" type="text" placeholder="b₂" autocomplete="off">
+      <input id="solveF" aria-label="c₂" type="text" placeholder="c₂" autocomplete="off">
+    </div>
+    <div class="tool-out" id="solveOut">&nbsp;</div>
+  </div>
+
+  <div class="history">
+    <h2>Finance</h2>
+    <div class="tool-row">
+      <select id="finOp" aria-label="Finance operation">
+        <option value="compound_interest">Compound interest</option>
+        <option value="simple_interest">Simple interest</option>
+        <option value="loan_payment">Loan payment</option>
+        <option value="future_value">Future value</option>
+        <option value="present_value">Present value</option>
+      </select>
+      <button id="finBtn">Go</button>
+    </div>
+    <div class="tool-row">
+      <input id="finP" aria-label="principal" type="text" placeholder="principal" autocomplete="off">
+      <input id="finR" aria-label="rate %" type="text" placeholder="rate %" autocomplete="off">
+      <input id="finN" aria-label="n/yr" type="text" placeholder="n/yr" autocomplete="off">
+      <input id="finT" aria-label="years" type="text" placeholder="years" autocomplete="off">
+    </div>
+    <div class="tool-out" id="finOut">&nbsp;</div>
+  </div>
+
+  <div class="history">
+    <h2>Unit converter</h2>
+    <div class="tool-row">
+      <input id="unitValue" aria-label="value" type="text" placeholder="value" autocomplete="off">
+      <select id="unitCategory" aria-label="Unit category">
+        <option value="length">length</option>
+        <option value="mass">mass</option>
+        <option value="temperature">temperature</option>
+        <option value="volume">volume</option>
+        <option value="time">time</option>
+        <option value="data">data</option>
+        <option value="speed">speed</option>
+      </select>
+    </div>
+    <div class="tool-row">
+      <select id="unitFrom" aria-label="Convert from unit"></select>
+      <span class="arrow">→</span>
+      <select id="unitTo" aria-label="Convert to unit"></select>
+      <button id="unitBtn">Go</button>
+    </div>
+    <div class="tool-out" id="unitOut">&nbsp;</div>
+  </div>
+
+  <div class="history">
+    <h2>Date calculator</h2>
+    <div class="tool-row">
+      <select id="dateOp" aria-label="Date operation">
+        <option value="diff">days between</option>
+        <option value="add">add days</option>
+        <option value="subtract">subtract days</option>
+        <option value="weekday">weekday of</option>
+      </select>
+    </div>
+    <div class="tool-row">
+      <input id="dateA" aria-label="First date" type="date" autocomplete="off">
+      <input id="dateB" aria-label="Second date" type="date" autocomplete="off">
+      <input id="dateDays" aria-label="days" type="text" placeholder="days" autocomplete="off">
+      <button id="dateBtn">Go</button>
+    </div>
+    <div class="tool-out" id="dateOut">&nbsp;</div>
+  </div>
+
+  <div class="history">
+    <h2>Vector calculator</h2>
+    <div class="tool-row">
+      <select id="vecOp" aria-label="Vector operation">
+        <option value="add">a + b</option>
+        <option value="subtract">a − b</option>
+        <option value="dot">a · b (dot)</option>
+        <option value="cross">a × b (cross, 3-D)</option>
+        <option value="distance">distance(a, b)</option>
+        <option value="angle">angle(a, b)°</option>
+        <option value="scale">k · a</option>
+        <option value="magnitude">|a|</option>
+        <option value="normalize">â (normalize)</option>
+      </select>
+    </div>
+    <div class="tool-row">
+      <input id="vecA" aria-label="a e.g. 1,2,3" type="text" placeholder="a e.g. 1,2,3" autocomplete="off">
+      <input id="vecB" aria-label="b e.g. 4,5,6" type="text" placeholder="b e.g. 4,5,6" autocomplete="off">
+      <input id="vecK" aria-label="k" type="text" placeholder="k" autocomplete="off">
+      <button id="vecBtn">Go</button>
+    </div>
+    <div class="tool-out" id="vecOut">&nbsp;</div>
+  </div>
+
+  <div class="history">
+    <h2>Matrix calculator</h2>
+    <div class="tool-row">
+      <select id="matOp" aria-label="Matrix operation">
+        <option value="add">A + B</option>
+        <option value="subtract">A − B</option>
+        <option value="multiply">A × B</option>
+        <option value="scale">k · A</option>
+        <option value="transpose">Aᵀ (transpose)</option>
+        <option value="determinant">det(A)</option>
+        <option value="inverse">A⁻¹ (inverse)</option>
+        <option value="trace">tr(A)</option>
+        <option value="identity">identity(n)</option>
+      </select>
+    </div>
+    <div class="tool-row">
+      <input id="matA" aria-label="A rows: 1,2; 3,4" type="text" placeholder="A rows: 1,2; 3,4" autocomplete="off">
+      <input id="matB" aria-label="B rows: 5,6; 7,8" type="text" placeholder="B rows: 5,6; 7,8" autocomplete="off">
+    </div>
+    <div class="tool-row">
+      <input id="matK" aria-label="k" type="text" placeholder="k" autocomplete="off">
+      <input id="matN" aria-label="n" type="text" placeholder="n" autocomplete="off">
+      <button id="matBtn">Go</button>
+    </div>
+    <div class="tool-out" id="matOut">&nbsp;</div>
+  </div>
+
+  <div class="history">
+    <h2>Complex numbers</h2>
+    <div class="tool-row">
+      <select id="cxOp" aria-label="Complex operation">
+        <option value="add">z₁ + z₂</option>
+        <option value="subtract">z₁ − z₂</option>
+        <option value="multiply">z₁ × z₂</option>
+        <option value="divide">z₁ ÷ z₂</option>
+        <option value="power">z₁ⁿ</option>
+        <option value="conjugate">conj(z₁)</option>
+        <option value="modulus">|z₁|</option>
+        <option value="argument">arg(z₁)</option>
+        <option value="polar">polar(z₁)</option>
+      </select>
+      <button id="cxBtn">Go</button>
+    </div>
+    <div class="tool-row">
+      <input id="cxRe1" aria-label="Re z₁" type="text" placeholder="Re z₁" autocomplete="off">
+      <span class="arrow">+</span>
+      <input id="cxIm1" aria-label="Im z₁" type="text" placeholder="Im z₁" autocomplete="off">
+      <span class="arrow">i</span>
+    </div>
+    <div class="tool-row" id="cxRow2">
+      <input id="cxRe2" aria-label="Re z₂" type="text" placeholder="Re z₂" autocomplete="off">
+      <span class="arrow">+</span>
+      <input id="cxIm2" aria-label="Im z₂" type="text" placeholder="Im z₂" autocomplete="off">
+      <span class="arrow">i</span>
+    </div>
+    <div class="tool-row" id="cxRowN" style="display:none;">
+      <input id="cxN" aria-label="n (integer exponent)" type="text" placeholder="n (integer exponent)" autocomplete="off">
+    </div>
+    <div class="tool-out" id="cxOut">&nbsp;</div>
+  </div>
+
+  <div class="history">
+    <h2>Polynomials</h2>
+    <div class="tool-row">
+      <select id="polyOp" aria-label="Polynomial operation">
+        <option value="evaluate">p(x)</option>
+        <option value="derivative">p′(x)</option>
+        <option value="integral">∫p dx</option>
+        <option value="add">a + b</option>
+        <option value="multiply">a × b</option>
+      </select>
+      <button id="polyBtn">Go</button>
+    </div>
+    <div class="tool-row" id="polyRowCoeffs">
+      <input id="polyCoeffs" aria-label="Coefficients (ascending), e.g. 1,2,3" type="text" placeholder="coeffs asc: 1,2,3" autocomplete="off">
+      <input id="polyX" aria-label="x" type="text" placeholder="x" autocomplete="off">
+    </div>
+    <div class="tool-row" id="polyRowAB" style="display:none;">
+      <input id="polyA" aria-label="a coefficients" type="text" placeholder="a: 1,2" autocomplete="off">
+      <input id="polyB" aria-label="b coefficients" type="text" placeholder="b: 3,4,5" autocomplete="off">
+    </div>
+    <div class="tool-out" id="polyOut">&nbsp;</div>
+  </div>
+
+  <div class="history">
+    <h2>Geometry</h2>
+    <div class="tool-row">
+      <select id="geoShape" aria-label="Shape">
+        <option value="square">Square</option>
+        <option value="rectangle">Rectangle</option>
+        <option value="circle">Circle</option>
+        <option value="triangle">Triangle</option>
+        <option value="trapezoid">Trapezoid</option>
+        <option value="cube">Cube</option>
+        <option value="rectangular_prism">Rect. prism</option>
+        <option value="sphere">Sphere</option>
+        <option value="cylinder">Cylinder</option>
+        <option value="cone">Cone</option>
+      </select>
+      <button id="geoBtn">Go</button>
+    </div>
+    <div class="tool-row" id="geoFields"></div>
+    <div class="tool-out" id="geoOut">&nbsp;</div>
+  </div>
+
+  <div class="history">
+    <h2>Roman numerals</h2>
+    <div class="tool-row">
+      <select id="romanOp" aria-label="Roman operation">
+        <option value="to_roman">Number → Roman</option>
+        <option value="from_roman">Roman → Number</option>
+      </select>
+      <input id="romanVal" aria-label="Value" type="text" placeholder="e.g. 2024 or MMXXIV" autocomplete="off">
+      <button id="romanBtn">Go</button>
+    </div>
+    <div class="tool-out" id="romanOut">&nbsp;</div>
+  </div>
+
+  <div class="history">
+    <h2>Linear regression</h2>
+    <div class="tool-row">
+      <select id="regOp" aria-label="Regression operation">
+        <option value="fit">Fit line</option>
+        <option value="predict">Fit &amp; predict</option>
+      </select>
+      <input id="regPoints" aria-label="Points" type="text" placeholder="points e.g. 1,2; 2,4; 3,5" autocomplete="off">
+      <input id="regPredictX" aria-label="Predict at x" type="text" placeholder="x" autocomplete="off">
+      <button id="regBtn">Go</button>
+    </div>
+    <div class="tool-out" id="regOut">&nbsp;</div>
+  </div>
+
+  <div class="history">
+    <h2>History <button id="clearHist">Clear</button></h2>
+    <ul id="histList"><li class="empty">No calculations yet</li></ul>
+  </div>
+</div>
+
+<script>
+  const OP_SYMBOL = { add: '+', subtract: '−', multiply: '×', divide: '÷' };
+  let current = '';
+  let stored = null;
+  let pendingOp = null;
+  let justEvaluated = false;
+
+  const resultEl = document.getElementById('result');
+  const exprEl = document.getElementById('expr');
+  const histList = document.getElementById('histList');
+
+  function render() {
+    resultEl.textContent = current === '' ? '0' : current;
+    if (stored !== null && pendingOp) {
+      exprEl.textContent = stored + ' ' + OP_SYMBOL[pendingOp] + ' ' + (current || '');
+    } else {
+      exprEl.textContent = ' ';
+    }
+  }
+
+  function inputDigit(d) {
+    if (justEvaluated) { current = ''; justEvaluated = false; }
+    if (d === '.' && current.includes('.')) return;
+    if (current === '' && d === '.') current = '0';
+    current += d;
+    render();
+  }
+
+  function backspace() {
+    if (justEvaluated) return;
+    current = current.slice(0, -1);
+    render();
+  }
+
+  function clearAll() {
+    current = '';
+    stored = null;
+    pendingOp = null;
+    justEvaluated = false;
+    render();
+  }
+
+  function setOp(op) {
+    if (current === '' && stored === null) return;
+    if (stored !== null && pendingOp && current !== '') {
+      evaluate(true);
+    }
+    if (current !== '') {
+      stored = current;
+      current = '';
+    }
+    pendingOp = op;
+    justEvaluated = false;
+    render();
+  }
+
+  async function evaluate(chain) {
+    if (stored === null || !pendingOp || current === '') return;
+    try {
+      const res = await fetch('/api/calculate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ op: pendingOp, a: parseFloat(stored), b: parseFloat(current) })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        resultEl.textContent = data.error || 'Error';
+        exprEl.textContent = ' ';
+        current = '';
+        stored = null;
+        pendingOp = null;
+        justEvaluated = true;
+        return;
+      }
+      current = String(data.result);
+      stored = null;
+      pendingOp = null;
+      justEvaluated = true;
+      render();
+      loadHistory();
+    } catch (e) {
+      resultEl.textContent = 'Network error';
+    }
+  }
+
+  async function applyUnary(op) {
+    const operand = current !== '' ? current : (justEvaluated ? current : '0');
+    const a = parseFloat(operand || '0');
+    try {
+      const res = await fetch('/api/unary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ op: op, a: a })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        resultEl.textContent = data.error || 'Error';
+        exprEl.textContent = ' ';
+        current = '';
+        stored = null;
+        pendingOp = null;
+        justEvaluated = true;
+        return;
+      }
+      current = String(data.result);
+      stored = null;
+      pendingOp = null;
+      justEvaluated = true;
+      exprEl.textContent = data.expression;
+      resultEl.textContent = current;
+      loadHistory();
+    } catch (e) {
+      resultEl.textContent = 'Network error';
+    }
+  }
+
+  async function evaluateExpression() {
+    const input = document.getElementById('exprInput');
+    const expression = input.value.trim();
+    if (expression === '') return;
+    try {
+      const res = await fetch('/api/evaluate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expression: expression })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        resultEl.textContent = data.error || 'Error';
+        exprEl.textContent = ' ';
+        return;
+      }
+      exprEl.textContent = expression + ' =';
+      resultEl.textContent = String(data.result);
+      current = String(data.result);
+      stored = null;
+      pendingOp = null;
+      justEvaluated = true;
+      loadHistory();
+    } catch (e) {
+      resultEl.textContent = 'Network error';
+    }
+  }
+
+  const memInd = document.getElementById('memInd');
+
+  function renderMemory(value) {
+    memInd.textContent = 'M: ' + value;
+  }
+
+  async function loadMemory() {
+    try {
+      const res = await fetch('/api/memory');
+      const data = await res.json();
+      renderMemory(data.memory);
+    } catch (e) {}
+  }
+
+  async function applyMemory(action) {
+    const body = { action: action };
+    if (action === 'store' || action === 'add' || action === 'subtract') {
+      body.value = parseFloat(current || '0');
+    }
+    try {
+      const res = await fetch('/api/memory', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        resultEl.textContent = data.error || 'Error';
+        return;
+      }
+      renderMemory(data.memory);
+      if (action === 'recall') {
+        current = String(data.memory);
+        justEvaluated = true;
+        render();
+      }
+    } catch (e) {
+      resultEl.textContent = 'Network error';
+    }
+  }
+
+  async function loadHistory() {
+    try {
+      const res = await fetch('/api/history');
+      const data = await res.json();
+      renderHistory(data.history || []);
+    } catch (e) {}
+  }
+
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+  }
+
+  function renderHistory(items) {
+    histList.replaceChildren();
+    if (!items.length) {
+      const empty = document.createElement('li');
+      empty.className = 'empty';
+      empty.textContent = 'No calculations yet';
+      histList.appendChild(empty);
+      return;
+    }
+    const frag = document.createDocumentFragment();
+    items.forEach(it => {
+      const li = document.createElement('li');
+      const s1 = document.createElement('span');
+      s1.textContent = it.expression;
+      const s2 = document.createElement('span');
+      s2.textContent = '= ' + it.result;
+      li.append(s1, s2);
+      frag.appendChild(li);
+    });
+    histList.appendChild(frag);
+  }
+
+  document.querySelectorAll('button[data-digit]').forEach(b =>
+    b.addEventListener('click', () => inputDigit(b.dataset.digit)));
+  document.querySelectorAll('button[data-op]').forEach(b =>
+    b.addEventListener('click', () => setOp(b.dataset.op)));
+  document.querySelector('[data-action="clear"]').addEventListener('click', clearAll);
+  document.querySelector('[data-action="back"]').addEventListener('click', backspace);
+  document.querySelector('[data-action="equals"]').addEventListener('click', () => evaluate(false));
+  document.querySelectorAll('button[data-unary]').forEach(b =>
+    b.addEventListener('click', () => applyUnary(b.dataset.unary)));
+  document.querySelectorAll('button[data-mem]').forEach(b =>
+    b.addEventListener('click', () => applyMemory(b.dataset.mem)));
+  document.getElementById('evalBtn').addEventListener('click', evaluateExpression);
+  document.getElementById('exprInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); evaluateExpression(); }
+  });
+
+  document.getElementById('clearHist').addEventListener('click', async () => {
+    await fetch('/api/history', { method: 'DELETE' });
+    loadHistory();
+  });
+
+  const convOut = document.getElementById('convOut');
+  async function convertBase() {
+    const value = document.getElementById('convValue').value.trim();
+    if (value === '') return;
+    const from_base = document.getElementById('convFrom').value;
+    const to_base = document.getElementById('convTo').value;
+    convOut.classList.remove('err');
+    try {
+      const res = await fetch('/api/convert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value, from_base, to_base })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        convOut.classList.add('err');
+        convOut.textContent = data.error || 'Error';
+        return;
+      }
+      convOut.textContent = value + ' (' + from_base + ') = ' + data.result + ' (' + to_base + ')';
+      loadHistory();
+    } catch (e) {
+      convOut.classList.add('err');
+      convOut.textContent = 'Network error';
+    }
+  }
+  document.getElementById('convBtn').addEventListener('click', convertBase);
+  document.getElementById('convValue').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); convertBase(); }
+  });
+
+  const statsOut = document.getElementById('statsOut');
+  async function computeStats() {
+    const raw = document.getElementById('statsValues').value.trim();
+    if (raw === '') return;
+    const values = raw.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
+    statsOut.classList.remove('err');
+    try {
+      const res = await fetch('/api/stats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        statsOut.classList.add('err');
+        statsOut.textContent = data.error || 'Error';
+        return;
+      }
+      const s = data.stats;
+      statsOut.textContent =
+        'n=' + s.count + '  mean=' + s.mean + '  median=' + s.median +
+        '  stdev=' + s.stdev + '  min=' + s.min + '  max=' + s.max;
+      loadHistory();
+    } catch (e) {
+      statsOut.classList.add('err');
+      statsOut.textContent = 'Network error';
+    }
+  }
+  document.getElementById('statsBtn').addEventListener('click', computeStats);
+  document.getElementById('statsValues').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); computeStats(); }
+  });
+
+  const bitOut = document.getElementById('bitOut');
+  async function computeBitwise() {
+    const a = parseFloat(document.getElementById('bitA').value.trim());
+    const b = parseFloat(document.getElementById('bitB').value.trim());
+    const op = document.getElementById('bitOp').value;
+    if (isNaN(a) || isNaN(b)) return;
+    bitOut.classList.remove('err');
+    try {
+      const res = await fetch('/api/calculate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ op, a, b })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        bitOut.classList.add('err');
+        bitOut.textContent = data.error || 'Error';
+        return;
+      }
+      bitOut.textContent = data.expression + ' = ' + data.result;
+      loadHistory();
+    } catch (e) {
+      bitOut.classList.add('err');
+      bitOut.textContent = 'Network error';
+    }
+  }
+  document.getElementById('bitBtn').addEventListener('click', computeBitwise);
+  ['bitA', 'bitB'].forEach(id =>
+    document.getElementById(id).addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); computeBitwise(); }
+    }));
+
+  const pctOut = document.getElementById('pctOut');
+  async function computePercent() {
+    const a = parseFloat(document.getElementById('pctA').value.trim());
+    const b = parseFloat(document.getElementById('pctB').value.trim());
+    const op = document.getElementById('pctOp').value;
+    if (isNaN(a) || isNaN(b)) return;
+    pctOut.classList.remove('err');
+    try {
+      const res = await fetch('/api/percent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ op, a, b })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        pctOut.classList.add('err');
+        pctOut.textContent = data.error || 'Error';
+        return;
+      }
+      pctOut.textContent = data.expression + ' = ' + data.result;
+      loadHistory();
+    } catch (e) {
+      pctOut.classList.add('err');
+      pctOut.textContent = 'Network error';
+    }
+  }
+  document.getElementById('pctBtn').addEventListener('click', computePercent);
+  ['pctA', 'pctB'].forEach(id =>
+    document.getElementById(id).addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); computePercent(); }
+    }));
+
+  window.addEventListener('keydown', (e) => {
+    if (e.target && e.target.id === 'exprInput') return;
+    if (e.key >= '0' && e.key <= '9') inputDigit(e.key);
+    else if (e.key === '.') inputDigit('.');
+    else if (e.key === '+') setOp('add');
+    else if (e.key === '-') setOp('subtract');
+    else if (e.key === '*') setOp('multiply');
+    else if (e.key === '/') { e.preventDefault(); setOp('divide'); }
+    else if (e.key === 'Enter' || e.key === '=') { e.preventDefault(); evaluate(false); }
+    else if (e.key === 'Backspace') backspace();
+    else if (e.key === 'Escape') clearAll();
+  });
+
+  const ntOut = document.getElementById('ntOut');
+  async function computeNumberTheory() {
+    const n = parseFloat(document.getElementById('ntN').value.trim());
+    const op = document.getElementById('ntOp').value;
+    if (isNaN(n)) return;
+    ntOut.classList.remove('err');
+    try {
+      const res = await fetch('/api/numtheory', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ op, n })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        ntOut.classList.add('err');
+        ntOut.textContent = data.error || 'Error';
+        return;
+      }
+      const r = Array.isArray(data.result) ? '[' + data.result.join(', ') + ']' : String(data.result);
+      ntOut.textContent = data.expression + ' = ' + r;
+      loadHistory();
+    } catch (e) {
+      ntOut.classList.add('err');
+      ntOut.textContent = 'Network error';
+    }
+  }
+  document.getElementById('ntBtn').addEventListener('click', computeNumberTheory);
+  document.getElementById('ntN').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); computeNumberTheory(); }
+  });
+
+  const frOut = document.getElementById('frOut');
+  async function computeFraction() {
+    const n1 = parseFloat(document.getElementById('frN1').value.trim());
+    const d1 = parseFloat(document.getElementById('frD1').value.trim());
+    const n2 = parseFloat(document.getElementById('frN2').value.trim());
+    const d2 = parseFloat(document.getElementById('frD2').value.trim());
+    const op = document.getElementById('frOp').value;
+    if ([n1, d1, n2, d2].some(isNaN)) return;
+    frOut.classList.remove('err');
+    try {
+      const res = await fetch('/api/fraction', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ op, n1, d1, n2, d2 })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        frOut.classList.add('err');
+        frOut.textContent = data.error || 'Error';
+        return;
+      }
+      frOut.textContent = data.expression + ' = ' + data.result + '  (≈ ' + data.decimal + ')';
+      loadHistory();
+    } catch (e) {
+      frOut.classList.add('err');
+      frOut.textContent = 'Network error';
+    }
+  }
+  document.getElementById('frBtn').addEventListener('click', computeFraction);
+  ['frN1', 'frD1', 'frN2', 'frD2'].forEach(id =>
+    document.getElementById(id).addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); computeFraction(); }
+    }));
+
+  const solveKind = document.getElementById('solveKind');
+  const solveRow2 = document.getElementById('solveRow2');
+  const solveC = document.getElementById('solveC');
+  const solveOut = document.getElementById('solveOut');
+
+  function syncSolveInputs() {
+    const k = solveKind.value;
+    solveRow2.style.display = k === 'system2' ? 'flex' : 'none';
+    solveC.style.display = k === 'linear' ? 'none' : '';
+    if (k === 'linear') {
+      document.getElementById('solveA').placeholder = 'a';
+      document.getElementById('solveB').placeholder = 'b';
+    } else if (k === 'system2') {
+      document.getElementById('solveA').placeholder = 'a₁';
+      document.getElementById('solveB').placeholder = 'b₁';
+      document.getElementById('solveC').placeholder = 'c₁';
+    } else {
+      document.getElementById('solveA').placeholder = 'a';
+      document.getElementById('solveB').placeholder = 'b';
+      document.getElementById('solveC').placeholder = 'c';
+    }
+  }
+  solveKind.addEventListener('change', syncSolveInputs);
+  syncSolveInputs();
+
+  async function solveEquation() {
+    const kind = solveKind.value;
+    const a = parseFloat(document.getElementById('solveA').value.trim());
+    const b = parseFloat(document.getElementById('solveB').value.trim());
+    const c = parseFloat(document.getElementById('solveC').value.trim());
+    const d = parseFloat(document.getElementById('solveD').value.trim());
+    const e = parseFloat(document.getElementById('solveE').value.trim());
+    const f = parseFloat(document.getElementById('solveF').value.trim());
+    let body = { kind };
+    if (kind === 'linear') {
+      if ([a, b].some(isNaN)) return;
+      body.a = a; body.b = b;
+    } else if (kind === 'quadratic') {
+      if ([a, b, c].some(isNaN)) return;
+      body.a = a; body.b = b; body.c = c;
+    } else {
+      if ([a, b, c, d, e, f].some(isNaN)) return;
+      body.a1 = a; body.b1 = b; body.c1 = c;
+      body.a2 = d; body.b2 = e; body.c2 = f;
+    }
+    solveOut.classList.remove('err');
+    try {
+      const res = await fetch('/api/solve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        solveOut.classList.add('err');
+        solveOut.textContent = data.error || 'Error';
+        return;
+      }
+      solveOut.textContent = data.expression + '  →  ' + data.nature + '  (' + data.result + ')';
+      loadHistory();
+    } catch (err) {
+      solveOut.classList.add('err');
+      solveOut.textContent = 'Network error';
+    }
+  }
+  document.getElementById('solveBtn').addEventListener('click', solveEquation);
+  ['solveA', 'solveB', 'solveC', 'solveD', 'solveE', 'solveF'].forEach(id =>
+    document.getElementById(id).addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); solveEquation(); }
+    }));
+
+  // --- Finance panel -------------------------------------------------------
+  const finOp = document.getElementById('finOp');
+  const finOut = document.getElementById('finOut');
+  // Per-op field labels: [principal, rate, third, fourth] (null hides the box).
+  const FIN_FIELDS = {
+    simple_interest:   ['principal', 'rate %', null, 'years'],
+    compound_interest: ['principal', 'rate %', 'n/yr', 'years'],
+    loan_payment:      ['principal', 'rate %', 'months', null],
+    future_value:      ['present value', 'rate %', null, 'periods'],
+    present_value:     ['future value', 'rate %', null, 'periods'],
+  };
+
+  function syncFinInputs() {
+    const labels = FIN_FIELDS[finOp.value];
+    const ids = ['finP', 'finR', 'finN', 'finT'];
+    ids.forEach((id, i) => {
+      const el = document.getElementById(id);
+      if (labels[i] === null) {
+        el.style.display = 'none';
+      } else {
+        el.style.display = '';
+        el.placeholder = labels[i];
+      }
+    });
+  }
+  finOp.addEventListener('change', syncFinInputs);
+  syncFinInputs();
+
+  async function computeFinance() {
+    const op = finOp.value;
+    const p = parseFloat(document.getElementById('finP').value.trim());
+    const r = parseFloat(document.getElementById('finR').value.trim());
+    const third = parseFloat(document.getElementById('finN').value.trim());
+    const fourth = parseFloat(document.getElementById('finT').value.trim());
+    const body = { op };
+    if (op === 'simple_interest') {
+      if ([p, r, fourth].some(isNaN)) return;
+      body.principal = p; body.rate = r; body.years = fourth;
+    } else if (op === 'compound_interest') {
+      if ([p, r, third, fourth].some(isNaN)) return;
+      body.principal = p; body.rate = r; body.n = third; body.years = fourth;
+    } else if (op === 'loan_payment') {
+      if ([p, r, third].some(isNaN)) return;
+      body.principal = p; body.rate = r; body.months = third;
+    } else if (op === 'future_value') {
+      if ([p, r, fourth].some(isNaN)) return;
+      body.principal = p; body.rate = r; body.periods = fourth;
+    } else {
+      if ([p, r, fourth].some(isNaN)) return;
+      body.amount = p; body.rate = r; body.periods = fourth;
+    }
+    finOut.classList.remove('err');
+    try {
+      const res = await fetch('/api/finance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        finOut.classList.add('err');
+        finOut.textContent = data.error || 'Error';
+        return;
+      }
+      const parts = Object.entries(data.finance)
+        .map(([k, v]) => k + ' = ' + v);
+      finOut.textContent = data.expression + '  →  ' + parts.join(', ');
+      loadHistory();
+    } catch (err) {
+      finOut.classList.add('err');
+      finOut.textContent = 'Network error';
+    }
+  }
+  document.getElementById('finBtn').addEventListener('click', computeFinance);
+  ['finP', 'finR', 'finN', 'finT'].forEach(id =>
+    document.getElementById(id).addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); computeFinance(); }
+    }));
+
+  // --- Polynomial panel ----------------------------------------------------
+  const polyOp = document.getElementById('polyOp');
+  const polyOut = document.getElementById('polyOut');
+  function parseList(text) {
+    const parts = text.split(',').map(s => s.trim()).filter(s => s !== '');
+    const nums = parts.map(Number);
+    if (parts.length === 0 || nums.some(isNaN)) return null;
+    return nums;
+  }
+  function syncPolyRows() {
+    const binary = polyOp.value === 'add' || polyOp.value === 'multiply';
+    document.getElementById('polyRowCoeffs').style.display = binary ? 'none' : '';
+    document.getElementById('polyRowAB').style.display = binary ? '' : 'none';
+    document.getElementById('polyX').style.display =
+      polyOp.value === 'evaluate' ? '' : 'none';
+  }
+  polyOp.addEventListener('change', syncPolyRows);
+  syncPolyRows();
+  async function computePolynomial() {
+    const op = polyOp.value;
+    const body = { op };
+    if (op === 'add' || op === 'multiply') {
+      const a = parseList(document.getElementById('polyA').value);
+      const b = parseList(document.getElementById('polyB').value);
+      if (!a || !b) return;
+      body.a = a; body.b = b;
+    } else {
+      const coeffs = parseList(document.getElementById('polyCoeffs').value);
+      if (!coeffs) return;
+      body.coeffs = coeffs;
+      if (op === 'evaluate') {
+        const x = parseFloat(document.getElementById('polyX').value.trim());
+        if (isNaN(x)) return;
+        body.x = x;
+      }
+    }
+    polyOut.classList.remove('err');
+    try {
+      const res = await fetch('/api/polynomial', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        polyOut.classList.add('err');
+        polyOut.textContent = data.error || 'Error';
+        return;
+      }
+      polyOut.textContent = data.poly !== undefined
+        ? data.poly : String(data.result);
+      loadHistory();
+    } catch (err) {
+      polyOut.classList.add('err');
+      polyOut.textContent = 'Network error';
+    }
+  }
+  document.getElementById('polyBtn').addEventListener('click', computePolynomial);
+
+  // --- Geometry panel ------------------------------------------------------
+  const GEO_FIELDS = {
+    square: ['side'], rectangle: ['width', 'height'], circle: ['radius'],
+    triangle: ['base', 'height'], trapezoid: ['a', 'b', 'height'],
+    cube: ['side'], rectangular_prism: ['length', 'width', 'height'],
+    sphere: ['radius'], cylinder: ['radius', 'height'], cone: ['radius', 'height'],
+  };
+  const geoShape = document.getElementById('geoShape');
+  const geoFields = document.getElementById('geoFields');
+  const geoOut = document.getElementById('geoOut');
+  function syncGeoFields() {
+    geoFields.innerHTML = '';
+    GEO_FIELDS[geoShape.value].forEach(name => {
+      const input = document.createElement('input');
+      input.id = 'geo_' + name;
+      input.type = 'text';
+      input.placeholder = name;
+      input.setAttribute('aria-label', name);
+      input.autocomplete = 'off';
+      geoFields.appendChild(input);
+    });
+  }
+  geoShape.addEventListener('change', syncGeoFields);
+  syncGeoFields();
+  async function computeGeometry() {
+    const shape = geoShape.value;
+    const body = { shape };
+    for (const name of GEO_FIELDS[shape]) {
+      const v = parseFloat(document.getElementById('geo_' + name).value.trim());
+      if (isNaN(v)) return;
+      body[name] = v;
+    }
+    geoOut.classList.remove('err');
+    try {
+      const res = await fetch('/api/geometry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        geoOut.classList.add('err');
+        geoOut.textContent = data.error || 'Error';
+        return;
+      }
+      const parts = Object.entries(data.geometry).map(([k, v]) => k + ' = ' + v);
+      geoOut.textContent = data.shape + ': ' + parts.join(', ');
+      loadHistory();
+    } catch (err) {
+      geoOut.classList.add('err');
+      geoOut.textContent = 'Network error';
+    }
+  }
+  document.getElementById('geoBtn').addEventListener('click', computeGeometry);
+
+  // --- Roman numeral panel -------------------------------------------------
+  const romanOut = document.getElementById('romanOut');
+  async function computeRoman() {
+    const op = document.getElementById('romanOp').value;
+    const raw = document.getElementById('romanVal').value.trim();
+    if (raw === '') return;
+    const body = { op };
+    body.value = op === 'to_roman' ? parseFloat(raw) : raw;
+    if (op === 'to_roman' && isNaN(body.value)) return;
+    romanOut.classList.remove('err');
+    try {
+      const res = await fetch('/api/roman', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        romanOut.classList.add('err');
+        romanOut.textContent = data.error || 'Error';
+        return;
+      }
+      romanOut.textContent = data.expression + '  =  ' + data.result;
+      loadHistory();
+    } catch (err) {
+      romanOut.classList.add('err');
+      romanOut.textContent = 'Network error';
+    }
+  }
+  document.getElementById('romanBtn').addEventListener('click', computeRoman);
+  document.getElementById('romanVal').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); computeRoman(); }
+  });
+
+  // --- Linear regression panel ---------------------------------------------
+  const regOut = document.getElementById('regOut');
+  function parsePoints(raw) {
+    const pts = [];
+    for (const chunk of raw.split(';')) {
+      const t = chunk.trim();
+      if (t === '') continue;
+      const parts = t.split(',').map((s) => parseFloat(s.trim()));
+      if (parts.length !== 2 || parts.some(isNaN)) return null;
+      pts.push(parts);
+    }
+    return pts;
+  }
+  async function computeRegression() {
+    const op = document.getElementById('regOp').value;
+    const raw = document.getElementById('regPoints').value.trim();
+    if (raw === '') return;
+    regOut.classList.remove('err');
+    const points = parsePoints(raw);
+    if (points === null || points.length < 2) {
+      regOut.classList.add('err');
+      regOut.textContent = 'Enter at least two pairs like 1,2; 3,4';
+      return;
+    }
+    const body = { op, points };
+    if (op === 'predict') {
+      const px = parseFloat(document.getElementById('regPredictX').value);
+      if (isNaN(px)) {
+        regOut.classList.add('err');
+        regOut.textContent = 'Enter an x value to predict';
+        return;
+      }
+      body.predict_x = px;
+    }
+    try {
+      const res = await fetch('/api/regression', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        regOut.classList.add('err');
+        regOut.textContent = data.error || 'Error';
+        return;
+      }
+      const r = data.regression;
+      let txt = data.expression + '   (r² = ' + r.r2 + ')';
+      if ('predict_y' in r) txt += '   →  y(' + r.predict_x + ') = ' + r.predict_y;
+      regOut.textContent = txt;
+      loadHistory();
+    } catch (err) {
+      regOut.classList.add('err');
+      regOut.textContent = 'Network error';
+    }
+  }
+  document.getElementById('regBtn').addEventListener('click', computeRegression);
+  document.getElementById('regPredictX').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); computeRegression(); }
+  });
+
+  render();
+  loadHistory();
+  loadMemory();
+</script>
+</body>
+</html>

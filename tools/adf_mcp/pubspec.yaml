@@ -1,0 +1,14 @@
+name: adf_mcp
+description: Stdio MCP server exposing the ADF orchestration pipeline as agent tools.
+publish_to: none
+version: 3.2.0
+
+environment:
+  sdk: ^3.5.0
+
+# Runtime uses dart:io + dart:convert only, so `dart run bin/adf_mcp.dart`
+# needs no third-party packages. Dev dependencies below serve `dart analyze`
+# and `dart test` exclusively.
+dev_dependencies:
+  lints: ^5.0.0
+  test: ^1.25.0

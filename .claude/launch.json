@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "adf-dashboard",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "3850",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "/Users/varunkumar/adf-framework/tools/orchestration_dashboard/build/web"
+      ],
+      "port": 3850
+    }
+  ]
+}

@@ -3,17 +3,30 @@
 # Usage: coverage_gate.sh <feature-id> [min_percent=100] [--mode=repo|feature|both]
 set -euo pipefail
 
-FEATURE_ID="${1:?Usage: coverage_gate.sh <feature-id> [min_percent] [--mode=repo|feature|both]}"
+FEATURE_ID="${1:?Usage: coverage_gate.sh <feature-id> [min_percent] [--mode=repo|feature|both|micro]}"
 MIN_PCT="${2:-100}"
 MODE="both"
+EXPLICIT_MODE=0
 if [[ "${3:-}" == --mode=* ]]; then
-  MODE="${3#--mode=}"
+  MODE="${3#--mode=}"; EXPLICIT_MODE=1
 elif [[ "${3:-}" == "--mode" && -n "${4:-}" ]]; then
-  MODE="$4"
+  MODE="$4"; EXPLICIT_MODE=1
 fi
 
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-FEAT_DIR="$ROOT/.cursor/orchestration/features/$FEATURE_ID"
+ROOT="${ORCH_REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+# shellcheck source=/dev/null
+. "$(dirname "$0")/change_scope.sh" 2>/dev/null || true
+
+# Auto-detect: a micro change downgrades repo-wide L100 to "the files you
+# touched (+ optionally their dependents)". You still owe 100% on what you
+# changed — you just don't have to cover the entire codebase to land a
+# one-liner. Force full behaviour with --mode=repo|both or ADF_SCOPE_MODE=repo.
+if [[ "$EXPLICIT_MODE" -eq 0 ]] && declare -f adf_is_micro >/dev/null 2>&1 && adf_is_micro; then
+  MODE="micro"
+fi
+# CURSOR-6: prefer the new .adf/orchestration; fall back to legacy .cursor.
+FEAT_DIR="$ROOT/.adf/orchestration/features/$FEATURE_ID"
+[ -d "$FEAT_DIR" ] || FEAT_DIR="$ROOT/.adf/orchestration/features/$FEATURE_ID"
 STATE_FILE="$FEAT_DIR/state.json"
 LCOV="$ROOT/coverage/lcov.info"
 BASELINE="$ROOT/scripts/orch/coverage_baseline.json"
@@ -123,6 +136,39 @@ check_repo_mode() {
   return $fail
 }
 
+check_micro_mode() {
+  local fail=0 f had=0
+  echo "=== L100 micro mode (changed lib files; repo-wide L100 waived) ==="
+  while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    had=1
+    check_file "$f" || fail=1
+  done < <(adf_changed_dart_lib_files)
+  if [[ "$had" -eq 0 ]]; then
+    echo "INFO: micro change with no lib/*.dart edits — nothing to cover."
+  fi
+  # Dependents (blast radius): reported for awareness. Enforce 100% on them too
+  # only when ADF_MICRO_COVER_DEPS=1, so a trivial edit isn't blocked by a
+  # pre-existing coverage gap in an unrelated caller.
+  local deps; deps="$(adf_dependent_files)"
+  if [[ -n "$deps" ]]; then
+    if [[ "${ADF_MICRO_COVER_DEPS:-0}" == 1 ]]; then
+      echo "--- dependents (enforced @ ${MIN_PCT}%) ---"
+      while IFS= read -r f; do
+        [[ -z "$f" ]] && continue
+        check_file "$f" || fail=1
+      done <<< "$deps"
+    else
+      echo "--- dependents (reported, not enforced; set ADF_MICRO_COVER_DEPS=1 to gate) ---"
+      while IFS= read -r f; do
+        [[ -z "$f" ]] && continue
+        echo "INFO: dependent $f -> $(lcov_pct "$f")%"
+      done <<< "$deps"
+    fi
+  fi
+  return $fail
+}
+
 if [[ ! -f "$LCOV" ]]; then
   echo "ERROR: run: flutter test testcases/ --coverage"
   exit 1
@@ -130,6 +176,7 @@ fi
 
 FAIL=0
 case "$MODE" in
+  micro) check_micro_mode || FAIL=1 ;;
   feature) check_feature_mode || FAIL=1 ;;
   repo) check_repo_mode || FAIL=1 ;;
   both)

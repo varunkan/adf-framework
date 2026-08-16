@@ -52,4 +52,18 @@ void main() {
     expect(messages.where((m) => m['type'] == 'result').length, 1);
     expect(messages.last['text'], 'Full readable response.');
   });
+
+  test('buildChatView respects limit', () {
+    for (var i = 0; i < 5; i++) {
+      store.appendCommand('demo', prompt: 'msg $i', execute: false);
+      store.updateCommandMeta(
+        'demo',
+        store.listCommands('demo').last['id'] as String,
+        assistantReply: 'reply $i',
+        llmSource: 'state',
+      );
+    }
+    final chat = builder.buildChatView('demo', limit: 4);
+    expect(chat.length, lessThanOrEqualTo(4));
+  });
 }

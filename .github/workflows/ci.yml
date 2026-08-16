@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  server:
+    name: Orchestration server (dart analyze + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/orchestration_server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - run: dart pub get
+      - run: dart analyze --fatal-infos
+      # -j 1: the ~25 suites share one on-disk feature store under
+      # .adf/orchestration/features/, so running files in parallel races
+      # (symptom: "state.json not found for <feature>"). Serial is
+      # deterministic; proper per-test isolation is tracked separately.
+      - run: dart test -j 1 --reporter expanded
+
+  mcp:
+    name: MCP server (dart analyze + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/adf_mcp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - run: dart pub get
+      - run: dart analyze --fatal-infos
+      # -j 1: the ~25 suites share one on-disk feature store under
+      # .adf/orchestration/features/, so running files in parallel races
+      # (symptom: "state.json not found for <feature>"). Serial is
+      # deterministic; proper per-test isolation is tracked separately.
+      - run: dart test -j 1 --reporter expanded
+
+  dashboard:
+    name: Dashboard (flutter analyze + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/orchestration_dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
+  shell:
+    name: Installer smoke (write_runner_env.sh)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: runner.env round-trip for every backend
+        run: |
+          set -euo pipefail
+          for runner in cursor claude ollama custom auto; do
+            dir="$(mktemp -d)"
+            bash install/write_runner_env.sh "$dir" "$runner"
+            test -f "$dir/.adf/runner.env"
+            # Every generated env file must survive `set -a` sourcing.
+            ( set -a; . "$dir/.adf/runner.env"; set +a )
+            grep -q "ADF_RUNNER=" "$dir/.adf/runner.env"
+          done
+
+  python:
+    name: Moat suites (python unit + offline gates)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Unit suites (stdlib only, no model, no npm)
+        run: |
+          set -euo pipefail
+          for t in test_compaction test_agent_runner test_proof_of_build \
+                   test_policy_gate test_app_data test_offline_build \
+                   test_export_app test_template_auth test_auth_secret \
+                   test_visual_verify test_component_manifest \
+                   test_feature_shapes test_native_render; do
+            echo "== scripts/orch/$t =="
+            python3 "scripts/orch/$t.py"
+          done
+          for t in test_bench test_bench_build test_scorecard; do
+            echo "== scripts/bench/$t =="
+            python3 "scripts/bench/$t.py"
+          done
+      - name: Offline moat gates (deterministic, no network)
+        run: |
+          set -euo pipefail
+          python3 scripts/orch/offline_build.py
+          python3 scripts/test/proof_of_build_demo.py
+          python3 scripts/test/policy_gate_demo.py
+          python3 scripts/test/moat_demo.py
+
+  policy:
+    name: Repository policy check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Runs the SAME checks as .githooks/pre-commit, but server-side where
+      # `git commit --no-verify` cannot skip them. The hook is fast feedback;
+      # this is the backstop. See scripts/policy_check.sh and CLAUDE.md.
+      - run: bash scripts/policy_check.sh

@@ -8,10 +8,10 @@ if [[ -z "$FEATURE_ID" ]]; then
   exit 1
 fi
 
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ROOT="${ORCH_REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 SPECS="$ROOT/specs/$FEATURE_ID"
-FEATURE="$ROOT/.cursor/orchestration/features/$FEATURE_ID"
-TPL="$ROOT/.cursor/orchestration/templates"
+FEATURE="$ROOT/.adf/orchestration/features/$FEATURE_ID"
+TPL="$ROOT/.adf/orchestration/templates"
 
 mkdir -p "$SPECS/tasks" "$SPECS/checklists" "$FEATURE/judge-verdicts"
 

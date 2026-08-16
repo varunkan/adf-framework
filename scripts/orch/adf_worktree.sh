@@ -11,8 +11,8 @@ if [[ -z "$CMD" || -z "$FEATURE_ID" || -z "$TASK_ID" ]]; then
   exit 1
 fi
 
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-WT_ROOT="$ROOT/.cursor/orchestration/worktrees/$FEATURE_ID"
+ROOT="${ORCH_REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+WT_ROOT="$ROOT/.adf/orchestration/worktrees/$FEATURE_ID"
 WT_PATH="$WT_ROOT/$TASK_ID"
 BRANCH="adf/$FEATURE_ID/$TASK_ID"
 

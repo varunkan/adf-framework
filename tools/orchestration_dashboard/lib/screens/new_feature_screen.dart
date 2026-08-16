@@ -12,16 +12,28 @@ class NewFeatureScreen extends StatefulWidget {
   State<NewFeatureScreen> createState() => _NewFeatureScreenState();
 }
 
+/// Parses reference links from free text (newline/comma separated), keeping only
+/// http(s) URLs. Pure + top-level so the new-feature form's source handling is
+/// testable (P4).
+List<String> parseSourceLinks(String raw) => raw
+    .split(RegExp(r'[\n,]'))
+    .map((s) => s.trim())
+    .where((s) => s.startsWith('http://') || s.startsWith('https://'))
+    .toList();
+
 class _NewFeatureScreenState extends State<NewFeatureScreen> {
   final _idController = TextEditingController();
   final _reqController = TextEditingController();
+  final _linksController = TextEditingController();
   String _track = 'M';
+  String _stack = 'react-vite-sqlite';
   bool _saving = false;
 
   @override
   void dispose() {
     _idController.dispose();
     _reqController.dispose();
+    _linksController.dispose();
     super.dispose();
   }
 
@@ -37,6 +49,8 @@ class _NewFeatureScreenState extends State<NewFeatureScreen> {
         id: id,
         requirement: _reqController.text.trim(),
         track: _track,
+        stack: _stack,
+        sourceLinks: parseSourceLinks(_linksController.text),
       );
       if (!mounted) return;
       final mode = detail['mode'] as String?;
@@ -49,12 +63,12 @@ class _NewFeatureScreenState extends State<NewFeatureScreen> {
         if (status == 'needs_login' || mode == 'needs_login') {
           showMessage(
             context,
-            'Feature created. Run cursor-agent login, then open it to start.',
+            'Feature created. Sign in to your runner, then open it to start.',
           );
         } else if (run?['headless_unavailable'] == true || mode == 'ide_only') {
           showMessage(
             context,
-            'Feature created (IDE mode). In Cursor run: '
+            'Feature created (IDE mode). In your IDE run: '
             '@orch-orchestrator start $id — then Sync in the dashboard.',
           );
         }
@@ -96,8 +110,31 @@ class _NewFeatureScreenState extends State<NewFeatureScreen> {
               onChanged: (v) => setState(() => _track = v ?? 'M'),
             ),
             const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              key: const Key('stack-picker'),
+              initialValue: _stack,
+              decoration: const InputDecoration(labelText: 'Stack'),
+              items: const [
+                DropdownMenuItem(
+                  value: 'react-vite-sqlite',
+                  child: Text('Web (React + Vite + SQLite)'),
+                ),
+                DropdownMenuItem(
+                  value: 'expo-rn',
+                  child: Text('Mobile (Expo / React Native)'),
+                ),
+                DropdownMenuItem(
+                  value: 'stdlib',
+                  child: Text('Single-file (Python)'),
+                ),
+              ],
+              onChanged: (v) =>
+                  setState(() => _stack = v ?? 'react-vite-sqlite'),
+            ),
+            const SizedBox(height: 12),
             Expanded(
               child: TextField(
+                key: const Key('requirement-field'),
                 controller: _reqController,
                 maxLines: null,
                 expands: true,
@@ -106,6 +143,17 @@ class _NewFeatureScreenState extends State<NewFeatureScreen> {
                   alignLabelWithHint: true,
                   border: OutlineInputBorder(),
                 ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              key: const Key('source-links'),
+              controller: _linksController,
+              maxLines: 2,
+              decoration: const InputDecoration(
+                labelText: 'Reference links (optional)',
+                hintText: 'https://… — one per line; the crew grounds the spec in these',
+                border: OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 12),

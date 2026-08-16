@@ -7,7 +7,6 @@ class OrchestrationPaths {
 
   final String repoRoot;
 
-  static const _legacyRelative = '.cursor/orchestration';
   static const _packageRelative = 'adf-framework/orchestration';
   static const _genericRelative = '.adf/orchestration';
 
@@ -26,7 +25,7 @@ class OrchestrationPaths {
   String get frameworkRoutingYaml => '$orchestrationRoot/framework-routing.yaml';
 
   static bool hasOrchestrationAt(String repoRoot) {
-    for (final rel in [_legacyRelative, _packageRelative, _genericRelative]) {
+    for (final rel in [_genericRelative, _packageRelative]) {
       if (Directory('$repoRoot/$rel').existsSync()) return true;
     }
     final install = File('$repoRoot/.adf-install.json');
@@ -55,13 +54,14 @@ class OrchestrationPaths {
       }
     }
 
-    for (final rel in [_legacyRelative, _packageRelative, _genericRelative]) {
+    for (final rel in [_genericRelative, _packageRelative]) {
       final abs = '$repoRoot/$rel';
       if (Directory(abs).existsSync()) return abs;
     }
 
-    return '$repoRoot/$_legacyRelative';
+    return '$repoRoot/$_genericRelative';
   }
+
 
   Map<String, dynamic>? _readInstallManifest() {
     final file = File('$repoRoot/.adf-install.json');

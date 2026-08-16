@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS games (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  player_count INTEGER NOT NULL,
+  current_player INTEGER NOT NULL DEFAULT 0,
+  positions TEXT NOT NULL,
+  winner INTEGER,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS moves (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  game_id INTEGER NOT NULL,
+  player INTEGER NOT NULL,
+  dice INTEGER NOT NULL,
+  from_pos INTEGER NOT NULL,
+  to_pos INTEGER NOT NULL,
+  jumped INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (game_id) REFERENCES games(id)
+);

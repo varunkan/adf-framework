@@ -1,0 +1,131 @@
+{
+  "build": {
+    "backend": "auto",
+    "model": null,
+    "prompt": "@orch-orchestrator resume unit-converter-convert-between-2",
+    "verified": true,
+    "verify_summary": "build + vitest passed; node serves / and /api/health on :64423; render OK \u2014 body has 6 interactive element(s) and 116 chars of text"
+  },
+  "created_at": "2026-06-16T11:25:29+00:00",
+  "feature_id": "unit-converter-convert-between-2",
+  "files": [
+    {
+      "bytes": 517,
+      "path": "README.md",
+      "sha256": "9aa00e9f81b24bf599af2d418f319bf98ac86f7b6b55d8324bed8a85110e87f3"
+    },
+    {
+      "bytes": 294,
+      "path": "index.html",
+      "sha256": "96d86f0cee80469fa6b60b6a871da8d963539560c63dd9cc83441926601c6a4f"
+    },
+    {
+      "bytes": 722,
+      "path": "package.json",
+      "sha256": "836b28f8b04b0aa57a016e60c65ffe32df751ecc737b00efb4108ecb81aedeb2"
+    },
+    {
+      "bytes": 69,
+      "path": "postcss.config.js",
+      "sha256": "f291af35aed970d241227c61b79861d3ff8f08705babd56649fd8fe8776c360b"
+    },
+    {
+      "bytes": 223,
+      "path": "schema.sql",
+      "sha256": "c9d6bc60b6f68bb56ce08c3e70f693674957826d9f42a36d3a329913abb388d7"
+    },
+    {
+      "bytes": 1576,
+      "path": "server/api/unit-converter.mjs",
+      "sha256": "cde574e5681fa3f00ae2bb06ff56bbb9087202bfe053f6bd2ada20f6d48c954f"
+    },
+    {
+      "bytes": 1065,
+      "path": "server/app.mjs",
+      "sha256": "d9d02c8a982ba95db70b6d7699503ee7e0341d72c23ec6333527fc6f15c69b63"
+    },
+    {
+      "bytes": 2732,
+      "path": "server/auth.mjs",
+      "sha256": "5c5a1cb63e7723ea4565c236083eb5f74f11ef7c37454873a567b33769278377"
+    },
+    {
+      "bytes": 495,
+      "path": "server/db.mjs",
+      "sha256": "6fcf0dae7e7cc219e96bf50f78dc28097dff3f79c627ed00bfe1de6e8d878685"
+    },
+    {
+      "bytes": 304,
+      "path": "server/index.mjs",
+      "sha256": "42d2dbe5a1363404cddc0045fb8e55a25a20989de53809e7777533b99a4e11a9"
+    },
+    {
+      "bytes": 5310,
+      "path": "src/App.tsx",
+      "sha256": "d12bca85f4a588dac9649fc4e7c88d317251dbc8255e174ce92e10018f3decd3"
+    },
+    {
+      "bytes": 59,
+      "path": "src/index.css",
+      "sha256": "cc1a7ad0d019ddb1d32d0ecb588ba0ac26ce41d8625dd6c366348b25f83a28ec"
+    },
+    {
+      "bytes": 246,
+      "path": "src/main.tsx",
+      "sha256": "b07deb33042809cd442ff9fbffc451b8ae05f6fe9a0c6d11dc9a283e3f8916ff"
+    },
+    {
+      "bytes": 155,
+      "path": "tailwind.config.js",
+      "sha256": "0e5b1720ee81cff033cd39c39298ce7df6e41f9559325560d8dd5c261420d0da"
+    },
+    {
+      "bytes": 953,
+      "path": "test/auth.test.mjs",
+      "sha256": "f4b83fe79cab30f7c7cba52ec8dcb5fb238546f79eb3a912db16a322218dfbb3"
+    },
+    {
+      "bytes": 2013,
+      "path": "test/unit-converter.test.mjs",
+      "sha256": "cb8bd614ed678fbde59087e8f13616d6f9a207cc93338e1176d37901da5959ed"
+    },
+    {
+      "bytes": 510,
+      "path": "tsconfig.json",
+      "sha256": "83672d2660de080f79e2f9db04811760bc2b1ae475c3c6da33662e6b0de5a94c"
+    },
+    {
+      "bytes": 162,
+      "path": "vite.config.ts",
+      "sha256": "dc9b8c2c4e81b143be4e522bcae8abb4af5df6b28f43469a8ecf0c02704c3117"
+    },
+    {
+      "bytes": 213,
+      "path": "vitest.config.mjs",
+      "sha256": "77fb49e5dcb4bacb5cc3d23a5a679e78476e098483b2ac3381b1faeab46a4d15"
+    }
+  ],
+  "merkle_root": "cbce20b0d0d2ef0eb27e418b2de411887a4c722a7e9e50ed9c7efa8f25baceae",
+  "schema": "adf-proof/1",
+  "seal": "adf1:cbce20b0d0d2",
+  "spec_sha256": "4da4016b1e7d30db7c06e3c26f2860b398ed6dcb5da5bcad775d30d75e5bed20",
+  "stack": "react-vite-sqlite",
+  "verdict": {
+    "policy": {
+      "checked": true,
+      "n_violations": 0,
+      "ok": true,
+      "policy_id": "adf-default-secure",
+      "rules": [
+        "dependency_allowlist:pass",
+        "no_network_egress:pass",
+        "no_plaintext_pii:pass",
+        "no_secrets:pass",
+        "offline_capable:pass"
+      ]
+    },
+    "stack": "react-vite-sqlite",
+    "verified": true,
+    "verify_summary": "build + vitest passed; node serves / and /api/health on :64423; render OK \u2014 body has 6 interactive element(s) and 116 chars of text"
+  }
+}

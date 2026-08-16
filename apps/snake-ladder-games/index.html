@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Snakes &amp; Ladders</title>
+    <style>
+      :root { --cell: 52px; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: #0f172a; color: #e2e8f0; padding: 20px;
+      }
+      h1 { margin: 0 0 4px; font-size: 26px; }
+      .muted { color: #94a3b8; font-size: 13px; }
+      .layout { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; margin-top: 16px; }
+      .panel {
+        background: #1e293b; border: 1px solid #334155; border-radius: 12px;
+        padding: 16px; min-width: 260px;
+      }
+      .board {
+        display: grid; grid-template-columns: repeat(10, var(--cell));
+        grid-template-rows: repeat(10, var(--cell));
+        border: 2px solid #475569; border-radius: 8px; overflow: hidden;
+      }
+      .sq {
+        position: relative; display: flex; align-items: flex-start; justify-content: flex-start;
+        font-size: 10px; color: #64748b; padding: 2px; border: 1px solid #233048;
+      }
+      .sq.ladder { background: #14532d; }
+      .sq.snake { background: #7f1d1d; }
+      .sq .mark { position: absolute; bottom: 2px; right: 3px; font-size: 13px; }
+      .tokens { position: absolute; inset: 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 2px; }
+      .token { width: 16px; height: 16px; border-radius: 50%; font-size: 10px; line-height: 16px;
+               text-align: center; color: #0f172a; font-weight: 700; }
+      button {
+        background: #2563eb; color: white; border: 0; border-radius: 8px;
+        padding: 9px 14px; font-size: 14px; cursor: pointer; margin: 3px 2px;
+      }
+      button:disabled { background: #475569; cursor: not-allowed; }
+      button.ghost { background: #334155; }
+      input {
+        width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #475569;
+        background: #0f172a; color: #e2e8f0; margin: 6px 0;
+      }
+      table { width: 100%; border-collapse: collapse; font-size: 13px; }
+      th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid #334155; }
+      .log { max-height: 200px; overflow-y: auto; font-size: 12px; }
+      .log div { padding: 2px 0; border-bottom: 1px solid #233048; }
+      .banner { background: #166534; padding: 8px 12px; border-radius: 8px; margin: 8px 0; font-weight: 600; }
+      .colors { display: flex; gap: 6px; margin-top: 6px; }
+    </style>
+  </head>
+  <body>
+    <h1>🐍 Snakes &amp; Ladders 🪜</h1>
+    <div class="muted">Roll the die, climb ladders, dodge snakes — first to the final square wins. Rolling a 6 grants another turn.</div>
+
+    <div class="layout">
+      <div class="panel">
+        <div id="board" class="board"></div>
+        <div id="banner"></div>
+        <div style="margin-top:10px">
+          <button id="rollBtn">🎲 Roll</button>
+          <button id="undoBtn" class="ghost">↶ Undo</button>
+          <button id="resetBtn" class="ghost">Reset game</button>
+        </div>
+        <div id="turn" class="muted" style="margin-top:6px"></div>
+        <div id="hint" class="muted"></div>
+      </div>
+
+      <div class="panel" style="max-width:280px">
+        <h3 style="margin-top:0">New game</h3>
+        <input id="players" placeholder="Players (comma separated)" value="Amy, Bob" />
+        <button id="newBtn">Start new game</button>
+
+        <h3>Standings</h3>
+        <table id="standings"><tbody></tbody></table>
+
+        <h3>Move log</h3>
+        <div id="log" class="log"></div>
+
+        <h3>🏆 Hall of Fame</h3>
+        <table id="leaderboard"><tbody></tbody></table>
+        <button id="lbResetBtn" class="ghost">Clear hall of fame</button>
+      </div>
+    </div>
+
+    <script>
+      const COLORS = ['#fbbf24', '#38bdf8', '#f472b6', '#4ade80', '#c084fc', '#fb7185'];
+      const $ = (id) => document.getElementById(id);
+
+      async function api(path, method, body) {
+        const opts = { method: method || 'GET', headers: { 'Content-Type': 'application/json' } };
+        if (body !== undefined) opts.body = JSON.stringify(body);
+        const r = await fetch(path, opts);
+        let data = null;
+        try { data = await r.json(); } catch (e) {}
+        return { status: r.status, data };
+      }
+
+      // Boustrophedon (snake) numbering: row 0 (bottom) goes left->right, next row right->left.
+      function squareToCell(square, size) {
+        const cols = 10, rows = Math.ceil(size / cols);
+        const idx = square - 1;
+        const row = Math.floor(idx / cols);
+        let col = idx % cols;
+        if (row % 2 === 1) col = cols - 1 - col;
+        const gridRow = rows - row; // CSS rows are 1-based from top
+        return { gridRow, gridCol: col + 1 };
+      }
+
+      let board = { ladders: {}, snakes: {}, size: 100 };
+
+      function renderBoard(state) {
+        const el = $('board');
+        el.innerHTML = '';
+        const size = board.size;
+        const positions = {};
+        if (state) state.players.forEach((p, i) => {
+          if (p.position >= 1) (positions[p.position] = positions[p.position] || []).push(i);
+        });
+        for (let sq = 1; sq <= size; sq++) {
+          const { gridRow, gridCol } = squareToCell(sq, size);
+          const cell = document.createElement('div');
+          cell.className = 'sq';
+          cell.style.gridRow = gridRow;
+          cell.style.gridColumn = gridCol;
+          let mark = '';
+          if (board.ladders[sq] !== undefined) { cell.classList.add('ladder'); mark = '🪜→' + board.ladders[sq]; }
+          if (board.snakes[sq] !== undefined) { cell.classList.add('snake'); mark = '🐍→' + board.snakes[sq]; }
+          cell.innerHTML = '<span>' + sq + '</span>' + (mark ? '<span class="mark">' + mark + '</span>' : '');
+          const here = positions[sq];
+          if (here) {
+            const tokens = document.createElement('div');
+            tokens.className = 'tokens';
+            here.forEach((pi) => {
+              const t = document.createElement('div');
+              t.className = 'token';
+              t.style.background = COLORS[pi % COLORS.length];
+              t.textContent = (state.players[pi].name || '?')[0].toUpperCase();
+              tokens.appendChild(t);
+            });
+            cell.appendChild(tokens);
+          }
+          el.appendChild(cell);
+        }
+      }
+
+      function renderState(state) {
+        renderBoard(state);
+        const sb = $('standings').querySelector('tbody');
+        sb.innerHTML = '';
+        state.standings.forEach((s, i) => {
+          const pi = state.players.findIndex((p) => p.name === s.name);
+          sb.innerHTML += '<tr><td>' + s.rank + '</td><td><span class="token" style="display:inline-block;background:'
+            + COLORS[pi % COLORS.length] + '">&nbsp;</span> ' + s.name + '</td><td>' + s.position + '</td></tr>';
+        });
+        const log = $('log');
+        log.innerHTML = '';
+        state.history.slice().reverse().forEach((m) => {
+          let txt = m.player + ' rolled ' + m.rolled + ' → ' + m.to;
+          if (m.event === 'ladder') txt += ' 🪜';
+          else if (m.event === 'snake') txt += ' 🐍';
+          else if (m.event === 'overshoot') txt += ' (overshoot)';
+          if (m.won) txt += ' 🏆 WINS!';
+          log.innerHTML += '<div>' + txt + '</div>';
+        });
+        $('banner').innerHTML = state.finished
+          ? '<div class="banner">🏆 ' + state.winner + ' wins!</div>' : '';
+        $('turn').textContent = state.finished ? '' : 'Turn: ' + state.current_player;
+        $('rollBtn').disabled = state.finished;
+        $('undoBtn').disabled = !state.can_undo;
+        loadHint(state);
+      }
+
+      async function loadHint(state) {
+        if (state.finished) { $('hint').textContent = ''; return; }
+        const { data } = await api('/api/game/hint');
+        if (data && data.winning_rolls && data.winning_rolls.length) {
+          $('hint').textContent = '💡 ' + data.player + ' wins by rolling a ' + data.winning_rolls.join(' or ');
+        } else { $('hint').textContent = ''; }
+      }
+
+      async function loadLeaderboard() {
+        const { data } = await api('/api/leaderboard');
+        const tb = $('leaderboard').querySelector('tbody');
+        tb.innerHTML = '<tr><th>#</th><th>Player</th><th>Wins</th><th>Rate</th></tr>';
+        (data && data.standings || []).forEach((s) => {
+          tb.innerHTML += '<tr><td>' + s.rank + '</td><td>' + s.name + '</td><td>' + s.wins
+            + '</td><td>' + Math.round(s.win_rate * 100) + '%</td></tr>';
+        });
+      }
+
+      async function refresh() {
+        const { status, data } = await api('/api/game');
+        if (status === 200) renderState(data);
+        else { renderBoard(null); $('banner').innerHTML = '<div class="muted">No active game — start one →</div>'; }
+        loadLeaderboard();
+      }
+
+      $('newBtn').onclick = async () => {
+        const players = $('players').value.split(',').map((s) => s.trim()).filter(Boolean);
+        const { status, data } = await api('/api/game/new', 'POST', { players });
+        if (status !== 200) { alert(data.error || 'Could not start game'); return; }
+        board = data.board;
+        renderState(data);
+      };
+      $('rollBtn').onclick = async () => {
+        const { status, data } = await api('/api/game/roll', 'POST', {});
+        if (status === 200) { renderState(data.state); loadLeaderboard(); }
+      };
+      $('undoBtn').onclick = async () => {
+        const { status, data } = await api('/api/game/undo', 'POST', {});
+        if (status === 200) renderState(data.state);
+      };
+      $('resetBtn').onclick = async () => { await api('/api/game/reset', 'POST', {}); refresh(); };
+      $('lbResetBtn').onclick = async () => { await api('/api/leaderboard/reset', 'POST', {}); loadLeaderboard(); };
+
+      (async () => {
+        const { data } = await api('/api/board');
+        if (data) board = data;
+        refresh();
+      })();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,40 @@
+{
+  "_doc": "ADF test-agent ecosystem. Each agent verifies one dimension of the built app and emits findings; the gate (run_test_agents.py) runs all enabled agents and BLOCKS 'complete' on any blocking finding at/above the agent's `block_severity` (default 'low' — NOTHING IS SKIPPED; every real defect of any severity is fixed before complete), feeding those to the relentless heal loop which fixes them ONE BY ONE, highest severity first, until zero remain. Only 'info'-severity notes, and all findings from gate:'advisory' agents, are reported but never block. The 'functional' agent raises its threshold to 'critical' because its sub-floor findings are unbuilt-scope (driven slice-by-slice by the campaign), not defects in the current build. Contract: a runner is invoked as `<cmd...>` with {app_dir} and {base_url} substituted, and prints ONE JSON object {\"agent\":id,\"ok\":bool,\"findings\":[{\"severity\":\"critical|high|medium|low\",\"title\":..,\"detail\":..,\"location\":..}],\"summary\":..} (also accepts {ok,defects:[str]}). exit 0 regardless. A blocking agent whose script does not exist yet is reported as advisory 'not implemented', never a hard fail — so agents roll out incrementally.",
+  "agents": [
+    { "id": "ui-visual", "title": "UI & visual validation (every view/form, desktop+mobile)",
+      "kind": "dynamic", "gate": "blocking", "block_severity": "low", "enabled": true,
+      "cmd": ["python3", "scripts/orch/app_verify.py", "{app_dir}"] },
+
+    { "id": "accessibility", "title": "Accessibility — WCAG barriers, every view",
+      "kind": "dynamic", "gate": "blocking", "block_severity": "low", "enabled": true,
+      "cmd": ["node", "scripts/orch/test_agents/accessibility.mjs", "{base_url}", "{app_dir}"] },
+
+    { "id": "duplicate-components", "title": "Duplicate code / UI-component reuse enforcement",
+      "kind": "static", "gate": "blocking", "block_severity": "low", "enabled": true,
+      "cmd": ["python3", "scripts/orch/test_agents/dup_components.py", "{app_dir}"] },
+
+    { "id": "security-pentest", "title": "Security & pen-test — OWASP / injection / authz",
+      "kind": "static", "gate": "blocking", "block_severity": "low", "enabled": true,
+      "cmd": ["python3", "scripts/orch/test_agents/security_scan.py", "{app_dir}"] },
+
+    { "id": "functional", "title": "Functional / requirements-coverage traceability",
+      "kind": "static", "gate": "blocking", "block_severity": "critical", "enabled": true,
+      "cmd": ["python3", "scripts/orch/test_agents/functional_coverage.py", "{app_dir}"] },
+
+    { "id": "e2e", "title": "End-to-end user journeys",
+      "kind": "llm", "gate": "blocking", "block_severity": "medium", "enabled": false,
+      "cmd": ["python3", "scripts/orch/test_agents/llm_agent.py", "e2e", "{app_dir}", "{base_url}"] },
+
+    { "id": "integration", "title": "Integration testing — modules + API + storage",
+      "kind": "llm", "gate": "blocking", "block_severity": "medium", "enabled": false,
+      "cmd": ["python3", "scripts/orch/test_agents/llm_agent.py", "integration", "{app_dir}", "{base_url}"] },
+
+    { "id": "black-box", "title": "Black-box — contract/boundary/fuzz via API+UI only",
+      "kind": "llm", "gate": "blocking", "block_severity": "medium", "enabled": false,
+      "cmd": ["python3", "scripts/orch/test_agents/llm_agent.py", "black-box", "{app_dir}", "{base_url}"] },
+
+    { "id": "white-box", "title": "White-box — branch/path coverage with code knowledge",
+      "kind": "llm", "gate": "advisory", "block_severity": "high", "enabled": false,
+      "cmd": ["python3", "scripts/orch/test_agents/llm_agent.py", "white-box", "{app_dir}", "{base_url}"] }
+  ]
+}

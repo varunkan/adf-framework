@@ -16,7 +16,7 @@ Standalone products (e.g. URL shortener, new services) may live outside `lib/` w
 4. `specs/<feature-id>/spec.md` (what / why)  
 5. `specs/<feature-id>/plan.md` (how)  
 6. `specs/<feature-id>/tasks.md`, `task-graph.yaml`, `tasks/*.md` (DAG + micro-tasks)  
-7. `.cursor/orchestration/features/<id>/04-test-plan.md`, `05-test-cases.md`, `06-traceability-matrix.md`  
+7. `.adf/orchestration/features/<id>/04-test-plan.md`, `05-test-cases.md`, `06-traceability-matrix.md`  
 8. Production code under declared `source_paths` (default `lib/` for POS)  
 9. Tests under `testcases/` (POS) or paths declared in spec
 
@@ -61,7 +61,7 @@ Phase 8 requires **all** machine gates PASS.
 
 | Track | When | Notes |
 |-------|------|-------|
-| **S** | Bug fix, ≤1 file | Light phases 1,2,5; bundle approval 1–2 optional |
+| **S** | Bug fix, ≤1 file (auto-detected) | Light phases 1,2,5; bundle approval 1–2 optional. Gates auto-scope to the changed file + its blast radius — repo-wide L100 is waived (you still owe 100% on what you touched). See [MICRO_CHANGES.md](MICRO_CHANGES.md). |
 | **M** | Normal feature | Full pipeline |
 | **L/XL** | Cross-cutting | Full; never skip BMAD review on phases 7, 9 |
 

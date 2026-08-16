@@ -3,8 +3,8 @@
 set -euo pipefail
 
 FEATURE_ID="${1:?Usage: validate_traceability.sh <feature-id>}"
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-FEAT_DIR="$ROOT/.cursor/orchestration/features/$FEATURE_ID"
+ROOT="${ORCH_REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+FEAT_DIR="$ROOT/.adf/orchestration/features/$FEATURE_ID"
 STATE_FILE="$FEAT_DIR/state.json"
 MATRIX="$FEAT_DIR/06-traceability-matrix.md"
 

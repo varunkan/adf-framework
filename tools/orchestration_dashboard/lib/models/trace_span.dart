@@ -1,3 +1,5 @@
+import '../utils/tool_narration.dart';
+
 /// OTEL-shaped span from orchestration telemetry ingest.
 class TraceSpan {
   TraceSpan({
@@ -32,7 +34,102 @@ class TraceSpan {
   String? get toolOutput => attributes['tool.output'] as String?;
   String? get runnerMessage => attributes['runner.message'] as String?;
 
+  /// Canonical human-readable message attribute written by `TraceWriter`
+  /// (`message:` → `orch.message`), e.g. the crew's "Wave 1: …" narration.
+  String? get orchMessage => attributes['orch.message'] as String?;
+
   bool get isRunnerControlEvent => name.startsWith('runner.');
+
+  // --- typed runner-event accessors (Layer 4) -------------------------------
+  // Bind the live UI to the runner's STRUCTURED truth, never a string match.
+
+  /// The runner event subtype, e.g. 'verify_stage_result' from
+  /// 'runner.verify_stage_result'. Null for non-runner spans.
+  String? get runnerType =>
+      isRunnerControlEvent ? name.substring('runner.'.length) : null;
+
+  /// The runner's real ok flag for a verdict event; null when absent/not a verdict.
+  bool? get runnerOk =>
+      attributes['runner.ok'] is bool ? attributes['runner.ok'] as bool : null;
+
+  String? get runnerStage => attributes['runner.stage'] as String?;
+  String? get runnerSeal => attributes['runner.seal'] as String?;
+  String? get runnerPath => attributes['runner.path'] as String?;
+
+  /// Typed kind for the Studio's live cards/pills. Additive — distinct from the
+  /// legacy [displayKind] (kept intact for existing views). HONESTY: verdict kinds
+  /// bind to [runnerOk] — a result is VERIFY_OK / POLICY_OK / DONE_OK only when
+  /// runnerOk == true, so a missing or false flag can NEVER render as positive
+  /// (green / sealed). A `sealed` span (SEAL) is only ever emitted by the runner
+  /// after a real seal, and is never reachable on a policy-blocked build.
+  String get cardKind {
+    if (name == 'file.write') return 'FILE_WRITE';
+    final t = runnerType;
+    if (t == null) return displayKind;
+    switch (t) {
+      case 'verifying':
+      case 'verify_stage':
+        return 'VERIFY_RUN';
+      case 'verify_stage_result':
+      case 'verify_result':
+        return runnerOk == true ? 'VERIFY_OK' : 'VERIFY_FAIL';
+      case 'policy_gate':
+        return runnerOk == true ? 'POLICY_OK' : 'POLICY_WARN';
+      case 'policy_blocked':
+        return 'BLOCKED';
+      case 'sealing':
+        return 'SEALING';
+      case 'sealed':
+        return 'SEAL';
+      case 'generating':
+      case 'generated':
+      case 'generating_progress': // throttled heartbeat during generation (D2)
+        return 'GENERATE';
+      case 'scaffolding':
+      case 'scaffolded':
+        return 'SCAFFOLD';
+      case 'warming_deps':
+      case 'deps_warm':
+        return 'DEPS';
+      case 'self_heal':
+        return 'HEAL';
+      case 'completion_audit':
+        return 'AUDIT';
+      case 'build_complete':
+        return runnerOk == true ? 'DONE_OK' : 'DONE_FAIL';
+      case 'building_apk':
+      case 'emulator_preview':
+        return 'MOBILE_RUN';
+      case 'apk_built':
+      case 'emulator_running':
+        return 'MOBILE_OK';
+      case 'apk_failed':
+        return 'MOBILE_FAIL';
+      case 'tdd_red_check':
+        return 'PROCESS_RUN';
+      case 'tdd_red':
+        // HONESTY: green only on a REAL red baseline (tests fail with no impl);
+        // a vacuous suite (ok != true) is a warning, never a positive card.
+        return runnerOk == true ? 'PROCESS_OK' : 'PROCESS_WARN';
+      case 'process_blocked':
+        return 'BLOCKED';
+      case 'feature_resolved':
+      case 'planning':
+      case 'reading_files':
+      case 'files_read':
+      case 'writing_files':
+      case 'files_written':
+      case 'recall_injected':
+      case 'component_manifest':
+      case 'build_summary': // result-event NL summary ("wrote N files")
+      case 'stdout': // re-routed runner stdout (tracebacks/install logs)
+        return 'STEP';
+      default:
+        // Unknown runner control event (e.g. runner.superseded / cancel) — HIDDEN,
+        // matching what the prose formatter already filters out. Never shown.
+        return 'HIDDEN';
+    }
+  }
 
   String get displayKind {
     if (reasoning != null && reasoning!.isNotEmpty) return 'REASONING';
@@ -48,18 +145,16 @@ class TraceSpan {
   String get body {
     if (reasoning != null && reasoning!.isNotEmpty) return reasoning!;
     if (response != null && response!.isNotEmpty) return response!;
-    if (toolName != null) {
-      final buf = StringBuffer('Tool: $toolName');
-      if (toolInput != null && toolInput!.isNotEmpty) {
-        buf.writeln('\nInput: ${toolInput!.length > 500 ? '${toolInput!.substring(0, 500)}…' : toolInput}');
-      }
-      if (toolOutput != null && toolOutput!.isNotEmpty) {
-        buf.writeln('Output: ${toolOutput!.length > 500 ? '${toolOutput!.substring(0, 500)}…' : toolOutput}');
-      }
-      return buf.toString();
-    }
+    // A tool call reads as a Cursor-style sentence ("Reading lib/db.dart",
+    // "$ npm install"), NOT raw "Tool: …\nInput: {json}". The raw tool JSON is
+    // intentionally not surfaced (it was the "machine output" complaint); a
+    // power-user "show details" disclosure would be a separate, opt-in feature.
+    if (toolName != null) return ToolNarration.humanize(toolName, toolInput);
     if (runnerMessage != null && runnerMessage!.trim().isNotEmpty) {
       return runnerMessage!.trim();
+    }
+    if (orchMessage != null && orchMessage!.trim().isNotEmpty) {
+      return orchMessage!.trim();
     }
     return name;
   }

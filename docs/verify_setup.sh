@@ -16,7 +16,7 @@ command -v flutter >/dev/null && ok "flutter" || fail "flutter not found"
 command -v curl >/dev/null && ok "curl" || fail "curl not found"
 [[ -x scripts/orch/seed_adf_artifacts.sh ]] && ok "scripts/orch executable" || fail "chmod +x scripts/orch/*.sh"
 
-[[ -f .cursor/orchestration/framework-routing.yaml ]] && ok "framework-routing.yaml" || fail "missing routing"
+[[ -f .adf/orchestration/framework-routing.yaml ]] && ok "framework-routing.yaml" || fail "missing routing"
 [[ -f tools/orchestration_server/bin/server.dart ]] && ok "orchestration_server" || fail "missing server"
 [[ -d tools/orchestration_dashboard/lib ]] && ok "orchestration_dashboard" || fail "missing dashboard"
 [[ -f .cursor/skills/orch-orchestrator/SKILL.md ]] && ok "orch-orchestrator skill" || fail "missing orchestrator skill"

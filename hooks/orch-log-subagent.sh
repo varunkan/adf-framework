@@ -3,7 +3,7 @@
 set +e
 
 INPUT=$(cat)
-FEATURE_DIR_ROOT=".cursor/orchestration/features"
+FEATURE_DIR_ROOT=".adf/orchestration/features"
 
 # Best-effort: find feature with status active and awaiting work
 FEATURE_ID=""
@@ -25,12 +25,13 @@ if [[ -n "$FEATURE_ID" ]]; then
   printf '%s\n' "$INPUT" >> "$LOG"
 fi
 
-#region agent log
-DEBUG_LOG="$(cd "$(dirname "$0")/../.." && pwd)/.cursor/debug-e6daa9.log"
-printf '{"sessionId":"e6daa9","runId":"pre-fix","hypothesisId":"D","location":"orch-log-subagent.sh:exit","message":"subagent hook stdout","data":{"feature_id":"%s","response":"{\"permission\":\"allow\"}"},"timestamp":%s}\n' \
-  "$FEATURE_ID" "$(python3 -c 'import time; print(int(time.time()*1000))' 2>/dev/null || date +%s000)" \
-  >> "$DEBUG_LOG" 2>/dev/null || true
-#endregion
+# Telemetry hook: do not auto-approve subagent execution unless the user has
+# opted into unattended mode (see orch-otel-ingest.sh). Default {} = let Cursor
+# prompt as usual.
+RESPONSE='{}'
+case "${ADF_HOOK_AUTO_APPROVE:-0}" in
+  1|true|yes|on) RESPONSE='{"permission":"allow"}' ;;
+esac
 
-printf '%s\n' '{"permission":"allow"}'
+printf '%s\n' "$RESPONSE"
 exit 0

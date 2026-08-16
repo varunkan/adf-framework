@@ -73,7 +73,7 @@ class PipelinePlanner {
                 Directory('${store.repoRoot}/$specDir').existsSync()
             ? 'done'
             : (currentPhase == 0 ? 'pending' : 'skipped'),
-        cursorCommand: '# Run: ./scripts/orch/sync_speckit_feature.sh $featureId',
+        runHint: 'Sync Spec Kit feature dir for $featureId',
         artifacts: _existing(['$specDir']),
       ),
     ];
@@ -127,8 +127,7 @@ class PipelinePlanner {
           kind: 'builder',
           label: 'Build: $skill',
           status: optional && !done && p < currentPhase ? 'skipped' : status,
-          cursorCommand:
-              '@orch-orchestrator resume $featureId\n# Builder: $skill phase $p',
+          runHint: 'Run builder "$skill" for phase $p',
           artifacts: _phaseArtifacts(featureId, p, phaseDef, specDir),
           optional: optional,
         ));
@@ -156,8 +155,8 @@ class PipelinePlanner {
           kind: 'review',
           label: 'BMAD review panel (${reviewers.length} reviewers)',
           status: status,
-          cursorCommand:
-              '@orch-orchestrator resume $featureId\n# Reviews: ${reviewers.map((r) => r['skill']).join(', ')}',
+          runHint:
+              'Run BMAD review panel: ${reviewers.map((r) => r['skill']).join(', ')}',
           artifacts: verdictFile
               ? [store.paths.featureRel(featureId, 'judge-verdicts/phase-$p.md')]
               : [],
@@ -183,7 +182,7 @@ class PipelinePlanner {
             kind: 'machine_gate',
             label: 'Gate: $script',
             status: status,
-            cursorCommand: './scripts/orch/$script $featureId',
+            runHint: 'Run quality gate script "$script" for $featureId',
             artifacts: store.artifactExists(
                     store.paths.featureRel(featureId, '07-verification-report.md'))
                 ? [
@@ -212,9 +211,9 @@ class PipelinePlanner {
         kind: 'approval',
         label: 'User approval (gate: $gateKey)',
         status: approvalStatus,
-        cursorCommand: awaiting
-            ? '@orch-orchestrator sync $featureId'
-            : '@orch-orchestrator resume $featureId',
+        runHint: awaiting
+            ? 'Awaiting user approval (gate: $gateKey)'
+            : 'Resume pipeline for $featureId',
         artifacts: [],
       ));
 
@@ -281,7 +280,7 @@ class PipelinePlanner {
     required String kind,
     required String label,
     required String status,
-    required String cursorCommand,
+    required String runHint,
     required List<String> artifacts,
     bool optional = false,
   }) {
@@ -290,7 +289,9 @@ class PipelinePlanner {
       'kind': kind,
       'label': label,
       'status': status,
-      'cursor_command': cursorCommand,
+      // JSON key kept stable for the dashboard reader; value is a neutral,
+      // runner-agnostic run hint (no orchestrator command spam).
+      'run_hint': runHint,
       'artifacts': artifacts,
       if (optional) 'optional': true,
     };

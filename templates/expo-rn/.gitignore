@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.expo/
+web-build/
+.adf-visual/
+.adf-logs/
+*.log
+*.db

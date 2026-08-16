@@ -2,7 +2,7 @@
 schema: 1
 ides:
   cursor:
-    orchestration: .cursor/orchestration
+    orchestration: .adf/orchestration
     skills: .cursor/skills
     hooks: .cursor/hooks
     hooks_manifest: .cursor/hooks.json

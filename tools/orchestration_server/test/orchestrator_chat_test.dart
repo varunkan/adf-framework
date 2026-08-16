@@ -9,10 +9,14 @@ void main() {
   late FeatureStore store;
   late OrchestratorChatProcessor processor;
 
+  // Hermetic: no API keys and an unreachable Ollama port so no tier can
+  // accidentally pick up a model running on the dev machine.
+  const hermeticEnv = {'ORCH_OLLAMA_HOST': 'http://127.0.0.1:9'};
+
   setUp(() {
     tmp = Directory.systemTemp.createTempSync('orch_chat_test_');
     store = FeatureStore(tmp.path);
-    processor = OrchestratorChatProcessor(store);
+    processor = OrchestratorChatProcessor(store, env: hermeticEnv);
     store.createFeature(
       id: 'feature2',
       requirement: 'Auth login feature',
@@ -28,6 +32,7 @@ void main() {
     final r = await processor.process(
       'feature2',
       '@orch-orchestrator sync feature2',
+      mode: ChatProcessMode.httpOnly,
     );
     expect(r.source, 'direct');
     expect(r.orchestratorCommand, contains('@orch-orchestrator sync'));
@@ -38,6 +43,7 @@ void main() {
     final r = await processor.process(
       'feature2',
       'Please add OAuth login and proceed to planning',
+      mode: ChatProcessMode.httpOnly,
     );
     expect(r.assistantReply, isNotEmpty);
     expect(r.orchestratorCommand, startsWith('@orch-orchestrator'));
@@ -49,19 +55,33 @@ void main() {
     final r = await processor.process(
       'feature2',
       'looks good, please sync and approve',
+      mode: ChatProcessMode.httpOnly,
     );
     expect(r.orchestratorCommand, contains('sync'));
   });
 
-  test('answers URL questions without static routing boilerplate', () async {
+  test('URL questions avoid static templates by default', () async {
     final r = await processor.process(
       'feature2',
       'what is the url for feature 2?',
+      mode: ChatProcessMode.httpOnly,
+    );
+    expect(r.source, isNot('context'));
+    expect(r.shouldRunAgent, isFalse);
+  });
+
+  test('static context answers URLs when forced', () async {
+    final staticProc = OrchestratorChatProcessor(
+      store,
+      forceStaticContext: true,
+      env: hermeticEnv,
+    );
+    final r = await staticProc.process(
+      'feature2',
+      'what is the url for feature 2?',
+      mode: ChatProcessMode.httpOnly,
     );
     expect(r.source, 'context');
-    expect(r.action, OrchestratorAction.answerOnly);
-    expect(r.shouldRunAgent, isFalse);
     expect(r.assistantReply, contains('http://localhost:3847/features/feature2'));
-    expect(r.assistantReply, isNot(contains('Set ORCH_LLM_API_KEY')));
   });
 }

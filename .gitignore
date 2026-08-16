@@ -1,9 +1,15 @@
 # Dart / Flutter
 .dart_tool/
 build/
+coverage/
 *.iml
 .packages
 .pub-cache/
+
+# Local machine config / secrets (never commit)
+.env
+.env.*.local
+.env.groq.local
 
 # ADF runtime (local)
 orchestration/otel-traces.jsonl
@@ -11,6 +17,16 @@ orchestration/otel-session.json
 orchestration/features/**/commands.jsonl
 orchestration/features/**/run-log.jsonl
 orchestration/features/**/otel-traces.jsonl
+# Generated when the server/studio/tests run against the framework repo itself:
+# orchestration runtime state, spec-kit state, and per-feature spec output.
+.adf/orchestration/*
+!.adf/orchestration/framework-routing.yaml
+!.adf/orchestration/README.md
+!.adf/orchestration/features/
+.adf/orchestration/features/*
+!.adf/orchestration/features/.gitkeep
+.specify/
+specs/
 
 # OS / IDE
 .DS_Store
@@ -20,3 +36,47 @@ orchestration/features/**/otel-traces.jsonl
 
 # Release build output (optional local)
 dist/
+
+# headroom integration (local venv — Python 3.13, litellm needs <3.14)
+.venv-headroom/
+
+# python bytecode
+__pycache__/
+*.pyc
+
+# app runtime data
+apps/*/expenses.json
+apps/*/*.db
+# Added by code-review-graph
+.code-review-graph/
+
+# Bench/export run artifacts (not source)
+.adf-bench-workspace/
+.adf-exports/
+
+# ADF signing keys — NEVER commit the private seed (provenance signing)
+.adf-keys/
+*.adf-signing.key
+adf-signing.key
+
+# local API keys for ADF (never commit)
+.adf/secrets.env
+
+# ADF visual-validation screenshots (evidence, regenerated each run)
+apps/*/.adf-visual/
+
+# ADF runner per-app working context (compaction snapshots, not source)
+apps/*/.adf-context/
+.tokensave
+
+# runtime state that generated apps write while running (never source)
+/control_plane.db
+/submissions.db
+apps/*/err.log
+apps/*/srv.log
+apps/*/.coverage
+apps/*/history.json
+apps/*/memory.json
+apps/*/data.json
+apps/*/urls.json
+apps/expense-tracker-expense-amount/expenses_corrupt_test.json

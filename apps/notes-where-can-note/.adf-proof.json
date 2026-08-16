@@ -1,0 +1,56 @@
+{
+  "build": {
+    "backend": "auto",
+    "model": null,
+    "prompt": "@orch-orchestrator resume notes-where-can-note\n# Builder: speckit-implement phase 1",
+    "verified": true,
+    "verify_summary": "....\n----------------------------------------------------------------------\nRan 4 tests in 2.029s\n\nOK\n\nboot check: server.py serves on :59084"
+  },
+  "created_at": "2026-06-17T05:12:54+00:00",
+  "feature_id": "notes-where-can-note",
+  "files": [
+    {
+      "bytes": 1106,
+      "path": "README.md",
+      "sha256": "d7f7132956fbbb3b4fcf91e9204df8fe1b0ef28fb57ec7b57c6c4e38fcb2d961"
+    },
+    {
+      "bytes": 4067,
+      "path": "index.html",
+      "sha256": "384304c484a0335ca2795e58780a331a858a1d687662ede7da648ee8195ffa57"
+    },
+    {
+      "bytes": 3382,
+      "path": "server.py",
+      "sha256": "7f05abe22796b8622ca2f3a8f2a857a637c9087fc62218542e4b9e18140faabc"
+    },
+    {
+      "bytes": 2855,
+      "path": "test_app.py",
+      "sha256": "ded6113c74d7324749c1f3b7a68fa52f79d6000819e888d51d707a644b8f4d08"
+    }
+  ],
+  "merkle_root": "e910d769b92f227282d63783f8184581931b940ac54598468f2d6b9bbda866c4",
+  "schema": "adf-proof/1",
+  "seal": "adf1:e910d769b92f",
+  "spec_sha256": "887e08050c8a5ed73585fdf032ffa4ad4b8ed8af6a17606b39f26e0efc3284d9",
+  "stack": "stdlib",
+  "verdict": {
+    "policy": {
+      "checked": true,
+      "n_violations": 0,
+      "ok": true,
+      "policy_id": "adf-default-secure",
+      "rules": [
+        "dependency_allowlist:pass",
+        "no_network_egress:pass",
+        "no_plaintext_pii:pass",
+        "no_secrets:pass",
+        "offline_capable:pass"
+      ]
+    },
+    "stack": "stdlib",
+    "verified": true,
+    "verify_summary": "....\n----------------------------------------------------------------------\nRan 4 tests in 2.029s\n\nOK\n\nboot check: server.py serves on :59084"
+  }
+}

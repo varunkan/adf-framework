@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Notes</title>
+<style>
+  * { box-sizing: border-box; }
+  .sr-only {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap; border: 0;
+  }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: linear-gradient(135deg, #f0f4ff 0%, #f7f0ff 100%);
+    color: #1f2937;
+    min-height: 100vh;
+  }
+  .container {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 32px 20px 60px;
+  }
+  h1 {
+    font-size: 28px;
+    font-weight: 700;
+    margin: 0 0 8px;
+    color: #4338ca;
+  }
+  #stats {
+    font-size: 13px;
+    color: #6b7280;
+    margin-bottom: 20px;
+    min-height: 18px;
+  }
+  .composer {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background: #fff;
+    padding: 14px;
+    border-radius: 14px;
+    box-shadow: 0 4px 20px rgba(67,56,202,0.08);
+    margin-bottom: 20px;
+  }
+  .composer-row { display: flex; gap: 10px; }
+  textarea {
+    flex: 1;
+    resize: vertical;
+    min-height: 48px;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 12px;
+    font-size: 15px;
+    font-family: inherit;
+    outline: none;
+  }
+  textarea:focus { border-color: #6366f1; }
+  .tag-input {
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+  }
+  .tag-input:focus { border-color: #6366f1; }
+  button {
+    background: #4f46e5;
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 0 20px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s;
+  }
+  button:hover { background: #4338ca; }
+  button:disabled { background: #a5b4fc; cursor: not-allowed; }
+  #error {
+    color: #dc2626;
+    font-size: 14px;
+    margin-bottom: 16px;
+    min-height: 18px;
+  }
+  .toolbar {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+  }
+  .search {
+    flex: 1;
+    min-width: 160px;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 12px;
+    font-size: 15px;
+    font-family: inherit;
+    outline: none;
+    background: #fff;
+  }
+  .search:focus { border-color: #6366f1; }
+  select.view {
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 11px 10px;
+    font-size: 14px;
+    font-family: inherit;
+    background: #fff;
+    outline: none;
+  }
+  .btn-secondary {
+    background: #eef2ff;
+    color: #4338ca;
+    padding: 11px 14px;
+    font-size: 14px;
+  }
+  .btn-secondary:hover { background: #e0e7ff; }
+  #tagFilters {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 18px;
+  }
+  .tag-chip {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    color: #4b5563;
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .tag-chip.active { background: #4f46e5; color: #fff; border-color: #4f46e5; }
+  ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 12px; }
+  li {
+    background: #fff;
+    padding: 16px;
+    border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    font-size: 15px;
+    line-height: 1.5;
+  }
+  li.pinned { border-left: 4px solid #f59e0b; }
+  li.archived { opacity: .65; }
+  /* Color accent labels — a subtle card tint that stays readable. */
+  li.c-red { background: #fef2f2; }
+  li.c-orange { background: #fff7ed; }
+  li.c-yellow { background: #fefce8; }
+  li.c-green { background: #f0fdf4; }
+  li.c-blue { background: #eff6ff; }
+  li.c-purple { background: #faf5ff; }
+  li.c-pink { background: #fdf2f8; }
+  .color-select {
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-family: inherit;
+    background: #fff;
+    outline: none;
+  }
+  .color-select:focus { border-color: #6366f1; }
+  .edit-color { margin-top: 8px; }
+  .btn-rename { background: #8b5cf6; }
+  .btn-rename:hover { background: #7c3aed; }
+  .tag-chip-row { display: flex; align-items: center; gap: 2px; }
+  .note-text {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .note-tags { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .note-tag {
+    background: #eef2ff;
+    color: #4338ca;
+    border-radius: 999px;
+    padding: 2px 10px;
+    font-size: 11px;
+  }
+  .note-meta {
+    margin-top: 6px;
+    font-size: 12px;
+    color: #9ca3af;
+  }
+  .note-actions {
+    margin-top: 10px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .note-actions button {
+    padding: 4px 12px;
+    font-size: 13px;
+    border-radius: 8px;
+  }
+  .btn-edit { background: #6366f1; }
+  .btn-delete { background: #dc2626; }
+  .btn-delete:hover { background: #b91c1c; }
+  .btn-cancel { background: #9ca3af; }
+  .btn-cancel:hover { background: #6b7280; }
+  .btn-pin { background: #f59e0b; }
+  .btn-pin:hover { background: #d97706; }
+  .btn-archive { background: #0ea5e9; }
+  .btn-archive:hover { background: #0284c7; }
+  .btn-dup { background: #10b981; }
+  .btn-dup:hover { background: #059669; }
+  .edit-area, .edit-tags {
+    width: 100%;
+    border: 1px solid #6366f1;
+    border-radius: 10px;
+    padding: 10px;
+    font-size: 15px;
+    font-family: inherit;
+    outline: none;
+  }
+  .edit-area { resize: vertical; min-height: 48px; }
+  .edit-tags { margin-top: 8px; font-size: 14px; }
+  .empty {
+    text-align: center;
+    color: #9ca3af;
+    padding: 40px 0;
+    font-size: 15px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>📝 Notes</h1>
+  <div id="stats" aria-live="polite"></div>
+  <div class="composer">
+    <div class="composer-row">
+      <label for="noteInput" class="sr-only">Write a note</label>
+      <textarea id="noteInput" placeholder="Write a note..." aria-label="Write a note"></textarea>
+      <button id="addBtn" type="button">Add</button>
+    </div>
+    <div class="composer-row">
+      <label for="tagInput" class="sr-only">Tags (comma separated)</label>
+      <input id="tagInput" class="tag-input" type="text" style="flex:1"
+             placeholder="Tags (comma separated, optional)" aria-label="Tags, comma separated" />
+      <label for="colorSelect" class="sr-only">Note color</label>
+      <select id="colorSelect" class="color-select" aria-label="Note color"></select>
+    </div>
+  </div>
+  <div class="toolbar">
+    <label for="search" class="sr-only">Search notes</label>
+    <input id="search" class="search" type="text" placeholder="Search notes..." aria-label="Search notes" />
+    <label for="viewSelect" class="sr-only">Filter by archived state</label>
+    <select id="viewSelect" class="view" aria-label="Filter by archived state">
+      <option value="active">Active</option>
+      <option value="all">All</option>
+      <option value="only">Archived</option>
+    </select>
+    <button id="exportBtn" type="button" class="btn-secondary">Export</button>
+    <button id="importBtn" type="button" class="btn-secondary">Import</button>
+    <input id="importFile" type="file" accept="application/json,.json"
+           class="sr-only" aria-hidden="true" tabindex="-1" />
+  </div>
+  <div id="tagFilters" aria-label="Filter by tag"></div>
+  <div id="error" role="alert" aria-live="assertive"></div>
+  <ul id="list" aria-label="Notes"></ul>
+</div>
+<script>
+  const input = document.getElementById('noteInput');
+  const tagInput = document.getElementById('tagInput');
+  const addBtn = document.getElementById('addBtn');
+  const exportBtn = document.getElementById('exportBtn');
+  const importBtn = document.getElementById('importBtn');
+  const importFile = document.getElementById('importFile');
+  const colorSelect = document.getElementById('colorSelect');
+  const list = document.getElementById('list');
+  const errorEl = document.getElementById('error');
+  const search = document.getElementById('search');
+  const viewSelect = document.getElementById('viewSelect');
+  const statsEl = document.getElementById('stats');
+  const tagFilters = document.getElementById('tagFilters');
+
+  let activeTag = null;  // currently selected tag filter, or null for none
+  let palette = ['default'];  // populated from /api/colors
+
+  function showError(msg) { errorEl.textContent = msg || ''; }
+
+  function colorClass(color) {
+    return (color && color !== 'default') ? 'c-' + color : '';
+  }
+
+  // Build a <select> of available colors, optionally preselecting one.
+  function makeColorSelect(selected) {
+    const sel = document.createElement('select');
+    sel.className = 'color-select edit-color';
+    sel.setAttribute('aria-label', 'Note color');
+    palette.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c;
+      opt.textContent = c === 'default' ? 'No color' : c;
+      if (c === (selected || 'default')) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    return sel;
+  }
+
+  async function loadColors() {
+    try {
+      const res = await fetch('/api/colors');
+      const data = await res.json();
+      if (Array.isArray(data.colors) && data.colors.length) palette = data.colors;
+    } catch (e) { /* fall back to ['default'] */ }
+    colorSelect.innerHTML = '';
+    palette.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c;
+      opt.textContent = c === 'default' ? 'No color' : c;
+      colorSelect.appendChild(opt);
+    });
+  }
+
+  // Single source of truth for action buttons (avoids duplicated create-set-listen code).
+  function makeButton(label, className, onClick, ariaLabel) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = label;
+    if (className) btn.className = className;
+    if (ariaLabel) btn.setAttribute('aria-label', ariaLabel);
+    btn.addEventListener('click', onClick);
+    return btn;
+  }
+
+  function parseTags(raw) {
+    return (raw || '')
+      .split(',')
+      .map(t => t.trim())
+      .filter(Boolean);
+  }
+
+  function snippet(text) {
+    const t = (text || '').trim().replace(/\s+/g, ' ');
+    return t.length > 24 ? t.slice(0, 24) + '…' : t;
+  }
+
+  function fmtDate(ts) {
+    if (!ts) return '';
+    try { return new Date(ts * 1000).toLocaleString(); } catch (e) { return ''; }
+  }
+
+  function render(notes) {
+    list.innerHTML = '';
+    if (!notes.length) {
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = (search.value.trim() || activeTag)
+        ? 'No notes match your filters.'
+        : 'No notes yet. Add your first one!';
+      list.appendChild(empty);
+      return;
+    }
+    // Server already sorts (pinned first, newest first); honor that order.
+    notes.forEach(n => {
+      const li = document.createElement('li');
+      li.dataset.id = n.id;
+      if (n.pinned) li.classList.add('pinned');
+      if (n.archived) li.classList.add('archived');
+      const cc = colorClass(n.color);
+      if (cc) li.classList.add(cc);
+
+      const textEl = document.createElement('div');
+      textEl.className = 'note-text';
+      textEl.textContent = (n.pinned ? '📌 ' : '') + n.text;
+      li.appendChild(textEl);
+
+      const tags = Array.isArray(n.tags) ? n.tags : [];
+      if (tags.length) {
+        const tagWrap = document.createElement('div');
+        tagWrap.className = 'note-tags';
+        tags.forEach(t => {
+          const chip = document.createElement('span');
+          chip.className = 'note-tag';
+          chip.textContent = '#' + t;
+          tagWrap.appendChild(chip);
+        });
+        li.appendChild(tagWrap);
+      }
+
+      const edited = n.updated_at && n.created_at && n.updated_at !== n.created_at;
+      const meta = document.createElement('div');
+      meta.className = 'note-meta';
+      meta.textContent = (edited ? 'edited ' : '') + fmtDate(n.updated_at || n.created_at);
+      li.appendChild(meta);
+
+      const actions = document.createElement('div');
+      actions.className = 'note-actions';
+      const label = snippet(n.text);
+      actions.appendChild(makeButton('Edit', 'btn-edit', () => startEdit(li, n),
+        'Edit note: ' + label));
+      actions.appendChild(makeButton(n.pinned ? 'Unpin' : 'Pin', 'btn-pin',
+        () => patchNote(n.id, { pinned: !n.pinned }),
+        (n.pinned ? 'Unpin' : 'Pin') + ' note: ' + label));
+      actions.appendChild(makeButton(n.archived ? 'Unarchive' : 'Archive', 'btn-archive',
+        () => patchNote(n.id, { archived: !n.archived }),
+        (n.archived ? 'Unarchive' : 'Archive') + ' note: ' + label));
+      actions.appendChild(makeButton('Duplicate', 'btn-dup', () => duplicateNote(n.id),
+        'Duplicate note: ' + label));
+      actions.appendChild(makeButton('Delete', 'btn-delete', () => deleteNote(n.id),
+        'Delete note: ' + label));
+
+      li.appendChild(actions);
+      list.appendChild(li);
+    });
+  }
+
+  function startEdit(li, n) {
+    li.innerHTML = '';
+    const area = document.createElement('textarea');
+    area.className = 'edit-area';
+    area.value = n.text;
+    area.setAttribute('aria-label', 'Edit note text');
+    li.appendChild(area);
+
+    const tagsField = document.createElement('input');
+    tagsField.className = 'edit-tags';
+    tagsField.type = 'text';
+    tagsField.placeholder = 'Tags (comma separated)';
+    tagsField.value = (Array.isArray(n.tags) ? n.tags : []).join(', ');
+    tagsField.setAttribute('aria-label', 'Edit note tags');
+    li.appendChild(tagsField);
+
+    const colorField = makeColorSelect(n.color);
+    li.appendChild(colorField);
+
+    const actions = document.createElement('div');
+    actions.className = 'note-actions';
+    actions.appendChild(makeButton('Save', 'btn-edit',
+      () => saveEdit(n.id, area.value, tagsField.value, colorField.value)));
+    actions.appendChild(makeButton('Cancel', 'btn-cancel', loadNotes));
+
+    li.appendChild(actions);
+    area.focus();
+  }
+
+  async function saveEdit(id, text, tagsRaw, color) {
+    text = text.trim();
+    showError('');
+    if (!text) { showError('Note text cannot be empty.'); return; }
+    await patchNote(id, { text, tags: parseTags(tagsRaw), color: color || 'default' });
+  }
+
+  // Shared PUT helper for any field change (text/tags/pinned/archived).
+  async function patchNote(id, fields) {
+    showError('');
+    try {
+      const res = await fetch('/api/notes/' + id, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fields)
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        showError(err.error || 'Failed to update note.');
+        return;
+      }
+      await loadNotes();
+    } catch (e) {
+      showError('Network error.');
+    }
+  }
+
+  async function duplicateNote(id) {
+    showError('');
+    try {
+      const res = await fetch('/api/notes/' + id + '/duplicate', { method: 'POST' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        showError(err.error || 'Failed to duplicate note.');
+        return;
+      }
+      await loadNotes();
+    } catch (e) {
+      showError('Network error.');
+    }
+  }
+
+  async function deleteNote(id) {
+    showError('');
+    try {
+      const res = await fetch('/api/notes/' + id, { method: 'DELETE' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        showError(err.error || 'Failed to delete note.');
+        return;
+      }
+      await loadNotes();
+    } catch (e) {
+      showError('Network error.');
+    }
+  }
+
+  async function loadStats() {
+    try {
+      const res = await fetch('/api/stats');
+      const s = await res.json();
+      statsEl.textContent =
+        `${s.total} notes · ${s.active} active · ${s.pinned} pinned · ` +
+        `${s.archived} archived · ${s.words} words`;
+    } catch (e) { /* stats are best-effort */ }
+  }
+
+  async function loadTags() {
+    try {
+      const res = await fetch('/api/tags');
+      const data = await res.json();
+      const tags = data.tags || [];
+      tagFilters.innerHTML = '';
+      if (!tags.length) return;
+      const all = document.createElement('span');
+      all.className = 'tag-chip' + (activeTag ? '' : ' active');
+      all.textContent = 'all';
+      all.addEventListener('click', () => { activeTag = null; refresh(); });
+      tagFilters.appendChild(all);
+      tags.forEach(t => {
+        const row = document.createElement('span');
+        row.className = 'tag-chip-row';
+        const chip = document.createElement('span');
+        chip.className = 'tag-chip' + (activeTag === t.tag ? ' active' : '');
+        chip.textContent = '#' + t.tag + ' (' + t.count + ')';
+        chip.addEventListener('click', () => {
+          activeTag = activeTag === t.tag ? null : t.tag;
+          refresh();
+        });
+        row.appendChild(chip);
+        row.appendChild(makeButton('✎', 'tag-chip btn-rename',
+          () => renameTag(t.tag), 'Rename tag ' + t.tag));
+        tagFilters.appendChild(row);
+      });
+    } catch (e) { /* tag chips are best-effort */ }
+  }
+
+  async function loadNotes() {
+    try {
+      const params = new URLSearchParams();
+      const q = search.value.trim();
+      if (q) params.set('q', q);
+      if (activeTag) params.set('tag', activeTag);
+      const view = viewSelect.value;
+      if (view && view !== 'active') params.set('archived', view);
+      const url = '/api/notes' + (params.toString() ? '?' + params.toString() : '');
+      const res = await fetch(url);
+      const data = await res.json();
+      render(data.notes || []);
+    } catch (e) {
+      showError('Failed to load notes.');
+    }
+  }
+
+  // Refresh the list plus the stats/tag widgets that depend on it.
+  async function refresh() {
+    await Promise.all([loadNotes(), loadStats(), loadTags()]);
+  }
+
+  let searchTimer = null;
+  search.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(loadNotes, 150);
+  });
+  viewSelect.addEventListener('change', loadNotes);
+  exportBtn.addEventListener('click', exportNotes);
+  importBtn.addEventListener('click', () => importFile.click());
+  importFile.addEventListener('change', importNotes);
+
+  // Rename (or, with an empty answer, delete) a tag across every note.
+  async function renameTag(oldTag) {
+    showError('');
+    const next = window.prompt(
+      'Rename tag "' + oldTag + '" to (leave blank to remove it):', oldTag);
+    if (next === null) return;  // user cancelled
+    try {
+      const res = await fetch('/api/tags/rename', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ old: oldTag, new: next })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        showError(err.error || 'Failed to rename tag.');
+        return;
+      }
+      if (activeTag === oldTag) activeTag = null;
+      await refresh();
+    } catch (e) {
+      showError('Network error.');
+    }
+  }
+
+  // Read a previously-exported JSON bundle and merge it into the collection.
+  async function importNotes(evt) {
+    showError('');
+    const file = evt.target.files && evt.target.files[0];
+    importFile.value = '';  // allow re-importing the same file later
+    if (!file) return;
+    try {
+      const text = await file.text();
+      let bundle;
+      try { bundle = JSON.parse(text); }
+      catch (e) { showError('Import file is not valid JSON.'); return; }
+      const res = await fetch('/api/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bundle)
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        showError(err.error || 'Failed to import notes.');
+        return;
+      }
+      await refresh();
+    } catch (e) {
+      showError('Failed to import notes.');
+    }
+  }
+
+  async function exportNotes() {
+    showError('');
+    try {
+      const res = await fetch('/api/export');
+      const data = await res.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)],
+        { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'notes-export.json';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+    } catch (e) {
+      showError('Failed to export notes.');
+    }
+  }
+
+  async function addNote() {
+    const text = input.value.trim();
+    showError('');
+    if (!text) {
+      showError('Please enter some text.');
+      return;
+    }
+    addBtn.disabled = true;
+    try {
+      const res = await fetch('/api/notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, tags: parseTags(tagInput.value),
+                               color: colorSelect.value || 'default' })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        showError(err.error || 'Failed to add note.');
+        return;
+      }
+      input.value = '';
+      tagInput.value = '';
+      colorSelect.value = 'default';
+      await refresh();
+    } catch (e) {
+      showError('Network error.');
+    } finally {
+      addBtn.disabled = false;
+    }
+  }
+
+  addBtn.addEventListener('click', addNote);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      addNote();
+    }
+  });
+
+  loadColors();
+  refresh();
+</script>
+</body>
+</html>

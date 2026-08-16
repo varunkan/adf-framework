@@ -1,5 +1,5 @@
 name: adf-framework
-version: 3.1.0
+version: 3.2.0
 description: Proof-Governed Agentic Development (ADF v3) — IDE-agnostic installable framework
 schema: 1
 components:
@@ -11,6 +11,7 @@ components:
     server: tools/orchestration_server/
     dashboard: tools/orchestration_dashboard/
     telemetry: tools/orchestration_telemetry/
+    mcp: tools/adf_mcp/
   docs: docs/
 supported_ides:
   - cursor

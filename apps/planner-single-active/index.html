@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>URL Shortener — planner-single-active</title>
+<style>
+  body { font-family: -apple-system, Arial, sans-serif; background: #0f172a; color: #e2e8f0; margin: 0; padding: 0; }
+  .wrap { max-width: 560px; margin: 60px auto; padding: 24px; background: #1e293b; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.4); }
+  h1 { font-size: 22px; margin-top: 0; }
+  p.sub { color: #94a3b8; margin-top: -8px; }
+  input[type=text] { width: 100%; box-sizing: border-box; padding: 12px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; font-size: 15px; }
+  button { margin-top: 12px; padding: 12px 18px; border: none; border-radius: 8px; background: #38bdf8; color: #06283d; font-weight: 600; font-size: 15px; cursor: pointer; }
+  button:hover { background: #7dd3fc; }
+  .result { margin-top: 20px; padding: 16px; border-radius: 8px; background: #0f172a; border: 1px solid #334155; display: none; }
+  .result a { color: #38bdf8; word-break: break-all; }
+  .copy { margin-left: 8px; font-size: 13px; padding: 6px 10px; background: #334155; }
+  .err { color: #f87171; margin-top: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>URL Shortener</h1>
+  <p class="sub">planner-single-active</p>
+  <input id="url" type="text" placeholder="https://example.com/some/long/path" />
+  <button id="go">Shorten</button>
+  <div class="err" id="err"></div>
+  <div class="result" id="result">
+    <div>Short URL:</div>
+    <a id="short" href="#" target="_blank"></a>
+    <button class="copy" id="copy">Copy</button>
+  </div>
+</div>
+<script>
+const urlInput = document.getElementById('url');
+const goBtn = document.getElementById('go');
+const result = document.getElementById('result');
+const shortA = document.getElementById('short');
+const errDiv = document.getElementById('err');
+const copyBtn = document.getElementById('copy');
+
+async function shorten() {
+  errDiv.textContent = '';
+  result.style.display = 'none';
+  const url = urlInput.value.trim();
+  if (!url) { errDiv.textContent = 'Please enter a URL.'; return; }
+  try {
+    const res = await fetch('/api/shorten', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      errDiv.textContent = data.error || ('Error ' + res.status);
+      return;
+    }
+    shortA.textContent = data.short_url;
+    shortA.href = data.short_url;
+    result.style.display = 'block';
+  } catch (e) {
+    errDiv.textContent = 'Network error: ' + e;
+  }
+}
+
+goBtn.addEventListener('click', shorten);
+urlInput.addEventListener('keydown', e => { if (e.key === 'Enter') shorten(); });
+copyBtn.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(shortA.textContent);
+    copyBtn.textContent = 'Copied!';
+    setTimeout(() => copyBtn.textContent = 'Copy', 1200);
+  } catch (e) {
+    copyBtn.textContent = 'Copy failed';
+  }
+});
+</script>
+</body>
+</html>

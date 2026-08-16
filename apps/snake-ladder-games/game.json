@@ -1,0 +1,80 @@
+{
+  "players": [
+    {
+      "name": "Amy",
+      "position": 3,
+      "rolls": 1,
+      "ladders_climbed": 0,
+      "snakes_bitten": 0
+    },
+    {
+      "name": "Bob",
+      "position": 0,
+      "rolls": 0,
+      "ladders_climbed": 0,
+      "snakes_bitten": 0
+    }
+  ],
+  "current": 1,
+  "current_player": "Bob",
+  "winner": null,
+  "finished": false,
+  "history": [
+    {
+      "from": 0,
+      "rolled": 3,
+      "after_dice": 3,
+      "to": 3,
+      "event": "move",
+      "won": false,
+      "player": "Amy",
+      "extra_turn": false,
+      "next_player": "Bob"
+    }
+  ],
+  "board": {
+    "ladders": {
+      "1": 38,
+      "4": 14,
+      "9": 31,
+      "21": 42,
+      "28": 84,
+      "36": 44,
+      "51": 67,
+      "71": 91,
+      "80": 100
+    },
+    "snakes": {
+      "16": 6,
+      "47": 26,
+      "49": 11,
+      "56": 53,
+      "62": 19,
+      "64": 60,
+      "87": 24,
+      "93": 73,
+      "95": 75,
+      "98": 78
+    },
+    "size": 100
+  },
+  "stats": {
+    "total_rolls": 1,
+    "moves": 1,
+    "ladders_climbed": 0,
+    "snakes_bitten": 0
+  },
+  "standings": [
+    {
+      "name": "Amy",
+      "position": 3,
+      "rank": 1
+    },
+    {
+      "name": "Bob",
+      "position": 0,
+      "rank": 2
+    }
+  ],
+  "can_undo": true
+}

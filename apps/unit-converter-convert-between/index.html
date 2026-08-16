@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Temperature Converter</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .card {
+    background: #1e293b;
+    border-radius: 16px;
+    padding: 32px;
+    width: 100%;
+    max-width: 420px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+  }
+  h1 { font-size: 1.4rem; margin: 0 0 4px; }
+  p.sub { margin: 0 0 24px; color: #94a3b8; font-size: 0.9rem; }
+  label { display: block; font-size: 0.85rem; margin-bottom: 6px; color: #cbd5e1; }
+  input, select {
+    width: 100%;
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid #334155;
+    background: #0f172a;
+    color: #e2e8f0;
+    font-size: 1rem;
+    margin-bottom: 16px;
+  }
+  button {
+    width: 100%;
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    background: #38bdf8;
+    color: #0f172a;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  button:hover { background: #0ea5e9; }
+  .result {
+    margin-top: 20px;
+    padding: 16px;
+    border-radius: 8px;
+    background: #0f172a;
+    border: 1px solid #334155;
+    min-height: 24px;
+    font-size: 1.1rem;
+    text-align: center;
+  }
+  .result.error { color: #f87171; border-color: #7f1d1d; }
+  .result .big { font-size: 1.6rem; font-weight: 700; color: #38bdf8; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Quick Convert</h1>
+    <p class="sub">Type it in plain English, e.g. <code>100 km to mi</code> or <code>98.6 f to c</code>.</p>
+
+    <label for="expression">Expression</label>
+    <input type="text" id="expression" placeholder="100 km to mi" />
+
+    <button id="parseBtn">Convert</button>
+
+    <div class="result" id="parseResult" role="status" aria-live="polite">Type an expression and click Convert.</div>
+
+    <hr style="border:none;border-top:1px solid #334155;margin:28px 0 24px;">
+
+    <h1>Temperature Converter</h1>
+    <p class="sub">Convert between Celsius and Fahrenheit.</p>
+
+    <label for="value">Value</label>
+    <input type="number" id="value" placeholder="e.g. 100" step="any" />
+
+    <label for="direction">Direction</label>
+    <select id="direction">
+      <option value="c2f">Celsius → Fahrenheit</option>
+      <option value="f2c">Fahrenheit → Celsius</option>
+      <option value="c2k">Celsius → Kelvin</option>
+      <option value="k2c">Kelvin → Celsius</option>
+      <option value="f2k">Fahrenheit → Kelvin</option>
+      <option value="k2f">Kelvin → Fahrenheit</option>
+    </select>
+
+    <button id="convertBtn">Convert</button>
+
+    <div class="result" id="result" role="status" aria-live="polite">Enter a value and click Convert.</div>
+
+    <hr style="border:none;border-top:1px solid #334155;margin:28px 0 24px;">
+
+    <h1>Unit Converter</h1>
+    <p class="sub">Convert length, mass, volume, area, speed, time, data, pressure, energy, angle, power, force, frequency, electrical (V/A/Ω), electromagnetic, and typography units.</p>
+
+    <label for="category">Category</label>
+    <select id="category">
+      <option value="length">Length</option>
+      <option value="mass">Mass</option>
+      <option value="volume">Volume</option>
+      <option value="area">Area</option>
+      <option value="speed">Speed</option>
+      <option value="time">Time</option>
+      <option value="data">Data</option>
+      <option value="pressure">Pressure</option>
+      <option value="energy">Energy</option>
+      <option value="angle">Angle</option>
+      <option value="power">Power</option>
+      <option value="force">Force</option>
+      <option value="frequency">Frequency</option>
+      <option value="illuminance">Illuminance</option>
+      <option value="bandwidth">Bandwidth</option>
+      <option value="torque">Torque</option>
+      <option value="acceleration">Acceleration</option>
+      <option value="density">Density</option>
+      <option value="flowrate">Flow rate</option>
+      <option value="charge">Electric charge</option>
+      <option value="pace">Pace</option>
+      <option value="voltage">Voltage</option>
+      <option value="current">Electric current</option>
+      <option value="resistance">Resistance</option>
+      <option value="capacitance">Capacitance</option>
+      <option value="inductance">Inductance</option>
+      <option value="magflux">Magnetic flux</option>
+      <option value="magfluxdensity">Magnetic flux density</option>
+      <option value="typography">Typography</option>
+    </select>
+
+    <label for="unitValue">Value</label>
+    <input type="number" id="unitValue" placeholder="e.g. 5" step="any" />
+
+    <label for="fromUnit">From</label>
+    <select id="fromUnit"></select>
+
+    <label for="toUnit">To</label>
+    <select id="toUnit"></select>
+
+    <button id="unitConvertBtn">Convert Units</button>
+
+    <div class="result" id="unitResult" role="status" aria-live="polite">Pick units and click Convert Units.</div>
+
+    <hr style="border:none;border-top:1px solid #334155;margin:28px 0 24px;">
+
+    <h1>Fuel Economy</h1>
+    <p class="sub">Convert between mpg, imperial mpg, km/L, and L/100km.</p>
+
+    <label for="fuelValue">Value</label>
+    <input type="number" id="fuelValue" placeholder="e.g. 30" step="any" />
+
+    <label for="fuelFrom">From</label>
+    <select id="fuelFrom">
+      <option value="mpg">mpg (US)</option>
+      <option value="mpgimp">mpg (imperial)</option>
+      <option value="kmpl">km/L</option>
+      <option value="l100km">L/100km</option>
+    </select>
+
+    <label for="fuelTo">To</label>
+    <select id="fuelTo">
+      <option value="l100km">L/100km</option>
+      <option value="kmpl">km/L</option>
+      <option value="mpg">mpg (US)</option>
+      <option value="mpgimp">mpg (imperial)</option>
+    </select>
+
+    <button id="fuelConvertBtn">Convert Fuel Economy</button>
+
+    <div class="result" id="fuelResult" role="status" aria-live="polite">Enter a value and click Convert Fuel Economy.</div>
+
+    <hr style="border:none;border-top:1px solid #334155;margin:28px 0 24px;">
+
+    <h1>Number Base</h1>
+    <p class="sub">Convert integers between binary, octal, decimal, and hexadecimal.</p>
+
+    <label for="baseValue">Value</label>
+    <input type="text" id="baseValue" placeholder="e.g. ff" />
+
+    <label for="baseFrom">From</label>
+    <select id="baseFrom">
+      <option value="dec">Decimal</option>
+      <option value="bin">Binary</option>
+      <option value="oct">Octal</option>
+      <option value="hex">Hexadecimal</option>
+    </select>
+
+    <label for="baseTo">To</label>
+    <select id="baseTo">
+      <option value="hex">Hexadecimal</option>
+      <option value="bin">Binary</option>
+      <option value="oct">Octal</option>
+      <option value="dec">Decimal</option>
+    </select>
+
+    <button id="baseConvertBtn">Convert Base</button>
+
+    <div class="result" id="baseResult" role="status" aria-live="polite">Enter a value and click Convert Base.</div>
+
+    <hr style="border:none;border-top:1px solid #334155;margin:28px 0 24px;">
+
+    <h1>Roman Numerals</h1>
+    <p class="sub">Convert between Arabic integers (1–3999) and Roman numerals.</p>
+
+    <label for="romanValue">Value</label>
+    <input type="text" id="romanValue" placeholder="e.g. 2024 or MMXXIV" />
+
+    <label for="romanFrom">From</label>
+    <select id="romanFrom">
+      <option value="arabic">Arabic (123)</option>
+      <option value="roman">Roman (CXXIII)</option>
+    </select>
+
+    <label for="romanTo">To</label>
+    <select id="romanTo">
+      <option value="roman">Roman (CXXIII)</option>
+      <option value="arabic">Arabic (123)</option>
+    </select>
+
+    <button id="romanConvertBtn">Convert Roman</button>
+
+    <div class="result" id="romanResult" role="status" aria-live="polite">Enter a value and click Convert Roman.</div>
+
+    <hr style="border:none;border-top:1px solid #334155;margin:28px 0 24px;">
+
+    <h1>Number Words</h1>
+    <p class="sub">Spell an integer in English, or read a phrase back into digits. Try <code>2024</code> or <code>two thousand twenty-four</code>.</p>
+
+    <label for="wordsValue">Value</label>
+    <input type="text" id="wordsValue" placeholder="e.g. 2024 or two thousand twenty-four" />
+
+    <label for="wordsFrom">From</label>
+    <select id="wordsFrom">
+      <option value="arabic">Arabic (123)</option>
+      <option value="words">Words (one hundred twenty-three)</option>
+    </select>
+
+    <label for="wordsTo">To</label>
+    <select id="wordsTo">
+      <option value="words">Words (one hundred twenty-three)</option>
+      <option value="arabic">Arabic (123)</option>
+    </select>
+
+    <button id="wordsConvertBtn">Convert Words</button>
+
+    <div class="result" id="wordsResult" role="status" aria-live="polite">Enter a value and click Convert Words.</div>
+
+    <hr style="border:none;border-top:1px solid #334155;margin:28px 0 24px;">
+
+    <h1>Colour</h1>
+    <p class="sub">Convert a colour between hex, rgb, and hsl. Try <code>#ff0000</code>, <code>rgb(255, 0, 0)</code>, or <code>hsl(0, 100%, 50%)</code>.</p>
+
+    <label for="colorValue">Value</label>
+    <input type="text" id="colorValue" placeholder="e.g. #ff0000 or rgb(255,0,0)" />
+
+    <label for="colorFrom">From</label>
+    <select id="colorFrom">
+      <option value="hex">Hex (#rrggbb)</option>
+      <option value="rgb">RGB (r, g, b)</option>
+      <option value="hsl">HSL (h, s%, l%)</option>
+    </select>
+
+    <label for="colorTo">To</label>
+    <select id="colorTo">
+      <option value="rgb">RGB (r, g, b)</option>
+      <option value="hex">Hex (#rrggbb)</option>
+      <option value="hsl">HSL (h, s%, l%)</option>
+    </select>
+
+    <button id="colorConvertBtn">Convert Colour</button>
+
+    <div class="result" id="colorResult" role="status" aria-live="polite">Enter a colour and click Convert Colour.</div>
+
+    <hr style="border:none;border-top:1px solid #334155;margin:28px 0 24px;">
+
+    <h1>Smart Convert</h1>
+    <p class="sub">One box for every family — temperature, fuel, and units. Try <code>c</code> → <code>f</code>, <code>mpg</code> → <code>l100km</code>, or <code>km</code> → <code>mi</code>.</p>
+
+    <label for="smartValue">Value</label>
+    <input type="number" id="smartValue" placeholder="e.g. 100" step="any" />
+
+    <label for="smartFrom">From unit</label>
+    <input type="text" id="smartFrom" placeholder="e.g. c, mpg, km" />
+
+    <label for="smartTo">To unit</label>
+    <input type="text" id="smartTo" placeholder="e.g. f, l100km, mi" />
+
+    <button id="smartConvertBtn">Smart Convert</button>
+
+    <div class="result" id="smartResult" role="status" aria-live="polite">Enter value and units, then click Smart Convert.</div>
+
+    <hr style="border:none;border-top:1px solid #334155;margin:28px 0 24px;">
+
+    <h1>Conversion Table</h1>
+    <p class="sub">Build a chart: convert a list of values from one unit to another in one shot.</p>
+
+    <label for="tableValues">Values (comma-separated)</label>
+    <input type="text" id="tableValues" placeholder="e.g. 1, 5, 10, 25" />
+
+    <label for="tableFrom">From unit</label>
+    <input type="text" id="tableFrom" placeholder="e.g. km" />
+
+    <label for="tableTo">To unit</label>
+    <input type="text" id="tableTo" placeholder="e.g. mi" />
+
+    <button id="tableConvertBtn">Build Table</button>
+
+    <div class="result" id="tableResult" role="status" aria-live="polite">Enter values and units, then click Build Table.</div>
+  </div>
+
+<script>
+  // Render a result safely: textContent never interprets markup, so echoed
+  // server/user strings (unit names, errors) can't become a DOM-XSS sink.
+  function showBig(el, text) {
+    el.textContent = '';
+    const span = document.createElement('span');
+    span.className = 'big';
+    span.textContent = text;
+    el.appendChild(span);
+  }
+
+  // --- Quick Convert (natural-language, via /api/parse) ---
+  const parseBtn = document.getElementById('parseBtn');
+  const parseResultEl = document.getElementById('parseResult');
+
+  async function quickConvert() {
+    const expression = document.getElementById('expression').value;
+    parseResultEl.classList.remove('error');
+
+    if (expression.trim() === '') {
+      parseResultEl.classList.add('error');
+      parseResultEl.textContent = 'Please type an expression.';
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/parse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expression: expression })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        parseResultEl.classList.add('error');
+        parseResultEl.textContent = data.error || 'Conversion failed.';
+        return;
+      }
+      showBig(parseResultEl, data.input + ' ' + data.from + ' = ' + data.result + ' ' + data.to);
+    } catch (e) {
+      parseResultEl.classList.add('error');
+      parseResultEl.textContent = 'Network error: ' + e.message;
+    }
+  }
+
+  parseBtn.addEventListener('click', quickConvert);
+  document.getElementById('expression').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') quickConvert();
+  });
+
+  const btn = document.getElementById('convertBtn');
+  const resultEl = document.getElementById('result');
+
+  async function convert() {
+    const value = document.getElementById('value').value;
+    const direction = document.getElementById('direction').value;
+
+    resultEl.classList.remove('error');
+
+    if (value === '' || value === null) {
+      resultEl.classList.add('error');
+      resultEl.textContent = 'Please enter a value.';
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/convert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: parseFloat(value), direction: direction })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        resultEl.classList.add('error');
+        resultEl.textContent = data.error || 'Conversion failed.';
+        return;
+      }
+      showBig(resultEl, data.result + ' °' + data.unit);
+    } catch (e) {
+      resultEl.classList.add('error');
+      resultEl.textContent = 'Network error: ' + e.message;
+    }
+  }
+
+  btn.addEventListener('click', convert);
+  document.getElementById('value').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') convert();
+  });
+
+  // --- General unit converter (length / mass / volume) ---
+  const UNITS = {
+    length: ['m', 'km', 'cm', 'mm', 'mi', 'yd', 'ft', 'in'],
+    mass: ['kg', 'g', 'mg', 't', 'lb', 'oz'],
+    volume: ['l', 'ml', 'gal', 'qt', 'pt', 'cup', 'floz', 'tbsp', 'tsp'],
+    area: ['m2', 'km2', 'cm2', 'mm2', 'ha', 'acre', 'ft2', 'in2', 'yd2', 'mi2'],
+    speed: ['mps', 'kph', 'mph', 'fps', 'kn'],
+    time: ['ms', 's', 'min', 'h', 'd', 'wk'],
+    data: ['b', 'kb', 'mb', 'gb', 'tb', 'kib', 'mib', 'gib', 'tib'],
+    pressure: ['pa', 'kpa', 'hpa', 'mpa', 'bar', 'mbar', 'atm', 'psi', 'mmhg', 'torr'],
+    energy: ['j', 'kj', 'mj', 'cal', 'kcal', 'wh', 'kwh', 'btu', 'ev'],
+    angle: ['rad', 'deg', 'grad', 'turn', 'arcmin', 'arcsec'],
+    power: ['w', 'kw', 'gw', 'hp', 'ps'],
+    force: ['n', 'kgf', 'lbf', 'dyn'],
+    frequency: ['hz', 'khz', 'mhz', 'ghz', 'thz', 'rpm'],
+    illuminance: ['lux', 'fc', 'ph'],
+    bandwidth: ['bps', 'kbps', 'mbps', 'gbps', 'tbps'],
+    torque: ['nm', 'kgfm', 'lbft', 'ozin'],
+    acceleration: ['mps2', 'ftps2', 'ips2', 'g0', 'galileo'],
+    density: ['kgm3', 'gcm3', 'gl', 'lbft3', 'lbin3'],
+    flowrate: ['m3s', 'm3h', 'ls', 'lmin', 'gpm', 'cfm'],
+    charge: ['coul', 'mcoul', 'ucoul', 'ah', 'mah'],
+    pace: ['minkm', 'minmi', 'seckm', 'secmi'],
+    voltage: ['v', 'mv', 'kv', 'uv'],
+    current: ['a', 'ma', 'ka', 'ua'],
+    resistance: ['ohm', 'mohm', 'kohm', 'megohm'],
+    capacitance: ['farad', 'mfarad', 'ufarad', 'nfarad', 'pfarad'],
+    inductance: ['henry', 'mhenry', 'uhenry', 'nhenry'],
+    magflux: ['weber', 'mweber', 'uweber', 'maxwell'],
+    magfluxdensity: ['tesla', 'mtesla', 'utesla', 'gauss', 'mgauss'],
+    typography: ['point', 'pica', 'px', 'twip']
+  };
+
+  const categoryEl = document.getElementById('category');
+  const fromUnitEl = document.getElementById('fromUnit');
+  const toUnitEl = document.getElementById('toUnit');
+  const unitResultEl = document.getElementById('unitResult');
+  const unitBtn = document.getElementById('unitConvertBtn');
+
+  function populateUnits() {
+    const units = UNITS[categoryEl.value] || [];
+    fromUnitEl.innerHTML = '';
+    toUnitEl.innerHTML = '';
+    units.forEach(function (u) {
+      fromUnitEl.add(new Option(u, u));
+      toUnitEl.add(new Option(u, u));
+    });
+    if (units.length > 1) toUnitEl.selectedIndex = 1;
+  }
+
+  async function convertUnits() {
+    const value = document.getElementById('unitValue').value;
+    unitResultEl.classList.remove('error');
+
+    if (value === '' || value === null) {
+      unitResultEl.classList.add('error');
+      unitResultEl.textContent = 'Please enter a value.';
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/units', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          value: parseFloat(value),
+          from: fromUnitEl.value,
+          to: toUnitEl.value
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        unitResultEl.classList.add('error');
+        unitResultEl.textContent = data.error || 'Conversion failed.';
+        return;
+      }
+      showBig(unitResultEl, data.result + ' ' + data.to);
+    } catch (e) {
+      unitResultEl.classList.add('error');
+      unitResultEl.textContent = 'Network error: ' + e.message;
+    }
+  }
+
+  categoryEl.addEventListener('change', populateUnits);
+  unitBtn.addEventListener('click', convertUnits);
+  document.getElementById('unitValue').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') convertUnits();
+  });
+  populateUnits();
+
+  // --- Fuel economy converter (reciprocal-aware, via /api/fuel) ---
+  const fuelResultEl = document.getElementById('fuelResult');
+  const fuelBtn = document.getElementById('fuelConvertBtn');
+
+  async function convertFuel() {
+    const value = document.getElementById('fuelValue').value;
+    fuelResultEl.classList.remove('error');
+
+    if (value === '' || value === null) {
+      fuelResultEl.classList.add('error');
+      fuelResultEl.textContent = 'Please enter a value.';
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/fuel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          value: parseFloat(value),
+          from: document.getElementById('fuelFrom').value,
+          to: document.getElementById('fuelTo').value
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        fuelResultEl.classList.add('error');
+        fuelResultEl.textContent = data.error || 'Conversion failed.';
+        return;
+      }
+      showBig(fuelResultEl, data.result + ' ' + data.to);
+    } catch (e) {
+      fuelResultEl.classList.add('error');
+      fuelResultEl.textContent = 'Network error: ' + e.message;
+    }
+  }
+
+  fuelBtn.addEventListener('click', convertFuel);
+  document.getElementById('fuelValue').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') convertFuel();
+  });
+
+  // --- Generic notation converter (number base + Roman numerals) ---
+  // Both endpoints share the {value, from, to} -> {result, to} shape, so one
+  // helper drives both buttons instead of duplicating the fetch boilerplate.
+  function wireNotation(endpoint, valueId, fromId, toId, resultId, btnId) {
+    const resultEl = document.getElementById(resultId);
+    async function run() {
+      const value = document.getElementById(valueId).value;
+      resultEl.classList.remove('error');
+      if (value.trim() === '') {
+        resultEl.classList.add('error');
+        resultEl.textContent = 'Please enter a value.';
+        return;
+      }
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            value: value,
+            from: document.getElementById(fromId).value,
+            to: document.getElementById(toId).value
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          resultEl.classList.add('error');
+          resultEl.textContent = data.error || 'Conversion failed.';
+          return;
+        }
+        showBig(resultEl, data.input + ' (' + data.from + ') = ' + data.result + ' (' + data.to + ')');
+      } catch (e) {
+        resultEl.classList.add('error');
+        resultEl.textContent = 'Network error: ' + e.message;
+      }
+    }
+    document.getElementById(btnId).addEventListener('click', run);
+    document.getElementById(valueId).addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') run();
+    });
+  }
+
+  wireNotation('/api/base', 'baseValue', 'baseFrom', 'baseTo', 'baseResult', 'baseConvertBtn');
+  wireNotation('/api/roman', 'romanValue', 'romanFrom', 'romanTo', 'romanResult', 'romanConvertBtn');
+  wireNotation('/api/words', 'wordsValue', 'wordsFrom', 'wordsTo', 'wordsResult', 'wordsConvertBtn');
+  wireNotation('/api/color', 'colorValue', 'colorFrom', 'colorTo', 'colorResult', 'colorConvertBtn');
+
+  // --- Smart Convert (any family, via /api/smart) ---
+  const smartResultEl = document.getElementById('smartResult');
+
+  async function smartConvert() {
+    const value = document.getElementById('smartValue').value;
+    const from = document.getElementById('smartFrom').value;
+    const to = document.getElementById('smartTo').value;
+    smartResultEl.classList.remove('error');
+
+    if (value === '' || value === null) {
+      smartResultEl.classList.add('error');
+      smartResultEl.textContent = 'Please enter a value.';
+      return;
+    }
+    if (from.trim() === '' || to.trim() === '') {
+      smartResultEl.classList.add('error');
+      smartResultEl.textContent = 'Please enter both units.';
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/smart', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: parseFloat(value), from: from, to: to })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        smartResultEl.classList.add('error');
+        smartResultEl.textContent = data.error || 'Conversion failed.';
+        return;
+      }
+      showBig(smartResultEl, data.input + ' ' + data.from + ' = ' + data.result + ' ' + data.to + ' (' + data.category + ')');
+    } catch (e) {
+      smartResultEl.classList.add('error');
+      smartResultEl.textContent = 'Network error: ' + e.message;
+    }
+  }
+
+  document.getElementById('smartConvertBtn').addEventListener('click', smartConvert);
+  ['smartValue', 'smartFrom', 'smartTo'].forEach(function (id) {
+    document.getElementById(id).addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') smartConvert();
+    });
+  });
+
+  // --- Conversion Table (many values, via /api/units/table) ---
+  const tableResultEl = document.getElementById('tableResult');
+
+  async function buildTable() {
+    const raw = document.getElementById('tableValues').value;
+    const from = document.getElementById('tableFrom').value;
+    const to = document.getElementById('tableTo').value;
+    tableResultEl.classList.remove('error');
+
+    const values = raw.split(',')
+      .map(function (s) { return s.trim(); })
+      .filter(function (s) { return s !== ''; })
+      .map(function (s) { return parseFloat(s); });
+
+    if (values.length === 0) {
+      tableResultEl.classList.add('error');
+      tableResultEl.textContent = 'Please enter at least one value.';
+      return;
+    }
+    if (from.trim() === '' || to.trim() === '') {
+      tableResultEl.classList.add('error');
+      tableResultEl.textContent = 'Please enter both units.';
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/units/table', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: from, to: to, values: values })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        tableResultEl.classList.add('error');
+        tableResultEl.textContent = data.error || 'Conversion failed.';
+        return;
+      }
+      // Render the table rows as plain text (textContent stays XSS-safe).
+      tableResultEl.classList.remove('error');
+      tableResultEl.textContent = data.rows.map(function (r) {
+        return r.input + ' ' + data.from + ' = ' + r.result + ' ' + data.to;
+      }).join('\n');
+    } catch (e) {
+      tableResultEl.classList.add('error');
+      tableResultEl.textContent = 'Network error: ' + e.message;
+    }
+  }
+
+  document.getElementById('tableConvertBtn').addEventListener('click', buildTable);
+  ['tableValues', 'tableFrom', 'tableTo'].forEach(function (id) {
+    document.getElementById(id).addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') buildTable();
+    });
+  });
+</script>
+</body>
+</html>

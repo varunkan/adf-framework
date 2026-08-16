@@ -13,7 +13,7 @@ if [[ -z "$FEATURE_ID" ]]; then
   exit 1
 fi
 
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ROOT="${ORCH_REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 SPECS="$ROOT/specs/$FEATURE_ID"
 ERRORS=0
 
@@ -51,6 +51,22 @@ esac
 # Shape: spec must have Problem statement
 if [[ -f "$SPECS/spec.md" ]] && ! grep -qi 'problem statement' "$SPECS/spec.md"; then
   warn "spec.md may lack Problem statement heading"
+fi
+
+# Garbage floor (requirements-quality): a spec must not leak orchestrator command spam
+# or template the raw prompt verbatim into a "requirement". These are never legitimate
+# requirements — exactly the failure on the pharma feature, where the deterministic
+# engine chopped "@orch-orchestrator resume ..." into 'The system SHALL ...'.
+if [[ -f "$SPECS/spec.md" ]]; then
+  if grep -qiE '@orch-orchestrator|SHALL +(resume|start implementing @|@orch)' \
+       "$SPECS/spec.md"; then
+    fail "spec.md leaks orchestrator command spam into requirements (e.g. '@orch-orchestrator resume') — not a real spec"
+  fi
+  # A SHALL statement that is a bare 1–2 word fragment (e.g. 'SHALL guidelines from
+  # best website') is not a testable requirement — flag the templated-chop smell.
+  if grep -oiE 'SHALL +[a-z]+( +[a-z]+)?[.[:space:]]*$' "$SPECS/spec.md" | grep -q .; then
+    fail "spec.md has SHALL statements that are sentence fragments — templated prompt chops, not testable requirements (the crew emits full EARS, so this only trips the garbage engine)"
+  fi
 fi
 
 # DAG validation when task-graph present

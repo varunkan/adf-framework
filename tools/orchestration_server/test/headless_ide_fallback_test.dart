@@ -13,8 +13,10 @@ void main() {
 
   setUp(() {
     repoRoot = Directory.current.path;
-    while (!Directory('$repoRoot/.cursor/orchestration').existsSync()) {
-      repoRoot = Directory(repoRoot).parent.path;
+    while (!Directory('$repoRoot/.adf/orchestration').existsSync()) {
+      final parent = Directory(repoRoot).parent.path;
+      if (parent == repoRoot) throw StateError('repo root not found');
+      repoRoot = parent;
     }
     store = FeatureStore(repoRoot);
     runner = PhaseRunner(store);
@@ -49,7 +51,7 @@ void main() {
     expect(run?['status'], 'idle');
     expect(run?['agent_active'], isNot(true));
     expect(run?['headless_unavailable'], isTrue);
-    expect(run?['resume_mode'], 'cursor_ide');
+    expect(run?['resume_mode'], 'ide');
   }, skip: Platform.environment['ORCH_SKIP_HEADLESS_PROBE'] != '1'
       ? 'ORCH_SKIP_HEADLESS_PROBE=1 not set'
       : false);

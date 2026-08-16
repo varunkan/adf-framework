@@ -5,7 +5,8 @@ import 'orchestration_paths.dart';
 
 export 'orchestration_paths.dart' show resolveRepoRoot;
 
-/// Reads/writes `.cursor/orchestration/features/<id>/` under repo root.
+/// Reads/writes `<orchestration>/features/<id>/` under repo root — `.adf/orchestration`
+/// by default (legacy `.adf/orchestration` still resolves). See OrchestrationPaths.
 class FeatureStore {
   FeatureStore(this.repoRoot) : paths = OrchestrationPaths(repoRoot);
 
@@ -116,6 +117,19 @@ class FeatureStore {
       changed = true;
     }
 
+    // A blocked feature has FAILED — it is NOT awaiting your approval. Clear the
+    // stale awaiting/pending flags so the UI shows the blocked banner (the real
+    // error + recovery steps), never a phantom "approve phase N" gate for an
+    // already-passed phase that the user can't act on. (Bug: a feature blocked at
+    // phase 7 showed "phase 1 needs your attention".)
+    if (state['status'] == 'blocked' &&
+        (state['awaiting_user'] == true ||
+            state['pending_approval_phase'] != null)) {
+      state['awaiting_user'] = false;
+      state['pending_approval_phase'] = null;
+      changed = true;
+    }
+
     state['gates'] = gates;
     return changed;
   }
@@ -208,6 +222,15 @@ class FeatureStore {
     return copy;
   }
 
+  /// Persist the user's multimodal sources (links + ingested docs) for a feature so
+  /// the requirements crew can GROUND + trace the spec to them (P4). Written to the
+  /// exact path RequirementsCrewRunner reads via --sources.
+  void writeSources(String id, List<dynamic> sources) {
+    final file = File('$repoRoot/${paths.featureRel(id, 'sources.json')}');
+    file.parent.createSync(recursive: true);
+    writeFileAtomic(file, jsonEncode(sources));
+  }
+
   void writeState(String id, Map<String, dynamic> state, {bool skipRepair = false}) {
     final toWrite = skipRepair ? state : Map<String, dynamic>.from(state);
     if (!skipRepair) {
@@ -215,7 +238,18 @@ class FeatureStore {
     }
     final file = File('${featurePath(id)}/state.json');
     file.parent.createSync(recursive: true);
-    file.writeAsStringSync(const JsonEncoder.withIndent('  ').convert(toWrite));
+    writeFileAtomic(
+        file, const JsonEncoder.withIndent('  ').convert(toWrite));
+  }
+
+  /// Write durably: a kill mid-write must never leave a half-written / corrupt
+  /// file (which would brick the feature). Write to a temp sibling then rename
+  /// (atomic on POSIX), so a reader sees either the old file or the new one,
+  /// never a torn one.
+  static void writeFileAtomic(File file, String contents) {
+    final tmp = File('${file.path}.tmp');
+    tmp.writeAsStringSync(contents, flush: true);
+    tmp.renameSync(file.path);
   }
 
   String readRequirement(String id) {
@@ -224,8 +258,37 @@ class FeatureStore {
     return file.readAsStringSync();
   }
 
+  // G2/I4/I7: lines that are orchestrator/builder control commands (not
+  // requirement content). The user types these to drive the pipeline (e.g.
+  // `@orch-orchestrator resume <id>`); they belong in commands.jsonl, never in
+  // requirement.md — where the deterministic engine would synthesize them into
+  // bogus "The system SHALL @orch-orchestrator resume…" EARS requirements (the
+  // exact contamination that permanently blocked the regulatory-affairs spec).
+  static final RegExp _controlLine = RegExp(
+    r'^\s*(@orch-orchestrator\b|#\s*Builder:|resume\s+\S+\s*$)',
+    caseSensitive: false,
+  );
+  static final RegExp _bareAffirmative = RegExp(
+    r'^(yes|yep|yeah|ok|okay|sure|proceed|go ahead|continue|do it)[.!]*$',
+    caseSensitive: false,
+  );
+
+  /// Strip control-command lines and return the requirement-bearing prose
+  /// (trimmed). Returns '' when the turn carried no requirement content (it was
+  /// only control commands, or a bare affirmative like "yes"/"proceed" — those
+  /// update execution state, not the spec). Static so it is unit-testable.
+  static String sanitizeClarification(String text) {
+    final kept = text
+        .split('\n')
+        .where((l) => !_controlLine.hasMatch(l))
+        .join('\n')
+        .trim();
+    if (kept.isEmpty || _bareAffirmative.hasMatch(kept)) return '';
+    return kept;
+  }
+
   void appendClientClarification(String id, String text) {
-    final t = text.trim();
+    final t = sanitizeClarification(text); // G2/I4/I7: never ingest control spam
     if (t.isEmpty) return;
     final file = File('${featurePath(id)}/requirement.md');
     file.parent.createSync(recursive: true);
@@ -237,7 +300,8 @@ class FeatureStore {
 
 $t
 ''';
-    file.writeAsStringSync(
+    writeFileAtomic(
+      file,
       existing.endsWith('\n') ? '$existing$block' : '$existing\n$block',
     );
   }
@@ -252,7 +316,7 @@ $t
     final list = readApprovals(id);
     list.add(entry);
     final file = File('${featurePath(id)}/approvals.json');
-    file.writeAsStringSync(const JsonEncoder.withIndent('  ').convert(list));
+    writeFileAtomic(file, const JsonEncoder.withIndent('  ').convert(list));
   }
 
   String? readLatestJudgeVerdict(String id) {
@@ -349,7 +413,8 @@ $t
 
   void writePhaseRequest(String id, int phase) {
     final file = File('${featurePath(id)}/phase-request.json');
-    file.writeAsStringSync(
+    writeFileAtomic(
+      file,
       const JsonEncoder.withIndent('  ').convert({
         'action': 'run_phase',
         'phase': phase,
@@ -366,7 +431,7 @@ $t
     updated['consumed'] = true;
     updated['consumed_at'] = DateTime.now().toUtc().toIso8601String();
     final file = File('${featurePath(id)}/phase-request.json');
-    file.writeAsStringSync(const JsonEncoder.withIndent('  ').convert(updated));
+    writeFileAtomic(file, const JsonEncoder.withIndent('  ').convert(updated));
   }
 
   Map<String, dynamic>? readRunStatus(String id) {
@@ -378,7 +443,7 @@ $t
   void writeRunStatus(String id, Map<String, dynamic> status) {
     final file = File('${featurePath(id)}/run-status.json');
     file.parent.createSync(recursive: true);
-    file.writeAsStringSync(const JsonEncoder.withIndent('  ').convert(status));
+    writeFileAtomic(file, const JsonEncoder.withIndent('  ').convert(status));
   }
 
   void appendRunLog(String id, Map<String, dynamic> entry) {
@@ -392,13 +457,14 @@ $t
     if (!file.existsSync()) return;
     final lines = file.readAsLinesSync();
     if (lines.length <= maxLines) return;
-    file.writeAsStringSync('${lines.sublist(lines.length - maxLines).join('\n')}\n');
+    writeFileAtomic(
+        file, '${lines.sublist(lines.length - maxLines).join('\n')}\n');
   }
 
   void writeLastAgentResponse(String id, String text) {
     final file = File('${featurePath(id)}/last-agent-response.md');
     file.parent.createSync(recursive: true);
-    file.writeAsStringSync(text.trim().isEmpty ? '' : '${text.trim()}\n');
+    writeFileAtomic(file, text.trim().isEmpty ? '' : '${text.trim()}\n');
   }
 
   String? readLastAgentResponse(String id) {
@@ -442,6 +508,32 @@ $t
     return cmd;
   }
 
+  /// Append a standalone assistant/system message to the conversation — a run
+  /// outcome ("Build complete", "Build stopped", …) that must persist and be
+  /// scrollable in the chat. It rides the same `commands.jsonl` store the chat
+  /// view is built from, but with an EMPTY prompt so it renders as a single
+  /// assistant bubble (no phantom user message). `buildChatView` surfaces these.
+  Map<String, dynamic> appendSystemMessage(
+    String id,
+    String text, {
+    String source = 'runner',
+  }) {
+    final cmd = {
+      'id': DateTime.now().microsecondsSinceEpoch.toString(),
+      'prompt': '',
+      'type': 'system',
+      'status': 'executed',
+      'assistant_reply': text,
+      'llm_source': source,
+      'created_at': DateTime.now().toUtc().toIso8601String(),
+      'executed_at': DateTime.now().toUtc().toIso8601String(),
+    };
+    final file = File('${featurePath(id)}/commands.jsonl');
+    file.parent.createSync(recursive: true);
+    file.writeAsStringSync('${jsonEncode(cmd)}\n', mode: FileMode.append);
+    return cmd;
+  }
+
   List<Map<String, dynamic>> listCommands(String id, {int limit = 20}) {
     final file = File('${featurePath(id)}/commands.jsonl');
     if (!file.existsSync()) return [];
@@ -466,6 +558,12 @@ $t
       state['status'] = 'active';
       changed = true;
     }
+    // Auto-flow: a feature stranded `awaiting_user` (e.g. from before auto-approve
+    // was on) must not stay stuck nagging — clear the gate so it can advance.
+    if (awaiting && autoApprove(state)) {
+      state['awaiting_user'] = false;
+      changed = true;
+    }
     if (repairPipelineState(id, state)) {
       changed = true;
     }
@@ -476,6 +574,7 @@ $t
       writeState(id, state, skipRepair: true);
     }
     repairRunStatus(id);
+    repairStaleChatReplies(id);
   }
 
   /// Mark orphaned `running` commands as cancelled (hook/agent crash).
@@ -501,10 +600,69 @@ $t
       }
     }
     if (changed) {
-      file.writeAsStringSync('${updated.join('\n')}\n');
+      writeFileAtomic(file, '${updated.join('\n')}\n');
     }
   }
 
+
+
+  /// Lovable-style: derive a kebab-case feature id from a free-text prompt.
+  static String generateFeatureId(String prompt, {Set<String> existing = const {}}) {
+    final words = prompt
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9\s-]'), ' ')
+        .split(RegExp(r'\s+'))
+        .where((w) => w.isNotEmpty && !_stopWords.contains(w))
+        .take(4)
+        .toList();
+    var base = words.isEmpty ? 'feature' : words.join('-');
+    if (base.length > 40) base = base.substring(0, 40);
+    base = base.replaceAll(RegExp(r'-+$'), '');
+    if (!existing.contains(base)) return base;
+    for (var i = 2; i < 100; i++) {
+      final candidate = '$base-$i';
+      if (!existing.contains(candidate)) return candidate;
+    }
+    return '$base-${DateTime.now().millisecondsSinceEpoch % 100000}';
+  }
+
+  static const _stopWords = {
+    'a', 'an', 'the', 'i', 'we', 'to', 'of', 'for', 'and', 'or', 'in', 'on',
+    'with', 'that', 'this', 'want', 'need', 'please', 'build', 'create',
+    'make', 'add', 'me', 'my', 'our', 'app', 'feature',
+  };
+
+  /// Chat replies stuck at pending/streaming after server restart get closed out.
+  void repairStaleChatReplies(String id, {Duration maxAge = const Duration(minutes: 10)}) {
+    final file = File('${featurePath(id)}/commands.jsonl');
+    if (!file.existsSync()) return;
+    final now = DateTime.now().toUtc();
+    final lines = file.readAsLinesSync();
+    final updated = <String>[];
+    var changed = false;
+    for (final line in lines) {
+      if (line.trim().isEmpty) continue;
+      try {
+        final cmd = jsonDecode(line) as Map<String, dynamic>;
+        final src = cmd['llm_source'] as String?;
+        if (src == 'pending' || src == 'streaming') {
+          final created = DateTime.tryParse(cmd['created_at'] as String? ?? '');
+          if (created != null && now.difference(created) > maxAge) {
+            cmd['llm_source'] = 'timeout';
+            cmd['assistant_reply'] =
+                'The assistant did not finish replying (server restarted or '
+                'the agent timed out). Ask again, or set GROQ_API_KEY for '
+                'instant replies.';
+            changed = true;
+          }
+        }
+        updated.add(jsonEncode(cmd));
+      } catch (_) {
+        updated.add(line);
+      }
+    }
+    if (changed) writeFileAtomic(file, '${updated.join('\n')}\n');
+  }
 
   void updateCommandMeta(
     String id,
@@ -513,6 +671,7 @@ $t
     String? orchestratorCommand,
     String? agentPrompt,
     String? llmSource,
+    int? latencyMs,
   }) {
     final file = File('${featurePath(id)}/commands.jsonl');
     if (!file.existsSync()) return;
@@ -529,13 +688,14 @@ $t
           }
           if (agentPrompt != null) cmd['agent_prompt'] = agentPrompt;
           if (llmSource != null) cmd['llm_source'] = llmSource;
+          if (latencyMs != null) cmd['latency_ms'] = latencyMs;
         }
         updated.add(jsonEncode(cmd));
       } catch (_) {
         updated.add(line);
       }
     }
-    file.writeAsStringSync('${updated.join('\n')}\n');
+    writeFileAtomic(file, '${updated.join('\n')}\n');
   }
 
   void markCommandExecuted(String id, String commandId, {String? status}) {
@@ -556,17 +716,61 @@ $t
         updated.add(line);
       }
     }
-    file.writeAsStringSync('${updated.join('\n')}\n');
+    writeFileAtomic(file, '${updated.join('\n')}\n');
   }
 
   bool artifactExists(String relativePath) {
     return File('$repoRoot/$relativePath').existsSync();
   }
 
+  /// Build stacks ADF can target (contract C5). `stdlib` = the original
+  /// single-file Python app; `react-vite-sqlite` = a real React+Vite+Tailwind
+  /// front + Fastify/better-sqlite3 server. The runner's StackProfile mirrors
+  /// these names; an unknown stack falls back to stdlib there.
+  static const Set<String> knownStacks = {
+    'stdlib',
+    'react-vite-sqlite',
+    'expo-rn', // cross-platform mobile (Expo / React Native: iOS + Android + web)
+  };
+
+  static bool isKnownStack(String stack) => knownStacks.contains(stack);
+
+  /// Whether the proof-governed approval gates should auto-flow (no human pause):
+  /// per-feature `state.auto_approve`, or globally via `ORCH_AUTO_APPROVE`. Single
+  /// source of truth so the server route AND the per-phase post-sync agree (they
+  /// disagreed before — auto-approve only covered the 6→7 handoff, so phases 1–6
+  /// still nagged). `env` is injectable for tests.
+  static bool autoApprove(Map<String, dynamic> state, [Map<String, String>? env]) {
+    if (state['auto_approve'] == true) return true; // per-feature override always wins
+    final g =
+        ((env ?? Platform.environment)['ORCH_AUTO_APPROVE'] ?? '').toLowerCase();
+    if (g == 'all') return true; // explicit power-user escape hatch: auto every track
+    final globalOn = g == 'true' || g == '1';
+    // Track-aware gate: a track-S micro-fix (≤1 file) may auto-flow when the global
+    // flag is on, but tracks M/L/XL are net-new or cross-cutting work whose
+    // REQUIREMENTS must be confirmed by a human — they NEVER auto-flow from the global
+    // flag (only the per-feature `auto_approve` override above, or ORCH_AUTO_APPROVE=all).
+    // This is the fix for ADF barreling to implementation on an unconfirmed spec.
+    final track = (state['track'] as String? ?? 'M').toUpperCase();
+    return track == 'S' && globalOn;
+  }
+
+  /// The build stack chosen for [id] (contract C5), read from `state.stack`.
+  /// Features created before stack selection have no field → stdlib, so legacy
+  /// single-file apps keep building exactly as before.
+  String stackFor(String id) {
+    try {
+      final s = (readState(id)['stack'] as String?)?.trim();
+      if (s != null && s.isNotEmpty) return s;
+    } catch (_) {/* no state yet → default below */}
+    return 'stdlib';
+  }
+
   void createFeature({
     required String id,
     required String requirement,
     required String track,
+    String stack = 'stdlib',
   }) {
     if (!RegExp(r'^[a-z0-9]+(-[a-z0-9]+)*$').hasMatch(id)) {
       throw ArgumentError('Invalid feature id: $id');
@@ -588,7 +792,7 @@ $t
 $requirement
 ''');
 
-    File('${root.path}/approvals.json').writeAsStringSync('[]\n');
+    writeFileAtomic(File('${root.path}/approvals.json'), '[]\n');
 
     // Spec Kit feature directory + pointer
     final specRel = 'specs/$id';
@@ -598,16 +802,18 @@ $requirement
       '${const JsonEncoder.withIndent('  ').convert({'feature_directory': specRel})}\n',
     );
 
-    writeState(id, defaultState(id: id, track: track));
+    writeState(id, defaultState(id: id, track: track, stack: stack));
   }
 
   Map<String, dynamic> defaultState({
     required String id,
     required String track,
+    String stack = 'stdlib',
   }) {
     return {
       'feature_id': id,
       'track': track,
+      'stack': stack,
       'spec_feature_dir': 'specs/$id',
       'coverage_mode': 'repo_wide',
       'current_phase': 0,
@@ -679,6 +885,12 @@ $requirement
       'awaiting_user': state['awaiting_user'],
       'pending_approval_phase': state['pending_approval_phase'],
       'last_judge_verdict': state['last_judge_verdict'],
+      // The crew's open questions, surfaced so the user can confirm requirements
+      // before the build proceeds (P3 — interactive elicitation).
+      'requirements_open_questions': state['requirements_open_questions'],
+      // G06: surface whether phase-2 used the real crew or fell back to the
+      // deterministic template, so a silent fallback is auditable in the UI.
+      'spec_source': state['spec_source'],
       'run_status': run?['status'],
     };
   }

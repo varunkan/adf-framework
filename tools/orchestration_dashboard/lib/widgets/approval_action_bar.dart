@@ -54,15 +54,37 @@ class _ApprovalActionBarState extends State<ApprovalActionBar> {
   String get _guidance {
     switch (widget.verdict.toLowerCase()) {
       case 'fail':
-        return 'Judge FAIL — review the combined recommendation below, confirm direction '
-            'with the client, then authorize the orchestrator to fix requirement, plan, and specs.';
+        return 'The AI review found issues that need fixing. Read the feedback '
+            'below, then approve or request changes.';
       case 'pending':
-        return 'Review pending — use the combined recommendation as the feedback loop. '
-            'Confirm with the client before re-running the phase.';
+        return 'The AI review is still forming. Read the feedback below, then '
+            'approve or request changes.';
       default:
-        return 'Verdict REVISE — the combined recommendation is the authoritative feedback. '
-            'Confirm with the client, then the orchestrator will update requirement.md, '
-            'specs plan, and phase artifacts until review PASS.';
+        return 'The AI review suggests some changes. Read the feedback below, '
+            'then approve as-is or request changes.';
+    }
+  }
+
+  Future<void> _confirmReject() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cancel this build?'),
+        content: const Text(
+            'This stops the feature here. It cannot be undone.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Keep building')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Cancel build')),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await _act(() =>
+          widget.onReject('rejected', notes: _notesController.text.trim()));
     }
   }
 
@@ -94,10 +116,10 @@ class _ApprovalActionBarState extends State<ApprovalActionBar> {
                 Expanded(
                   child: Text(
                     artifactBlocked
-                        ? 'ADF validator blocked — Phase ${widget.phase}'
+                        ? 'ADF checks blocked — Phase ${widget.phase}'
                         : canApprove
-                            ? 'Ready to approve — Phase ${widget.phase}'
-                            : 'Client confirmation required — Phase ${widget.phase}',
+                            ? 'Phase ${widget.phase} ready for your review'
+                            : 'Phase ${widget.phase} needs your decision',
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
                           fontWeight: FontWeight.bold,
                           color: canApprove ? status.awaiting : status.error,
@@ -131,7 +153,7 @@ class _ApprovalActionBarState extends State<ApprovalActionBar> {
               if (combined.isNotEmpty) ...[
                 SizedBox(height: spacing.md),
                 Text(
-                  'Combined recommendation (feedback loop)',
+                  'What the AI review found',
                   style: Theme.of(context).textTheme.labelLarge?.copyWith(
                         fontWeight: FontWeight.bold,
                       ),
@@ -165,8 +187,7 @@ class _ApprovalActionBarState extends State<ApprovalActionBar> {
                 contentPadding: EdgeInsets.zero,
                 controlAffinity: ListTileControlAffinity.leading,
                 title: const Text(
-                  'Client confirms: apply combined recommendation and fix '
-                  'requirement, plan (specs), and phase artifacts',
+                  "I've reviewed the feedback — make these changes",
                   style: TextStyle(fontSize: 13),
                 ),
               ),
@@ -200,9 +221,21 @@ class _ApprovalActionBarState extends State<ApprovalActionBar> {
                               notes: _notesController.text.trim(),
                             )),
                     icon: const Icon(Icons.check_circle_outline, size: 18),
-                    label: const Text('Approve phase'),
+                    label: const Text('Approve'),
                   )
-                else
+                else ...[
+                  // One-click request-changes — no checkbox ceremony required.
+                  OutlinedButton.icon(
+                    onPressed: _busy
+                        ? null
+                        : () => _act(() => widget.onClarifyAndRedo(
+                              _notesController.text.trim(),
+                              clientConfirmed: true,
+                            )),
+                    icon: const Icon(Icons.rate_review_outlined, size: 18),
+                    label: const Text('Request changes'),
+                  ),
+                  // Confirmed redo (carries the reviewed-feedback acknowledgement).
                   FilledButton.icon(
                     onPressed: _busy || !_clientConfirmed
                         ? null
@@ -211,16 +244,12 @@ class _ApprovalActionBarState extends State<ApprovalActionBar> {
                               clientConfirmed: _clientConfirmed,
                             )),
                     icon: const Icon(Icons.edit_note, size: 18),
-                    label: const Text('Confirm & redo with feedback'),
+                    label: const Text('Make these changes'),
                   ),
+                ],
                 TextButton(
-                  onPressed: _busy
-                      ? null
-                      : () => _act(() => widget.onReject(
-                            'rejected',
-                            notes: _notesController.text.trim(),
-                          )),
-                  child: const Text('Reject feature'),
+                  onPressed: _busy ? null : _confirmReject,
+                  child: const Text('Cancel build'),
                 ),
               ],
             ),

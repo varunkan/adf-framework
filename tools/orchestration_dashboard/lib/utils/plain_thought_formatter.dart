@@ -1,4 +1,6 @@
 import '../models/trace_span.dart';
+import 'thought_sanitizer.dart';
+import 'tool_narration.dart';
 
 /// Formats trace spans as plain Cursor-style thought lines (no badges/cards).
 class PlainThoughtFormatter {
@@ -14,7 +16,9 @@ class PlainThoughtFormatter {
       if (normalized.length < 8) return;
 
       for (final part in _splitIntoThoughts(normalized)) {
-        _addLine(lines, part);
+        // Cursor-style: keep prose, rewrite raw code/SQL/shell to plain English.
+        final clean = ThoughtSanitizer.clean(part);
+        if (clean != null) _addLine(lines, clean);
       }
     }
 
@@ -33,8 +37,10 @@ class PlainThoughtFormatter {
       if (kind == 'RESPONSE') {
         final text = (span.reasoning ?? span.body).trim();
         if (text.length > 400) continue;
+        final clean = ThoughtSanitizer.clean(text);
+        if (clean == null) continue;
         flushReasoning();
-        _addLine(lines, text);
+        _addLine(lines, clean);
         continue;
       }
 
@@ -75,28 +81,8 @@ class PlainThoughtFormatter {
     return parts;
   }
 
-  static String _toolLine(TraceSpan span) {
-    final name = span.toolName ?? 'tool';
-    final input = span.toolInput;
-    if (input != null && input.isNotEmpty) {
-      final short = _shortToolInput(input);
-      if (short != null) return 'Using $name · $short';
-    }
-    return 'Using $name';
-  }
-
-  static String? _shortToolInput(String input) {
-    try {
-      final m = RegExp(r'"file_path"\s*:\s*"([^"]+)"').firstMatch(input);
-      if (m != null) {
-        final path = m.group(1)!;
-        final parts = path.split('/');
-        return parts.length > 3 ? '…/${parts.sublist(parts.length - 3).join('/')}' : path;
-      }
-    } catch (_) {}
-    if (input.length <= 60) return input;
-    return '${input.substring(0, 57)}…';
-  }
+  static String _toolLine(TraceSpan span) =>
+      ToolNarration.humanize(span.toolName, span.toolInput);
 
   static void _addLine(List<String> lines, String line) {
     var t = line.trim();

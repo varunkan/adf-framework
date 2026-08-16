@@ -61,6 +61,37 @@ void main() {
     expect(lines.first, contains('standalone product'));
   });
 
+  test('renders crew narration spans from orch.message (no dead-air)', () {
+    final spans = [
+      TraceSpan(
+        timestamp: '2026-01-01T00:00:01Z',
+        name: 'crew.wave_start',
+        status: 'OK',
+        attributes: {
+          'hook.event': 'crew',
+          'orch.message': 'Wave 1: product-analyst',
+        },
+      ),
+      TraceSpan(
+        timestamp: '2026-01-01T00:00:02Z',
+        name: 'crew.agent_done',
+        status: 'OK',
+        attributes: {
+          'hook.event': 'crew',
+          'orch.phase': 2,
+          'orch.message': 'spec-writer — EARS requirements',
+        },
+      ),
+    ];
+
+    final lines = PlainThoughtFormatter.format(spans);
+    final joined = lines.join(' | ');
+    expect(joined, contains('Wave 1: product-analyst'));
+    expect(joined, contains('spec-writer'));
+    // The raw span name must never leak into the user-facing narration.
+    expect(joined, isNot(contains('crew.wave_start')));
+  });
+
   test('hides runner.superseded control spans from thought lines', () {
     final spans = [
       TraceSpan(
