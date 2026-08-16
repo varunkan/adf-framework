@@ -26,7 +26,7 @@ void main() {
     final ids = store.listFeatures();
     if (ids.isEmpty) {
       // Create ephemeral test feature
-      const id = '_planner-test';
+      const id = 'planner-test';
       if (store.featureExists(id)) {
         Directory(store.featurePath(id)).deleteSync(recursive: true);
       }
