@@ -224,6 +224,45 @@ if a consumer needs a change, make it here and let the consumer pick it up.
 Equally, **do not bring consumer product code into this repo.** The POS app, its
 Flutter sources, and its product specs belong to the consumer.
 
+### No product domain knowledge in framework code — ever
+
+This framework builds arbitrary applications. Nothing in `scripts/`, `tools/`,
+`templates/` or `lib/` may assume what the app under test *is*. This rule has
+been broken twice, in both directions, and both were only found by grepping:
+
+- **ANDS leaked in.** Every test-agent prompt ended "This is the Canada ANDS
+  (Abbreviated New Drug Submission) regulatory submission portal", and any
+  feature built without an `mvp-scope.md` was told to implement "dossier-ID
+  validation, the eCTD validation rules, REP identifiers, CESG packaging model".
+  Build a calculator and the model was told it was building a drug portal.
+- **POS leaked in.** `security_gate.sh` opened with "POS security heuristics",
+  grepped for `DELETE FROM orders` and named the `is_deleted` policy;
+  `performance_gate.sh` scoped its retry-cap check to `--include='*order*'`.
+
+Both are fixed. When adding a check, a prompt, or a default, ask: *would this
+still be correct for an app in a completely different domain?* If not, it belongs
+in the consumer repo, not here.
+
+### This repo depends on nothing outside itself
+
+No config, hook, script or CI job may reference a path outside this repository.
+Until 2026-08-16 twelve config files pointed at
+`/Users/varunkumar/ai_pos_system/adf-framework` — the old vendored location —
+and kept doing so after that directory was deleted, so the MCP server and the
+code-review-graph hooks were silently broken. Prefer a self-locating path
+(`$(cd "$(dirname "$0")/../.." && pwd)`) over any absolute path.
+
+Check the rule still holds:
+
+```bash
+git grep -nE "/Users/[^/]+/(ai_pos_system|ands-platform)" -- . | grep -v '^docs/'
+git grep -inE "\bANDS\b|eCTD|CESG|DELETE FROM orders|is_deleted" -- scripts tools templates lib
+```
+
+Hits in the first command are broken cross-repo paths; hits in the second are
+product domain knowledge that must move to the consumer. Test fixtures using a
+sample domain are acceptable — framework *behaviour* keyed to one is not.
+
 ### `ORCH_REPO_ROOT` is a hard contract — never regress it
 
 Every gate in `scripts/orch/` MUST resolve the tree it scans as:

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# POS security heuristics on lib/ (zero tolerance for listed patterns).
+# Security heuristics for the app under test (zero tolerance for listed patterns).
+# Domain-agnostic: this framework builds arbitrary apps, so nothing here may
+# assume a particular product's schema or vocabulary.
 set -euo pipefail
 
 FEATURE_ID="${1:-_repo}"
@@ -42,9 +44,10 @@ if grep -rEn 'dart:mirrors' "${SCAN[@]}" --include='*.dart' 2>/dev/null; then
   FAIL=1
 fi
 
-# Order soft-delete: new deletes should use is_deleted pattern (advisory grep for .delete( without is_deleted nearby is noisy — check deleteOrder paths)
-if grep -rEn 'hardDelete|DELETE FROM orders' "${SCAN[@]}" --include='*.dart' 2>/dev/null; then
-  echo "WARN: possible hard delete pattern — verify is_deleted soft-delete policy"
+# Destructive SQL without a soft-delete guard. Advisory only — some raw deletes
+# are legitimate cleanup, and the right policy is app-specific.
+if grep -rEn 'hardDelete|DELETE[[:space:]]+FROM' "${SCAN[@]}" --include='*.dart' 2>/dev/null; then
+  echo "WARN: destructive delete detected — verify the app's soft-delete policy"
 fi
 
 if [[ $FAIL -eq 0 ]]; then

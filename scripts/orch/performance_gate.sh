@@ -35,9 +35,9 @@ if grep -rEn 'readAsStringSync|writeAsStringSync|readAsBytesSync' "${SCAN[@]}" -
   FAIL=1
 fi
 
-# Unbounded retry without cap in order reload (heuristic)
-if grep -rEn 'while\s*\(\s*true\s*\)' "${SCAN[@]}" --include='*order*' 2>/dev/null; then
-  echo "WARN: while(true) in order-related code — verify retry cap"
+# Unbounded retry loops (heuristic)
+if grep -rEn 'while\s*\(\s*true\s*\)' "${SCAN[@]}" --include='*.dart' 2>/dev/null; then
+  echo "WARN: while(true) detected — verify the loop has a retry cap"
 fi
 
 if [[ $FAIL -eq 0 ]]; then
