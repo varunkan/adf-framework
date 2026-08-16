@@ -8,8 +8,10 @@ void main() {
   test('self-heal poller survives a corrupt feature with no state.json',
       () async {
     var repoRoot = Directory.current.path;
-    while (!Directory('$repoRoot/.cursor/orchestration').existsSync()) {
-      repoRoot = Directory(repoRoot).parent.path;
+    while (!Directory('$repoRoot/.adf/orchestration').existsSync()) {
+      final parent = Directory(repoRoot).parent.path;
+      if (parent == repoRoot) throw StateError('repo root not found');
+      repoRoot = parent;
     }
     final store = FeatureStore(repoRoot);
     const id = 'corrupt-resilience-feat';

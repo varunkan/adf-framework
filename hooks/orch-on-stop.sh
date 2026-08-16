@@ -3,7 +3,7 @@
 set +e
 
 INPUT=$(cat)
-FEATURE_DIR_ROOT=".cursor/orchestration/features"
+FEATURE_DIR_ROOT=".adf/orchestration/features"
 
 MSG=""
 if [[ -d "$FEATURE_DIR_ROOT" ]]; then

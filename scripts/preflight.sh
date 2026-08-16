@@ -106,7 +106,7 @@ if [[ -f "$FW/lib/resolve_paths.sh" ]]; then
       if [[ -d "$ORCH" ]]; then printf '  \033[32mOK\033[0m   orchestration dir: %s\n' "$ORCH"
       else printf '  \033[33mWARN\033[0m orchestration dir missing: %s\n' "$ORCH"; fi
       [[ -f "$ROOT/.adf-install.json" ]] && printf '  \033[32mOK\033[0m   .adf-install.json present\n' \
-        || printf '  \033[33mWARN\033[0m no .adf-install.json (fine if using .cursor/orchestration)\n'
+        || printf '  \033[33mWARN\033[0m no .adf-install.json (fine if using .adf/orchestration)\n'
     else
       printf '  \033[31mFAIL\033[0m no orchestration found — run: adf install -t "%s" -i cursor\n' "$TARGET"
     fi )

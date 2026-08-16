@@ -98,7 +98,7 @@ done
 echo "Runner: $EFFECTIVE_RUNNER (.adf/runner.env)"
 
 # Manifest reflects the primary IDE's paths.
-ORCH_DIR=".cursor/orchestration"
+ORCH_DIR=".adf/orchestration"
 SKILLS_DIR=".cursor/skills"
 HOOKS_FILE=".cursor/hooks.json"
 case "$PRIMARY_IDE" in

@@ -60,7 +60,7 @@ And the honest, bench-backed comparison: **[docs/ADF_VS_LOVABLE.md](docs/ADF_VS_
 
 | IDE | `-i` flag | Installed paths |
 |-----|-----------|-----------------|
-| Cursor | `cursor` | `.cursor/orchestration`, skills, hooks |
+| Cursor | `cursor` | `.adf/orchestration`, skills, hooks |
 | VS Code | `vscode` | `.adf/orchestration`, `AGENTS.md`, Copilot instructions |
 | Windsurf | `windsurf` | `.adf/orchestration`, `.windsurf/rules/adf.md` |
 | Claude Code | `claude` | `.adf/orchestration`, `.claude/skills`, `CLAUDE.md`, `.adf/runner.env` |

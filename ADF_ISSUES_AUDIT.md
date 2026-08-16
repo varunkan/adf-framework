@@ -77,7 +77,7 @@ Findings are ordered by severity. Each lists the location and a suggested fix. L
 - No API keys leaked into any **git-tracked** file (`git grep` for `nvapi-`/`sk-ant-`/`sk-…` returned nothing).
 - `.env` is git-ignored and untracked; existing release tarballs do not contain it.
 - No `TODO`/`FIXME`/`HACK`/`BUG:` markers in tracked source.
-- No build output or `dist/` artifacts committed; `.gitignore` patterns (`specs/`, `.specify/`, `.cursor/orchestration/`, `dist/`) have 0 tracked files each — no ignore-vs-track inconsistencies.
+- No build output or `dist/` artifacts committed; `.gitignore` patterns (`specs/`, `.specify/`, `.adf/orchestration/`, `dist/`) have 0 tracked files each — no ignore-vs-track inconsistencies.
 - All relative file links in `README.md` resolve.
 - `tools/orchestration_server` and `tools/adf_mcp` ship real test suites and CI runs `dart analyze --fatal-infos` + tests on every push/PR.
 

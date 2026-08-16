@@ -431,7 +431,7 @@ def _load_sources(repo_root, sources_path):
     return out
 
 
-_ORCH_PROBE = (".cursor/orchestration", "adf-framework/orchestration", ".adf/orchestration")
+_ORCH_PROBE = (".adf/orchestration", "adf-framework/orchestration", ".adf/orchestration")
 
 
 def resolve_orchestration_dir(repo_root, env):
@@ -446,9 +446,9 @@ def resolve_orchestration_dir(repo_root, env):
          standalone export resolves against CWD).
       2. .adf-install.json `orchestration_dir` at repo_root, if that dir exists
          (relative paths resolved under repo_root, mirroring Dart's _absUnderRepo).
-      3. directory probe: .cursor/orchestration, adf-framework/orchestration,
+      3. directory probe: .adf/orchestration, adf-framework/orchestration,
          .adf/orchestration — first that exists wins.
-      4. default: <repo_root>/.cursor/orchestration."""
+      4. default: <repo_root>/.adf/orchestration."""
     env_val = (env.get("ORCH_ORCHESTRATION_DIR") or "").strip()
     if env_val:
         return os.path.abspath(env_val)
@@ -470,7 +470,7 @@ def resolve_orchestration_dir(repo_root, env):
         if os.path.isdir(abs_d):
             return abs_d
 
-    return os.path.join(repo_root, ".cursor", "orchestration")
+    return os.path.join(repo_root, ".adf", "orchestration")
 
 
 def main():
@@ -488,7 +488,7 @@ def main():
         fid = args.feature_id
 
         req = ""
-        for d in (".cursor/orchestration", ".claude/orchestration", "orchestration"):
+        for d in (".adf/orchestration", ".claude/orchestration", "orchestration"):
             p = os.path.join(repo_root, d, "features", fid, "requirement.md")
             if os.path.isfile(p):
                 with open(p, encoding="utf-8") as f:

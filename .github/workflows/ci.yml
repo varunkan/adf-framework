@@ -19,7 +19,11 @@ jobs:
           sdk: stable
       - run: dart pub get
       - run: dart analyze --fatal-infos
-      - run: dart test --reporter expanded
+      # -j 1: the ~25 suites share one on-disk feature store under
+      # .adf/orchestration/features/, so running files in parallel races
+      # (symptom: "state.json not found for <feature>"). Serial is
+      # deterministic; proper per-test isolation is tracked separately.
+      - run: dart test -j 1 --reporter expanded
 
   mcp:
     name: MCP server (dart analyze + test)
@@ -34,7 +38,11 @@ jobs:
           sdk: stable
       - run: dart pub get
       - run: dart analyze --fatal-infos
-      - run: dart test --reporter expanded
+      # -j 1: the ~25 suites share one on-disk feature store under
+      # .adf/orchestration/features/, so running files in parallel races
+      # (symptom: "state.json not found for <feature>"). Serial is
+      # deterministic; proper per-test isolation is tracked separately.
+      - run: dart test -j 1 --reporter expanded
 
   dashboard:
     name: Dashboard (flutter analyze + test)

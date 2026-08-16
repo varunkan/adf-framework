@@ -229,7 +229,7 @@ class MainExit(unittest.TestCase):
     """G13 — main() exits 0 on normal completion (PASS or REVISE), non-zero on crash."""
 
     def _make_repo(self, tmp):
-        feat_dir = os.path.join(tmp, ".cursor", "orchestration", "features", "feat-x")
+        feat_dir = os.path.join(tmp, ".adf", "orchestration", "features", "feat-x")
         os.makedirs(feat_dir, exist_ok=True)
         with open(os.path.join(feat_dir, "requirement.md"), "w") as f:
             f.write("Build a thing.\n")
@@ -362,7 +362,7 @@ class OrchestrationDir(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             # env points at a CUSTOM dir name that is NOT one of the probe paths AND
             # while a .cursor probe dir also exists — proving env wins over probe.
-            os.makedirs(os.path.join(tmp, ".cursor", "orchestration"))
+            os.makedirs(os.path.join(tmp, ".adf", "orchestration"))
             orch = os.path.join(tmp, "custom-orch")
             os.makedirs(orch, exist_ok=True)
             resolved = rc.resolve_orchestration_dir(
@@ -374,7 +374,7 @@ class OrchestrationDir(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             resolved = rc.resolve_orchestration_dir(
                 tmp, {"ORCH_ORCHESTRATION_DIR": ""})
-            self.assertEqual(resolved, os.path.join(tmp, ".cursor", "orchestration"))
+            self.assertEqual(resolved, os.path.join(tmp, ".adf", "orchestration"))
 
     def test_manifest_orchestration_dir(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -387,7 +387,7 @@ class OrchestrationDir(unittest.TestCase):
 
     def test_manifest_overrides_probe(self):
         with tempfile.TemporaryDirectory() as tmp:
-            os.makedirs(os.path.join(tmp, ".cursor", "orchestration"))
+            os.makedirs(os.path.join(tmp, ".adf", "orchestration"))
             os.makedirs(os.path.join(tmp, ".adf", "orchestration"))
             with open(os.path.join(tmp, ".adf-install.json"), "w") as f:
                 json.dump({"orchestration_dir": ".adf/orchestration"}, f)
@@ -396,11 +396,11 @@ class OrchestrationDir(unittest.TestCase):
 
     def test_probe_cursor_wins_over_others(self):
         with tempfile.TemporaryDirectory() as tmp:
-            for rel in (".cursor/orchestration", "adf-framework/orchestration",
+            for rel in (".adf/orchestration", "adf-framework/orchestration",
                         ".adf/orchestration"):
                 os.makedirs(os.path.join(tmp, rel))
             resolved = rc.resolve_orchestration_dir(tmp, {})
-            self.assertEqual(resolved, os.path.join(tmp, ".cursor", "orchestration"))
+            self.assertEqual(resolved, os.path.join(tmp, ".adf", "orchestration"))
 
     def test_probe_package_wins_over_adf(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -413,7 +413,7 @@ class OrchestrationDir(unittest.TestCase):
     def test_default_when_nothing_resolves(self):
         with tempfile.TemporaryDirectory() as tmp:
             resolved = rc.resolve_orchestration_dir(tmp, {})
-            self.assertEqual(resolved, os.path.join(tmp, ".cursor", "orchestration"))
+            self.assertEqual(resolved, os.path.join(tmp, ".adf", "orchestration"))
 
 
 if __name__ == "__main__":

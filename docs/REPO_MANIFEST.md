@@ -5,7 +5,7 @@ Paths required to **clone and run** ADF orchestration. Checked against repo at d
 ## Core orchestration
 
 ```text
-.cursor/orchestration/
+.adf/orchestration/
   ADF.md ARCHITECTURE.md WORKFLOW.md README.md
   constitution.md grok-determinism.md protocol.md
   adf-grok-refinement.md framework-routing.yaml prompt-registry.yaml

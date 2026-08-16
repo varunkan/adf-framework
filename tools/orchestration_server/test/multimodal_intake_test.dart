@@ -161,7 +161,7 @@ void main() {
 
     String findRepoRoot() {
       var dir = Directory.current.path;
-      while (!Directory('$dir/.cursor/orchestration').existsSync()) {
+      while (!Directory('$dir/.adf/orchestration').existsSync()) {
         final parent = Directory(dir).parent;
         if (parent.path == dir) throw StateError('repo root not found');
         dir = parent.path;

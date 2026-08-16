@@ -49,7 +49,7 @@ Read after `constitution.md` on every agent spin. Grok pack source: `tools/ultim
 ## §9 Conflict precedence
 
 1. `grok-determinism.md` (deterministic execution)
-2. `.cursor/orchestration/constitution.md` (POS + RACI + coverage)
+2. `.adf/orchestration/constitution.md` (POS + RACI + coverage)
 3. `specs/<id>/spec.md` → `plan.md` → `tasks.md`
 4. Feature `state.json`
 

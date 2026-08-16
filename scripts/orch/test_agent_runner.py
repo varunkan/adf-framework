@@ -533,7 +533,7 @@ class RecallBlockers(unittest.TestCase):
     def _repo(self, entries):
         d = tempfile.mkdtemp(prefix="adf-recall-")
         self.addCleanup(shutil.rmtree, d, ignore_errors=True)
-        p = os.path.join(d, ".cursor", "orchestration")
+        p = os.path.join(d, ".adf", "orchestration")
         os.makedirs(p)
         with open(os.path.join(p, "learnings.jsonl"), "w") as f:
             for e in entries:
@@ -570,7 +570,7 @@ class RecallBlockers(unittest.TestCase):
     def test_ignores_non_object_json_lines(self):
         # bug#5: a bare-value JSON line must be skipped, not crash with AttributeError
         repo = self._repo([])
-        path = os.path.join(repo, ".cursor", "orchestration", "learnings.jsonl")
+        path = os.path.join(repo, ".adf", "orchestration", "learnings.jsonl")
         with open(path, "w") as f:
             f.write("42\n\"x\"\ntrue\n[1,2]\n")
             f.write(json.dumps(

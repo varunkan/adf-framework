@@ -4,7 +4,7 @@ adf_resolve_repo_root() {
   if [[ -n "${ORCH_REPO_ROOT:-}" ]]; then echo "$(cd "$ORCH_REPO_ROOT" && pwd)"; return 0; fi
   local dir="$(pwd)"
   while [[ "$dir" != "/" ]]; do
-    if [[ -d "$dir/.cursor/orchestration" || -d "$dir/adf-framework/orchestration" || -d "$dir/.adf/orchestration" ]]; then echo "$dir"; return 0; fi
+    if [[ -d "$dir/.adf/orchestration" || -d "$dir/adf-framework/orchestration" || -d "$dir/.adf/orchestration" ]]; then echo "$dir"; return 0; fi
     if [[ -f "$dir/.adf-install.json" ]]; then echo "$dir"; return 0; fi
     dir="$(dirname "$dir")"
   done
@@ -17,10 +17,10 @@ adf_orchestration_dir() {
     local rel; rel="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('orchestration_dir',''))" "$root/.adf-install.json" 2>/dev/null || true)"
     [[ -n "$rel" && -d "$root/$rel" ]] && { echo "$(cd "$root/$rel" && pwd)"; return 0; }
   fi
-  for rel in .cursor/orchestration adf-framework/orchestration .adf/orchestration; do
+  for rel in .adf/orchestration adf-framework/orchestration .adf/orchestration; do
     [[ -d "$root/$rel" ]] && { echo "$(cd "$root/$rel" && pwd)"; return 0; }
   done
-  echo "$root/.cursor/orchestration"
+  echo "$root/.adf/orchestration"
 }
 adf_features_dir() { echo "$(adf_orchestration_dir "$1")/features"; }
 adf_framework_root() {

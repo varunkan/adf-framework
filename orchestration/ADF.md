@@ -12,7 +12,7 @@ ADF v3 unifies your orchestration stack (dashboard, Spec Kit, BMAD, machine gate
 | Conductor | `@orch-orchestrator` | Sole coordinator; never writes production code |
 | Policy | `constitution.md`, `grok-determinism.md` | POS + deterministic execution rules |
 | Routing | `framework-routing.yaml` | One builder + BMAD reviewers per phase |
-| Artifacts | `specs/<id>/`, `.cursor/orchestration/features/<id>/` | Proof on disk |
+| Artifacts | `specs/<id>/`, `.adf/orchestration/features/<id>/` | Proof on disk |
 | Validator | `scripts/orch/validate_adf_artifacts.sh` | Shape + DAG + micro-task scope |
 | Worktrees | `scripts/orch/adf_worktree.sh` | Isolated workspace per micro-task (phase 7) |
 | API | `tools/orchestration_server` (:3847) | Gates, runner, artifact checklist |
@@ -22,9 +22,9 @@ ADF v3 unifies your orchestration stack (dashboard, Spec Kit, BMAD, machine gate
 ## Agent read order
 
 1. `ADF.md` (this file)
-2. `.cursor/orchestration/constitution.md`
-3. `.cursor/orchestration/grok-determinism.md`
-4. `.cursor/orchestration/framework-routing.yaml`
+2. `.adf/orchestration/constitution.md`
+3. `.adf/orchestration/grok-determinism.md`
+4. `.adf/orchestration/framework-routing.yaml`
 5. Feature `state.json` + `requirement.md`
 
 ## Greenfield vs brownfield

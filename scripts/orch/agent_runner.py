@@ -44,7 +44,7 @@ import uuid
 import urllib.request
 import urllib.error
 
-ORCH_DIRS = (".cursor/orchestration", ".adf/orchestration", "orchestration")
+ORCH_DIRS = (".adf/orchestration", ".adf/orchestration", "orchestration")
 FILE_OPEN = re.compile(r"^<<<FILE:\s*(.+?)\s*>>>\s*$")
 FILE_CLOSE = re.compile(r"^<<<END>>>\s*$")
 NVIDIA_BASE = "https://integrate.api.nvidia.com/v1"
@@ -149,13 +149,13 @@ def read_first(*paths):
     return ""
 
 
-LEARNINGS_REL = os.path.join(".cursor", "orchestration", "learnings.jsonl")
+LEARNINGS_REL = os.path.join(".adf", "orchestration", "learnings.jsonl")
 
 
 def recall_blockers(repo_root, phase=7, k=5):
     """A compact 'past failures + the fixes that resolved them' block to splice into
     the build/heal prompt so the model pre-empts repeat failures. ADF already RECORDS
-    every outcome (LearningStore writes .cursor/orchestration/learnings.jsonl) and
+    every outcome (LearningStore writes .adf/orchestration/learnings.jsonl) and
     even ranks blockers (knownBlockers) — but nothing read it back into a prompt.
     This closes that loop (docs/ADF_VS_OH_MY_PI.md §5.4). Returns '' when nothing is
     learned; disabled via ADF_RECALL_BLOCKERS=0. Phase 7 = implement (the runner's

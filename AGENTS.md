@@ -10,7 +10,7 @@
 @orch-orchestrator sync <feature-id>
 ```
 
-1. Read [ADF.md](.cursor/orchestration/ADF.md), [constitution](.cursor/orchestration/constitution.md), [grok-determinism](.cursor/orchestration/grok-determinism.md), and [framework-routing.yaml](.cursor/orchestration/framework-routing.yaml).
+1. Read [ADF.md](.adf/orchestration/ADF.md), [constitution](.adf/orchestration/constitution.md), [grok-determinism](.adf/orchestration/grok-determinism.md), and [framework-routing.yaml](.adf/orchestration/framework-routing.yaml).
 2. Seed artifacts: `./scripts/orch/seed_adf_artifacts.sh <feature-id>`
 3. Validate before approve: `./scripts/orch/validate_adf_artifacts.sh <feature-id> --phase <N>`
 2. Each phase: **Build** (Spec Kit) → **Review** (`orch-review-coordinator` + BMAD panel) → **Approve** → next.
@@ -105,7 +105,7 @@ See [tools/orchestration_telemetry/README.md](tools/orchestration_telemetry/READ
 
 Deprecated builders: `orch-spec-author`, `orch-architect`, `orch-task-decomposer`, `orch-implementer` → use Spec Kit.
 
-Protocol: [protocol.md](.cursor/orchestration/protocol.md)
+Protocol: [protocol.md](.adf/orchestration/protocol.md)
 
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph
