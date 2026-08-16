@@ -8,7 +8,7 @@ export const meta = {
   ],
 }
 
-const ROOT = '/Users/varunkumar/ai_pos_system/adf-framework'
+const ROOT = '/Users/varunkumar/adf-framework'
 
 const FINDINGS_SCHEMA = {
   type: 'object',

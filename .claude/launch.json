@@ -11,7 +11,7 @@
         "--bind",
         "127.0.0.1",
         "--directory",
-        "/Users/varunkumar/ai_pos_system/adf-framework/tools/orchestration_dashboard/build/web"
+        "/Users/varunkumar/adf-framework/tools/orchestration_dashboard/build/web"
       ],
       "port": 3850
     }
