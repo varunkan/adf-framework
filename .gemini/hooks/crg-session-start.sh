@@ -5,7 +5,7 @@ set -euo pipefail
 
 cat > /dev/null || true
 
-msg="$(code-review-graph status --repo "/Users/varunkumar/ai_pos_system/adf-framework" 2>&1 | head -n 1 || true)"
+msg="$(code-review-graph status --repo "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." && pwd)" 2>&1 | head -n 1 || true)"
 
 CRG_MSG="$msg" python3 -c '
 import json,os

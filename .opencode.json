@@ -6,7 +6,7 @@
         "code-review-graph",
         "serve"
       ],
-      "cwd": "/Users/varunkumar/ai_pos_system/adf-framework",
+      "cwd": "/Users/varunkumar/adf-framework",
       "type": "stdio",
       "env": []
     }
