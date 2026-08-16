@@ -19,8 +19,17 @@ orchestration/features/**/run-log.jsonl
 orchestration/features/**/otel-traces.jsonl
 # Generated when the server/studio/tests run against the framework repo itself:
 # orchestration runtime state, spec-kit state, and per-feature spec output.
-.cursor/orchestration/
-.adf/orchestration/
+# Orchestration roots: runtime feature state is ignored, but the scaffolding
+# that makes the test suites runnable IS tracked. Note the `/*` form — git will
+# not descend into a directory excluded as `dir/`, so a `!dir/file` negation
+# there can never match.
+.cursor/orchestration/*
+!.cursor/orchestration/README.md
+!.cursor/orchestration/features/
+.cursor/orchestration/features/*
+!.cursor/orchestration/features/.gitkeep
+.adf/orchestration/*
+!.adf/orchestration/framework-routing.yaml
 .specify/
 specs/
 
